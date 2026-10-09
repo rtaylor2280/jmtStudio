@@ -1,12 +1,12 @@
 // [B-292] Bulk import explains itself BEFORE it opens a folder picker.
 // [B-294] And offers to carry on without you, because the wait is long.
 //
-// ⭐ THE ORIGIN, and it is the whole case: he wrote the feature and, opening it months later,
+// ⭐ THE ORIGIN, and it is the whole case: the user wrote the feature and, opening it months later,
 // asked "what is bulk import? not remembering." The link went STRAIGHT to the OS folder picker,
-// so every capability was invisible until after he had committed to a folder — and so was the
-// cost. Measured the same day on his own originals: 136 fonts at ~7.3s each, review screen
-// reached at ~18 MINUTES, all of it beginning the moment he clicked OK on a dialog that had told
-// him nothing.
+// so every capability was invisible until after there had been committed to a folder — and so was the
+// cost. Measured the same day on a real originals: 136 fonts at ~7.3s each, review screen
+// reached at ~18 MINUTES, all of it beginning the moment the user clicked OK on a dialog that had told
+// the user nothing.
 'use strict';
 
 const fs   = require('fs');
@@ -61,12 +61,12 @@ function ok(label, cond, detail) {
      && /map\(t => `<li>/.test(fn));
 
   // ⭐⭐ THE COST IS THE HALF THAT COST HIM AN AFTERNOON. A screen that teaches what the feature
-  // is while still ambushing him with how long it takes has fixed the smaller problem.
+  // is while still ambushing the user with how long it takes has fixed the smaller problem.
   ok('it warns that this is a long operation, before the picker opens',
      /can take a while/i.test(copy), fn.slice(fn.indexOf('cost'), 400));
 
   // ⚠️⚠️ AND IT MUST NOT CARRY A FIGURE. This assertion is INVERTED from its first version, which
-  // required 'roughly 7 seconds per font'. His call 2026-09-19: "a bit nervous about being so
+  // required 'roughly 7 seconds per font'. Ruled 2026-09-19: "a bit nervous about being so
   // specific in the estimate... could be different on different devices." A per-font rate is
   // device-dependent exactly as a total is - slow disk, network drive, busy machine - so it was
   // the same false precision one step removed. Any number here is a promise about hardware we
@@ -81,7 +81,7 @@ function ok(label, cond, detail) {
   // exact moment that worry lands.
   ok('it carries the keep-everything thesis line',
      /Keep everything\. JMT Studio saves you space by storing identical sounds only once, while maintaining the original file structure/.test(copy)
-     // ⚠️ FULL BRANDING. His ruling 2026-09-19: the bare "Studio" was inconsistent with
+     // ⚠️ FULL BRANDING. Ruled 2026-09-19: the bare "Studio" was inconsistent with
      // the savings sentence elsewhere, which already says "JMT Studio saved you X".
      && !/(?<!JMT )Studio saves/.test(copy));
 
@@ -99,16 +99,16 @@ function ok(label, cond, detail) {
   const _copy = (fn.match(/'[^']*'/g) || []).join(' ');
   ok('it never says "cost" about storage', !/costs?/i.test(_copy), _copy.slice(0, 200));
 
-  // ⭐ And it names the ideal input, not just the accepted one. His call 2026-09-19.
+  // ⭐ And it names the ideal input, not just the accepted one. Ruled 2026-09-19.
   ok('it names the original zips as ideal',
      /original zip files as you downloaded them from the creator are ideal/i.test(copy));
 
-  // ⚠️ Register: an app dialog, not a chat. 'until you say so' was his catch the same night.
+  // ⚠️ Register: an app dialog, not a chat. 'until you say so' was the catch the same night.
   ok('it uses app register, not casual', !/say so/i.test(copy));
 
   // ⭐⭐ INVERTED, and this one is about TRUTH rather than taste. The screen used to promise
   // "nothing is added to your library until you confirm". With the auto-continue checkbox ticked
-  // there IS no confirm step, so the very next screen would contradict it. His call: "might not be
+  // there IS no confirm step, so the very next screen would contradict it. Ruled: "might not be
   // true and could probably just be dropped honestly. less is more."
   // A reassurance that is only sometimes true is worse than none - it spends trust on a promise
   // the app will visibly break.
@@ -138,9 +138,9 @@ function ok(label, cond, detail) {
   ok('it is not written to settings', !/setSetting\([^)]*[Aa]utoContinue/.test(html));
 }
 
-// ── [B-294] the MID-FLIGHT half, which is the one he actually asked for ────
+// ── [B-294] the MID-FLIGHT half, which is the one it actually asked for ────
 {
-  // ⭐ His words, 29 minutes into importing 136 fonts: "almost need a checkbox during the analyze
+  // ⭐ Reported, 29 minutes into importing 136 fonts: "almost need a checkbox during the analyze
   // to go straight to quick import on completion." Offering it in both places is not redundancy —
   // some people know up front they will not review 136 fonts, and some only decide to walk away
   // after watching the clock. The explain-screen copy cannot serve the second person, because by
@@ -220,7 +220,7 @@ function ok(label, cond, detail) {
        && /extras to create customized versions/i.test(note)
        && !/should have/i.test(note), note);
 
-  // ⚠️ "sit" was wrong for files - his catch. The scene-setting sentence is gone entirely and
+  // ⚠️ "sit" was wrong for files - the catch. The scene-setting sentence is gone entirely and
   // the actionable half leads.
   ok('it does not say the files "sit" on the card', !/as they sit on the card/i.test(note));
 

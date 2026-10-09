@@ -10,12 +10,12 @@
 // SECOND, independent route to the same bug, and it fails open and silent.
 //
 // ⚠️⚠️ WHY THIS ASSERTS THE RIGHT SPELLING RATHER THAN MERELY THAT THE TWO SIDES AGREE.
-// His call, 2026-10-07: *"if you're going to write a rule to test against, then it shouldn't just
+// Ruled 2026-10-07: *"if you're going to write a rule to test against, then it shouldn't just
 // be do they match. It should be, is it the right one, the new one."* A match-test blesses two
 // wrong-but-agreeing sites and freezes the split forever; this one fails on every NEW old-spelling
 // site, so the old ones drain away as their files are touched for other reasons.
 //
-// ⚠️ WHY A RATCHET AND NOT A HARD ZERO. There are 69 old-spelling sites today across doors Ryan has
+// ⚠️ WHY A RATCHET AND NOT A HARD ZERO. There are 69 old-spelling sites today across doors The library has
 // already tested and signed off. Converting them is real work with a real retest and is filed
 // separately for 1.8.1 - see the backlog. Until then the number may only SHRINK. A file that gains
 // one fails here, named, immediately.

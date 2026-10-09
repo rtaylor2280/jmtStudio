@@ -9,16 +9,16 @@
 //   • `_sfFmtSpace`       - a non-breaking-space formatter stranded the previous day, whose
 //                           deletion exposed that the two LIVE formatters were doing
 //                           `.replace(' ', ' ')` - a plain space for a plain space, a no-op.
-//   • `_sdBusyProgress`   - written for his catch "showing indeterminate when it is
+//   • `_sdBusyProgress`   - written for the catch "showing indeterminate when it is
 //                           determinable" and never wired. The whole chain behind it - an IPC
 //                           emit in main, a preload bridge - was complete with no subscriber,
-//                           so the fix for a defect he reported had never once run.
+//                           so the fix for a defect reported had never once run.
 //   • `_sdRenderText`     - a second implementation of the card's text viewer, with its own copy
 //                           of the config test and its own "Open in editor" button.
 //
 // ⚠️ The pattern is not "dead code is untidy". It is that a definition with no caller reads as a
 // feature that exists, so the thing it was supposed to fix stays broken while looking handled -
-// and a test can keep it alive indefinitely. His reason for fixing rather than filing:
+// and a test can keep it alive indefinitely. The reason for fixing rather than filing:
 // "I don't like the idea of continuing to code and test against a moving target even with dead
 // code since the validation is that nothing is broken."
 'use strict';

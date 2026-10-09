@@ -3,7 +3,7 @@
  *
  * ⭐ WHAT HE SAW, 2026-09-16, testing backup export/import: after a full REPLACE - which
  * wipes the library and restores the backup exactly - the import dialog STILL read
- * "335 items match, 2 differ". His words: "shouldn't have been possible to be different
+ * "335 items match, 2 differ". Reported: "shouldn't have been possible to be different
  * unless backup is not backing up everything."
  *
  * It was backing up everything. Verified read-only at the time: both trees byte-identical,
@@ -178,8 +178,8 @@ function ok(name, cond, extra) {
 // after a full backup completed, and everything after it (including the refusal dialog)
 // never ran. Present in HEAD, not introduced by this work.
 //
-// ⭐ IT ALSO EXPLAINS A SILENT ONE EARLIER THE SAME DAY: his 15GB export "finished" and
-// he never saw Export complete. The zip was written; the dialog threw.
+// ⭐ IT ALSO EXPLAINS A SILENT ONE EARLIER THE SAME DAY: the 15GB export "finished" and
+// it never saw Export complete. The zip was written; the dialog threw.
 {
   // ⚠️ ANCHORED ON TWO MARKERS, NOT A CHARACTER COUNT. [B-420, 2026-09-21] This sliced 14,000
   // characters from the function's start, which happened to contain it - until the door was
@@ -220,7 +220,7 @@ function ok(name, cond, extra) {
 //
 // ⭐ WHAT HE SAW, 2026-09-16, on the first full export after the fix above: the dialog
 // reported three findings removed and then, in red, "1 could not be removed:
-// 8.21打印.rar". His question was the right one - "is the .rar really still in my
+// 8.21打印.rar". The question was the right one - "is the .rar really still in my
 // library?" It was not. Swept: no .rar, .exe or trk99.wav anywhere in the store.
 //
 // ⚠️ THE STORE HARDLINKS ONE FILE INTO SEVERAL BUCKETS ([B-315]), so that .rar wore two
@@ -230,8 +230,8 @@ function ok(name, cond, extra) {
 // two arrived at a path record one had already removed, `resolveManagedFile` said "File
 // not found", and a complete success was reported as a failure.
 //
-// ⭐⭐ THE DIRECTION OF THE LIE IS THE WHOLE POINT. It told him a program had survived in
-// his library - the one outcome we can actually PROVE did not happen. His quarantine
+// ⭐⭐ THE DIRECTION OF THE LIE IS THE WHOLE POINT. It told the user a program had survived in
+// the library - the one outcome we can actually PROVE did not happen. The quarantine
 // README proved it at the time: one quarantine file, both paths listed under `Found in:`.
 {
   const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'b394-link-'));

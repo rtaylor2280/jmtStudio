@@ -2,7 +2,7 @@
  * The already-have-it dialog's primary button is a destination  [B-390]
  *
  * ⭐ WHAT HE SAW, 2026-09-16, dev-testing [B-360] against the test-import fixture: six
- * matched fonts, three buttons, and the PRIMARY one was the one he could not read —
+ * matched fonts, three buttons, and the PRIMARY one was the one it could not read —
  *     "what is the blue option supposed to be saying here?"
  * The symptom is that the recommended action's label did not say what it would do. The
  * cause was that it did not do anything: "Back to my library" ran the same
@@ -115,7 +115,7 @@ function ok(name, cond, extra) {
 // the thing that decides whether the strip renders at all: `_sfRenderActiveFilters`
 // computes a `total` and returns early at 0, before any chip is built. The name filter
 // was missing from that one line, so the grid filtered to 4 of 150 and the row that
-// undoes it never appeared. His report: "this filter doesn't show properly and can't
+// undoes it never appeared. Reported: "this filter doesn't show properly and can't
 // clear it."
 //
 // ⭐ SO THIS EVALUATES THE REAL EXPRESSION rather than grepping for a variable name —
@@ -146,10 +146,10 @@ function ok(name, cond, extra) {
 //
 // Two matched sources can resolve to ONE library entry — a renamed row is exactly
 // that. A per-source list counted 6 while the filter behind "Show in library" showed
-// 4, and he met it as a question: "why are there 4 but we said there were 6?" then
+// 4, and the user met it as a question: "why are there 4 but we said there were 6?" then
 // ruled it: "we can't make up 2 more to show so have to match 4 not 6".
 //
-// ⚠️ THIS EXTRACTS THE REAL GROUPING CODE AND RUNS IT on his actual case. A grep
+// ⚠️ THIS EXTRACTS THE REAL GROUPING CODE AND RUNS IT on the actual case. A grep
 // would pass on an off-by-one or a bad key; only running it proves the number.
 {
   const lines = html.split('\n');
@@ -175,7 +175,7 @@ function ok(name, cond, extra) {
     body + '\nreturn {ownedUnique, out: Array.from(groups,([l,a])=>groupLi(l,a)).join("")};'
   )(matched, esc);
 
-  // His exact case: six sources, two of them renamed onto entries already listed.
+  // The exact case: six sources, two of them renamed onto entries already listed.
   const his = run([
     {name:'DarkSaber', matchName:'DarkSaber'},
     {name:'FoRed', matchName:'FoRed'},
@@ -207,7 +207,7 @@ function ok(name, cond, extra) {
      JSON.stringify(noMatchName.ownedUnique));
 
   // ⭐ [B-390] AND THE GAP IS ACCOUNTED FOR. Grouping alone made the number honest
-  // and left two of his six unexplained: "so what happened to the other 2?... that's
+  // and left two of the six unexplained: "so what happened to the other 2?... that's
   // ok but should be stated."
   // ⚠️ The sentence says MATCH, never "duplicates of each other" - this dialog only
   // knows what each source matched in the LIBRARY. Two different versions can both
@@ -233,7 +233,7 @@ function ok(name, cond, extra) {
 
 // ── ⚠️⚠️ EVERY CONSUMER OF FILTER STATE, NOT JUST THE GRID ────────────────
 //
-// His catch, 2026-09-16, off the Effects dropdown: "all the chips have full library
+// Caught, 2026-09-16, off the Effects dropdown: "all the chips have full library
 // info". Five things filter entries in this view - the grid, the toggle badge counts,
 // and three facet dropdowns - and the name scope had only reached the grid. So Effects
 // advertised "font 150, hum 148" over a grid reading 4 of 150.

@@ -4,7 +4,7 @@
  * ⭐ HIS, 2026-09-16, while dev-testing [B-296]: "clicking anywhere outside of this throws
  * away the entire analyze... pretty sure we block that in other such areas... not good..."
  *
- * ⚠️⚠️ THE COST IS NOT A DIALOG, IT IS THE ANALYZE. His 136-source folder was measured
+ * ⚠️⚠️ THE COST IS NOT A DIALOG, IT IS THE ANALYZE. A 136-source folder was measured
  * mid-run at 8 sources in 1m 51s — about half an hour of work — and a click on the font
  * grid behind the modal discarded all of it, silently, with no undo. The same click on a
  * form loses a sentence.

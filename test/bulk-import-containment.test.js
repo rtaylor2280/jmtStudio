@@ -1,7 +1,7 @@
 // ⭐⭐ THE FULL SOURCE WINS. [B-415]
 //
-// His rule, 2026-09-19: "it's really the full source wins. duplicate font but one has more stuff
-// around it... that wins." And the case behind it, both paths handed over by him and MEASURED:
+// The rule, 2026-09-19: "it's really the full source wins. duplicate font but one has more stuff
+// around it... that wins." And the case behind it, both paths handed over and MEASURED:
 //
 //   G:\...\Original Font Files\1.2-lightsaber of the  bells   213 files / 291 MB
 //        GoldenHarvest, Verso, asteria, cfx, proffie, xenopixelv3
@@ -11,7 +11,7 @@
 //   29 distinct hashes in the desktop copy, 29 of them in the original, ZERO unique to it.
 //
 // ⚠️⚠️ AND BOTH USED TO IMPORT. Their contentHashes share nothing - one digest covers 213 files,
-// the other 32 - so the intra-batch twin check never fired. His words: "those would both import
+// the other 32 - so the intra-batch twin check never fired. Reported: "those would both import
 // and be called identical fonts." The relationship is CONTAINMENT, not equality.
 'use strict';
 
@@ -84,7 +84,7 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
 //
 // ⚠⚠ THEY PASSED BECAUSE THEY ALL BUILT THEIR OWN INPUT - `{hash}` objects and bare hash strings
 // handed straight to rankByContainment, which skips this function entirely. The algorithm was
-// tested thoroughly and the ADAPTER between it and the app was tested not at all. He found it by
+// tested thoroughly and the ADAPTER between it and the app was tested not at all. Found by
 // running the app: "nope, didn't work... why?"
 // ⭐ THE RULE: when a function reads fields off a structure some OTHER module produces, the test
 // has to get that structure from that module. A fixture you authored tests your fixture.
@@ -93,7 +93,7 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   const fhm = require('../soundFontFileHash');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'b415-'));
   try {
-    // The shape of his real case in miniature: `sub` is the font, and the tree around it holds
+    // The shape of the real case in miniature: `sub` is the font, and the tree around it holds
     // that font plus extras — the other board flavors and the readme it shipped with.
     // ⚠️ THE EXTRAS MUST BE OUTSIDE `sub`, and the first cut of this got it wrong: with every
     // distinct byte-string present in both, the two were an exact TWIN and the ranker declined to
@@ -140,7 +140,7 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
 // ── it costs no new I/O, which is the whole reason it is allowed to exist ──
 {
   // ⚠️⚠️ [B-398] SPENT A DAY making the import pass yield so the window would stop freezing —
-  // 9,347ms of unbroken main-thread work measured on his machine, against the ~5s at which Windows
+  // 9,347ms of unbroken main-thread work measured on a real machine, against the ~5s at which Windows
   // offers to kill the app. A second walk over extracted content to answer this question would
   // hand that back. The records are ALREADY in hand for contentHash.
   ok('⭐⭐ the hashes are taken from records already collected',
@@ -172,14 +172,14 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
      /if \(row\.sameInBatch && row\.sameInBatch\.keeps === false\) continue;/.test(bulk));
 
   // ⭐⭐ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
-  // the loop; this ranking decides after it, so the row was already counted as new. He hit exactly
+  // the loop; this ranking decides after it, so the row was already counted as new. Hit exactly
   // this: the summary read "8 new sound fonts" on a run where the ranking HAD fired and only 6
   // would import - indistinguishable, from the outside, from the feature not working at all.
   ok('⭐⭐ a contained source is taken out of the new count',
      /if \(newCount > 0\) newCount--;/.test(bulk),
      'leaving it counted makes the summary contradict the import');
 
-  // ⭐⭐ AND IT IS NOT A SECOND CATEGORY. His call 2026-09-19, on the separate line I had added:
+  // ⭐⭐ AND IT IS NOT A SECOND CATEGORY. Ruled 2026-09-19, on the separate line I had added:
   // "isn't it the same category as whatever our wording was for duplicate on source? don't need to
   // tell about fuller - that was what informed our choice... but we still only kept 1."
   // Fullness decides WHICH copy survives. It is not a second thing that happened to the user, so
@@ -187,7 +187,7 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('⭐⭐ containment routes through the existing twin field',
      /row\.sameInBatch = \{ idx: info\.container, label: _kLabel, keeps: false \};/.test(bulk));
 
-  // ⭐⭐ THREE COPIES, AND THE GUARD THAT NEARLY BROKE IT. His question 2026-09-19: "what if it
+  // ⭐⭐ THREE COPIES, AND THE GUARD THAT NEARLY BROKE IT. The question 2026-09-19: "what if it
   // were in there 3 times?" Reproduced with pkg + bare1 + bare2, where the two bare copies are
   // byte-identical and both sit inside pkg. bare1 and bare2 pair off as exact twins FIRST, bare1
   // wins that contest and is marked a keeper - and the original guard, `if (row.sameInBatch)
@@ -203,7 +203,7 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('⚠⚠ rows pointing at a demoted keeper are re-pointed',
      /other\.sameInBatch = \{ idx: info\.container, label: _kLabel, keeps: false \};/.test(bulk));
 
-  // ⭐⭐ THE ROW SAYS WHICH WAY THE CHOICE WENT. His call: "don't we know that it was more complete
+  // ⭐⭐ THE ROW SAYS WHICH WAY THE CHOICE WENT. Ruled: "don't we know that it was more complete
   // so message can say ... and then add 'This one is more complete'". Without it both rows read
   // identically - same sentence on the ticked one and the unticked one - so the screen states that
   // a choice was made and withholds which way.
@@ -263,7 +263,7 @@ const H = (n, p) => Array.from({ length: n }, (_, i) => (p || 'h') + i);
   ok('⚠⚠ it never claims the library already has it',
      !/already in your library/i.test(copy), copy);
 
-  // ⭐⭐ INVERTED, on his call 2026-09-19: "don't we know that it was more complete so message
+  // ⭐⭐ INVERTED, on the ruling 2026-09-19: "don't we know that it was more complete so message
   // can say ... and then add 'This one is more complete'". The earlier version of this case
   // asserted the opposite - that the screen stays silent about why - and that left BOTH rows
   // reading identically, stating a choice was made while withholding which way it went.

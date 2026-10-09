@@ -26,9 +26,9 @@ ok('the summary still reads it as auto',
    'if this reader goes away the hazard changes shape and this test should be revisited');
 
 // ── The offer retires when the run is being abandoned, and comes back afterwards. ──
-// His ruling 2026-10-06: *"we don't have auto eject after cancel."* So a tick left live during a
+// Ruled 2026-10-06: *"we don't have auto eject after cancel."* So a tick left live during a
 // cancel is a promise the cancel path will not keep - the same shape as the quick-import box
-// beside it, which has greyed since 2026-10-05. He asked for it on consistency grounds; it holds
+// beside it, which has greyed since 2026-10-05. The ask was for it on consistency grounds; it holds
 // on its own grounds too.
 const cancelAt = H.indexOf('const _bulkBeginCancel = ');
 const cancelEnd = H.indexOf('};', cancelAt);

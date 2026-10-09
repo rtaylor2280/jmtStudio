@@ -14,12 +14,12 @@
 //        needed. English G is the one V2-only variant; its sample
 //        ships as a bundled file in renderer/assets/voicepacks/.
 //
-// Why we FETCH from his Dropbox rather than host copies: NoSloppy
+// Why we FETCH from the Dropbox rather than host copies: NoSloppy
 // publishes V2 as a single ~435MB folder. The content is CC BY 4.0 so
 // redistributing would be legal, but hosting our own copies means a
-// mirror that goes stale the moment he updates a pack, and a 435MB
+// mirror that goes stale the moment the user updates a pack, and a 435MB
 // download for someone who wants one ~10MB variant. Per-variant Dropbox
-// links avoid both: the user pulls the one variant they want, from him,
+// links avoid both: the user pulls the one variant they want, from the user,
 // always current. English F and G have no per-variant link yet and still
 // redirect to the folder for a manual download + "Pick .zip file…" import.
 //

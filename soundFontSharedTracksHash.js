@@ -64,7 +64,7 @@ function hashFile(absPath) {
 // 100. An `await` per chunk is what lets the event loop breathe.
 //
 // ⚠️ THE ONE IT WAS NOT FILED FOR: `readFileSync` pulls the ENTIRE file into memory. A long
-// .wav is hundreds of MB, and "+Add can actually bring in many files" (his, 2026-09-17) makes
+// .wav is hundreds of MB, and "+Add can actually bring in many files" (the, 2026-09-17) makes
 // that a spike per file rather than a one-off. Streaming holds one 64 KB chunk.
 //
 // ⚠️ THE SYNC VERSION STAYS. It has callers that are not in an async context, and converting

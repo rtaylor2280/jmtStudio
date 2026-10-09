@@ -70,7 +70,7 @@ const H = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 
 
 // ── 3. ⚠️⚠️ AND THE ARITHMETIC, AGAINST THE REAL CARD THAT FOUND IT ──
 //
-// The two filters above can each be present and still produce a wrong number. This runs his
+// The two filters above can each be present and still produce a wrong number. This runs the
 // actual listing through both and asserts the sentence the user would have read.
 {
   // ⚠️⚠️ THE SET IS READ OUT OF main.js, NOT RETYPED HERE. A hand-copied list is a fixture

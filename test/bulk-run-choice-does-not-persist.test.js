@@ -61,7 +61,7 @@ ok('the checkbox is seeded from the flag, not reset separately',
 // ── The same invariant on the BACKUP RESTORE door ────────────────────────────
 // Found the same night, from the same cause, on a different surface: "Eject when finished" is
 // armed when the APPLY starts, which is several screens in. So the inspect phase, the compare
-// phase and the three-way chooser all rendered whatever the previous restore left behind. He hit
+// phase and the three-way chooser all rendered whatever the previous restore left behind. Hit
 // it on a second run - the box visible on "Comparing against your library…" and already ticked.
 //
 // An inherited tick is worse than an inherited control: it is a standing agreement to eject a card,

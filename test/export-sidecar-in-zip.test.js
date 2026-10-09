@@ -168,7 +168,7 @@ const entriesOf = async (zipPath) => {
   // ⭐ THIS ASSERTION USED TO SAY THE OPPOSITE, AND IT WAS WRONG. It required fileCount === 3 (the
   // vendor files only) and justified it as "the honest reading of files". It is not honest: these
   // numbers are the export's denominator, and the appended entries are compressed like everything
-  // else. Ryan found it on a real export whose customized font carried a pile of tracks he had added
+  // else. Testing found it on a real export whose customized font carried a pile of tracks there had been added
   // for earlier testing: "you see the progress bars at 100% for a really long time because it was
   // like 1.4 gigabytes out of 300 MB."
   // ⚠️⚠️ THE TEST MADE THE DEFECT LOOK DECIDED. A wrong assertion with a confident comment is worse

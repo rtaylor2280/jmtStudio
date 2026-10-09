@@ -7,7 +7,7 @@
 //
 // That is what happened on 2026-10-06 to door 9, "Import as common folder". The arming lived
 // inside `_runAnalyze`, and a common-folders-only plan skips the analyze entirely - the analyze
-// gate is `if (total > 0 || _hasTracks)`, and a common-only plan satisfies neither. His report was
+// gate is `if (total > 0 || _hasTracks)`, and a common-only plan satisfies neither. The report was
 // both faces of it at once: "missing the eject" and "no eject and no check box during import".
 //
 // The slow-import warning had already been moved out of that same gate for the same reason, and

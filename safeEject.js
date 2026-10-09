@@ -1,6 +1,6 @@
 // ── Safely ejecting removable media ──────────────────────────── [B-005 item 4, 2026-09-20]
 //
-// His requirement: an export to removable media should be able to end with the card safely
+// The requirement: an export to removable media should be able to end with the card safely
 // released, rather than the user guessing when it is finished writing.
 //
 // ⭐⭐ THE VERIFICATION IS ALREADY CROSS-PLATFORM; ONLY THE INVOKE IS NOT. That is the whole
@@ -20,7 +20,7 @@
 // letter listed as an empty removable drive (`Size=<null>`) - a reader with no card in it.
 // Only the built-in slot makes it vanish. **`fs.existsSync` is false for all three**, which is
 // why the mount path is what gets watched and not the volume table: enumeration still reports
-// E:, H: and I: as present after a successful eject, and would have told him not to unplug a
+// E:, H: and I: as present after a successful eject, and would have told the user not to unplug a
 // card that was already safe. Device status is worse - after E: ejected, the Tlera disk, the
 // mass-storage interface and COM6 all still reported OK. Same trap as 2026-09-15.
 //
@@ -53,7 +53,7 @@ const { execFile } = require('child_process');
 //
 // ⭐⭐ `vocab.lingersAfterEject` IS A BEHAVIOUR FLAG, NOT A STRING. On Windows the drive letter
 // stays listed as an empty drive and the success message MUST say so - without it the app
-// contradicts what the user can see, which is exactly how he read a successful eject as a
+// contradicts what the user can see, which is exactly how the user read a successful eject as a
 // failure ("didn't work. I see it's still connected... (E)"). On macOS and Linux the mount
 // point goes away, so that sentence would be a lie rather than a reassurance. **A per-OS
 // string table would have shipped the Windows explanation everywhere.**
@@ -81,8 +81,8 @@ const PLATFORMS = {
       return m ? `${m[1].toUpperCase()}:\\` : null;
     },
     label: (mountPath) => String(mountPath || '').slice(0, 2),   // "E:"
-    // ⚠️ PER-VOLUME, NOT PER-DEVICE. His USB reader has two slots on ONE device holding H: and
-    // I:, so a device-level eject would dismount a sibling card he is still using.
+    // ⚠️ PER-VOLUME, NOT PER-DEVICE. The USB reader has two slots on ONE device holding H: and
+    // I:, so a device-level eject would dismount a sibling card it is still using.
     // ⚠️ No admin required, which is why this and not `mountvol /p`.
     // ⚠️⚠️ FIND THE VERB, DO NOT NAME IT. This called `InvokeVerb("Eject")`, which is a match
     // against the verb's DISPLAY name - and the display name on this machine is `E&ject`, with
@@ -126,7 +126,7 @@ const PLATFORMS = {
     // `raw` can no longer say whether the verb fired, was refused, or found no volume - the
     // three honest outcomes this module exists to report. It now says `launched` and nothing
     // more. **The verdict therefore rests ENTIRELY on `waitForMediaGone` observing the media
-    // leave.** That is a narrower promise than this file used to make and it is not yet his
+    // leave.** That is a narrower promise than this file used to make and it is not yet the
     // ruling; see the two-witnesses question in the notes.
     //
     // ⭐⭐ ASK READABLY, ACT DETACHED — AND THAT SPLIT IS WHY THE HONEST OUTCOMES SURVIVED.
@@ -287,7 +287,7 @@ function mediaPresent(mountPath) {
   try { return fs.existsSync(p); } catch { return false; }
 }
 
-// ⚠️⚠️ DEBOUNCED, BECAUSE ONE SAMPLE LIED. His I: went gone -> back -> gone across three
+// ⚠️⚠️ DEBOUNCED, BECAUSE ONE SAMPLE LIED. The I: volume went gone -> back -> gone across three
 // consecutive 250 ms polls. Whether the reader briefly re-presented or the poll caught an
 // intermediate teardown state does not matter: on a single sample, suspect the instrument.
 // ⭐ Built from reasoning alone this would have been a single poll and a flaky message.
@@ -300,7 +300,7 @@ const STABLE_MS = 1000;
 // ceiling was then set to 15 s. So the one transport this feature exists for was guaranteed to
 // time out, report `busy`, and tell the user to close files that were not open. It hit three
 // times in a row on E: ("still got in use... it really doesn't want to work"), and the card was
-// already gone by the time we looked. Earlier the same evening his F: went away roughly ninety
+// already gone by the time we looked. Earlier the same evening the F: went away roughly ninety
 // seconds after the app had given up on it.
 //
 // ⭐ THE MEASUREMENT WAS IN OUR OWN FILE BEFORE THE CEILING WAS CHOSEN. Nothing new had to be
@@ -382,7 +382,7 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
   // honest outcomes, never a success dressed up - now rests entirely on watching the media
   // leave. The poll went from a check on the return value to the whole verdict.
   //
-  // ⚠️ AND HIS ORIGINAL QUESTION IS FINALLY TESTABLE HERE. He proposed that this poll, opening
+  // ⚠️ AND HIS ORIGINAL QUESTION IS FINALLY TESTABLE HERE. It was proposed that this poll, opening
   // the volume ROOT every 250 ms, denies the exclusive lock a dismount needs and so prevents
   // the very thing it watches for. That was tested while the eject was broken for an unrelated
   // reason, so it never got a clean answer. With the eject working, a `busy` from this line

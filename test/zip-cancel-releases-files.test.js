@@ -6,7 +6,7 @@
 // `archive.abort()` stops PULLING and drops the source WITHOUT destroying it, so an abandoned
 // generator sits suspended at its `yield` holding an open descriptor indefinitely.
 //
-// He cancelled a few exports, then deleted the font and got:
+// The user cancelled a few exports, then deleted the font and got:
 //     ENOTEMPTY: directory not empty, rmdir '...\soundFonts\library\Decay'
 // with exactly one file locked — the 26.7 MB payload wav ta cancel of export had been reading.
 // ⚠️ NOT A TEST ARTIFACT: any user who cancels an export leaks a handle per in-flight file and

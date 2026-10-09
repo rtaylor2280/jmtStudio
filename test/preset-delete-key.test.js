@@ -59,13 +59,13 @@ const fontGrid = (() => {
 ok('the sidecar binding exists', sidecar.length > 0);
 ok('the B-336 font-grid binding is still there to match against', fontGrid.length > 0);
 
-// ── both keys, per his ruling on B-336 ─────────────────────────────────────
+// ── both keys, per the ruling on B-336 ─────────────────────────────────────
 {
   // ⚠️⚠️ THIS USED TO REQUIRE BOTH KEYS, and it was right until the file browsers entered the
   // picture. Backspace is up-one-level there ([B-405]), so it can never also be the delete key —
   // a key whose meaning depends on which panel has focus is worse than one that only navigates.
-  // His call 2026-09-17: "we can remove the backspace from the others". Nothing had shipped:
-  // v1.7.2 predates both bindings, and he confirmed it — "Nope it didn't work there in 1.7".
+  // Ruled 2026-09-17: "we can remove the backspace from the others". Nothing had shipped:
+  // v1.7.2 predates both bindings, and it was confirmed it — "Nope it didn't work there in 1.7".
   const deleteOnly = /if \(e\.key !== 'Delete'\) return;/;
   ok('the sidecar takes Delete', deleteOnly.test(sidecar));
   ok('and so does the font grid', deleteOnly.test(fontGrid));

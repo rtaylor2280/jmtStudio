@@ -637,7 +637,7 @@ async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNa
   const destRoot = path.resolve(_root(userData, kind, id));
   const added = [];
   const failed = [];
-  // ⚠️ THE SAME POLICY AS EVERY OTHER WAY IN ([B-370], his catch 2026-09-11: "I just
+  // ⚠️ THE SAME POLICY AS EVERY OTHER WAY IN ([B-370], the catch 2026-09-11: "I just
   // added a .exe into my library"). This module had NO checker of any kind, and this
   // is the font detail's "+ Add" - so Studio itself would put a program in a font, and
   // the export dialog would then tell the user something else on their computer did.

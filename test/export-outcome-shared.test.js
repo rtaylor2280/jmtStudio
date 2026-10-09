@@ -6,7 +6,7 @@
 // construction. Reporting the OUTCOME was hand-rolled per door, and that is where all three
 // were wrong:
 //
-//   • Font card quick export  -> *Exported as "Techno_2"* after he pressed Cancel
+//   • Font card quick export  -> *Exported as "Techno_2"* after the user pressed Cancel
 //   • Common Folders as zip   -> said nothing at all
 //   • tracks                  -> said nothing AND committed a sync manifest describing files
 //                                that were never written, which the next export would trust
@@ -58,7 +58,7 @@ ok('it treats a cancel as its own outcome, before any success path',
 // `_sfDeleteProgress` and `_sfShowProgramRefusal` are declared in a nested scope and are NOT
 // exposed on window. A helper calling them from top level is a ReferenceError waiting for the
 // first completed export - the 2026-09-15 defect class, which no syntax check and no
-// source-grep can see, and which he found in ten seconds by opening DevTools.
+// source-grep can see, and which was found in ten seconds by opening DevTools.
 {
   const at = (re) => { const m = H.match(re); return m ? H.slice(0, m.index).split('\n').length : -1; };
   const indentOf = (line) => {

@@ -8,7 +8,7 @@
  * convenience only... it will never cause an error in compile or on saber."
  * test/mount-sd-usb-check.test.js was deleted with it.
  *
- * ⭐ THE JOB DID NOT GO AWAY, IT MOVED TO THE POINT OF CHANGE. His words:
+ * ⭐ THE JOB DID NOT GO AWAY, IT MOVED TO THE POINT OF CHANGE. Reported:
  *     "it moves it from the place it was in where it was doing it as part of a
  *      preflight to instead live on change, commenting it out so that it's not there
  *      when you don't need it and not giving anybody the impression that they still

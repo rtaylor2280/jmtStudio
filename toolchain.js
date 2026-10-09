@@ -1854,7 +1854,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
     // matches ANY device with those IDs, so dfu-util flashes whichever board happens to
     // be in the bootloader - not the one the user selected. The COM port only ever drove
     // the touch reset; it never constrained the target.
-    // Found 2026-07-26 by Note: he unplugged the board on COM12, plugged a DIFFERENT board
+    // Found 2026-07-26 by Note: the user unplugged the board on COM12, plugged a DIFFERENT board
     // in, clicked Flash, and the log narrated COM12 while the firmware went to the board
     // that was actually present. Since 0483:df11 is the GENERIC STM32 bootloader ID, the
     // unconstrained form can also target a non-Proffieboard STM32 sitting in DFU.

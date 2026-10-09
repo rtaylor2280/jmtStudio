@@ -396,7 +396,7 @@ function _forgetPlugin(version) {
 // keeping. (2026-08-15)
 const PENDING_INSTALL_KEY = 'pendingPluginInstall';
 
-// ⭐⭐ VERIFY FIRST, AND NEVER AUTO-DELETE. [B-299], his ruling 2026-09-13.
+// ⭐⭐ VERIFY FIRST, AND NEVER AUTO-DELETE. [B-299], ruled 2026-09-13.
 //
 // The version above deleted the marker and then removed the whole versioned tree, on
 // the reasoning that a standing marker means an interrupted install. That reasoning
@@ -1871,9 +1871,9 @@ ipcMain.handle('bulkImport:scan', async (_, { rootDir } = {}) => {
 //   2. The `finally` set the pointer to null. So when the OLD run finally ended it wiped the
 //      pointer belonging to the NEW one, disarming that too.
 //
-// Observed 2026-09-18: he cancelled a 136-source import and the probe kept naming new sources for
+// Observed 2026-09-18: the user cancelled a 136-source import and the probe kept naming new sources for
 // eight more minutes, marching alphabetically past the cancel point, while the modal was gone and
-// the library was being written. He could see nothing at all.
+// the library was being written. It could see nothing at all.
 //
 // Cancel now means cancel EVERYTHING in flight, and each run removes only its own token.
 // ⚠️ THE GATE LIVES IN ITS OWN MODULE so it can be tested (test/bulk-import-gate.test.js).
@@ -1918,10 +1918,10 @@ ipcMain.handle('bulkImport:cancel', () => {
 // and return real stats + per-source prepared/dup/corrupt results. Reuses the
 // same progress event + cancel token as run.
 ipcMain.handle('bulkImport:analyze', async (e, { plan } = {}) => {
-  // [B-398] The freeze he screenshotted was during ANALYZE. Flush on the way out so the log
+  // [B-398] The freeze the user screenshotted was during ANALYZE. Flush on the way out so the log
   // exists even if the run is cancelled or fails.
   // [B-413] Same guard as run: analyze stages and hashes into the store, so two at once is two
-  // writers. This is the one he actually hit — a cancelled analyze that never stopped, then a
+  // writers. This is the one it actually hit — a cancelled analyze that never stopped, then a
   // second analyze started on top of it.
   const _analyzeToken = _bulkGate.begin();
   if (!_analyzeToken) {
@@ -2604,7 +2604,7 @@ ipcMain.handle('dialog:selectSaveDestination', async () => {
 // renderer sums the deltas; flush() sends whatever's left so the sum stays
 // exact (every byte copied is accounted for, no drift).
 // [B-400] Progress for the +Add doors. ONE emitter and ONE channel for all three (tracks, font,
-// common) - his rule from ui-conventions.md 2026-09-16: "if they all use the same style then it
+// common) - the rule in ui-conventions.md, 2026-09-16: "if they all use the same style then it
 // doesn't rely on us remembering to follow the rule but rather implement the pattern." Three
 // hand-rolled bars would be three chances to drift.
 //
@@ -2633,7 +2633,7 @@ function _sfByteProgressEmitter(event) {
 function _sfExportProgressEmitter(event) {
   let acc = 0;
   let last = 0;
-  // ⭐⭐ THE DELTA CHANNEL CARRIES A NAME TOO. [B-420, 2026-09-23 — his report on door 1:
+  // ⭐⭐ THE DELTA CHANNEL CARRIES A NAME TOO. [B-420, 2026-09-23 — the report on door 1:
   // "do we not have file names to fly by on this?"]
   //
   // Two channels report export progress: `soundFonts:byteProgress` sends ABSOLUTES and has
@@ -2667,7 +2667,7 @@ function _sfExportProgressEmitter(event) {
 
 // ── Cancelling an export ────────────────────────────────────── [B-005 item 4, 2026-09-19]
 //
-// ⭐⭐ THE EXIT IS THE HAZARD, NOT THE WAIT. He hit this on a real export: 109 MB to a card over
+// ⭐⭐ THE EXIT IS THE HAZARD, NOT THE WAIT. Hit on a real export: 109 MB to a card over
 // mass storage, sat at 32.3 MB after two minutes, and "the only way out is potentially damaging -
 // I'd have to force the app to close." Force-quitting mid-write to a FAT32 card is the precise
 // failure the whole SD guard exists to prevent, so the app was offering a long operation whose
@@ -2782,7 +2782,7 @@ ipcMain.handle('entries:exportToFolder', async (event, { name, destDir, mode, sy
   // and that answer costs a ~1,900 ms PowerShell spawn. It was already established before the
   // write started; paying for it again at the moment the user presses Cancel would recreate
   // the exact complaint this work exists to fix.
-  // ⚠️ Absent means FALSE, which is his ruling and not a shortcut: "if we can't tell, then we
+  // ⚠️ Absent means FALSE, which is the ruling and not a shortcut: "if we can't tell, then we
   // assume it's not card through proffie." An unknown destination gets the fast, silent
   // cleanup rather than a prompt nobody needed.
   return _withExportCancel(async (shouldStop, token) => {
@@ -3256,7 +3256,7 @@ ipcMain.handle('provenance:write', (_, params = {}) => {
 // ── Export destination: will it fit, and what is it attached to? ── [B-203]
 //
 // Two handlers because the costs differ by four orders of magnitude and callers must be
-// able to choose. Measured on his machine 2026-09-19:
+// able to choose. Measured on a real machine 2026-09-19:
 //   exportDest:check     0.3 ms   statfs only, safe anywhere, including before every write
 //   exportDest:classify  1.9 ms   ...thousand. One PowerShell spawn. Never on a write path.
 //
@@ -3323,7 +3323,7 @@ ipcMain.handle('fs:removeSetAside', async (_, { target } = {}) => {
 //
 // ⭐ VERIFIES BY OBSERVATION. The shell's Eject verb is fire-and-forget, so the module polls
 // the filesystem until the media has been gone for a stable second. See safeEject.js for why
-// that instrument and not volume enumeration - measured on his bench, where enumeration would
+// that instrument and not volume enumeration - measured on the bench, where enumeration would
 // have been wrong about two of three transports.
 // ⚠️ Takes a drive letter, not a path: the eject is per-VOLUME, because one physical reader
 // can hold two letters and a device-level eject would take a sibling card with it.
@@ -3339,7 +3339,7 @@ ipcMain.handle('media:eject', async (_, { destDir, timeoutMs } = {}) => {
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-// ⭐⭐ THE PER-OS VOCABULARY, ASKED FOR ONCE. His requirement: "if I build a Mac build, it
+// ⭐⭐ THE PER-OS VOCABULARY, ASKED FOR ONCE. The requirement: "if I build a Mac build, it
 // doesn't use the Windows language or any of that. It has its own version."
 //
 // ⚠️ AND THE DIFFERENCE IS NOT ONLY WORDING - one message must not EXIST on some platforms.
@@ -3395,7 +3395,7 @@ ipcMain.handle('exportDest:classify', async (_, { destDir } = {}) => {
 
 // ── "What did the user just hand us?" ─────────────────────────────── [B-005 item 4]
 //
-// ⭐⭐ THE CHEAP HALF OF `classify`, AND THE REASON IT IS A SEPARATE DOOR. Measured on his
+// ⭐⭐ THE CHEAP HALF OF `classify`, AND THE REASON IT IS A SEPARATE DOOR. Measured on the
 // machine 2026-09-21: this is ~85 ms where `exportDest:classify` is ~1,900-2,600 ms, because
 // it never starts PowerShell. Every export wants to know whether the destination is removable
 // (that is the whole safe-eject decision); almost none of them need to know whether it is a
@@ -3404,7 +3404,7 @@ ipcMain.handle('exportDest:classify', async (_, { destDir } = {}) => {
 // ⚠️ THIS IS SAFE ON A WRITE PATH, unlike its expensive neighbour. See the cost table above
 // `exportDest:check` - this belongs in the same tier as statfs, not in the classify tier.
 //
-// ⭐ His framing, which is what produced the split: "we don't have to do everything in the
+// ⭐ The framing, which is what produced the split: "we don't have to do everything in the
 // identify... so genuinely fast and tiny logic on it."
 ipcMain.handle('exportDest:identify', async (_, { destDir } = {}) => {
   try {
@@ -3523,7 +3523,7 @@ ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
 // export would write - and it had no cancel at all, so the primary export's scan sat through every
 // remaining track after the user pressed Cancel. Reported: *"it goes through about 10-20 more
 // files before it cancels... it says stopping and files are still flying by."*
-// ⭐ And his argument, which is the whole justification: *"why would it need to do anything if all
+// ⭐ And the argument, which is the whole justification: *"why would it need to do anything if all
 // it was doing was analyzing? there's not a copy being made... so it should just stop."*
 ipcMain.handle('sharedTracks:planExport', async (event, { destDir } = {}) => {
   return _withExportCancel(async (shouldStop) => {
@@ -3855,7 +3855,7 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
     // This used to be `copyFileSync` inside a `readdirSync` loop - not one await anywhere in it.
     // Main's event loop never yielded, so the `export:cancel` IPC could not even be DELIVERED
     // until the export had finished. From the outside: the window went "Not Responding", the
-    // Cancel button did nothing, and the export completed anyway. His report, exactly: "right
+    // Cancel button did nothing, and the export completed anyway. Reported exactly: "right
     // click from font selected items turned to unresponsive while attempting to cancel. export
     // still finished."
     //
@@ -3891,7 +3891,7 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   // the fit check and the slow-write warning further down. So "↗ Export folder…" on a
   // source or a font wrote through a Proffieboard with no warning and onto a full card
   // with no refusal, while the very same folder reached by multi-selecting its files got
-  // both. He found the ordering bug on the multi-select door; this one would have been
+  // both. Testing found the ordering bug on the multi-select door; this one would have been
   // next, and it fails SILENTLY rather than in the wrong order.
   //
   // ⭐ The duplicate is now deleted rather than patched. The shared flow below already
@@ -3935,14 +3935,14 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   // export: read, write, remember the folder, report success. The runner then called `produce`
   // and wrote the identical file a SECOND time.
   //
-  // ⭐ Three symptoms, one cause, all of them his: the file written twice; a bar that never
+  // ⭐ Three symptoms, one cause, all of them the: the file written twice; a bar that never
   // moved because the probe returned no `totalBytes`, so the runner ran at `total: 0`; and a
   // post-write "Not enough room" instead of a refusal, because the preflight reads 0 bytes as
   // "cannot measure" and correctly declines to refuse. The fit check simply never ran.
   //
   // ⭐ Falling THROUGH rather than sizing here: the shared block below already sizes any
   // `paths` for any kind, and a second sizer in this branch is how the two would drift.
-  // His rule for the whole thing: "it shouldn't matter if 1 or multiple".
+  // The rule for the whole thing: "it shouldn't matter if 1 or multiple".
   if (paths.length === 1 && !_singleIsDir && !probe) {
     const subPath = paths[0];
     const baseName = suggestedName || subPath.split('/').pop() || 'untitled';
@@ -3995,7 +3995,7 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
       return { ok: true, written: [filePath], refused };
     } catch (err) {
       // ⚠️⚠️ A CANCEL IS NOT A FAILURE, AND THIS BRANCH WAS THE ONE PLACE THAT SAID IT WAS.
-      // [B-420, 2026-09-23 — his screenshots, same door, two endings]
+      // [B-420, 2026-09-23 — the screenshots, same door, two endings]
       //
       // Seven other catches in this file normalise a stop to `{ ok: true, canceled: true }`;
       // this one returned `ok:false` with the cancellation as the error TEXT, so the funnel's
@@ -4096,7 +4096,7 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
       //
       // ⚠️⚠️ THIS IS WHY A SOURCE EXPORT RAN STRAIGHT INTO ENOSPC. `sizable` was false for
       // kind==='source', so _bTotal stayed 0 and [B-203]'s check below skipped itself - the
-      // guard was present and silently inapplicable to a whole class of export. He found it
+      // guard was present and silently inapplicable to a whole class of export. Found
       // by right-clicking a source: five files failed mid-write with raw
       // "ENOSPC: no space left on device".
       try {
@@ -4203,7 +4203,7 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
   //
   // ⭐⭐ THE BAR MUST NOT BE UP WHEN WE ASK. This door was the last one still using the
   // two-phase handshake - renderer raises a determinate bar, main sizes, main hands back
-  // slowWrite, renderer dialogs OVER its own moving bar. He caught it on a 57-file source
+  // slowWrite, renderer dialogs OVER its own moving bar. Caught on a 57-file source
   // export: "does the regular progress bar before the 'this will take a while' message."
   // Every other door now asks before it shows anything.
   //
@@ -4265,11 +4265,11 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
         if (refuseBuf(buf, subPath)) continue;
         const out = uniqueIn(destDir, baseName);
         // [B-005 item 4] Chunked + cancellable; leaves nothing truncated behind.
-        // ⭐⭐ LIVE BYTES, NOT A LUMP ON COMPLETION. [B-420, 2026-09-23 — his report]
+        // ⭐⭐ LIVE BYTES, NOT A LUMP ON COMPLETION. [B-420, 2026-09-23]
         //
         // This passed `null` as the progress sink to a function named `writeBufferWithProgress`,
         // so an 11 MB wav wrote eleven chunks and reported none of them. The bar only moved when
-        // the whole file closed. His scenario made it unmistakable - one large wav and three
+        // the whole file closed. The scenario made it unmistakable - one large wav and three
         // small ones - "it sits at 0 for like a min... then goes to the top", because the single
         // large file WAS the minute and the three small ones were the jump.
         //
@@ -4658,7 +4658,7 @@ ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) 
 // ⭐ SO THE RENDERER CAN CHECK BEFORE IT RAISES A BAR. The source export used a two-phase
 // handshake - start, let main decline, ask, restart - which meant the progress modal was
 // already up when the dialog opened, and the question arrived on top of a bar. Every other
-// door asks with a clear screen. His catch: "i think the order is off on this one... the
+// door asks with a clear screen. Caught: "i think the order is off on this one... the
 // progress bar... not like the other spots."
 //
 // ⚠️ CHEAP: a zip's central directory carries every entry's uncompressed size and listAll()
@@ -4745,7 +4745,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     // ⚠️⚠️ ZIP FORMAT INCLUDED, AND IT WAS EXCLUDED AT FIRST. The argument for leaving it
     // out was that a zip writes COMPRESSED bytes, so an uncompressed total is only an upper
     // bound and refusing on it could block an archive that would have fit. That is true and
-    // it is beside the point, which he made after watching a zip export try and fail: "we
+    // it is beside the point, which it made after watching a zip export try and fail: "we
     // have a message for this already. it shouldn't have tried to go there."
     // ⭐ THE ASYMMETRY DECIDES IT: a rare false refusal costs a retry; attempting a write we
     // can predict will fail costs a part-written archive on a card, which is the condition
@@ -4773,7 +4773,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
         // and returns WITHOUT writing; on "Export anyway" the renderer calls back with
         // confirmSlow.
         //
-        // ⚠️ Sources are the biggest single items in the library - his run from 467 MB to
+        // ⚠️ Sources are the biggest single items in the library - the run from 467 MB to
         // 1,090 MB across up to 2,398 files - so this is the door where the warning matters
         // most, and it was the last one to get it.
         const _pf = await require('./exportDestination').preflight(target, {
@@ -4810,7 +4810,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     //
     // XX THE SIDECAR NOW GOES IN DURING THE EXPORT, NOT AFTER IT. [B-420, 2026-09-23]
     // This used to call injectIntoZip on the FINISHED archive: extract the whole thing back out,
-    // write the sidecar into the tree, re-compress everything, rename into place. Ryan: "How can
+    // write the sidecar into the tree, re-compress everything, rename into place. Reported: "How can
     // curation have after compression? It goes inside the zip...." and "why would we have ever
     // packed, unpacked and packed again?" It predated the pooled store, when the archive itself
     // was the stored artifact and had to be rebuilt to stay byte-canonical. exportToDownloads
@@ -4840,7 +4840,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     //
     // !! THIS KNOWINGLY BREAKS FOLDER IMPORT UNTIL [B-427]. Import peeks inside ZIPS only, so a
     // folder re-imported today stores our .jmt-curation.json as vendor content and restores
-    // nothing. Deliberate, his call, 2026-09-23: "it is totally fine to break the imports right now
+    // nothing. Deliberate, ruled 2026-09-23: "it is totally fine to break the imports right now
     // since it is the next thing we are fixing after this is done. So you should do the export
     // correctly now and we will learn how to deal with the import later." And the reason it is
     // safe: "we are not coding for some other group of people who are using this mid-flight...
@@ -4868,7 +4868,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
   }
 }));
 
-// ── Export MANY sources as ONE operation ─────────────────── [B-420, 2026-09-23, his design]
+// ── Export MANY sources as ONE operation ─────────────────── [B-420, 2026-09-23]
 //
 // ⭐⭐ WHY THIS EXISTS AND WHY IT IS NOT A LOOP IN THE RENDERER. The bulk delete used to call the
 // single-source export once per source, which made the export phase N operations wearing one
@@ -4877,7 +4877,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
 //
 // ⭐ HIS RE-SCOPE, and it dissolved a question rather than answering it. I had asked whether the
 // shared export runner should grow a "the caller paints, not you" mode to accommodate that second
-// surface. His answer: "do the export of all 4... then once done it can return to delete and let
+// surface. The answer: "do the export of all 4... then once done it can return to delete and let
 // delete do its thing being told the export was completed for all of them. so same as 1 or many."
 // One operation means one surface, so the mode was never needed.
 //   "one bar for the bytes over all 4 showing which source it's working on and all the files
@@ -5021,7 +5021,7 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
     // curation-unpack/curation-repack around the job accumulator as "phase-local", because those
     // phases reported their OWN byte totals and folding them in collapsed the text to "0 B" while
     // the monotonic floor held the bar full - two readouts each correct about a different quantity.
-    // He rejected the premise: "to a user, they don't know anything about curation etc. it's all
+    // It was rejected the premise: "to a user, they don't know anything about curation etc. it's all
     // part of the export." The second counted them as ordinary passes, which made the bar honest.
     //
     // ⭐ Neither was the fix. The phases existed only because the sidecar was written by rebuilding
@@ -5036,7 +5036,7 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
     pending = {
       phase: p && p.phase,
       sourceLabel: currentLabel,
-      // ⚠️ POSITION, because bytes alone cannot answer "where am I in this". [2026-09-23, his
+      // ⚠️ POSITION, because bytes alone cannot answer "where am I in this". [2026-09-23, the
       // call: "we just have to show 1 of 2 then 2 of 2 so the user knows where they are in
       // process"] Each source runs rebuild-then-archive, so a phase word changes twice per
       // source and the bar moves continuously - neither tells you how many are left.
@@ -5085,11 +5085,11 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
       // XX BOTH FORMATS CARRY IT, and that is the point of the change rather than a side effect.
       // This used to be zip-only because the sidecar was injected by rebuilding an ARCHIVE, so a
       // folder export had nothing to inject into. Writing it into the tree works for both, so all
-      // four export doors now produce the same thing. Ryan asked what was different about the
+      // four export doors now produce the same thing. The question was what was different about the
       // contents of the four: the answer is now nothing.
       // !! THIS KNOWINGLY BREAKS FOLDER IMPORT UNTIL [B-427]. Import only peeks inside ZIPS, so a
       // folder re-imported today stores our .jmt-curation.json as vendor content and restores
-      // nothing. His call, deliberately, 2026-09-23: "it is totally fine to break the imports right
+      // nothing. Ruled deliberately 2026-09-23: "it is totally fine to break the imports right
       // now since it is the next thing we are fixing after this is done. So you should do the
       // export correctly now and we will learn how to deal with the import later."
       // ⭐ TAKEN FROM THE SIZING PASS, NOT REBUILT. [B-420, 2026-09-24] It used to be built here
@@ -5105,7 +5105,7 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
       // `destPath` is the folder or .zip this export produced; the eject offer needs the DIRECTORY
       // it landed in, because that is what resolves to a piece of removable media. The renderer had
       // to make do with destPath, which happens to be a directory for a folder export and is a FILE
-      // for a zip - so the eject would have worked on exactly the format he tested and silently not
+      // for a zip - so the eject would have worked on exactly the format the user tested and silently not
       // on the other one.
       exported.push({ uuid: it.uuid, label: currentLabel, destDir: target, ...result, curation });
       baseBytes += it.bytes * (it.passes || 1);
@@ -5323,7 +5323,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
         // follow-on download (peeling a captured .txt/.rtf pointer) runs clean.
         try { if (bw && !bw.isDestroyed()) bw.close(); } catch {}
         // ⚠️⚠️ A CANCEL IS HONOURED EVEN WHEN THE DOWNLOAD COMPLETED. [B-424] This is the case
-        // that produced his 23 MB orphan: a small font finishes in the gap between the click and
+        // that produced the 23 MB orphan: a small font finishes in the gap between the click and
         // the cancel taking effect, so `state` is 'completed' and every success path runs as if
         // nothing happened. The bytes arriving does not un-ask the question - a stop was asked for, so
         // the file is dropped rather than handed to the importer.
@@ -6125,7 +6125,7 @@ function parseBoardVersion(buf) {
   // field, and (once B-183 landed) "No installed version is v6.9.." printed over a
   // v6.9 tree sitting right there in the list. A trailing separator is never part
   // of a version, so it is stripped rather than excluded from the class.
-  // (Found on Ryan's board 2026-08-19; every fixture here had used a banner with
+  // (Found on the user's board 2026-08-19; every fixture here had used a banner with
   // no trailing period, which is why it survived.)
   const trim = v => v.replace(/[.\-]+$/, '');
   const banner = buf.match(/Welcome to ProffieOS\s+v?(\d+\.\d+[\w.\-]*)/i);
@@ -6138,7 +6138,7 @@ function parseBoardVersion(buf) {
   // with no CONFIG_FILE line at all, so the `.h` test rejected a correct reply and
   // the probe timed out with the answer sitting in the buffer. On 6.9 that left the
   // boot banner as the only path that ever worked, which is why detection succeeded
-  // right after a flash or a power cycle and never again. (Read off Ryan's own board
+  // right after a flash or a power cycle and never again. (Read off the user's own board
   // 2026-08-19; every fixture here had been written against 8.10's shape.)
   //
   // Still deliberately narrow: a bare decimal followed by anything is NOT a version.
@@ -6214,7 +6214,7 @@ function parseBoardVersionRaw(buf) {
 // end-of-line, so a half-received line matched happily and returned a truncated
 // date - the probe then finished on it, because a truthy install date ends the
 // wait. Measured: a buffer cut after "Sep 19 2026 10:3" returned exactly that.
-// Seen on his board 2026-09-19 as "built Sep 19 2026 10." in the tooltip.
+// Seen on the board 2026-09-19 as "built Sep 19 2026 10." in the tooltip.
 // Demanding \n means a partial line yields null, the 250ms grace window runs, and
 // the finished line is read instead. ProffieOS always terminates it ("\n" after
 // install_time), so nothing legitimate is lost.
@@ -6308,7 +6308,7 @@ ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
       // of the reply and parseBoardInstalled now requires its terminating newline -
       // which routinely arrives in the NEXT chunk. Finishing immediately therefore
       // dropped the build date entirely, in the one state where it is the only
-      // identifying fact the firmware has. Observed on his board 2026-09-19: the
+      // identifying fact the firmware has. Observed on the board 2026-09-19: the
       // date was present before the newline requirement went in and absent after.
       // Waiting the same 250ms lets the line complete.
       if (parseBoardReplied(buf)) {
@@ -6873,7 +6873,7 @@ ipcMain.handle('versions:export', async (_, name) => {
   // whose names hid them - classify by what a call WRITES TO, never by where it lives.
   //
   // ⚠️ The old copy was `cpDir`: recursive `readdirSync` + `copyFileSync` with no awaits. That
-  // is the shape that froze the app on him on 09-19 - a synchronous loop never yields, so even
+  // is the shape that froze the app on 09-19 - a synchronous loop never yields, so even
   // a cancel flag could not have been delivered. Replaced with the shared streamed walk, which
   // yields, reports bytes, stops mid-file and removes its own partial.
   const _srcRoot = versionInfo.path || versionInfo.dir || null;

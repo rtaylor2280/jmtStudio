@@ -38,7 +38,7 @@ function ok(name, cond, extra) {
   ok('the chip-side control exists', /id="btn-sf-mark-all-seen"/.test(html));
   ok('the selection-side control exists', /id="btn-sf-bulk-mark-seen"/.test(html));
   // ⚠️⚠️ THIS ASSERTION WAS INVERTED ON 2026-09-18 AND THE INVERSION IS THE POINT. [B-297]
-  // It used to require the control to sit BESIDE THE NEW FILTER, in the chip row. He looked at
+  // It used to require the control to sit BESIDE THE NEW FILTER, in the chip row. The user looked at
   // that live and would not pass it: it "looks like a filter". A row of filters is where you go
   // to change the VIEW, not your data, so an action there reads as a view toggle no matter how it
   // is styled. Placement was the whole fix; the old test had encoded the rejected design.
@@ -65,7 +65,7 @@ function ok(name, cond, extra) {
   ok('the chip control hides when nothing is New',
      /markAllBtn\.style\.display = newCount > 0 \? '' : 'none';/.test(chip), chip);
   // ⚠️ The label references the BADGE, not the mechanism. "seen" is not a clear opposite of
-  // "NEW" and quietly claims the user looked at something. His own words for the gap:
+  // "NEW" and quietly claims the user looked at something. A real words for the gap:
   // "no way to clear the new tag". seenAt stays the field name in code. [B-297]
   ok('and it names the count, referencing the badge', /Clear all New \(\$\{newCount\}\)/.test(chip), chip);
 

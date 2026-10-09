@@ -149,7 +149,7 @@ function buildReadme({
   // wrong in opposite directions. The first said "any of these files can be deleted without
   // affecting the fonts or how the saber runs" - true about the saber, and an invitation to bin
   // the attribution on a file whose whole job is attribution. Nobody in this community writes
-  // that: Fett263 asks explicitly that his attributions are not removed, so telling people to go
+  // that: Fett263 asks explicitly that the attributions are not removed, so telling people to go
   // ahead and delete ours is a strange thing to ship. The second overcorrected into "leaving the
   // manifest is worth it", which argues a case at the reader instead of stating a fact.
   // ⭐ State what each file IS and what keeping it buys, and let that be the whole argument. The

@@ -177,7 +177,7 @@ const sfTable = (() => {
 const rows = (sfTable.match(/^\|\s*\d+[a-z]?\s*\|/gm) || []).length;
 // ⚠️ 14: eleven enumerated off the screen 2026-09-20, plus 8b ("Export common folder…", added
 // 2026-09-22), plus doors 12 and 13 - the two export-before-delete paths, which the RUNNER had been
-// naming by number since 09-21 while this table left them out. His correction: "technically 14...
+// naming by number since 09-21 while this table left them out. The correction: "technically 14...
 // the two delete paths. delete last source with export and delete source."
 // ⚠️ Superseded note: "Export common folder…" (8b) was added because there was no way to write a
 // common onto a card before it — the one Export item only ever produced a zip.

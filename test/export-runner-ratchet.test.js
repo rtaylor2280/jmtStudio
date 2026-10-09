@@ -57,7 +57,7 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
 // [B-420, 2026-09-24] The primary export runs a cheap upper-bound check BEFORE its conflict scan
 // so an obviously-impossible job is refused without reading the whole card, and so the slow-write
 // warning lands before the user resolves a dozen skip/replace decisions that backing out would
-// waste. His ruling: "this was too far in the process... shouldn't this be even before that or
+// waste. Ruled: "this was too far in the process... shouldn't this be even before that or
 // just after? probably just after..." The runner's preflight cannot serve that, because it runs
 // after `plan` by construction - the accurate total does not exist until the scan has finished.
 // ⚠️ SO THIS CEILING SHOULD NOT REACH ZERO, and a future session trying to drive it there would
@@ -96,7 +96,7 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
   // ⚠️ Ceiling, not zero: the unmigrated doors legitimately still call it. It must only fall.
   // ⭐ ZERO AS OF 2026-09-23. The last ending outside the runner was the source door's own
   // "Export stopped" dialog, which drew a SECOND one on top of the shared ending the moment
-  // that door migrated - he hit it on the first cancel. With it gone the runner is the only
+  // that door migrated - hit on the first cancel. With it gone the runner is the only
   // thing that ends an export, and a ceiling of zero says so rather than leaving room for
   // one nobody is tracking.
   const OUTSIDE_MAX = 0;   // tightened 2026-09-23 when source export landed
@@ -151,7 +151,7 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
     // ⚠️⚠️ THE FUNNEL IS HALF MIGRATED ON PURPOSE, AND THE HALVES SERVE DIFFERENT DOORS.
     //
     // `_sfExportFiles` has two branches. The MULTI-PATH branch is doors 2, 5, 7 and 9 - the
-    // "select files → Export" items his count names - and it is on the runner as of 2026-09-22.
+    // "select files → Export" items the count names - and it is on the runner as of 2026-09-22.
     // The SINGLE-PATH branch serves menu items that are NOT in that count: single-file
     // "Export…", "Export folder…" and "Export ZIP…" (which passes `asFile` and produces a
     // different artifact). Those are the open question recorded in the register.
@@ -161,7 +161,7 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
     // the renderer cannot know without probing, and probing before opening a picker is the
     // delay-before-the-dialog the "a click always acts instantly" rule forbids. ⏭ The unlock is
     // that the CALL SITES already know - "Export folder…" passes `dirSubPath` - so the fact just
-    // needs threading through. That is a change to ten call sites and it waits for his ruling on
+    // needs threading through. That is a change to ten call sites and it waits for the ruling on
     // whether those items are doors.
     //
     // ⚠️ So the two exemptions below are the single-path branch, not the migrated one. They are
@@ -177,7 +177,7 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
     // ⚠️⚠️ THE PRIMARY EXPORT CARRIES THREE EXEMPTIONS, ALL FOR ONE REASON, AND ALL NAMED RATHER
     // THAN OMITTED. [B-420, 2026-09-24] Everything this door does before `_sfRunExport` is a
     // PRE-STEP: resolving common slots, the picker, the early obvious-no destination check, and
-    // the conflict scan that decides what will actually be written. His ruling on backup's survey
+    // the conflict scan that decides what will actually be written. The ruling on backup's survey
     // settles the category - "deciding whether to export is not exporting" - and the scan is the
     // longest user-visible wait in the app, so it legitimately owns a modal and an elapsed ticker
     // of its own until the runner takes over.

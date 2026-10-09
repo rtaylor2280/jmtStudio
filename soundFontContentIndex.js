@@ -36,7 +36,7 @@
 // outcome this code can produce, far worse than storing a duplicate. So the
 // index NARROWS THE SEARCH; IT NEVER AUTHORISES THE LINK. Every candidate is
 // re-hashed and proven to be what the index claims before anything points at
-// it. A miss costs a copy: correct, only larger. A wrong link costs his audio.
+// it. A miss costs a copy: correct, only larger. A wrong link costs the audio.
 //
 // The index is built from data already on disk — the per-file manifests under
 // soundFonts/.filehashes/ already hold every source and entry file with its

@@ -25,7 +25,7 @@ const path = require('path');
 // ⭐⭐ THE ORIGINAL COMPLAINT WAS LATENCY, AND THIS IS WHERE IT LIVED. Cancel used to stop
 // only between files, so pressing it bought "no more files after this one" and you still
 // waited out the current write. A 40 MB track to a board over mass storage is minutes of
-// that - his report was ~15 - with the button already pressed and the app looking hung.
+// that - the report was ~15 - with the button already pressed and the app looking hung.
 //
 // ⭐ IT COST ALMOST NOTHING TO FIX, which is the part worth remembering. This was already a
 // 1 MB-chunked stream with backpressure - it already yielded between chunks and already had
@@ -47,14 +47,14 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
     const ws = fs.createWriteStream(destPath);
     let settled = false;
     // ⚠️ UNLINK ONLY WHAT WE OPENED. destPath was just created by createWriteStream above,
-    // so removing it cannot touch a pre-existing file of his - the write had already
+    // so removing it cannot touch a pre-existing file of the - the write had already
     // truncated it the moment the stream opened. Deleting on a path we did not open is the
-    // shape that cost him 708 MB on 2026-09-02.
+    // shape that cost the user 708 MB on 2026-09-02.
     //
     // ⚠️⚠️ WAIT FOR THE HANDLE TO CLOSE BEFORE UNLINKING. THIS IS A WINDOWS RACE AND IT
     // REACHED HIM. `ws.destroy()` is ASYNCHRONOUS, and on Windows deleting a file whose
     // handle is still open fails with EPERM/EBUSY - POSIX allows it, which is exactly why
-    // the first cut looked correct. He cancelled an export to a board card and the partial
+    // the first cut looked correct. The user cancelled an export to a board card and the partial
     // folder was still there afterwards; the unlink had silently lost the race, and so had
     // the caller's recursive remove of the folder, for the same reason.
     //
@@ -190,7 +190,7 @@ async function writeBufferWithProgress(buf, destPath, onBytes = null, shouldStop
     }
   } catch (err) {
     // ⚠️ CLOSE BEFORE UNLINKING. On Windows a file with an open handle cannot be deleted, and
-    // that race already reached him once: he cancelled to a board card and the partial was
+    // that race already reached the user once: the user cancelled to a board card and the partial was
     // still there afterwards. Closing first is what makes the removal actually happen.
     try { await fh.close(); } catch {}
     try { await fs.promises.unlink(destPath); } catch {}
@@ -275,7 +275,7 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
           continue;
         }
       }
-      // ⭐⭐ THE CHUNK CARRIES THE FILE IT CAME FROM. [B-420, 2026-09-23 — his requirement:
+      // ⭐⭐ THE CHUNK CARRIES THE FILE IT CAME FROM. [B-420, 2026-09-23 — the requirement:
       // "we need to show which file we're working on"]
       //
       // `onBytes` was called with a bare chunk length, so a caller driving a progress bar knew

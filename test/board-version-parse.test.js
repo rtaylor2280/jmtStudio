@@ -45,7 +45,7 @@ const cases = [
   // no installed tree and reddened the OS Version field against a tree that agreed.
   // Every fixture above happened to use a banner with no trailing period, so the
   // real board's output was the first thing to hit it (2026-08-19).
-  // ProffieOS 6.9's reply shape, copied off Ryan's board 2026-08-19. It answers
+  // ProffieOS 6.9's reply shape, copied off the user's board 2026-08-19. It answers
   // with `Installed: <date>` and NO CONFIG_FILE line, so the original `.h`-only
   // follower test rejected a correct reply and the probe timed out with the answer
   // already in the buffer. Every fixture above had been written against 8.10.

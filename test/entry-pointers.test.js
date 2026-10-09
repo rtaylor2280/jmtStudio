@@ -1,6 +1,6 @@
 // A library entry is a folder of POINTERS into its source, not a second copy. [B-309]
 //
-// His spec, 2026-09-04: "a font folder is a folder full of pointers if you don't
+// The spec, 2026-09-04: "a font folder is a folder full of pointers if you don't
 // customize. You can rename a pointer without renaming its file it comes from.
 // You can delete a pointer and it has no effect on the original either. I can also
 // add to this... they live only in that font folder."
@@ -129,7 +129,7 @@ async function setup() {
 
   {
     console.log('an attached folder is pointers too, however novel its files are');
-    // [B-316], his ruling 2026-09-05: "just because it happens to be all unique
+    // [B-316], ruled 2026-09-05: "just because it happens to be all unique
     // if you added a folder doesn't mean we start keeping real files in a
     // folder." So the ALL-NOVEL case is the one worth asserting — the tempting
     // shortcut is to pool only what looks like an added file and leave a whole

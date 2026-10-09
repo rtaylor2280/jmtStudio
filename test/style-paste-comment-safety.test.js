@@ -1,5 +1,5 @@
 /**
- * Two clipboard-parsing faults, both found by Ryan in normal use  [B-458] [B-459]
+ * Two clipboard-parsing faults, both found in normal use  [B-458] [B-459]
  *
  * [B-459] `_extractStylePtrInner` counted `<` and `>` with no comment awareness, so a
  * single unbalanced angle inside a comment moved the depth, the slice ended at the
@@ -114,7 +114,7 @@ function balanced(expr) {
      balanced(_extractStylePtrInner(
        'StylePtr<Layers</* AlphaL<White,Bump<Scale<BladeAngle<>,Int<4000>>> */Red,Blue>>()')));
 
-  // The real-world comment from his Courkrus style: `twistangle<>` plus `tip->emitter`.
+  // The real-world comment from the Courkrus style: `twistangle<>` plus `tip->emitter`.
   const MELT = 'StylePtr<Layers<'
     + '/* Melt - BC custom melt effects, uses twistangle<>. Remap Fire to travel tip->emitter */'
     + 'Red,Blue>>()';
@@ -128,7 +128,7 @@ function balanced(expr) {
        === 'Layers</* x -> y */Red,Blue>',
      JSON.stringify(_extractStylePtrInner('StylePtr<Layers</* x -> y */Red,Blue>>()')));
 
-  // Defensive half, unmeasured in his corpus: a commented-out StylePtr must not be
+  // Defensive half, unmeasured in the corpus: a commented-out StylePtr must not be
   // mistaken for the real one.
   ok('a commented-out StylePtr is skipped in favour of the live one',
      _extractStylePtrInner('//StylePtr<Layers<Old>>()\nStylePtr<Layers<New>>()') === 'Layers<New>',
@@ -214,7 +214,7 @@ function balanced(expr) {
 // that is `/* Base blade */` sitting INSIDE the expression — so the harvest began
 // mid-code and ran to the next comment's close.
 // ⚠️ The paste itself was already correct by then. A fix can be right and still leave
-// a wrong-looking result on screen, which is why his eyes are the test that counts.
+// a wrong-looking result on screen, which is why the eyes are the test that counts.
 // ───────────────────────────────────────────────────────────────────────────
 {
   const SLOT = 'StylePtr<Layers<\n'

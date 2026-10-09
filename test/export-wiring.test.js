@@ -69,7 +69,7 @@ ok('preload bridges it', /preflightExportDest:/.test(pre));
 }
 // ── ⚠️⚠️ A REFUSAL MUST NOT ORPHAN THE DOOR'S PROGRESS MODAL ─────────
 //
-// He hit this on the tracks export to a full volume 2026-09-21: the refusal dialog drew on top
+// Hit on the tracks export to a full volume 2026-09-21: the refusal dialog drew on top
 // of the door's "Comparing with your library · 54 of 54" modal, and dismissing the dialog
 // revealed that modal **frozen and undismissable** — owned by a function that had already
 // returned, with a bar nothing would ever move again.
@@ -140,7 +140,7 @@ ok('the old refuse+warn pair is gone from every door',
 // wrapped in `_sfPreflightBusy` - a 150 ms-delayed overlay - which was right while most doors
 // had no progress surface. Once the runner began supplying a modal to every door, that wrapper
 // became a SECOND surface for one wait: the funnel's multi-select export showed the small
-// overlay for the probe, then the runner's modal for the free-space check. His call was to
+// overlay for the probe, then the runner's modal for the free-space check. The ruling was to
 // delete the overlay rather than guard it, so passing these meant the bug was still wired in.
 //
 // ⚠️ THE INTENT IS UNCHANGED AND IS WHAT IS ASSERTED NOW: nobody waits on a destination with
@@ -343,7 +343,7 @@ ok('a door threads the tally in', /wrote: token\.wrote/.test(main));
 // ── One export per destination, and the claim always comes back ──────
 //
 // ⚠️⚠️ HE REACHED THIS FOR REAL 2026-09-24. A cancel that hid its surface while the scan kept
-// reading made a live export look finished, so he started a second one at the same destination:
+// reading made a live export look finished, so the user started a second one at the same destination:
 // *"I clicked cancel... looked like it did... then I started again to same location and it was
 // still in progress."* Two writers in one folder is how a card's directory gets torn up.
 //
@@ -381,7 +381,7 @@ ok('a door threads the tally in', /wrote: token\.wrote/.test(main));
      'the primary export claims at its PICKER and holds through the scan - minutes before the '
      + 'runner sees the job - so without this opt-out the runner would block it');
 
-  // ⭐ AND IT MUST COVER THE SCAN. His second export started while the first was still COMPARING,
+  // ⭐ AND IT MUST COVER THE SCAN. The second export started while the first was still COMPARING,
   // with nothing being written and `_sfExportBusy` false the whole time. A guard that only wrapped
   // the copy would refuse a case that never happened and allow the one that did.
   {
@@ -427,7 +427,7 @@ ok('no synchronous whole-buffer export writes remain',
    !/fs\.writeFileSync\((outPath|filePath|out), buf\)/.test(main),
    'third instance of the same shape: a write with no checkpoints');
 
-// ── Backup: the exemption he overruled elsewhere and never revisited ──
+// ── Backup: the exemption it was overruled elsewhere and never revisited ──
 //
 // ⚠️⚠️ THIS WAS ALMOST REPORTED AS DONE ON THE STRENGTH OF A COMMENT. The module's note said
 // backup was no longer exempt, the register table said "now included" - and no caller
@@ -465,10 +465,10 @@ ok('⚠️⚠️ the backup door goes through the shared export runner',
 // "Confirm / Are you sure?" with an OK and a Cancel that behave identically, because callers
 // of an informational dialog ignore the result.
 //
-// ⭐ FOUR CALLS WERE WRONG AND TWO OF THEM WERE MINE, WRITTEN THE SAME NIGHT. His reports:
+// ⭐ FOUR CALLS WERE WRONG AND TWO OF THEM WERE MINE, WRITTEN THE SAME NIGHT. The reports:
 // "cancel and ok from there do the same thing", and - worse - "export on common folders went
-// through eject... don't recall asking for it." He was never asked. He was shown a contextless
-// "Are you sure?" and OK ejected his card.
+// through eject... don't recall asking for it." It was never asked. It was shown a contextless
+// "Are you sure?" and OK ejected the card.
 //
 // ⚠️ THE FIRST SWEEP FOR THESE MISSED TWO, because it matched `promptConfirm('` and both were
 // written multiline with the title on the next line. A grep that encodes a formatting habit
@@ -484,7 +484,7 @@ ok('showToast is called with a message first',
 
 // ── The eject cannot fire without being asked for ────────────────────
 // ⚠️⚠️ THE EJECT PROMPT IS GONE ON PURPOSE (2026-09-21). It was a modal of its own shown
-// after the summary, and his ruling killed it: "The eject shouldn't be its own modal. It
+// after the summary, and the ruling killed it: "The eject shouldn't be its own modal. It
 // should take place on the summary screen, so it can show the status of it right there."
 // Replacing the summary with an eject dialog threw away the counts, the destination and the
 // free-space line at the moment the user is deciding whether to pull the card.
@@ -521,7 +521,7 @@ ok('the offer requires removable === true',
   // ⚠️ RE-ANCHORED 2026-09-21 [B-420]. The rule is unchanged - Windows has a note, the other
   // platforms have null - but the note is now ONE SHORT SENTENCE. The old text asserted the
   // volume was "the reader with no card in it", which we do not know and which was wrong for
-  // his F:, and it ran to a paragraph in a status line beside a button. His verdict: "this isn't
+  // the F:, and it ran to a paragraph in a status line beside a button. The verdict: "this isn't
   // a reader... way too much information."
   // ⭐ Microsoft's own wording for this state is "Safe To Remove Hardware" and explains nothing
   // further, so the inline status now says just that and this note is kept short for wherever
@@ -619,7 +619,7 @@ process.exit(failed ? 1 : 0);
 // still look correct all the way through the export - the checkbox is right there, ticked.
 //   • Backup lost it when it migrated to the shared runner. The note left beside that fix said
 //     "nobody noticed, because the during-export checkbox still appeared."
-//   • The source-export door lost it the same way, and Ryan found it on the first real export of
+//   • The source-export door lost it the same way, and Testing found it on the first real export of
 //     the evening, to F:: "I'm missing the eject. I saw the check box, but not here after."
 //
 // ⭐ `_sfCompletionNotice` and `_sfShowExportSummary` both derive the row themselves, so a door that

@@ -457,7 +457,7 @@ function _vpRenderDetail(v) {
 // That is the community's own name for it, verified rather than assumed
 // (2026-08-12): Arduino's Boards Manager lists the package as literally
 // "Proffieboard Plugin", pod.hubbe.net's setup page tells users to install
-// "the latest version Proffieboard Plugin", and profezzorn titles his own
+// "the latest version Proffieboard Plugin", and profezzorn titles the
 // release threads "Arduino-Proffieboard Plugin v3.6 beta" / "Arduino-proffieboard
 // plugin 4.6 beta". In running copy the forum shortens it to "plugin 4.6".
 //
@@ -1339,7 +1339,7 @@ function _vpWirePropCopySubmenu(parentItem, fromVersion, fileName, others) {
     const sub = _vpCtxSubmenu();
     sub.innerHTML = '';
     sub.style.minWidth = '260px';
-    // Seven versions is already normal for him, so the list gets the sized variant
+    // Seven versions is already normal for the user, so the list gets the sized variant
     // with its own scroll rather than running off the bottom of the screen.
     sub.classList.add('preset-ctx-submenu-sized');
 

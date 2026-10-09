@@ -89,7 +89,7 @@ const BROKEN = 'using L = Layers<Black,Red;';
   // ⭐⭐⭐ A HEADER **ABOVE A TEMPLATE PREFIX**, WHICH IS THE CASE THIS FILE MISSED.
   // Comments were covered. Templates were covered. The COMBINATION never was, and
   // that is precisely the shape a wrapper entry takes: a `/*---*/` header from the
-  // source library, then `template<...>`, then `using`. His own BootAccelSpin.
+  // source library, then `template<...>`, then `using`. A real BootAccelSpin.
   //
   // The first fix ran _splitTemplatePrefix BEFORE skipping comments, and that
   // function anchors on `^template` — so with a comment in front it matched nothing,

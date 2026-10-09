@@ -356,7 +356,7 @@ function cacheFor(destDir, itemName) {
 // about anything else. `observed` is a Map of relPath -> [size, mtimeMs, hash].
 // [B-402] ⭐⭐ COMMIT EVERYTHING THE OPERATION LEARNED, IN ONE WRITE.
 //
-// His design: "we gather all the information and at the very end we drop a SINGLE manifest
+// The design: "we gather all the information and at the very end we drop a SINGLE manifest
 // update based on what we learned along the way." The first cut wrote per exported item, which
 // is several writes AND silently drops any item the operation looked at but did not export — a
 // font already identical at the destination was hashed by the compare and then never recorded,

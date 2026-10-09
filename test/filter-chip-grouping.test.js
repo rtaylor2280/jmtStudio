@@ -12,16 +12,16 @@
  * The split was made on 09-13 and it leaked — GROUPING is independent of the semantics,
  * but the JOINER TEXT is not. "and" printed between two tag chips is a statement about
  * the predicate, so shipping the display half alone left the row truthfully describing
- * logic he had already ruled should change. His call: "two backlog items that address
+ * logic there had been already ruled should change. Ruled: "two backlog items that address
  * the same area and only one being complete but changes the meaning doesn't seem right."
  *
  * THE JOINERS, read from the predicates rather than assumed:
- *   tags            — OR   [B-382] (measured: 79% of his 44 tags are mutually-exclusive
+ *   tags            — OR   [B-382] (measured: 79% of the 44 tags are mutually-exclusive
  *                          bundle names, avg 0.51 tags per entry — AND returned 0)
  *   creators        — OR, and FORCED: meta.author is one string, so ANDing two is zero
  *   effects present — OR   [B-382] (swingh is on 212 of 220, so ANDing filters nothing)
  *   effects absent  — AND-NOT, and it is the one asymmetry: exclusions are conjunctive.
- *                     Confirmed by him 2026-09-16; it was already the built behaviour.
+ *                     Confirmed in testing 2026-09-16; it was already the built behaviour.
  *
  * ⚠️ THE ENTRY'S "COUPLED REVERT" WAS BACKWARDS AND IS NOT DONE HERE. It said the tag
  * self-apply had to be reverted for OR. Commit 66c8876 had already made every dropdown
@@ -130,7 +130,7 @@ const render = (counts) => {
 
 // ── the joiners agree with the predicates ──────────────────────────────────
 {
-  // ⭐ [B-382] EVERY FACET ORs INTERNALLY; FACETS AND TOGETHER. His model, 2026-09-03:
+  // ⭐ [B-382] EVERY FACET ORs INTERNALLY; FACETS AND TOGETHER. The model, 2026-09-03:
   //     TAGS(a or b) and CREATORS(a or b) and EFFECTS(a or b) and NEW
   // One rule, nothing to learn per control. The single exception is the ABSENT effects
   // set, which is AND-NOT — exclusions are conjunctive, OR is for things you want.

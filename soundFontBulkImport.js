@@ -647,7 +647,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   //
   // ⭐ SURFACED, NOT SILENTLY SKIPPED. Catching this at COMMIT would make the review
   // lie: it would say "importing 40" and import 39. Caught here, the row can say which
-  // other row it matches and he decides — the app's normal shape, and it matches the
+  // other row it matches and it was decides — the app's normal shape, and it matches the
   // 2026-08-31 ruling that a row ticked despite an owned marker is a row they meant.
   //
   // ⚠️ NOT THE SAME STATEMENT AS "already in your library". One is about the library,
@@ -690,10 +690,10 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         // already running". Hit twice in testing: *"the import doesn't really cancel... still."*
         // ⭐ `shouldStop` is export's mechanism and `importSource` already honoured it in three
         // places along the hash/copy path — the single-source import door passes it, which is why
-        // its cancel works. Bulk called the same function and left the argument off. His memory is
+        // its cancel works. Bulk called the same function and left the argument off. The memory is
         // what found it: *"pretty sure we had the exact scenario before... on export?"*
         // ⚠️ Safe because analyze only STAGES: cancelling throws the staged work away and nothing
-        // is lost, which is his reasoning for checking often rather than politely.
+        // is lost, which is the reasoning for checking often rather than politely.
         shouldStop: shouldCancel,
       });
     } catch (e) {
@@ -743,20 +743,20 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       // ⭐⭐ KEYED ON CONTENT, NOT ON SOURCE IDENTITY. [B-415] `res.hash` identifies the ARTIFACT:
       // for a zip it is the sha256 of the archive on disk, for a folder it is the content digest.
       // So a zip and its own extracted copy of the SAME FONT carried two different numbers, never
-      // collided here, and both imported - his find 2026-09-19, Energy / Energy_2 byte-identical.
+      // collided here, and both imported - the find 2026-09-19, Energy / Energy_2 byte-identical.
       // ⚠️ [B-314] was not wrong; its fixture was two twins of the SAME SHAPE, which do collide.
       // ⚠️ Falls back to res.hash so a source that somehow yields no content digest still gets
       // the old same-shape protection rather than none.
       const _h = res.contentHash || res.hash || null;
       const _twin = _h ? _batchHashes.get(_h) : null;
-      // ⭐⭐ THE ZIP WINS, WHATEVER THE WALK ORDER. His ruling 2026-09-19: "take the zip over the
+      // ⭐⭐ THE ZIP WINS, WHATEVER THE WALK ORDER. Ruled 2026-09-19: "take the zip over the
       // extracted... so extracted is skipped." The zip is what the creator shipped - it carries
       // the extras, and every provenance and savings claim is anchored to it.
-      // ⚠⚠ WITHOUT THIS, WHICH COPY SURVIVES IS AN ACCIDENT OF FILENAME ORDER. His zips happened
+      // ⚠⚠ WITHOUT THIS, WHICH COPY SURVIVES IS AN ACCIDENT OF FILENAME ORDER. The zips happened
       // to be named "1.1-Energy.zip", and "1" sorts before "E", so the folders became the later
       // twin. Rename the folder and the ZIP would have been the one skipped. Shape decides, not
       // the alphabet.
-      // ⭐⭐ THE RULE IS THE FULLEST SOURCE WINS. His wording 2026-09-19: "it's really the full
+      // ⭐⭐ THE RULE IS THE FULLEST SOURCE WINS. The wording 2026-09-19: "it's really the full
       // source wins. duplicate font but one has more stuff around it... that wins." The keeper is
       // the copy carrying the most AROUND the font - the extras used to build a customized version,
       // or the exports for another board - because that is the material that cannot be recovered
@@ -767,7 +767,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       // the measurement and let shape break ties.
       // ⚠⚠ AND FOR AN EXACT TWIN THE RANKING IS ALWAYS A TIE, by definition: contentHash covers
       // the WHOLE staged tree, extras included, so two sources that collide here hold byte-identical
-      // material and neither is fuller. Measured on his own pair - Energy/Energy_2, 55 files and one
+      // material and neither is fuller. Measured on a real pair - Energy/Energy_2, 55 files and one
       // digest on both. The comparison is written anyway because it states the intended rule at the
       // point the decision is made, and because the SUBSET case it really targets is a different
       // check that does not exist yet (see [B-415]: different content, so no collision, so both
@@ -838,7 +838,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // button and 54 from the other.
   //
   // Asking it once, here, is what makes the two paths agree by construction rather
-  // than by luck: analyze produces one answer and both paths read it. Ryan's
+  // than by luck: analyze produces one answer and both paths read it. the user's
   // acceptance test: "when I go to review, I'm reviewing exactly what we said we
   // were already going to do as a quick import, and they will not change after the
   // fact."
@@ -923,7 +923,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // bar, and quick import ran the creator half AGAIN after committing each source
   // (see the detectVendor call in runBulkImport). Two paths, same work, twice.
   //
-  // His test for whether moving it was worth doing: "there should be nothing other
+  // The test for whether moving it was worth doing: "there should be nothing other
   // than loading a screen between the two" — so ALL of it moves, not just the half
   // quick import shares. Analyze is already opening and reading every source to zip
   // and hash it, so the readme reads and the preview picks ride along; review
@@ -998,7 +998,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         if (h && !seen.has(h)) seen.set(h, path.basename(w));
         // ⚠️ THE COUNT SPLITS WHERE THE ROWS ALREADY DID ([B-349]). `owned`
         // lumped library hits and same-card twins into one number the UI
-        // labelled "already in your library" — against Ryan's 3-track library
+        // labelled "already in your library" — against the user's 3-track library
         // it claimed 42. The per-row ownedIn distinction existed ([B-246]);
         // only the counter kept telling the lie.
         if (owned) {
@@ -1010,7 +1010,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         // for the batch case, where X is a sibling on the same card that the library
         // has never seen. Harmless while the row only had a checkbox; the moment
         // Adopt tried to rename that name it failed with "source file not found",
-        // which is how it surfaced (2026-09-01, his dev test). Anything acting on
+        // which is how it surfaced (2026-09-01, the dev test). Anything acting on
         // matchName MUST check ownedIn first. [B-246]
         items.push({ absPath: w, name: path.basename(w), size, owned, matchName, ownedIn, hash: h });
       }
@@ -1019,7 +1019,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       // treated as one decision. Tag every member of a 2+ group with a shared key.
       // Byte-identical files in the flat shared-tracks folder are never worth
       // importing twice — the only real question is which NAME to keep, which is a
-      // single choice, not two independent checkboxes. (Ryan, 2026-09-01.)
+      // single choice, not two independent checkboxes. (2026-09-01.)
       const byHash = new Map();
       for (const it of items) {
         if (!it.hash) continue;
@@ -1041,7 +1041,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // the second one carried the marker is that it was scanned second. Marking one side is
   // an artifact of walk order dressed up as a statement about the font.
   //
-  // ⚠️ AND IT IS WHAT MAKES THE CHECKBOXES SAFE TO LEAVE ALONE. His, 2026-09-16: "shouldn't
+  // ⚠️ AND IT IS WHAT MAKES THE CHECKBOXES SAFE TO LEAVE ALONE. Reported 2026-09-16: "shouldn't
   // they trade places if you reverse the selection? should they both state this if both
   // selected? we don't want to toggle between them if we're going to allow direct
   // duplication... but we shouldn't be quiet about it either." Labelling both, always,
@@ -1091,7 +1091,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         if (!row || !keeper) continue;
         // ⚠⚠ ONLY SKIP A ROW THAT IS ALREADY HELD BACK. The first cut skipped any row carrying
         // `sameInBatch` at all, and that quietly left TWO survivors when the same font appeared
-        // three times - his question, and it took about a minute to reproduce:
+        // three times - the question, and it took about a minute to reproduce:
         //     pkg (font + cfx + readme) | bare1 | bare2   ->   pkg AND bare1 both imported
         // bare1 and bare2 pair off as exact twins, bare1 wins THAT contest and is marked a keeper,
         // and the keeper mark then shielded it from the containment pass that should have put it
@@ -1100,13 +1100,13 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         const _wasKeeper = !!row.sameInBatch;
         const _kLabel = keeper.label != null ? keeper.label : (keeper.prepared && keeper.prepared.name) || '';
         const _lLabel = row.label != null ? row.label : (row.prepared && row.prepared.name) || '';
-        // ⭐⭐ THE SAME CATEGORY AS AN EXACT TWIN, SO IT USES THE SAME FIELD. His call 2026-09-19:
+        // ⭐⭐ THE SAME CATEGORY AS AN EXACT TWIN, SO IT USES THE SAME FIELD. Ruled 2026-09-19:
         // "isn't it the same category as whatever our wording was for duplicate on source? don't
         // need to tell about fuller - that was what informed our choice... but we still only kept 1."
         // Fullness decided WHICH copy survives; it is not a second thing that happened to the user.
         // ⚠⚠ SO THERE IS NO SECOND NOTE, NO SECOND PREDICATE ARM AND NO SECOND SUMMARY LINE.
         row.sameInBatch = { idx: info.container, label: _kLabel, keeps: false };
-        // ⭐⭐ `fuller` IS WHY THIS ONE WON, AND THE ROW IS ALLOWED TO SAY SO. His call 2026-09-19:
+        // ⭐⭐ `fuller` IS WHY THIS ONE WON, AND THE ROW IS ALLOWED TO SAY SO. Ruled 2026-09-19:
         // "don't we know that it was more complete so message can say 'Same font as G-Grievous in
         // this import.' and then add 'This one is more complete'".
         // ⚠⚠ WITHOUT IT BOTH ROWS READ IDENTICALLY - the same sentence on the ticked one and the
@@ -1132,7 +1132,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         // ⚠⚠ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
         // the loop; this ranking can only decide after it, so the row was already counted. Leaving
         // it counted made the summary read "8 new" on a run where 6 imported - indistinguishable,
-        // from the outside, from the feature not working at all. He hit exactly that.
+        // from the outside, from the feature not working at all. Hit exactly that.
         if (newCount > 0) newCount--;
       }
     }
@@ -1248,7 +1248,7 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
       // Without this, importSource would spot the identical hash and skip — which
       // would make the review screen the one place in the app that refuses to take
       // a second copy, when the single-import path happily gives you one with a new
-      // number. Consistency wins. (2026-08-31, his call.)
+      // number. Consistency wins. (2026-08-31, the ruling.)
       forceNewSource: !!src._duplicate,
       onProgress: (p) => onSubProgress && onSubProgress({ phase: 'import', ...p }),
       // ⭐ Same gap as the analyze path, same one-argument fix. [B-462, 2026-10-05] Without this

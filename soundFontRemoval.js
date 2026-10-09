@@ -1,7 +1,7 @@
 // Removing a program from the managed store: DELETE it, or QUARANTINE it inert.
 //
 // WHY THIS EXISTS ([B-364]). The export guard refuses to carry a program out of the
-// library, and for 1.8 that refusal now has to come with a way to act. His scope call,
+// library, and for 1.8 that refusal now has to come with a way to act. The scope call,
 // 2026-09-11: "the scope is on export. The reason is, on import we're not deleting
 // anything because we don't own the cards - that's a 1.9 decision. But for 1.8, we own
 // and manage the source data. User doesn't know where it is, nor do we want them poking
@@ -9,7 +9,7 @@
 //
 // So OWNERSHIP is the test. A card is the user's and we only ever report on it; the
 // managed store is ours and we may act on it with the user's consent. And the second
-// half of his argument is the stronger one: the alternative to acting is not inaction,
+// half of the argument is the stronger one: the alternative to acting is not inaction,
 // it is sending the user into AppData to hand-edit a store the app manages.
 //
 // ⚠️ DELETION IS ALREADY POLICY, NOT A NEW RULE. importSource purges the extracted tree
@@ -77,7 +77,7 @@ function _zipFormatRefusal(userData, kind, id) {
 // anywhere upstream deletes somebody's wav. Costs one 256-byte read at the moment it
 // matters, and it is the difference between enforcing a policy and following orders.
 function _confirmProgram(absPath, relPath) {
-  // checkCarryableFile, not the executable test alone ([B-368], his question 2026-09-11:
+  // checkCarryableFile, not the executable test alone ([B-368], the question 2026-09-11:
   // "if there's no way to import a rar and no way to export a rar, then why are we keeping
   // a rar?"). An archive we cannot open can never enter, never leave and never be read -
   // it is bytes the user stores for nothing. So it leaves on the same terms, and SAVE A
@@ -102,7 +102,7 @@ function _markDirty(userData, kind, id) {
   } catch { /* a stale marker costs a recompute, never correctness */ }
 }
 
-// ⭐ A FONT FOLDER HAS NO FILES OF ITS OWN — THEY ARE ALL POINTERS (his note,
+// ⭐ A FONT FOLDER HAS NO FILES OF ITS OWN — THEY ARE ALL POINTERS (the note,
 // 2026-09-11, and it changed this module). Measured on the real library the same
 // minute: 85 of 86 files in an entry have nlink 2 and share an inode with the source
 // file; the one exception is meta.json, the app artifact, which exports already skip.
@@ -157,7 +157,7 @@ function _findAllNames(userData, absPath) {
   // ⚡ BASENAME PASS FIRST. A hardlinked copy almost always wears the same filename,
   // so comparing names before calling stat turns ~35,000 stat calls into ~35,000 string
   // compares plus a handful of stats. Measured cost of NOT doing this: a multi-second
-  // freeze on a two-name file (his catch, 2026-09-11). It is an optimisation, never the
+  // freeze on a two-name file (2026-09-11). It is an optimisation, never the
   // answer: if it does not account for every link the full pass below still runs, so a
   // copy stored under a different name is still found.
   const targetBase = path.basename(absPath);
@@ -262,7 +262,7 @@ function holdingRoot(userData) {
   return path.join(userData, 'soundFonts', '_impound');
 }
 
-// ⚠️⚠️ A SECOND NAME FOR A FILE WE ALREADY SWEPT IS NOT A FAILURE ([B-394], his export
+// ⚠️⚠️ A SECOND NAME FOR A FILE WE ALREADY SWEPT IS NOT A FAILURE ([B-394], the export
 // 2026-09-16). The content-addressed store HARDLINKS one file into several buckets, and
 // `_unlinkAndSweep` deliberately removes EVERY name `_findAllNames` can reach — leaving one
 // behind would leave the program in the library. So a batch that refused the same file once
@@ -271,7 +271,7 @@ function holdingRoot(userData) {
 // "1 could not be removed".
 //
 // ⭐ THAT IS THE WORST POSSIBLE DIRECTION FOR THIS LIE. It tells the user a program survived
-// in their library — the one outcome we can actually prove did not happen. His dialog said
+// in their library — the one outcome we can actually prove did not happen. The dialog said
 // exactly that about "8.21打印.rar" while BOTH of its names were already gone: one quarantine
 // file, two paths in its `Found in:`, and a clean store.
 //
@@ -366,23 +366,23 @@ function impoundProgram(userData, { kind, id, relPath } = {}) {
 
 // The user chose to keep a copy. Copy out, then drop the holding entry immediately —
 // "and then we delete it immediately". Nothing waits for the sweep once they have it.
-// ⚠️ IT LANDS IN ITS OWN LABELLED FOLDER, NEVER LOOSE IN THE CHOSEN DIRECTORY (his
+// ⚠️ IT LANDS IN ITS OWN LABELLED FOLDER, NEVER LOOSE IN THE CHOSEN DIRECTORY (the
 // catch on the first dev pass, 2026-09-11: "one file but there are two here... and it
 // should have come in its own folder, properly labeled for what it is, as potentially it
 // can be dangerous").
 //
-// TWO THINGS WERE WRONG. The file and its sidecar dropped straight onto his Desktop as
+// TWO THINGS WERE WRONG. The file and its sidecar dropped straight onto the Desktop as
 // two anonymous icons whose names were both truncated to "blst99.wav...." — so one
 // finding looked like two files and neither said what it was. And a file we have just
 // told the user is a program has no business sitting unlabelled among their own things.
 //
 // The folder carries the warning, the README explains the rename, and a batch lands
 // together instead of scattering N pairs across the destination.
-// ⚠️ ONE TEXT FILE, NOT A JSON PER FINDING (his catch, 2026-09-11: "what's the json?
-// shouldn't we be handing a text file if there's going to be information?"). He is right
+// ⚠️ ONE TEXT FILE, NOT A JSON PER FINDING (the catch, 2026-09-11: "what's the json?
+// shouldn't we be handing a text file if there's going to be information?"). That is right
 // and it fixes the count problem at the same time: a .json is a developer artifact, and
 // pairing one with every quarantined file is what made a single finding look like two
-// files on his Desktop. Everything the sidecar carried now reads as prose in READ ME.txt,
+// files on the Desktop. Everything the sidecar carried now reads as prose in READ ME.txt,
 // which a person can actually open - and a hash copies out of a text file just as well as
 // out of JSON.
 function _readmeHeader() {
@@ -432,7 +432,7 @@ function _readmeBlock(b) {
 }
 
 
-// ⚠️ THE FILES SIT ONE LEVEL DOWN, IN A FOLDER THAT NAMES ITSELF (his shape, 2026-09-11:
+// ⚠️ THE FILES SIT ONE LEVEL DOWN, IN A FOLDER THAT NAMES ITSELF (the shape, 2026-09-11:
 // "a folder with a text file saying something about it's safe to read, and then a folder
 // labeled quarantined files with the file in it"). Opening the quarantine folder should
 // put a readable explanation in front of you, not the programs themselves. Anyone who
@@ -490,7 +490,7 @@ function releaseImpounded(userData, { token, destDir, batchLabel } = {}) {
 //
 // ⚠️ FROM THE USER'S SIDE THIS IS THE WHOLE OF "DELETE" — they are not told the file was
 // parked anywhere, because the holding area is our bookkeeping and not their business
-// (his call, 2026-09-11: "the underworks of it, the fact that we're putting it in a temp
+// (, ruled 2026-09-11: "the underworks of it, the fact that we're putting it in a temp
 // file and all that stuff, is irrelevant to the user"). Dismissing the dialog reaches the
 // same end by a slower road: the sweep takes it at quit.
 function discardImpounded(userData, { token } = {}) {

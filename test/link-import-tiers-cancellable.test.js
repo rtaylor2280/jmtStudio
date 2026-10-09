@@ -12,7 +12,7 @@
 //     SOURCE-IMPORT gate that has not started yet, so the download carried on unwatched and the
 //     finished file went straight to the importer.
 // Both tiers show the same modal and the same Cancel button, so nothing on screen distinguishes
-// them - which is exactly why this is a test and not a reading. His report: *"I was given the BVM
+// them - which is exactly why this is a test and not a reading. Reported: *"I was given the BVM
 // browser page. then I clicked on the font I wanted and the download button. then it went back to
 // the progress bar and I immediately clicked cancel. that's when you got the orphan."*
 //
@@ -108,7 +108,7 @@ for (const t of TIERS) {
   }
   ok('⚠️ and the temp dir is dropped, not left', /dropDestDir\(\)/.test(body),
      'a cancelled import keeps nothing - including the partial');
-  // ⚠️ VERIFIED REMOVAL, NOT A HOPEFUL ONE. His first cancel after the tier was wired came back
+  // ⚠️ VERIFIED REMOVAL, NOT A HOPEFUL ONE. The first cancel after the tier was wired came back
   // with no orphan source and an EMPTY `jmt-linkimport-*` still in temp: a plain rmSync with
   // `force: true` had removed the partial FILE and left the DIRECTORY, returning quietly. That is
   // the shape [B-436] exists for - "it did not throw" is not "it is gone".

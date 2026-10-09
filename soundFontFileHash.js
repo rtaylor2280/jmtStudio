@@ -401,7 +401,7 @@ function uniqueFileHashes(records) {
   const out = new Set();
   // ⚠⚠ THE FIELD IS `fileHash`, NOT `hash`. Reading `r.hash` here returned undefined for every
   // record, so this produced an EMPTY ARRAY and the containment ranking silently never ran - it
-  // shipped that way and his test looked identical to no fix at all. Nothing threw, no count was
+  // shipped that way and the test looked identical to no fix at all. Nothing threw, no count was
   // wrong, no test failed: the batch simply had nothing to compare.
   // ⭐ IT SURVIVED THE TESTS BECAUSE THE TESTS BUILT THEIR OWN RECORDS. Every case fed either
   // `{hash}` objects or bare hash strings straight to rankByContainment, so this function was

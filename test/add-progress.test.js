@@ -1,14 +1,14 @@
 /**
  * +Add reports real byte progress, and the loop actually yields  [B-400]
  *
- * ⭐ His, 2026-09-17: "+Add can actually bring in many files. and that's good, but if the user
+ * ⭐ Reported 2026-09-17: "+Add can actually bring in many files. and that's good, but if the user
  * selects 100 long wav files... that's real bytes that need to be tracked for sure."
  *
  * ⚠️⚠️ THE ASSERTION THAT MATTERS IS THE YIELD, NOT THE NUMBERS. The old loop was
  * `copyFileSync` plus a `readFileSync` hash, which holds the main process for the whole add —
  * so progress events describing the work queued *behind* the work and flushed after it
  * finished. Wiring a callback into that would produce a bar that sits at zero and jumps to
- * 100: green on a three-file test, broken for the case he reported.
+ * 100: green on a three-file test, broken for the case reported.
  *
  * ⭐⭐ SO THIS TEST RUNS A TIMER ALONGSIDE THE ADD. If the timer never fires, the loop never
  * yielded and the bar cannot move, however correct the byte arithmetic is. That is the one

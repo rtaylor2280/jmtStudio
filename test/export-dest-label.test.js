@@ -5,8 +5,8 @@
  * which is really short and hard to read. I think in SD card read we solved this by
  * naming it..."
  *
- * ⭐ He is right that it was already solved — `_sdDriveLabel` renders "RevantedJMT (F:)"
- * and, for a card with no volume name, "Removable Disk (K:)". Both were on his screen at
+ * ⭐ That is right that it was already solved — `_sdDriveLabel` renders "RevantedJMT (F:)"
+ * and, for a card with no volume name, "Removable Disk (K:)". Both were on the screen at
  * the same moment the export summary said "Saved to K:\". Two surfaces, one card, two
  * names. This reuses the existing form rather than inventing a second one.
  *
@@ -76,7 +76,7 @@ function ok(name, cond, extra) {
 
 // ── the lookup is started EARLY, not at the summary ────────────────────────
 // ⚠️⚠️ THIS IS THE ONE THAT SHIPPED WRONG AND PASSED EVERY TEST. The query MEASURED 2666ms
-// on his machine; the first attempt raced it against a 2500ms timeout at summary-build time
+// on a real machine; the first attempt raced it against a 2500ms timeout at summary-build time
 // and lost by 166ms. Every unit assertion was green and the card still wore a bare "K:\".
 // Timing was the defect, so timing is what these assert.
 {
@@ -101,7 +101,7 @@ function ok(name, cond, extra) {
   // ⚠️⚠️ AND IT MUST ACCEPT A SUBFOLDER. [B-203 / B-420, 2026-09-24] This required the destination
   // to BE a drive root and bailed to `_sfVolPrime = null` otherwise, so exporting to
   // `H:\TEMP_TESTING` - or any folder on a card - silently dropped the free-space line from the
-  // summary. Found in a console log he was reading for an unrelated cancel bug, by the very
+  // summary. Found in a console log was being read for an unrelated cancel bug, by the very
   // diagnostic that was added because this feature once vanished with nothing able to say why.
   // ⭐ The consumer only needs the VOLUME, and a subfolder shares its root's volume.
   ok('⭐ the prime accepts ANY absolute path, not only a drive root',
@@ -175,7 +175,7 @@ function ok(name, cond, extra) {
       ['a card root with a backslash',   'K:\\',                   NAMED,   'PROFFIE (K:)'],
       ['a bare drive letter',            'K:',                     NAMED,   'PROFFIE (K:)'],
       ['a forward-slash root',           'K:/',                    NAMED,   'PROFFIE (K:)'],
-      // His own K: card has no volume name — verified on screen 2026-09-17.
+      // A real K: card has no volume name — verified on screen 2026-09-17.
       ['⭐ an UNNAMED removable root',   'K:\\',                   UNNAMED, 'Removable Disk (K:)'],
       // ⚠️ "Removable Disk" would be a lie about a fixed drive.
       ['a fixed drive root, unnamed',    'E:\\',                   FIXED,   'E:\\'],
@@ -193,7 +193,7 @@ function ok(name, cond, extra) {
 }
 
 // ── ONE builder, not two copies that happen to match ───────────────────────
-// His question, 2026-09-17, and it is the right one to ask of any two surfaces that agree:
+// The question, 2026-09-17, and it is the right one to ask of any two surfaces that agree:
 // "do they agree because written the same or because it's one shared builder?"
 // Matching spellings agree right up until one of them is reworded. Only the call is proof.
 {

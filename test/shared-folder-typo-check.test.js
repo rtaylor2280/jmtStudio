@@ -77,7 +77,7 @@ const run = (text) => {
     ok('one name used everywhere is silent', !r.fired);
   }
   {
-    // His own commonSith / commonJedi idea. Two conventions used evenly is a
+    // A real commonSith / commonJedi idea. Two conventions used evenly is a
     // design, not a slip — and they are only two edits apart.
     const r = run(cfg('a;commonSith', 'b;commonSith', 'c;commonSith',
                       'd;commonJedi', 'e;commonJedi', 'f;commonJedi'));

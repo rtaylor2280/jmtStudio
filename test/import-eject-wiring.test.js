@@ -1,6 +1,6 @@
 // The import side's eject offer reuses the export side's eject, and gives the shared bar back.
 //
-// ⭐⭐ WHY THIS EXISTS. [B-424] His ask was to offer eject where you IMPORT from a card, not only
+// ⭐⭐ WHY THIS EXISTS. [B-424] The ask was to offer eject where you IMPORT from a card, not only
 // where you export to one - "add the eject option to this screen and to the import finish summary
 // as well as the eject when complete." The entry says plainly that this is a wiring job and that
 // if it turns into new eject code, something has been missed. These checks are what make that
@@ -37,7 +37,7 @@ function ok(label, cond, detail) {
 // `const X =` and `window.X =` anywhere in the file and went green on a build that could not start:
 // the export block sat ABOVE `const _sfWireEjectRow`, and reading a `const` before its declaration
 // is evaluated is a temporal-dead-zone ReferenceError. It threw, abandoned the rest of that IIFE,
-// and collapsed the editor pane to zero height. He found it in DevTools; the suite was green.
+// and collapsed the editor pane to zero height. Found in DevTools; the suite was green.
 // ⭐ A check that cannot see position cannot see this bug, and "both strings exist" was never the
 // guarantee - "the read happens after the write" was.
 const EJECT_HELPERS = ['_sfEjectContext', '_sfEjectRowHtml', '_sfWireEjectRow',

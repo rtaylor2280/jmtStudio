@@ -6,7 +6,7 @@
 // three deleteEntry loops and three deleteSource calls, each re-implementing
 // delete-the-entries-then-clean-up-the-source.
 //
-// ⚠️ HOW IT SURFACED, which is the argument for a structural check rather than more testing: Ryan
+// ⚠️ HOW IT SURFACED, which is the argument for a structural check rather than more testing: Testing
 // deleted a font by right-click and got no summary. Two of the four doors spoke, two said nothing,
 // and which one you got depended on where you started. Reported: "I thought we got rid of the
 // concept of bulk/single and it's all the same" and "shouldn't matter where I delete from."

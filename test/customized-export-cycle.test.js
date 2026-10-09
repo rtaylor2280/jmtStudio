@@ -4,7 +4,7 @@
 // its source rides the export payload, the vendor's candidate path drops out of
 // importedPaths (so the review re-opens with the original UNCHECKED), and the
 // restore recreates the entry with the EDITED bytes, its own name and its own
-// dates. His rule, 2026-09-07: "If I customized, its original is unchecked. If
+// dates. The rule, 2026-09-07: "If I customized, its original is unchecked. If
 // I made a copy so I have the customized and the original, they are both
 // checked. Matches what was there before deletion."
 //
@@ -127,7 +127,7 @@ const VENDOR_FILES = {
     payload2 && JSON.stringify(payload2.importedPaths));
   // The candidate row describes the VENDOR's copy, so the keyed curation must
   // come from the STOCK entry — the rider's curation travels on its record.
-  // (Ryan's live failure 2026-09-07: the row offered the customized name,
+  // (the user's live failure 2026-09-07: the row offered the customized name,
   // which the restore had already taken, and the commit collided.)
   const _keyBlock = payload2 && payload2.entries && payload2.entries['Ahsoka'];
   check('both-copies: the candidate row carries the STOCK name',
@@ -194,7 +194,7 @@ const VENDOR_FILES = {
     r2 && r2.restored === 1 && r2.names[0] === 'Ahsoka_2', r2 && JSON.stringify(r2));
 
   // ── Deferred restore: the review's rows decide ([B-311] rescope 2026-09-08) ─
-  // His calls: "this shouldn't be put in my library until the user says import
+  // The calls: "this shouldn't be put in my library until the user says import
   // and only if checked", and unchecking means "don't bring it back". picks is
   // how the commit says which rows stayed checked, with the form's edited name.
   console.log('picks: only checked rows restore, under the form\'s name');

@@ -109,7 +109,7 @@ ok('every `.modal-btn-close` is inside a `.modal`', orphans.length === 0,
 // out except for clicking to the side or pressing escape, then we're also not telling the user
 // how to get out... that is less intuitive."
 //
-// He is right, and the resolution is that the ✕ is the provision and the other two are the
+// That is right, and the resolution is that the ✕ is the provision and the other two are the
 // safety net. So for the narrow class of dialog where the ✕ is the ONLY visible exit — a choice
 // of two or more actions with no Cancel and no Close in the footer — three things are required
 // together, and this check exists to notice when a THIRD such dialog appears without them:

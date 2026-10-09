@@ -112,7 +112,7 @@ ok('under the limit is not slow',            !D.isSlowWriteJob(10, 1024));
 ok('⭐ a huge file count alone does NOT trip it', !D.isSlowWriteJob(10000, 0));
 ok('bytes alone trip it',                     D.isSlowWriteJob(1, 60 * 1024 * 1024));
 ok('one byte under does not',                !D.isSlowWriteJob(0, 60 * 1024 * 1024 - 1));
-// ⭐ His measured case, asserted as itself so the regression has a name rather than a number:
+// ⭐ The measured case, asserted as itself so the regression has a name rather than a number:
 // 18 MB across 200+ files is not slow, and 100 MB is.
 ok('⭐ 18 MB / 220 files is not slow',       !D.isSlowWriteJob(220, 18 * 1024 * 1024));
 ok('⭐ 100 MB / 5 files is slow',             D.isSlowWriteJob(5, 100 * 1024 * 1024));
@@ -136,7 +136,7 @@ ok('cleanup garbage reads as not slow',      !D.isSlowCleanupJob(null, undefined
 ok('⭐ 200 files / 18 MB: write not slow',   !D.isSlowWriteJob(200, 18 * 1024 * 1024));
 ok('⭐ 200 files / 18 MB: cleanup IS slow',   D.isSlowCleanupJob(200, 18 * 1024 * 1024));
 
-// ── isSlowTransport: his 2026-09-20 ruling ───────────────────────────
+// ── isSlowTransport: the 2026-09-20 ruling ───────────────────────────
 //
 // "if we can't tell, then we assume it's not card through proffie. it's only card through
 // proffie that's the long part."

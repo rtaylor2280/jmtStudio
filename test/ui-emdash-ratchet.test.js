@@ -7,7 +7,7 @@
 // internal the moment the window became an image.
 //
 // ⚠️ AND IT REGROWS. The same class has been swept to zero and come back repeatedly elsewhere in
-// this project (his name in code comments: 84 instances swept, ~85 again five weeks later). A
+// this project (the name in code comments: 84 instances swept, ~85 again five weeks later). A
 // sweep plus resolve has never held. What holds is a check that fails.
 //
 // ── WHAT THIS IS NOT ───────────────────────────────────────────────────────────

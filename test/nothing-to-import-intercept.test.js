@@ -13,7 +13,7 @@
  * user would fill in vendor, website, link, acquisition date, notes and proof
  * of purchase, press Add to Library, and import nothing.
  *
- * ⭐ Ryan, dev test 2026-09-14: "if there's nothing to import at all... then it
+ * ⭐ dev test 2026-09-14: "if there's nothing to import at all... then it
  * shouldn't even get to the import screen." And on the door that stays open:
  * "don't block them. they want to they can. will potentially need a new name
  * but that's ok."
@@ -249,7 +249,7 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
   }
 
   const dlg = lift('_sfShowDuplicateFont');
-  // ⭐⭐ NOT A BLOCK. Ryan rejected the disabled checkbox on 2026-09-13 for the
+  // ⭐⭐ NOT A BLOCK. Rejected the disabled checkbox on 2026-09-13 for the
   // same reason: the app may say "you already have this", never "you may not".
   ok('⭐ import-anyway resolves TRUE, so the review still opens',
      /const onImport = \(\) => \{[^}]*resolve\(true\)/.test(dlg),
@@ -277,13 +277,13 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
      /const renamed = \(n\) => !!n\.to && n\.from\.toLowerCase\(\) !== n\.to\.toLowerCase\(\)/.test(dlg)
        && (dlg.match(/renamed\(n\)/g) || []).length === 2,
      'the gate must be live, and BOTH the one-font sentence and the list must consult it');
-  // ⭐ His call, 2026-09-14: "do we need to tell them its a different download".
+  // ⭐ Ruled 2026-09-14: "do we need to tell them its a different download".
   // No — that fact explains why the SOURCE-level duplicate prompt stayed quiet,
   // which is our plumbing, not their question.
   ok('⭐ the copy does not explain our own plumbing',
      !/different download/i.test(dlg.replace(/\/\/[^\n]*/g, '')),
      'the user never asked why the source check missed it');
-  // No em dash in anything the user reads (his call the same day). Comments keep
+  // No em dash in anything the user reads (the ruling the same day). Comments keep
   // theirs — this checks the strings only.
   {
     const strings = (dlg.match(/`[^`]*`/g) || []).join(' ');

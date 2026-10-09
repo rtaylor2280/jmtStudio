@@ -10,7 +10,7 @@
 //     indistinguishable versions - which is how a change lands that neither of us can see in a
 //     diff. It blocked [B-420]'s sidecar fix mid-flight.
 //   • WRONG ANSWERS. Conclusions were built on the dead zip path three times in one week and
-//     withdrawn each time. His words: *"No, Cody, that's also wrong, and I've had to correct you
+//     withdrawn each time. Reported: *"No, Cody, that's also wrong, and I've had to correct you
 //     on this a lot over the last week."*
 //
 // ⭐ The durable fix was that the misleading code stops existing - 911 lines removed. This guard is

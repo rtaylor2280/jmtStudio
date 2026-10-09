@@ -39,7 +39,7 @@ console.log('backup-prep-autostart');
 // ⚠️⚠️ THE BUG THIS PINS: the click listener used to be attached AFTER `await sfBackupPrep(...)`
 // resolved, so for the whole survey of an 8.19 GB library the Cancel button was visible, enabled,
 // and wired to nothing. Reported: clicking it *"doesn't do anything"*, and the summary came up
-// afterwards as though he had never clicked.
+// afterwards as though there had been never clicked.
 // ⭐ And it closes on the click rather than waiting for the survey. Ruled: *"cancel is stop
 // analyzing... should be instant in that phase."* The survey writes nothing, so abandoning it
 // costs nothing — main finishing a read is not the user's problem.
@@ -121,7 +121,7 @@ ok('⭐ the copy names no cancelling gesture that does not exist',
    'nothing pauses this countdown, so the status line must not imply anything does');
 
 // ── 7. THE SCREEN HAS TO REACH THE GLASS ────────────────────────────────────
-// ⚠️⚠️ THE DEFECT, 2026-09-24. He reported Cancel doing nothing on the survey screen. Five
+// ⚠️⚠️ THE DEFECT, 2026-09-24. Reported Cancel doing nothing on the survey screen. Five
 // renderer-side theories, none measured, all wrong — the renderer was never the blocked process.
 // `surveyLibrary` is a synchronous recursive stat walk running in MAIN, and Electron routes frame
 // presentation AND input dispatch through that process. So for ~1.9 s the modal existed in the DOM

@@ -47,7 +47,7 @@ function ok(name, cond, extra) {
   ok('it is seeded from the CONTENT hash, not the artifact hash',
      /const _h = res\.contentHash \|\| res\.hash \|\| null;/.test(bulk));
   // ⭐ [B-415] The entry records what the ranking needs: the shape, and how FULL the source is.
-  // Fullness is the rule (his: "the full source wins"); shape only breaks an exact tie.
+  // Fullness is the rule (the: "the full source wins"); shape only breaks an exact tie.
   ok('and the set entry records what the ranking needs',
      /_batchHashes\.set\(_h, \{ idx: i, label, isZip: _isZip, full: _full \}\)/.test(bulk));
   ok('fullness is measured from the whole staged tree, not the wavs alone',
@@ -114,7 +114,7 @@ function ok(name, cond, extra) {
 
 // ── ⭐⭐ ONE COPY BY DEFAULT, AND BOTH ROWS SAY WHY ───────────────────
 //
-// ⭐ HIS DEV TEST, 2026-09-16, and he was right: "if those are the byte identical then
+// ⭐ HIS DEV TEST, 2026-09-16, and that was right: "if those are the byte identical then
 // this didn't work. they are both selected..." Detection had fired and the label was
 // correct, but both twins stayed ticked — so pressing Import still produced the two
 // copies the entry exists to prevent, just announced beforehand. And eight lines below in
@@ -132,13 +132,13 @@ function ok(name, cond, extra) {
      'otherwise Import still lands both copies — the original complaint, unchanged');
 
   // ⭐ AND THE DECISION ITSELF IS RUN, not read. Extract the real predicate and put both
-  // orderings through it, so an inverted comparison fails here rather than on his screen.
+  // orderings through it, so an inverted comparison fails here rather than on the screen.
   const _expr = (html.match(/const _isLaterTwin = \(s\) =>([\s\S]*?);\s*?\r?\n/) || [])[1];
   ok('the later-twin decision is ONE hoisted predicate', !!_expr,
      'inline copies are how review and quick import came to disagree');
   if (_expr) {
     const decide = new Function('s', `return (${_expr});`);
-    // ⭐⭐ [B-415] THE RULE IS NO LONGER "SECOND LOSES". His wording 2026-09-19: "it's really the
+    // ⭐⭐ [B-415] THE RULE IS NO LONGER "SECOND LOSES". The wording 2026-09-19: "it's really the
     // full source wins. duplicate font but one has more stuff around it... that wins." The ranking
     // happens in soundFontBulkImport and arrives as `keeps`; the renderer only obeys it.
     ok('⭐⭐ the row the ranking did not keep is held back',
@@ -174,7 +174,7 @@ function ok(name, cond, extra) {
      'the ranking is upstream now; comparing indices here re-introduces the bug');
   // ⭐⭐ QUICK IMPORT HONOURS IT TOO — the door that was missed.
   //
-  // His dev test of the untick, 2026-09-16: "correctly unchecked and would have been
+  // A dev test of the untick, 2026-09-16: "correctly unchecked and would have been
   // skipped on review but went al and did quick import am both came in." Review showed
   // Import (5); Quick imported 6. A twin IS `_prepared`, is not `_corrupt` and is not
   // `_owned` — it is not in the library, it is in this run — so it passed every test the
@@ -194,7 +194,7 @@ function ok(name, cond, extra) {
      !/disabled = true/.test(rowNote) && /checkbox\.title = /.test(rowNote),
      'the same font under two names on a card is sometimes deliberate');
 
-  // ⭐⭐ THE NOTE IS NOT INSIDE THE TICK BRANCH. His questions were whether the rows
+  // ⭐⭐ THE NOTE IS NOT INSIDE THE TICK BRANCH. The questions were whether the rows
   // should trade places on reselection, and whether both should speak when both are
   // ticked. They are answered by the note never depending on a tick at all.
   const beforeGuard = rowNote.slice(0, rowNote.indexOf('_isLater'));

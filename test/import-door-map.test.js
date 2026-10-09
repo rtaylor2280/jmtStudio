@@ -143,7 +143,7 @@ for (const h of INWARD) {
 
 // ── The count stays HIS, not a grep's ────────────────────────────────
 //
-// ⭐ The export register's door count is asserted because he enumerated it off the screen. The
+// ⭐ The export register's door count is asserted because it was enumerated it off the screen. The
 // import list has NOT been walked yet, so asserting a number here would manufacture exactly the
 // false confidence this whole file is a reaction to. What IS asserted is that the draft admits
 // what it is.

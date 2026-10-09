@@ -168,18 +168,18 @@ let _userChosenPortPath = null;   // the path they chose
 //
 // Reproduced exactly that: one board on COM6, nothing picked, Duality plugged in
 // just before Flash, and the dropdown flipped to COM16 while the flash ran on COM6.
-// On a previous run the same mechanism sent a build to a test board and he did not
+// On a previous run the same mechanism sent a build to a test board and it did not
 // notice - "I never got my OS7 version on the real board because I had a test board
 // sitting on 6."
 //
 // ⚠️ THE AUTO-SELECT IS NOT THE BUG AND MUST NOT BE WEAKENED. It is what finds the board
-// a config remembers, and he wants it: "that's great. that's what it should do... but it
+// a config remembers, and it was wants it: "that's great. that's what it should do... but it
 // has to lock in on a button press otherwise its unpredictable". Promoting at the click
 // gets that from machinery that already exists - no new state, no change to the
 // preference order, no change to auto-select.
 //
 // ⚠️ NOTHING SHOWING IS NOT A CHOICE. If no port is selected we deliberately promote
-// nothing, so a board arriving later can still be picked up - behaviour he confirmed is
+// nothing, so a board arriving later can still be picked up - behaviour it was confirmed is
 // already correct and must not regress ("if no board was available at the time of compile
 // and one shows up... we can use that / we already do").
 function lockDisplayedPort() {
@@ -969,7 +969,7 @@ async function refreshPorts() {
   // ⭐ AND LOCKED WHILE A FLASH RUNS. [B-471, 2026-10-05]
   // A flash fires onPortsChanged by definition: the board leaves its port for DFU and comes
   // back on a different one. Rebuilding the dropdown mid-flash made it disagree with the
-  // modal - it moved to COM16 while the flash correctly ran on COM6, and he could
+  // modal - it moved to COM16 while the flash correctly ran on COM6, and it could
   // not tell afterwards which board had the firmware ("actually it did flash 6... not 16").
   // The dropdown is the one surface people read, so a wrong value there loses the answer.
   // The post-flash settle calls refreshPorts() again, so the display still lands on the new
@@ -3906,7 +3906,7 @@ function applyOSVersionSignal() {
     // Deliberately NOT solved by probing on a timer: the probe is not passive - it
     // opens the port and writes to it, holding it for up to 2.5s - so a poller would
     // periodically seize the port the user may want for the Serial Monitor.
-    // Ryan, 2026-08-19, on leaving it manual: "it's a very rare case."
+    // 2026-08-19, on leaving it manual: "it's a very rare case."
     // monitor-open is the exception: closing the monitor re-probes on its own.
     // Short sentences rather than one clause-chain: this sits under a target line
     // that is already a mouthful, and each fact lands on its own. Also keeps dashes
@@ -3952,15 +3952,15 @@ function applyOSVersionSignal() {
   // informative, and the build date disappeared exactly when everything was fine.
   // The date is the half a version can never supply: several configs build against
   // one ProffieOS, so "v8.10" identifies the firmware family and "built Sep 19 2026
-  // 10:39:12" identifies THIS flash. Agreement is information. (2026-09-19, his
+  // 10:39:12" identifies THIS flash. Agreement is information. (2026-09-19, the
   // call: "I guess we decided not to show this valuable information when on the
   // same flashed version??")
   if (_boardOSVersion) {
     // BUILT, not "installed" and not "flashed". The board prints `Installed:`, but
     // ProffieOS defines it as `const char install_time[] = __DATE__ " " __TIME__`
     // (common/common.h:19) — COMPILE-time macros. It is the build timestamp of the
-    // firmware, not when anyone put it on the board. Ryan's own numbers said so
-    // before the source did: board 10:29:12, his compile 10:29, his flash 10:30.
+    // firmware, not when anyone put it on the board. the user's own numbers said so
+    // before the source did: board 10:29:12, the compile 10:29, the flash 10:30.
     // ProffieOS uses it as a build identity itself, invalidating saved presets via
     // `f->Expect(install_time)` (common/config_file.h:108).
     // "installed" is also already taken in this app and means "present on the
@@ -3969,7 +3969,7 @@ function applyOSVersionSignal() {
     // already taken in this app and means something else: whether a ProffieOS tree
     // is present on the COMPUTER ("INSTALLED VERSIONS", "No versions installed",
     // "which isn't installed"). Both meanings appeared in one tooltip on
-    // 2026-08-19 and Ryan caught the collision. "Flashed" is the community's word
+    // 2026-08-19 and Testing caught the collision. "Flashed" is the community's word
     // for putting firmware on a board and matches @jmt:flashed, which is the same
     // event recorded from our side — so the eventual comparison reads straight.
     // The install date rides on the same sentence: both are facts about the board
@@ -4004,7 +4004,7 @@ function applyOSVersionSignal() {
         // config-was-written-for line below is about the CONFIG's. They usually
         // differ and both earn their place. When they name the SAME version they
         // collapse into one fact stated twice, and the other line says it better
-        // - it names what to do about it. So yield to it. (Ryan, 2026-08-19.)
+        // - it names what to do about it. So yield to it. (2026-08-19.)
         // Compared on the version number rather than the string, because one side
         // is a reported version ("v6.9") and the other a folder name
         // ("ProffieOS 6.9").

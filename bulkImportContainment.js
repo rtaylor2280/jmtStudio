@@ -1,7 +1,7 @@
 // ⭐⭐ THE FULL SOURCE WINS. [B-415]
 //
-// His rule, 2026-09-19: "it's really the full source wins. duplicate font but one has more stuff
-// around it... that wins." And the case that produced it, both paths handed over by him and
+// The rule, 2026-09-19: "it's really the full source wins. duplicate font but one has more stuff
+// around it... that wins." And the case that produced it, both paths handed over and
 // measured rather than imagined:
 //
 //   G:\...\Original Font Files\1.2-lightsaber of the  bells   213 files  291 MB
@@ -14,7 +14,7 @@
 //
 // ⚠️⚠️ EQUALITY CANNOT SEE THIS AND NEVER WILL. Those two sources share no contentHash - one
 // digest covers 213 files, the other covers 32 - so the intra-batch twin check ([B-314], and its
-// [B-415] extension to contentHash) finds nothing, and BOTH import. His words: "those would both
+// [B-415] extension to contentHash) finds nothing, and BOTH import. Reported: "those would both
 // import and be called identical fonts." The relationship is CONTAINMENT, not equality, and it is
 // the normal shape of a real folder rather than an exotic one: a full download kept for reference
 // plus the one font somebody pulled out of it to actually use.

@@ -1,6 +1,6 @@
 // [B-424] A CANCEL THAT ARRIVES AFTER THE SOURCE IS COMMITTED MUST STILL DISCARD IT.
 //
-// ⭐⭐ THE DEFECT, found by his dev pass 2026-10-07 and twice in one evening. Every checkpoint in
+// ⭐⭐ THE DEFECT, found by the dev pass 2026-10-07 and twice in one evening. Every checkpoint in
 // `importSource` guarded work still IN PROGRESS. None guarded the moment just after the commit -
 // meta written, candidates stamped - so a cancel landing there was noticed by nobody: the function
 // returned `ok:true`, and the renderer's rollback was racing a main process that had been busy
@@ -9,7 +9,7 @@
 //
 // ⭐ HIS RULE, which is what makes "too late" wrong here: *"if I click it, it should just discard
 // on an import."* An import writes nothing to the user's card, so there is no point at which our
-// copy cannot be thrown away. The "too late" he half-remembered belongs to EXPORT, where bytes are
+// copy cannot be thrown away. The "too late" instinct belongs to EXPORT, where bytes are
 // already on the user's media.
 //
 // ⚠️ AND A CANCEL IS NOT A FAILURE. The catch reported every cancel as "Import failed: ...", which

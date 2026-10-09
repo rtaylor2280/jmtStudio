@@ -7,7 +7,7 @@
 // modern board. board-version-parse.test.js covers the version half and stops
 // there, which is exactly how a whole function goes unread for a year.
 //
-// The two failure modes below are the ones that actually happened on his bench,
+// The two failure modes below are the ones that actually happened on the bench,
 // and they pull in OPPOSITE directions - which is why both are pinned here:
 //   1. Too loose: under /m, `$` matches end-of-STRING as well as end-of-line, so a
 //      buffer cut mid-date matched and returned a truncated value. The probe then
@@ -48,7 +48,7 @@ const REPLY_810 =
 // 6.9: capitalised, and no CONFIG_FILE/prop/buttons lines at all.
 const REPLY_69 = 'v6.9\r\nInstalled: Aug 19 2026 10:29:12\r\n';
 
-// The real board read on his bench 2026-09-19 - firmware built from a git
+// The real board read on the bench 2026-09-19 - firmware built from a git
 // checkout, so a git ident string sits where a version belongs.
 const REPLY_ID =
   '$Id: ce12a06a1e236b5101ec60c950530a9a4719a74d $\r\n' +

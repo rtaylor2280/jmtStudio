@@ -12,7 +12,7 @@
 //      one still going became permanently un-cancellable — the click set a flag nobody read.
 //   2. The `finally` nulled the pointer, so when the OLD run ended it disarmed the NEW one.
 //
-// ⚠️ OBSERVED, NOT THEORISED, 2026-09-18: he cancelled a 136-source import and the probe kept
+// ⚠️ OBSERVED, NOT THEORISED, 2026-09-18: the user cancelled a 136-source import and the probe kept
 // naming new sources for eight minutes, marching alphabetically past the cancel point, while the
 // modal was gone and the library was being written. From the UI there was nothing to see at all.
 //

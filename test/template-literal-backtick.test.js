@@ -15,10 +15,10 @@
 // a property access minus an undefined identifier. **It is valid syntax.** `node --check`
 // passed, every one of the 116 tests passed, and the OS Versions detail pane threw
 // `ReferenceError: divider is not defined` the moment a version was selected - the whole
-// right-hand pane blank, found by Ryan opening the app.
+// right-hand pane blank, found by opening the app.
 //
 // ⚠️ THE REASON A TEST IS THE ANSWER RATHER THAN CARE: this is the second time in a
-// fortnight that a runtime ReferenceError in a renderer function reached him through a
+// fortnight that a runtime ReferenceError in a renderer function reached the user through a
 // green suite (see qa-1.8.0 §278 / TC-3890, `_sdFlash`). That case is genuinely hard to
 // catch statically. THIS one is not, and the difference is worth stating: an HTML comment
 // can only appear in a .js file INSIDE a template literal, so "HTML comment containing a

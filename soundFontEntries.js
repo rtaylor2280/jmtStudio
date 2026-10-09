@@ -282,7 +282,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex,
         walk(abs, rel);
       } else if (e.isFile()) {
         if (rel === 'meta.json') continue;
-        // ⚠️ "Add from folder…" IS AN IMPORT DOOR ([B-370], his catch 2026-09-11: "just
+        // ⚠️ "Add from folder…" IS AN IMPORT DOOR ([B-370], the catch 2026-09-11: "just
         // added a folder with known threats"). It builds a whole entry out of an
         // arbitrary folder on disk, and this walk was the copy — unchecked. So Studio
         // itself put programs in a font, and the export dialog would then tell the user
@@ -534,10 +534,10 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     };
 
     // ── Record provenance restore ([B-283]) ──────────────────────────────
-    // ⭐ Ryan's bar, 2026-09-03: "there should be no trace of me ever deleting
+    // ⭐ the user's bar, 2026-09-03: "there should be no trace of me ever deleting
     // and bringing it back." A createdAt of today IS such a trace. The font
-    // entered his library in August; only this row is new, and that is a
-    // database fact he never asked to be shown. Same for the NEW badge, which
+    // entered the library in August; only this row is new, and that is a
+    // database fact it never asked to be shown. Same for the NEW badge, which
     // is simply `seenAt` being empty.
     // Applied AFTER the meta is built, deliberately: these compete with
     // nothing, so unlike curation there is no caller-wins question to settle.
@@ -1184,7 +1184,7 @@ function entryFolderExistsAt(name, destDir) {
 // the destination to answer "is it already there" - and it had no stop check, so a cancel during
 // the primary export's conflict scan waited for the current font to finish hashing. Same defect as
 // `planExport`, one size smaller: bounded by a font rather than by a hundred tracks.
-// ⭐ His rule for both: *"why would it need to do anything if all it was doing was analyzing?
+// ⭐ The rule for both: *"why would it need to do anything if all it was doing was analyzing?
 // there's not a copy being made... so it should just stop."*
 // ⭐ THE LIBRARY'S PER-FILE RECORDS, resolved one way.        [B-005 item 7b, 2026-09-26]
 //
@@ -1364,7 +1364,7 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   // their budget, and a library-only file is the common case here. [B-389].
   if (_onBytes) { try { _onBytes({ done: _bTotal, total: _bTotal, name: '' }); } catch {} }
   // ⚠️ THE CHECK'S CACHE IS THE SYNC MANIFEST, so a read-only question can
-  // seed jmt-studio-manifest.json at the destination ([B-358], his second
+  // seed jmt-studio-manifest.json at the destination ([B-358], the second
   // catch 2026-09-08 14:49: the quick export's TOAST wording asks this
   // question, and the manifest followed the question, not the copy).
   // writeCache:false makes the question truly side-effect-free; the conflict
@@ -1475,7 +1475,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
     }
     if (mode === 'replace') {
-      // ⭐⭐ MOVE THE ORIGINAL ASIDE; DO NOT DELETE IT. [B-005 item 4, his design 2026-09-20]
+      // ⭐⭐ MOVE THE ORIGINAL ASIDE; DO NOT DELETE IT. [B-005 item 4, the design 2026-09-20]
       //
       // This used to `rm` the existing font tree and THEN start copying, which is the exact
       // shape that destroyed 708 MB on 2026-09-02 and produced the standing rule: move the
@@ -1486,7 +1486,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       //
       // ⭐ AND ON A CARD IT IS ALSO MUCH FASTER, WHICH IS WHY IT SOLVES THE "too large to
       // clean up" PROBLEM. A rename is one metadata write; the delete it replaces is one
-      // round trip PER FILE - 110 of them for his biggest font, across a board's USB bridge.
+      // round trip PER FILE - 110 of them for the biggest font, across a board's USB bridge.
       // So the restore after a cancel is O(1) and instant no matter how big the font is;
       // only disposing of the junk afterwards is slow, and that is the part worth offering
       // rather than doing.
@@ -1530,7 +1530,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       // 'rename' (default) — fall through to "<name>_N" until free.
       // Underscore (not parens) so the resulting folder name is safe
       // for Proffie's font-folder matcher on the SD card destination.
-      // Starts at _2 ([B-343], his rule): the ORIGINAL is implicitly
+      // Starts at _2 ([B-343], the rule): the ORIGINAL is implicitly
       // number one, so the first copy of "Ahsoka" is "Ahsoka_2", never
       // "Ahsoka_1". Names already minted on disk are data, not migrated.
       let n = 2;
@@ -1664,7 +1664,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       if (require('./sfExportCopy').isCancel(err)) {
         const out = { ok: true, canceled: true, destPath: targetDir, item: targetName,
                       partialRemoved: false, restored: false, leftovers: [] };
-        // ⭐⭐ RESTORE FIRST, DISPOSE SECOND, AND THE ORDER IS THE WHOLE POINT. Getting his
+        // ⭐⭐ RESTORE FIRST, DISPOSE SECOND, AND THE ORDER IS THE WHOLE POINT. Getting the
         // font back is two metadata renames - instant even on a board card, and it must not
         // be made to wait behind a recursive delete that costs a round trip per file. If the
         // process dies between these two steps the user still has a complete font under
@@ -1749,7 +1749,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         // user's.
         //
         // ⭐⭐ ON A BOARD CARD WITH A LOT ALREADY WRITTEN, RENAME AND OFFER - DO NOT DELETE.
-        // [B-005 item 4, his ruling 2026-09-20] "on card specifically, we need to enable abort
+        // [B-005 item 4, the ruling 2026-09-20] "on card specifically, we need to enable abort
         // and offer to clean if over 60mb already... offer to cleanup because if we've already
         // done a bunch, it will take a while to delete... and the user may want partial files
         // rather than wait." A recursive delete across the board's USB bridge is one round
@@ -1771,7 +1771,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
           } catch { /* rename failed - fall through and try the ordinary removal */ }
         }
 
-        // ⚠️⚠️ RETRIED, BECAUSE THIS SILENTLY FAILED ON HIS CARD. He cancelled an export to a
+        // ⚠️⚠️ RETRIED, BECAUSE THIS SILENTLY FAILED ON HIS CARD. The user cancelled an export to a
         // board card and the partial folder was still there afterwards. A single `rm` here
         // looked sufficient and was not: on Windows a directory containing a file whose
         // handle is still open cannot be removed (EBUSY/EPERM), and the write stream's handle
@@ -1867,7 +1867,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // next export can tell "unchanged since we wrote it" with stat calls instead
     // of reading the folder back. Best effort: a manifest we cannot write only
     // costs a re-read next time.
-    // ⚠️ CARD-SYNC BOOKKEEPING, NOT PART OF THE FONT ([B-358], Ryan 2026-09-08:
+    // ⚠️ CARD-SYNC BOOKKEEPING, NOT PART OF THE FONT ([B-358], 2026-09-08:
     // the quick export "shouldn't be sending a manifest"). The save-to-card
     // flow wants it — that destination is a card the sync will re-read — but a
     // one-off copy to some folder must not seed a jmt-studio-manifest.json
@@ -1923,7 +1923,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     // error message said nothing about it.
     //
     // ⭐ Not lost - but renamed and unmentioned is its own kind of loss, and it is precisely
-    // the divergence between what he believes is on disk and what is on disk that the
+    // the divergence between what it was believes is on disk and what is on disk that the
     // standing rule exists to prevent. Guarded by existsSync so it cannot fight the inner
     // restore or resurrect a disposal that already succeeded.
     // ⚠️⚠️ AND THE SAME SPLIT HERE, WHICH IS THE MOST DANGEROUS OF THE THREE because this handler
@@ -2136,7 +2136,7 @@ function markEntrySeen(userData, entryName, whenIso) {
 // ⭐ THE REVERSE, AND IT IS markEntrySeen's SIBLING ON PURPOSE. [B-297]
 //
 // Until now NEW could only ever be SPENT, never restored: the four stamp paths are all side
-// effects of doing something else, so a badge cleared by accident was gone for good. His call
+// effects of doing something else, so a badge cleared by accident was gone for good. The ruling
 // looking at the card menu 2026-09-13: "this should have mark as seen and mark as new".
 //
 // ⚠️ ONE CARD, BY RIGHT-CLICK, AND NOWHERE ELSE. Symmetry was PROPOSED AND REFUSED — "don't need
@@ -2452,10 +2452,10 @@ function getEntryCustomization(userData, entryName) {
         forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,
         at: new Date().toISOString(),
       };
-      // ── The "Customized" TAG rides the stamp ([B-346], his spec) ──────────
+      // ── The "Customized" TAG rides the stamp ([B-346], the spec) ──────────
       // This function runs exactly at RE-DETERMINATION (the cached path above
       // returns without ever reaching here), which is the delta-driven
-      // lifecycle he ruled: add when determined true (no-op if tagged),
+      // lifecycle ruled: add when determined true (no-op if tagged),
       // remove when determined false, and a MANUAL tag delete sticks — a
       // mere re-read hits the cache and never rewrites the tag; only a real
       // content change lands here and re-adds it. Case-insensitive on both
@@ -2510,7 +2510,7 @@ function getEntryCustomization(userData, entryName) {
   // empty directory as a '<empty>' marker; the source manifest walker records
   // nothing for it. Diffing the two verbatim made every font whose vendor
   // ships empty effect folders read "Customized: 2 added" the moment it was
-  // imported — Ryan hit it on Volatile (empty bgndrag/ + enddrag/ in the
+  // imported — Testing hit it on Volatile (empty bgndrag/ + enddrag/ in the
   // vendor's own Proffie folder) on the first [B-311] dev pass, and a fresh
   // copy-from-source lit up the same way. Filtered on BOTH sides so the answer
   // cannot depend on which walker wrote which manifest. An empty folder the

@@ -71,7 +71,7 @@ function _safeFileName(name) {
 
 // Suggest a non-colliding filename. If "track.wav" exists, returns
 // "track_2.wav", then "track_3.wav", etc. — the original is implicitly
-// number one, so _1 is never minted ([B-343], his rule).
+// number one, so _1 is never minted ([B-343], the rule).
 function _uniqueName(root, desired) {
   if (!fs.existsSync(path.join(root, desired))) return desired;
   const ext = (desired.match(/\.[^.]+$/) || [''])[0];
@@ -86,7 +86,7 @@ function _uniqueName(root, desired) {
 // `onFileProgress({ done, total, name })` is OPTIONAL and fires once per file.
 // Without it the caller can only report at FOLDER level, which on a tracks-only
 // import means one unit of work: the bar sits at 0 and jumps to done, so a real
-// copy of hundreds of megabytes looks like nothing is happening. (Ryan spotted it
+// copy of hundreds of megabytes looks like nothing is happening. (Spotted in testing
 // 2026-09-01: "might be doing the whole folder level rather than the files".)
 // [B-400] ASYNC, and the async is the fix rather than a refactor that came with it.
 //
@@ -96,7 +96,7 @@ function _uniqueName(root, desired) {
 // bar that sat at zero and jumped to 100 - passing a three-file test and failing the case he
 // reported. `await` per file is what lets the event loop breathe. Same mechanism [B-398] measured.
 //
-// ⭐ BYTES, NOT FILE COUNT, and that is his correctness point not a polish one: "if the user
+// ⭐ BYTES, NOT FILE COUNT, and that is the correctness point not a polish one: "if the user
 // selects 100 long wav files... that's real bytes that need to be tracked for sure." A file-count
 // bar sits at 99/100 with a third of the data still to move.
 //
@@ -213,11 +213,11 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       // [B-400] The copy is awaited rather than synchronous: the await is what yields the event
       // loop so the ticks emitted above reach the renderer while the add is still running.
       //
-      // [B-406] ⭐⭐ AND IT GOES THROUGH THE LIBRARY-WIDE POOL FIRST. His framing, and it is the
+      // [B-406] ⭐⭐ AND IT GOES THROUGH THE LIBRARY-WIDE POOL FIRST. The framing, and it is the
       // one that settles this: "tracks is just a font source under a different name" — for
       // STORAGE purposes it is a folder of wavs like any other, so "we never store the same bytes
       // twice" has to hold here too. A plain copy meant a track matching a wav already in a font
-      // was written fresh, in the direction opposite to the one he found.
+      // was written fresh, in the direction opposite to the one testing found.
       //
       // ⚠️⚠️ THE SIDECAR STAYS, AND DOING ONLY ONE OF ITS JOBS IS THE POINT. sharedTracksHash was
       // doing TWO things: per-track UUID IDENTITY (so a renamed track survives a backup merge —
@@ -230,12 +230,12 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       // lose a file. And it re-hashes a candidate before linking, so a stale record costs one
       // wasted check rather than a wrong file.
       // ⚠️⚠️ THE INDEX IS BUILT ONCE, ABOVE THE LOOP. The first draft of this built it per file —
-      // measured at 165ms on his store, so a 62-file add would have spent TEN SECONDS rebuilding
+      // measured at 165ms on the store, so a 62-file add would have spent TEN SECONDS rebuilding
       // the same index 62 times. addFilesAt already does it correctly; copying the shape rather
       // than the idea is what avoids this.
       // ⚠️⚠️ `ingest` ALONE — NOT storeInPool FIRST, and the difference is the whole point.
-      // His model, 2026-09-17: "I just assumed that tracks was its own pool because it's the only
-      // dynamic source. so when I add a track, that is its home." He is right, and it is the
+      // The model, 2026-09-17: "I just assumed that tracks was its own pool because it's the only
+      // dynamic source. so when I add a track, that is its home." That is right, and it is the
       // ORIGINAL design: [B-315] and [B-316] both say the content pool was MODELLED on
       // sharedTracksHash — "exactly like sharedTracks, which is already this pattern and proves it
       // works." Tracks was always a pool. Routing it through storeInPool layered a second pool on
@@ -338,7 +338,7 @@ function deleteFile(userData, name) {
     // [B-406] ⚠️⚠️ A DEFECT THIS ENTRY ITSELF INTRODUCED, caught before it shipped. Tracks now
     // store their bytes in the pool and hold a link, so removing the track's name is no longer
     // the same as freeing its space — the pool copy is left at nlink 1 and nothing reclaimed it.
-    // Deleting tracks to free space is EXACTLY what he was doing the day this was written, so the
+    // Deleting tracks to free space is EXACTLY what it was doing the day this was written, so the
     // change would have quietly defeated the thing it was next to.
     // ⚠️ The sweep only removes pool files whose link count has fallen to 1, so a file any other
     // font, common or track still names is never touched. deleteEntry, deleteFiles and removal all
@@ -478,7 +478,7 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
 
   // [B-402] RETURNED, NOT WRITTEN. A compare answers a question, and a question must not
   // mutate the thing it is asking about - the same principle the mass-storage guard is built
-  // on, and the one he set at [B-358] for a different caller ('a read-only question can seed
+  // on, and the one the user set at [B-358] for a different caller ('a read-only question can seed
   // jmt-studio-manifest.json at the destination').
   //
   // ⭐ NOTHING IS LOST BY DEFERRING IT. Everything here was computed as a side effect of work
@@ -607,7 +607,7 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
   // Refresh entries for the files we just wrote, and only those. Their content
   // is the library's, so the hash is the library's — already known, nothing to
   // re-read. Anything else recorded for this folder is left alone.
-  // [B-402] THE ONE WRITE, AND IT CARRIES EVERYTHING LEARNED ALONG THE WAY. His design:
+  // [B-402] THE ONE WRITE, AND IT CARRIES EVERYTHING LEARNED ALONG THE WAY. The design:
   // "we gather all the information and at the very end we drop a single manifest update based
   // on what we learned along the way." Two sources feed it and neither costs a read:
   //   • the COMPARE already hashed every file that was at the destination, because comparing

@@ -356,7 +356,7 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testba
   
 // ── [B-379] ONE DEFINITION OF WHAT A STYLE WRAPPER IS CALLED ───────────────
 //
-// His ruling, 2026-09-16: "it must do that. I don't want two places using their own
+// Ruled 2026-09-16: "it must do that. I don't want two places using their own
 // pattern and a hardcoded copy is always the worse option."
 //
 // The token count is a SECOND OPINION against the parser - it reads the same text a

@@ -104,7 +104,7 @@ function writeBuildProvenance(buildOutputPath, proffieOSHash, configHash = null,
  * lookup missed - so the app cleared its belief in a build that was sitting right there, valid, and
  * refused to flash it. A miss means "nothing is STORED", which says nothing about the folder.
  *
- * Ryan, finding it in one sentence: "shouldn't the build folder already be populated at this point
+ * Found in one sentence: "shouldn't the build folder already be populated at this point
  * and not need cached version? sure it couldn't save it, but it should be still available at the
  * moment right?" Yes. This is how the app can now answer that instead of guessing. (B-216)
  */
@@ -609,7 +609,7 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
     // anything (it takes the cache hit), so its dependence was invisible and could
     // never be reconstructed afterwards.
     // `configId` above is kept as the CREATOR and for entries written before this.
-    // (2026-08-19. Ryan: "we need 1 to many and easiest way is to save the config ids
+    // (2026-08-19: "we need 1 to many and easiest way is to save the config ids
     // as an array. How we decide to work with those can be later." Deliberately data
     // only - nothing consumes this yet, and no behaviour changes.)
     configIds:     meta.configId ? [meta.configId] : [],

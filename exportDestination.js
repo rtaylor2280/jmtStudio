@@ -105,7 +105,7 @@ function isSlowCleanupJob(fileCount, totalBytes) {
       || (Number(totalBytes) || 0) >= SLOW_WRITE_MIN_BYTES;
 }
 
-// ⭐ THE ONE TRANSPORT THAT IS ACTUALLY SLOW. His ruling 2026-09-20: "if we can't tell,
+// ⭐ THE ONE TRANSPORT THAT IS ACTUALLY SLOW. Ruled 2026-09-20: "if we can't tell,
 // then we assume it's not card through proffie. it's only card through proffie that's the
 // long part." A card in a reader or a built-in slot writes at normal speed; the cost is
 // the Proffieboard's USB bridge, ~773 ms per file (measured 2026-09-19).
@@ -145,10 +145,10 @@ async function _statfsNearest(destDir) {
 // ── On-disk cost ─────────────────────────────────────────────────────
 //
 // ⭐ CLUSTER-ROUNDED, NOT PADDED WITH A MARGIN. FAT32 rounds every file up to a cluster,
-// and a sound-font card uses 32 KB clusters (measured on his 16 GB card; NTFS volumes
+// and a sound-font card uses 32 KB clusters (measured on the 16 GB card; NTFS volumes
 // here use 4 KB). So a byte-sum underestimates what a write actually consumes, and the
 // error is not a constant you could pick a fudge factor for - it depends entirely on the
-// file-size mix. Measured across 486 real files in six of his font folders: 4.5% overall,
+// file-size mix. Measured across 486 real files in six of the font folders: 4.5% overall,
 // ranging 1.7% to 7.4% per folder, and a folder of tiny files is far worse.
 // Since statfs already returns the cluster size, the honest cost is computable rather
 // than estimated, at no extra I/O.
@@ -448,7 +448,7 @@ async function describe(destDir, opts = {}) {
   }
 
   // ⚠️⚠️ CLASSIFICATION IS OPT-IN BECAUSE IT COSTS SECONDS, AND THE MEASUREMENT INVERTED
-  // THE ORIGINAL DESIGN. Timed on his machine 2026-09-19:
+  // THE ORIGINAL DESIGN. Timed on a real machine 2026-09-19:
   //
   //     fs.statfs (the whole fit answer)          0.2 - 0.7 ms
   //     sdCardDetect.enumerateRemovableVolumes  2,401 - 2,795 ms
@@ -653,7 +653,7 @@ async function preflight(destDir, {
       out.tooBig = { needBytes: need, bytesFree: d.bytesFree, shortfallBytes: need - d.bytesFree };
       // ⚠️ RETURN WITH THE REFUSAL AND NOTHING ELSE DECIDED. A door that cannot write has no
       // use for a slow-write warning, and stacking two dialogs on one refusal is the
-      // "two stacked dialogs" shape he has already caught once.
+      // "two stacked dialogs" shape there is already caught once.
       return out;
     }
   }

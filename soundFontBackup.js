@@ -369,7 +369,7 @@ async function exportBackup({
           // in step by construction rather than by a subtraction that can drift.
           //
           // ⭐ ATTACHMENTS ARE DELIBERATELY EXEMPT. Proof of purchase is the one place a
-          // macro-enabled document is allowed, in and out (his policy, 2026-09-11), and
+          // macro-enabled document is allowed, in and out (2026-09-11), and
           // programs cannot reach it because soundFontAttachments guards on add. Running
           // the carry test here would strip the user's receipts out of their own backup.
           if (bucket !== 'attachments') {
@@ -592,7 +592,7 @@ async function exportBackup({
     // and abort() stops it resolving. Settle them BEFORE aborting or the loop never gets to
     // see `cancelled` at all, and the cancel hangs until an outer ceiling fires. This is the
     // line that turns a minutes-long cancel into a one-second one, and it is the real answer
-    // to his measurement: "I barely coppied anything to it... why is cancel taking so long?"
+    // to the measurement: "I barely coppied anything to it... why is cancel taking so long?"
     for (const g of _abortGates) { try { g.resolve(); } catch {} }
     try { archive.abort(); } catch {}
     try { ws.destroy(); } catch {}
@@ -613,9 +613,9 @@ async function exportBackup({
   // .catch() is attached to the unlink promise BEFORE the race so a
   // rejection arriving after the wall doesn't become an unhandled
   // rejection that destabilizes the main process.
-  // ⭐⭐ WAIT FOR OUR OWN HANDLE, THEN RETRY. [B-420, 2026-09-21 — his question found this]
+  // ⭐⭐ WAIT FOR OUR OWN HANDLE, THEN RETRY. [B-420, 2026-09-21 — the question found this]
   //
-  // He asked why there is a deadline at all: "if there's concern then let them abort knowing we
+  // The ask was why there is a deadline at all: "if there's concern then let them abort knowing we
   // couldn't release the card... but we already had a quick method with renaming so shouldn't
   // be an issue." The right answer turned out to be that the deadline was guarding a race we
   // had ALREADY FIXED ELSEWHERE, in this same codebase, THE SAME MORNING.
@@ -665,13 +665,13 @@ async function exportBackup({
       if (r !== 'EBUSY' && r !== 'EPERM') break;   // timeout or a real error - stop retrying
       await new Promise((r2) => setTimeout(r2, 50 * (i + 1)));
     }
-    // ⭐⭐ IF WE CANNOT DELETE IT, NAME IT. His design, and it is the same convention as the
+    // ⭐⭐ IF WE CANNOT DELETE IT, NAME IT. The design, and it is the same convention as the
     // font path: "so essentially we want to delete it... but if we can't, then at least it's
     // named DELETE.Ahsoka etc..."
     //
     // A `.partial` left behind is already inert, but it is OUR word for it — `DELETE.` is a
     // word the user reads without being taught, on a card they are looking at in Explorer.
-    // ⚠️ And his other rule holds: no product name in it. "don't blame us for this by putting
+    // ⚠️ And the other rule holds: no product name in it. "don't blame us for this by putting
     // our name int it. juswt mark it for delete... human readable."
     //
     // ⚠️ A rename can fail too — Windows refuses it while a handle is open without
@@ -698,13 +698,13 @@ async function exportBackup({
   // deadlineTimer is cleared in the finally if work wins the race, so
   // the deadline promise never rejects and there's no late unhandled
   // rejection floating in the loop.
-  // ⚠️⚠️ THE CEILING WAS 5 SECONDS AND IT WAS REPORTING A LIE. [B-420, his catch 2026-09-21]
+  // ⚠️⚠️ THE CEILING WAS 5 SECONDS AND IT WAS REPORTING A LIE. [B-420, 2026-09-21]
   //
   // On a card mounted through a Proffieboard a write is ~773 ms per file, so archive teardown
   // routinely takes longer than 5 s. The deadline fired, the renderer was told the export had
-  // STOPPED, and the archiver kept streaming to the card in the background. What he saw next:
+  // STOPPED, and the archiver kept streaming to the card in the background. What the user saw next:
   // starting another backup appeared to lock the app up, because `dialog.showSaveDialog` was
-  // queued behind work that was supposedly finished. His read of it was exactly right - "we
+  // queued behind work that was supposedly finished. The read of it was exactly right - "we
   // said it was done but it wasn't."
   //
   // ⭐⭐ AND HE NAMED THE CONSEQUENCE THAT MATTERS MORE THAN THE LOCKUP: "if they then wanted
@@ -736,7 +736,7 @@ async function exportBackup({
   // safe eject this morning - measured then across a board card, a USB reader and a built-in
   // slot, all three reading false the moment the media went.
   //
-  // ⚠️ THE LONG BACKSTOP IS KEPT AND I AM FLAGGING IT RATHER THAN HIDING IT. Strictly, his rule
+  // ⚠️ THE LONG BACKSTOP IS KEPT AND I AM FLAGGING IT RATHER THAN HIDING IT. Strictly, the rule
   // says only drive loss earns "unknown", and a genuine deadlock with the drive still present
   // would now hang forever. Ten minutes is far outside any real teardown (the known cause - our
   // own unlink racing an unclosed handle - is fixed above), so it should never fire; it exists
@@ -804,9 +804,9 @@ async function exportBackup({
   const attachmentsFilesExpected = bucketTops.attachments.reduce(
     (sum, it) => sum + (filesPerTopItem.get(`attachments/${it.name}`) || 0), 0
   );
-  // ⭐⭐ EVERY GATE MUST BE ABLE TO SETTLE ON ABORT. [B-420, 2026-09-21 — his measurement]
+  // ⭐⭐ EVERY GATE MUST BE ABLE TO SETTLE ON ABORT. [B-420, 2026-09-21 — the measurement]
   //
-  // ⚠️⚠️ THIS IS WHY CANCEL TOOK MINUTES REGARDLESS OF HOW LITTLE WAS WRITTEN. His report:
+  // ⚠️⚠️ THIS IS WHY CANCEL TOOK MINUTES REGARDLESS OF HOW LITTLE WAS WRITTEN. Reported:
   // "I barely coppied anything to it... why is cancel taking so long? it might ahve been like
   // a couple mb." It was never I/O. The dispatch loop does
   //
@@ -824,7 +824,7 @@ async function exportBackup({
   // ⚠️ AND THIS IS WHAT THE OLD 5-SECOND DEADLINE WAS REALLY HIDING. It was not covering a
   // slow drive; it was escaping this deadlock - by reporting a clean cancel that had not
   // happened. Removing the lie without fixing the hang made the wait honest and much longer,
-  // which is what he hit at 1m58s. The lesson is the one from this morning, again: a timeout
+  // which is what hit at 1m58s. The lesson is the one from this morning, again: a timeout
   // standing in for a diagnosis buries the defect instead of removing it.
   const _gate = () => {
     let resolve;
@@ -1188,7 +1188,7 @@ async function exportBackup({
 // ── No duplicates, whichever door ──────────────────────────────────── [B-407]
 //
 // ⭐⭐ HIS RULE, 2026-09-17, and it is absolute: "When we backup/import/merge it can't duplicate a
-// file. No duplicates ever." His scenario is what this has to pass: back up, delete a track, add
+// file. No duplicates ever." The scenario is what this has to pass: back up, delete a track, add
 // that same track to a FONT instead, then merge the backup back in. Those bytes are already in the
 // library — inside the font — so the restore must recognise them and link, never write a copy.
 //
@@ -1196,7 +1196,7 @@ async function exportBackup({
 // without naming it as a problem: merge "materialises items by raw extraction". Raw extraction
 // cannot know what the library already holds.
 //
-// ⭐ AND THE SECOND HALF IS THE BIGGER WIN. Measured on his own backup: 18,465 wav entries, 5,649
+// ⭐ AND THE SECOND HALF IS THE BIGGER WIN. Measured on a real backup: 18,465 wav entries, 5,649
 // distinct, so 4.24 GB of a 6.80 GB archive is the SAME audio stored again — hardlinks do not
 // survive a zip, so every name became its own entry. Recording each novel file as it lands means
 // the archive's internal duplication COLLAPSES on the way in rather than being faithfully rebuilt.
@@ -1410,7 +1410,7 @@ async function applyReplace({
   // archive lands. That is deliberate: linking new files to content inside the snapshot — which is
   // deleted on success — would be reasoning about storage that is on its way out.
   // ⭐ What it still buys is the big one: the archive's OWN duplication collapses on the way in.
-  // Measured on his backup, 4.24 GB of 6.80 GB is the same audio stored again, because hardlinks
+  // Measured on the backup, 4.24 GB of 6.80 GB is the same audio stored again, because hardlinks
   // do not survive a zip. Without this, a restore faithfully rebuilds every one of those copies.
   const _dedupeExtracted = _makeContentDeduper(userData) || (() => {});
 
@@ -3030,7 +3030,7 @@ async function applyMerge({
           await zip.extract(entryName, target);
           if (!_screenRestored(target, restoreRefused)) return null;
           // [B-407] ⚠️⚠️ TRACKS DO NOT GO THROUGH extractPrefix — they have their own extractor,
-          // so deduping only there would have missed the exact case he specified: back up, delete
+          // so deduping only there would have missed the exact case it was specified: back up, delete
           // a track, add it to a FONT instead, merge the backup. The track's bytes are in the
           // library (inside the font) and must be linked, not written again. Enumerate by what
           // WRITES, not by what looks like the main path — the lesson [B-370] taught and this

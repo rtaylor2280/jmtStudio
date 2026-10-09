@@ -113,7 +113,7 @@ ok('⭐ showToast hands back the element so its button can be pressed',
 }
 
 // ── 4. EVERY EJECT ROW MUST BE TOLD WHETHER THE BOX WAS TICKED ───────────────
-// ⚠️⚠️ THE DEFECT THIS GUARDS, found by him on the Common Folders door 2026-10-07: the door
+// ⚠️⚠️ THE DEFECT THIS GUARDS, found in testing on the Common Folders door 2026-10-07: the door
 // called `offerEject()` on the progress modal, so the checkbox DREW and could be TICKED, and
 // then wired its summary row with no `auto` at all. The box did nothing. The button worked, so
 // the door looked fine to anyone who pressed the button.

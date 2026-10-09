@@ -127,7 +127,7 @@ function nextNumberedName(userData, base) {
     const rest = nm.slice(prefix.length);
     if (/^\d+$/.test(rest) && parseInt(rest, 10) > max) max = parseInt(rest, 10);
   }
-  // Never mint _1 ([B-343], his rule): the ORIGINAL is implicitly number one,
+  // Never mint _1 ([B-343], the rule): the ORIGINAL is implicitly number one,
   // so the first copy is _2. An existing higher _N still numbers above itself;
   // names already on disk are data and are not migrated.
   let n = Math.max(max + 1, 2);
@@ -203,7 +203,7 @@ function _hasAnyWav(dir) {
 // directory listing answers the question without opening anything.
 //
 // Written at EXPORT, into the destination, never into the library copy. That was
-// caught that on 2026-07-30 and he was right: storing it in files/ would pollute
+// caught that on 2026-07-30 and that was right: storing it in files/ would pollute
 // the content hash, go stale on every add/delete, and need a backfill. Generated
 // fresh at export it is always true, and the library copy stays a pristine copy
 // of the upstream pack. destDir is REQUIRED so that invariant is structural
@@ -212,7 +212,7 @@ function _hasAnyWav(dir) {
 // IT MUST BE OBVIOUS WE WROTE THIS. The file lands beside NoSloppy's own
 // a_ReadMe.txt and cover art, in the same naming style, and it talks ABOUT the
 // pack — so without a clear byline a reader reasonably assumes it shipped with
-// the pack, and anything wrong in it lands on him. Hence the JMT_ in the
+// the pack, and anything wrong in it lands . Hence the JMT_ in the
 // filename (the only part most people ever see) and the byline on line 2, above
 // any fact that could be mistaken for the pack's own documentation.
 //
@@ -268,7 +268,7 @@ function writeCommonReadme(userData, uuid, destDir) {
   // 'a_' prefix follows NoSloppy's existing convention (a_ReadMe.txt, a_<Character>.jpg
   // ship in 11 of the official V2 packs) so it sorts to the top of a directory
   // listing with the other metadata instead of scattering among the wavs. 'JMT_'
-  // then separates ours from his at a glance, in the one place a reader always
+  // then separates ours from the at a glance, in the one place a reader always
   // looks. The pack name stays in the filename so a plain listing still answers
   // 'which pack is this' without opening anything.
   const fileName = `a_JMT_${_safeFileName(name)}.txt`;
@@ -948,7 +948,7 @@ async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onByte
       // checkCarryableFile, not the executable test ([B-370]): programs were stopped
       // here but a .rar or a macro document walked straight in.
       const _v = require('./sdCardDetect').checkCarryableFile(src, path.basename(src));
-      // ⚠️ `refused` IS NOT `failed` ([B-370], his catch 2026-09-11: correctly blocked,
+      // ⚠️ `refused` IS NOT `failed` ([B-370], the catch 2026-09-11: correctly blocked,
       // but it surfaced in the generic failure dialog with a raw G:\ path). A policy
       // refusal and a copy that broke are different facts — one is the app working, the
       // other is the app failing — and they read completely differently to the user.
@@ -1352,7 +1352,7 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
   let identical = true, _anyMissing = false;
 
   // [B-398] door 2. This loop hashes every file of a common folder AND READS THE CARD, so it was
-  // the same main-thread block as the import - on slower storage. His ProffieOS voicepack commons
+  // the same main-thread block as the import - on slower storage. The ProffieOS voicepack commons
   // are 214-225 files each. Yield between files so the window keeps answering Windows.
   // ⚠️ The breath is shared from soundFontFileHash on purpose: it must be setImmediate, never a
   // microtask, or it yields to nothing while looking fixed.
@@ -1412,7 +1412,7 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
 //             (the wavs)
 // The pack's name lives in the FILENAME; there is no wrapper folder inside. An
 // earlier version of this nested `<Pack>/common/` and the name read twice over -
-// Ryan checked a real vendor zip and it does not do that.
+// Checked against a real vendor zip and it does not do that.
 // Two consequences worth keeping: unzipping hands you a `common/` folder that
 // can go straight onto a card, and what we emit is indistinguishable from what
 // people already receive. Our own importer takes either shape
@@ -1454,7 +1454,7 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
     // exception in the main process - the same shape as [B-418] - and from the renderer it
     // looked like nothing happened at all: the progress modal appeared, showed
     // "Compressing · 0 B of 16.3 MB", then vanished with no result and no message.
-    // (His report, 2026-09-19: "does this but then disappears like nothing happened".)
+    // (Reported, 2026-09-19: "does this but then disappears like nothing happened".)
     //
     // ⚠️ Clean up the same way the archiver path does, so a failed export never leaves a
     // .partial behind - it is the one artefact that would consume the space that just ran
@@ -1472,7 +1472,7 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
     // caller already knows the total of.
     if (onBytes) {
       let seen = 0;
-      // ⚠️⚠️ ARCHIVER SPLITS THE TWO FACTS ACROSS TWO EVENTS. [B-420, 2026-09-23 — his report:
+      // ⚠️⚠️ ARCHIVER SPLITS THE TWO FACTS ACROSS TWO EVENTS. [B-420, 2026-09-23:
       // "same thing on the common folder export as common and export as archive"]
       // `progress` carries byte counts and no name; `entry` carries the name and no bytes. So a
       // bar fed only from `progress` can say how much has moved and never what is moving, which
@@ -1599,7 +1599,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       // (soundFontEntries, `ORIGINAL.<name>`), for a different reason: a rename is one metadata
       // write where a delete is a round trip per file, which is what makes a cancel instant on a
       // board card. The robustness came along free, and this path never got either half. The
-      // seven `DELETE.*` folders sitting at his destination are the font path surviving exactly
+      // seven `DELETE.*` folders sitting at the destination are the font path surviving exactly
       // this and moving on.
       //
       // ⚠️ SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by construction.

@@ -161,7 +161,7 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
 
 // ── ⚠️⚠️ THE VERB IS FOUND, NOT NAMED ────────────────────────────────
 //
-// Measured 2026-09-21: the Eject verb's display name on his machine is `E&ject`, carrying the menu
+// Measured 2026-09-21: the Eject verb's display name on a real machine is `E&ject`, carrying the menu
 // accelerator. The shipped call was `InvokeVerb("Eject")` - a match against that display name, which
 // returns nothing whether it hits or misses.
 //

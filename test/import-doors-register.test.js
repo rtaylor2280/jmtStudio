@@ -2,7 +2,7 @@
 //
 // ⭐⭐ WHY A TEST AND NOT JUST A DOCUMENT. `local/import-doors.md` is the map of every way content
 // gets INTO the library. The export side needed exactly this and the reason is on the record: its
-// count was wrong three times, and every correction came from Ryan USING the app rather than from
+// count was wrong three times, and every correction came from USING the app rather than from
 // anyone reading code. The import count has the same history - eight doors on 2026-10-01, thirteen
 // on 2026-10-04, twenty-nine once routes were separated from doors.
 //

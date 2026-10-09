@@ -9,13 +9,13 @@
 //   • IMPORT used to unpack the archive, strip our files, RE-ZIP the remainder, and then unpack that
 //     repack again into the pool. Two full extractions with a re-compress between them. It now splits
 //     our files from the vendor's during the one extraction that always ran.
-// Ryan's summary of the pair, which is the thing this test defends: "why would we have ever packed,
+// the user's summary of the pair, which is the thing this test defends: "why would we have ever packed,
 // unpacked and packed again?"
 //
 // ⚠️⚠️ AND THE FOLDER CASE IS A LIVE DEFECT THIS CLOSES. [B-420] made folder exports carry a sidecar
 // too - previously impossible, because injection needed an archive to rebuild - but the import peek
 // was still `if (isZip)`. So a folder re-imported in between stored `.jmt-curation.json` INSIDE the
-// tree as vendor content and restored nothing. He accepted that knowingly for a few hours: "it's
+// tree as vendor content and restored nothing. It was accepted that knowingly for a few hours: "it's
 // totally fine to break the imports right now since it's the next thing we're fixing after this is
 // done." This test is what says it is no longer broken.
 //

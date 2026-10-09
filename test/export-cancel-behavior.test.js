@@ -114,7 +114,7 @@ fs.writeFileSync(BIG, Buffer.alloc(5 * 1024 * 1024, 0x41));
 
   // ── 5. ⚠️⚠️ THE WINDOWS HANDLE RACE, WHICH THIS SUITE ORIGINALLY MISSED ──
   //
-  // He cancelled an export to a board card and the partial folder was STILL THERE. Cause: on
+  // The user cancelled an export to a board card and the partial folder was STILL THERE. Cause: on
   // Windows, unlinking a file whose write handle is still open fails with EPERM/EBUSY - POSIX
   // permits it, which is why the first implementation looked right. `ws.destroy()` is async,
   // so the immediate `unlinkSync` after it was racing the handle release.

@@ -151,7 +151,7 @@
         const slotWord = short.every(s => expected - s.actual === 1) ? 'slot' : 'slots';
 
         findings.push({
-          // ⭐ "but", NOT "and". [B-375] His catch 2026-09-16, and it is a rule not a typo:
+          // ⭐ "but", NOT "and". [B-375] the catch 2026-09-16, and it is a rule not a typo:
           // "and" joins two compatible facts, and this sentence exists precisely because the two
           // halves CANNOT both be right. The conjunction was doing the opposite of the message's
           // job. Any finding whose title states the expectation AND the violation in one sentence
@@ -186,7 +186,7 @@
         const extraWord = over.every(s => s.actual - expected === 1) ? 'style' : 'styles';
 
         findings.push({
-          // ⭐ "but", NOT "and". [B-375] His catch 2026-09-16, and it is a rule not a typo:
+          // ⭐ "but", NOT "and". [B-375] the catch 2026-09-16, and it is a rule not a typo:
           // "and" joins two compatible facts, and this sentence exists precisely because the two
           // halves CANNOT both be right. The conjunction was doing the opposite of the message's
           // job. Any finding whose title states the expectation AND the violation in one sentence
@@ -1116,7 +1116,7 @@
   // ⚠️ THE DISTANCE IS AGAINST THE CONFIG'S OWN NAMES, NEVER A WORD LIST, and that
   // distinction is the entry's and is load-bearing. A dictionary of
   // misspellings-of-"common" cannot see `MC` typed as `M C` — and an MC config is
-  // exactly what he runs. Comparing against whatever the config uses 3+ times keeps
+  // exactly what the user runs. Comparing against whatever the config uses 3+ times keeps
   // that property: `M C` is one edit from `MC`, whatever the words are.
   //
   // ⚠️ MULTIPLE SHARED FOLDERS ARE LEGITIMATE AND ABOUT TO GET COMMONER. commonSith
@@ -1160,7 +1160,7 @@
       const established = [...counts].filter(([, c]) => c >= SHARED_ESTABLISHED_MIN).map(([n]) => n);
       if (!established.length) return null;
 
-      // ⭐ A NUMBERED VARIANT IS DELIBERATE, HOWEVER FEW PRESETS USE IT (his catch,
+      // ⭐ A NUMBERED VARIANT IS DELIBERATE, HOWEVER FEW PRESETS USE IT (the catch,
       // 2026-09-12, after watching `common2` used several times stay silent:
       // "given it wouldn't work as a one off... shouldn't the number be another
       // exception to frequency?"). That is right, and the reasoning is mechanical

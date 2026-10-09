@@ -1,6 +1,6 @@
 // [B-398] The stall probe must still know what was running AFTER an auto-flush.
 //
-// Found on his first captured run, 2026-09-18: flush() cleared the timeline outright, so a phase
+// Found on the first captured run, 2026-09-18: flush() cleared the timeline outright, so a phase
 // that began before a flush and was still running after it lost its 'begin' event. Every later
 // stall inside it was attributed to "(idle - nothing marked)" — while the same log showed a
 // 37-second bulkImport:analyze wrapped around those exact stalls.

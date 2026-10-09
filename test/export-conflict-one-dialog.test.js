@@ -169,7 +169,7 @@ function ok(name, cond, extra) {
      /_CAUTION_TRACKS\s+= 'Replace overwrites these files[^']*'/.test(html)
      && !/_CAUTION_TRACKS\s+= '[^']*whole folder/.test(html),
      'this is the sentence he caught');
-  // ⚠ REWRITTEN 2026-09-17 on his read. "back it up first" was advice the reader cannot
+  // ⚠ REWRITTEN 2026-09-17 on the read. "back it up first" was advice the reader cannot
   // take — the dialog is modal, so backing anything up means cancelling, and the sentence
   // named an action they could not perform while not naming the button that would let them.
   // The consequence is now stated in the word people actually fear.
@@ -229,7 +229,7 @@ function ok(name, cond, extra) {
 
 // ── ⚠ THE TITLE NAMES WHAT THE COMPARISON IS AGAINST ──────────────────
 //
-// His: "is this clear that it's different content but same name?" The body said so; the TITLE
+// Reported: "is this clear that it's different content but same name?" The body said so; the TITLE
 // said only "are different" — a comparative with no referent, read first, above a row that is
 // just a name and two radio buttons. ⭐ Tracks had always named it ("differ from your library")
 // and folders never had, and the sectioned dialog is where both appear at once.
@@ -248,7 +248,7 @@ function ok(name, cond, extra) {
 
 // ── ⭐ TITLE STATES THE SITUATION, BODY STATES THE DECISION ────────────
 //
-// His, 2026-09-17: "the title and the line under it seem repetative. and isn't it just about an
+// Reported 2026-09-17: "the title and the line under it seem repetative. and isn't it just about an
 // export conflict and they have to make a decision?" Every variant opened by saying they differ
 // and then immediately said it again in other words.
 {

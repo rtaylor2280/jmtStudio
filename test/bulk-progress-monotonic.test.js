@@ -156,7 +156,7 @@ function ok(name, cond, extra) {
 
 // ── 4. every phase FILLS before the next one starts  (2026-09-16) ──────────
 //
-// His rule: "it should always flow to 100%. That unresolved bar is not good UI/UX."
+// The rule: "it should always flow to 100%. That unresolved bar is not good UI/UX."
 // Pitchers, not one picture — a phase may start at zero, but none hands over unfinished.
 // Monotonic was already true here and did NOT catch this: the analyze bar never went
 // backward, it just never arrived.

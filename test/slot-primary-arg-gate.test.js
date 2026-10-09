@@ -4,12 +4,12 @@
  * `registryArgs` is sorted by `pos`, and the slot editor took index 0 as "the base
  * colour" — true only when BASE_COLOR_ARG is actually in the set. A PARTIALLY argified
  * style (args, but no base arg) had its lowest-numbered arg promoted into the headline
- * position: ALT_COLOR_ARG (2), BLAST (9), CLASH (10), or OFF_COLOR_ARG (31) on his
+ * position: ALT_COLOR_ARG (2), BLAST (9), CLASH (10), or OFF_COLOR_ARG (31) on the
  * ChassisAccentStrip. The collapsed tile meanwhile fell through to `_pickSlotPrimary`
  * and showed the style's hardcoded colour, so the two views reported different colours
  * for one slot with nothing to say which to believe.
  *
- * ⭐ His diagnosis, and the reason the fix is a condition and not a feature: *"It was
+ * ⭐ The diagnosis, and the reason the fix is a condition and not a feature: *"It was
  * args that had no right to the primary slot. Needed ladder. But instead something that
  * should have been in advanced took the lead."* The arg slot NUMBERS are fixed by
  * ProffieOS (`enum ArgumentName`, styles/edit_mode.h), so "no BASE_COLOR_ARG" is a fact

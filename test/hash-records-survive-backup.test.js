@@ -1,8 +1,8 @@
 /**
  * A backup carries the per-file ownership records, and merge carries them too  [B-399]
  *
- * ⭐ THE SYMPTOM, found by him 2026-09-16: the "Already in your library (skipped)" row
- * vanished from the import breakdown. Cause, traced: his library held 151 fonts and
+ * ⭐ THE SYMPTOM, found in testing 2026-09-16: the "Already in your library (skipped)" row
+ * vanished from the import breakdown. Cause, traced: the library held 151 fonts and
  * `.filehashes/entries/` held ZERO files, so `soundFontCompare.buildLibraryIndex` — which
  * reads those records and has NO fallback — returned an empty index, the ownership pass
  * never ran, and every font in the library became invisible to "do I already have this?".
@@ -18,8 +18,8 @@
  *
  * ⭐⭐ AND THE SCOPE SHRANK TWICE, BOTH TIMES BECAUSE HE PUSHED. The first build also
  * REPAIRED degraded libraries — warmed missing records before archiving, rebuilt them after
- * restoring. His: "there is zero chance anyone could ever need it once this is repared...
- * we don't want to maintian code that isn't needed." He was right: the Sound Font Library is
+ * restoring. Reported: "there is zero chance anyone could ever need it once this is repared...
+ * we don't want to maintian code that isn't needed." That was right: the Sound Font Library is
  * new in 1.8 (v1.7.2 has no soundFontBackup.js at all — verified), so no shipped user can
  * hold an archive that predates the records, and no shipped library can be degraded once
  * the carry works. The repair had no audience and came out.

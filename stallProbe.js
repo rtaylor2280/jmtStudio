@@ -207,7 +207,7 @@ function flush(note) {
   phaseTotals.clear();
   // ⚠️⚠️ RE-SEED THE STILL-OPEN PHASES INSTEAD OF CLEARING THEM AWAY. [B-398]
   //
-  // Clearing the timeline outright was a real defect, found 2026-09-18 on his first captured run:
+  // Clearing the timeline outright was a real defect, found 2026-09-18 on the first captured run:
   // a phase that began BEFORE an auto-flush and was still running after it lost its 'begin' event,
   // so every later stall inside it resolved to "(idle - nothing marked)" — while the log's own
   // phase list showed a 37-second bulkImport:analyze wrapped around those exact stalls. The

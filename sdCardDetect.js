@@ -24,16 +24,16 @@ const SIDECAR_NAME = '.jmt-sd-id';
 // mapped network drives, and reading VolumeName off one means contacting its host. If that host
 // is unreachable, SMB does not fail fast - it waits.
 //
-// MEASURED 2026-09-21 on his machine, with A: and K: mapped to a Mac that was mid-reinstall:
+// MEASURED 2026-09-21 on a real machine, with A: and K: mapped to a Mac that was mid-reinstall:
 // over 60 SECONDS for an enumeration documented elsewhere at ~3,100-3,200 ms. To a user that is
 // "JMT Studio froze when I plugged in my card."
 //
-// ⚠️ NOT A DEV-ONLY CASE, which was his question. Mapped drives are ordinary - a NAS that
+// ⚠️ NOT A DEV-ONLY CASE, which was the question. Mapped drives are ordinary - a NAS that
 // sleeps, a work share on a laptop that left the house, a VPN that dropped, a machine that is
 // simply off. And a saber card is NEVER a network share, so there is no reason to have reached
 // across the network in the first place.
 //
-// ⭐ His correction on how to handle it, when I suggested disconnecting the drives so a test
+// ⭐ The correction on how to handle it, when I suggested disconnecting the drives so a test
 // would run cleanly: "you can't just disconnect a drive to 'fix' an issue." Right - that hides
 // the defect and verifies nothing about the real case. The machine being in that state was the
 // opportunity, not the obstacle: a live repro we cannot normally produce on demand.
@@ -208,8 +208,8 @@ const NON_FONT_DIRS = new Set([
 // are skipped by the font count and the import scan. That is the whole of it.
 //
 // ⚠️ IT USED TO BE CALLED VENDOR_NOTE_DIR_RX AND DROVE A "this card shows signs of
-// being counterfeit" VERDICT. Removed 2026-08-31, his call: "not sure where we
-// decided to call this counterfeit. and we are not even testing." He was right on
+// being counterfeit" VERDICT. Removed 2026-08-31, the ruling: "not sure where we
+// decided to call this counterfeit. and we are not even testing." That was right on
 // both counts. The app performs NO capacity test anywhere, and a folder name is a
 // property of whoever last wrote to the card, not of the card - copy that folder
 // onto a genuine SanDisk and it would have been accused too. Asserting counterfeit
@@ -507,7 +507,7 @@ const _EXE_EXT_RX = /\.(exe|com|scr|pif|bat|cmd|msi|dll|lnk|vbs|vbe|jse|wsf|ps1|
 // while failing a naive end-anchored match. That strip was written beside the first
 // caller that needed it (checkExecutableBuffer, 2026-09-09) and never reached the
 // other three: the card walk and the bulk-import walk both matched raw names, so the
-// evasion passed both. Found by his test pass 2026-09-10 - the card report said 6
+// evasion passed both. Found by the test pass 2026-09-10 - the card report said 6
 // program files when there were 7.
 // So the RULE lives here as a function and the regex is no longer exported. A caller
 // cannot reintroduce this by forgetting a step it can no longer see.
@@ -542,7 +542,7 @@ function _looksExecutable(buf) {
 // ALONE READ AS CONCEALMENT AND IS NOT. Every real program has executable bytes, so
 // byContent is true for an honestly named Installer.exe too - the UI called seven
 // plainly named .exe files "disguised as a sound file" when only two were disguised
-// (measured on his card, 2026-09-10). Concealment is byContent AND NOT byName.
+// (measured on the card, 2026-09-10). Concealment is byContent AND NOT byName.
 // Shipped as a single flag rather than two, so no screen has to remember to combine
 // them: a consumer that must AND two booleans correctly will eventually not.
 function checkExecutableBuffer(buf, relPath) {
@@ -601,7 +601,7 @@ function scanCardExecutables(mountPath, opts) {
   out.ms = Date.now() - t0;
   return out;
 }
-// ── THREE TIERS, NOT TWO ([B-214], his calls 2026-09-09) ───────────────────
+// ── THREE TIERS, NOT TWO ([B-214], the calls 2026-09-09) ───────────────────
 //
 // BLOCK - a program. Removed, always, from every import path. A program in a
 //   sound font is out of place by definition; that is the whole basis and it
@@ -671,7 +671,7 @@ function classifyFileBuffer(buf, relPath) {
 // the copy for dead weight are not interchangeable.
 //
 // ⚠️ THIS PARAGRAPH USED TO SAY MACROS WERE "DELIBERATELY ABSENT" HERE. That was true
-// until his policy landed on 2026-09-11 and the `macro` branch below was added, and the
+// until the policy landed on 2026-09-11 and the `macro` branch below was added, and the
 // stale sentence outlived it — long enough to send a reader (me, 2026-09-16, building
 // export fixtures) looking for a bug in a predicate that was behaving correctly. The list
 // above and the branches below have to be read as one thing; if a kind is added, it
@@ -682,7 +682,7 @@ function checkCarryable(buf, relPath) {
     return { blocked: true, kind: 'program', reason: v.reason,
       byContent: !!v.byContent, disguised: !!v.disguised };
   }
-  // ⚠️ MACRO DOCUMENTS ARE ALLOWED IN EXACTLY ONE PLACE: PROOF OF PURCHASE (his policy,
+  // ⚠️ MACRO DOCUMENTS ARE ALLOWED IN EXACTLY ONE PLACE: PROOF OF PURCHASE (the policy,
   // 2026-09-11). "There is nowhere you can import a macro-enabled file except there, so
   // that's the only place it can leave from. If it showed up anywhere else then it got
   // there not by us."

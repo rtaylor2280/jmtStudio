@@ -6,7 +6,7 @@
 // the hand-authored part — the purchase link, the style-library link, the demo
 // URL, the tags, a renamed entry. That is the part with the user's time in it.
 //
-// THE SHAPE (Ryan, 2026-09-02): one file at the ROOT of an exported zip. On a
+// THE SHAPE (2026-09-02): one file at the ROOT of an exported zip. On a
 // zip import it is stripped the moment it is seen, along with anything it
 // points at, and the archive is repackaged BEFORE it is hashed. Everything
 // downstream then runs exactly as it does today — no hash-exclusion threaded
@@ -34,7 +34,7 @@
 // custom font folder is a receipt, only larger" (the [B-304] dictation). On
 // re-import they are recreated as entries, and the candidate path they came
 // from is left OUT of importedPaths unless a stock copy of it also existed —
-// his rule (2026-09-07): "If I customized, its original is unchecked. If I made
+// the rule (2026-09-07): "If I customized, its original is unchecked. If I made
 // a copy so I have the customized and the original, they are both checked.
 // Matches what was there before deletion."
 
@@ -58,7 +58,7 @@ const SCHEMA_VERSION = 1;
 // WRONG — RESTORED. I checked `_writeSourceMetaAndStamp`, saw it never writes a
 // bundleName, and concluded the field did not exist. It is written LATER, by the
 // review's commit (`updateSourceMeta({ bundleName: userBundle })`), and 56 of
-// Ryan's 159 sources carry one. Checking the wrong writer is not the same as
+// the user's 159 sources carry one. Checking the wrong writer is not the same as
 // checking for the field.
 // It is also the field that MATTERS MOST here: bundleName is the user-facing
 // Source Name, so it is hand-authored the moment anyone renames a source, and
@@ -78,11 +78,11 @@ const ENTRY_FIELDS = ['name', 'tags', 'linkedStyleLibraryEntry', 'author', 'desc
 // leave no trace. `seenAt` is whether they have LOOKED at it since it appeared,
 // and it just appeared. Restoring it suppressed the NEW badge, so three fonts
 // landed in the grid with nothing marking them.
-// Ryan, 2026-09-03: "yes, the created date goes back to original, but the new
+// 2026-09-03: "yes, the created date goes back to original, but the new
 // tag should still come on." HISTORY IS RESTORED; ATTENTION STATE IS NOT.
 // ⚠️ There is a real argument the other way and it should be seen before this is
 // "fixed" back: the badge's own definition is "never opened and never used"
-// (index.html:19498), and a restored font HAS been used. His call stands
+// (index.html:19498), and a restored font HAS been used. The ruling stands
 // because the badge's value AT IMPORT is showing what just landed.
 // Safe from the one-time `backfillSeenAt`, which is gated behind a persisted
 // flag precisely so it cannot silently re-stamp newly arrived entries.
@@ -118,7 +118,7 @@ function _pick(obj, fields) {
 // and its exported bytes stay untouched.
 function buildForSource(userData, uuid, appVersion, opts) {
   const includeAttachments = !(opts && opts.includeAttachments === false);
-  // Same treatment as the receipts ([B-311], his call 2026-09-07: "option only
+  // Same treatment as the receipts ([B-311], the ruling 2026-09-07: "option only
   // on direct export and automatic on delete with export first"): a parameter
   // of the export, defaulting to carry.
   const includeCustomized = !(opts && opts.includeCustomized === false);
@@ -180,17 +180,17 @@ function buildForSource(userData, uuid, appVersion, opts) {
         _absDir: path.join(entriesMod.entriesRoot(userData), e.name),
       });
     }
-    // ⭐ WHICH CANDIDATES WERE ACTUALLY IMPORTED. (Ryan, 2026-09-03: "if I chose
+    // ⭐ WHICH CANDIDATES WERE ACTUALLY IMPORTED. (2026-09-03: "if I chose
     // to not import certain files, in other words left them unchecked, those
     // checked versus unchecked I don't believe are included and they should
-    // be.") A bundle of six where he took three is a DECISION. Without this the
+    // be.") A bundle of six where the user took three is a DECISION. Without this the
     // review re-opens with all six ticked by default and the restore quietly
     // undoes it - another trace of the delete.
     // ⚠️ IT CANNOT BE INFERRED FROM `entries`. That map only gains a key when
     // the font carried curation, so an imported-but-uncurated font would look
-    // like one he had deliberately skipped - exactly backwards.
+    // like one there had been deliberately skipped - exactly backwards.
     // ⭐ A CUSTOMIZED ENTRY THAT RIDES THE PAYLOAD DOES NOT CLAIM ITS PATH
-    // ([B-311], his rule 2026-09-07): the restore recreates the customized
+    // ([B-311], the rule 2026-09-07): the restore recreates the customized
     // version directly, so the vendor's candidate comes back UNCHECKED — "the
     // original is no longer one that you're including." A stock entry at the
     // same path still pushes it, which is exactly the both-copies case. And a
@@ -201,7 +201,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
     // MAPS. The maps are keyed by candidatePath and a stock copy and a
     // customized copy can SHARE one path — letting the rider write here meant
     // last-writer-wins handed the customized entry's NAME to the stock
-    // candidate's review row. Ryan hit the consequence live (2026-09-07): the
+    // candidate's review row. This hit the consequence live (2026-09-07): the
     // row offered "Volatile_2", the restore had already created Volatile_2,
     // and the commit died on "Entry already exists". The candidate row
     // describes the VENDOR's copy, so only entries restorable THROUGH the
@@ -213,7 +213,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
     // Record-level provenance, kept SEPARATE from the curation block above
     // because they are different kinds of fact: `entries` is what the user
     // wrote, this is when the record existed.
-    // ⭐ Ryan's bar, 2026-09-03: "there should be no trace of me ever deleting
+    // ⭐ the user's bar, 2026-09-03: "there should be no trace of me ever deleting
     // and bringing it back." A createdAt of today is exactly such a trace - the
     // font entered HIS library in August; only the row is new. Same for the
     // NEW badge, which is `seenAt` being empty.
@@ -242,7 +242,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
   }
 
   // ── PROVENANCE ──────────────────────────────────────────────────────────
-  // Ryan's bar, 2026-09-03: "it should for me be identical to what it was
+  // the user's bar, 2026-09-03: "it should for me be identical to what it was
   // before I deleted." Curation alone does not reach that. Two things were
   // still lost across the round trip, and neither is a value the user typed:
   //
@@ -266,7 +266,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
   const provenance = {
     archiveHash: sourceMeta.hash || null,
     contentHash: null,
-    // ⭐ THE DATE, and his rule is the whole specification (2026-09-03): "the date
+    // ⭐ THE DATE, and the rule is the whole specification (2026-09-03): "the date
     // is the date of the file. The user can override that or the restore can
     // override it. That's it." One value, three sources, in precedence: the
     // file's date, the user's override, the restore's value.
@@ -570,7 +570,7 @@ async function peekZip(zipPath) {
 // The folder equivalent of peekZip: is there a sidecar at the root of this directory?
 // ⭐ EXISTS BECAUSE FOLDER EXPORTS NOW CARRY ONE. [B-427] Injection worked by rebuilding an ARCHIVE,
 // so a folder export had nothing to inject into - and that limitation got written down as though it
-// were a rule about folders. Ryan's call once the sidecar moved into the tree: "you should do the
+// were a rule about folders. the user's call once the sidecar moved into the tree: "you should do the
 // export correctly now and we'll learn how to deal with the import later." This is that half.
 // ⚠️ Every acceptance rule is copied from peekZip deliberately, not approximated: a malformed sidecar
 // is ignored rather than half-applied, and a sidecar from a NEWER schema is data we cannot promise to
@@ -639,18 +639,18 @@ function applySourceCuration(userData, uuid, payload, attDir) {
 //
 // `picks` (optional): the review form's per-row selection — [{ index, name }].
 // The single-import doors DEFER this restore to Add to Library so the user
-// decides, row by row, what comes back (his call, 2026-09-08: "this shouldn't
+// decides, row by row, what comes back (, ruled 2026-09-08: "this shouldn't
 // be put in my library until the user says import and only if checked").
 // index addresses payload.customized; name is the form's edited value, and the
 // collision suffix below still backstops it. No picks = restore everything
 // with the sidecar's names (the bulk door, which commits post-review anyway).
 // ⭐⭐ `onProgress` ADDED 2026-09-23 [B-429]. This reported NOTHING for its entire life, so the import
-// bar fell to 0% and sat there through the restore - Ryan: "looked like bar going backwards then
+// bar fell to 0% and sat there through the restore - Reported: "looked like bar going backwards then
 // stayed at 0... then finished correctly."
 // ⚠️ IT WAS NEVER A MEASUREMENT PROBLEM, WHICH IS THE PART WORTH REMEMBERING. `createEntry` has always
 // taken an onProgress and main has always had an `entries:createProgress` channel; this function
 // simply never passed one down, and the renderer subscribed to that channel immediately AFTER the
-// restore instead of around it. Every piece existed and none of them were joined. His question is
+// restore instead of around it. Every piece existed and none of them were joined. The question is
 // what found it: "was this so small that all we could get was indeterminate?" No - it was not small,
 // it was unwired.
 async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir, picks, onProgress) {
@@ -665,7 +665,7 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
   // ⭐ A REAL DENOMINATOR, because createEntry reports cumulative bytes with nothing to divide by.
   // The picked folders are already on local disk, so summing them costs a stat walk and buys a bar
   // that means something across ALL picks rather than restarting per font.
-  // ⚠️ ONE CONTINUOUS BAR, not one per entry - the same shape he specified for multi-source export:
+  // ⚠️ ONE CONTINUOUS BAR, not one per entry - the same shape it was specified for multi-source export:
   // "one bar for the bytes over all 4 showing which source it's working on and all the files flying
   // by. so genuinely looks the same for 1 or 100 of them."
   const _picked = [];
@@ -728,7 +728,7 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
         folderSource: { folderPath: dirAbs },
         // ⭐ createEntry's bytes are cumulative WITHIN one entry, so they are offset by everything
         // already restored to make one continuous number across all picks. Position rides along
-        // because bytes alone cannot answer "where am I in this" - his call on the export bar,
+        // because bytes alone cannot answer "where am I in this" - the ruling on the export bar,
         // and the same applies here.
         onProgress: onProgress ? (p) => {
           try {

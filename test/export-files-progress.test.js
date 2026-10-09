@@ -139,7 +139,7 @@ ok('the export helper was found', caller.length > 0);
      !/_bDone \+= \(buf \? buf\.length : 0\)/.test(handler),
      'the per-file lump and the per-chunk sink cannot both be live');
   // The name travels with the bytes: nowhere upstream can recover it, because by the time the
-  // chunk arrives the walk has moved on to the next file. [his: "we need to show which file"]
+  // chunk arrives the walk has moved on to the next file. [the: "we need to show which file"]
   ok('the tree copier tells its caller which file each chunk came from',
      /onBytes \? \(\(n\) => onBytes\(n, _rel\)\) : null/.test(copyJs),
      'a bar that knows how much moved and not what moved is half an answer');

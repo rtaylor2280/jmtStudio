@@ -1,7 +1,7 @@
 /**
  * Keeping your fonts must not cancel the track merge  [B-409]
  *
- * ⭐ HIS, 2026-09-17, found while testing [B-407]: he deleted one shared track, added it to a
+ * ⭐ HIS, 2026-09-17, found while testing [B-407]: the user deleted one shared track, added it to a
  * font, merged the backup, and set the single font conflict to "Keep yours". Result:
  * "Nothing to merge", and the track was never restored. 53 tracks where the backup had 54.
  *

@@ -2,7 +2,7 @@
 //
 // ⭐⭐ WHY THIS EXISTS. The only way out of a running export was force-quitting the app, and
 // force-quitting mid-write to a FAT32 card over USB mass storage is the precise corruption the
-// whole SD guard was built to prevent. His words on a 109 MB export stuck at 32.3 MB: "no
+// whole SD guard was built to prevent. the report on a 109 MB export stuck at 32.3 MB: "no
 // cancel... the only way out is potentially damaging." Nine doors had to gain one.
 //
 // The two invariants worth a test are not "does the button exist" - they are the ones that turn
@@ -35,7 +35,7 @@ function ok(name, cond, detail) {
 }
 
 // ── 1. Every writing export handler takes a cancel token ──
-// His nine doors resolve to six handlers. A door added later that skips the wrapper is a door
+// The nine doors resolve to six handlers. A door added later that skips the wrapper is a door
 // with no way out, which is exactly how this became a release blocker.
 // ⚠️⚠️ SLICED TO THE NEXT HANDLER, NOT A CHARACTER COUNT. This used to take 700 chars from
 // the handler's opening line, and a comment growing above the wrapper pushed the call out of
@@ -170,7 +170,7 @@ ok('the token carries the board-card verdict so cancel never re-measures',
 
   // ⚠️⚠️ A CANCEL MUST NEVER BE REPORTED AS A DAMAGED SOURCE. Aborting the archive looks exactly
   // like a file that will not read - entries stop completing - so the stall watchdog fired and
-  // told him his font was corrupt. It is not, and that message is far worse than none.
+  // told the user the font was corrupt. It is not, and that message is far worse than none.
   ok('⚠️⚠️ the stall watchdog stands down when the stop was deliberate',
      /if \(_canceled\) \{ clearInterval\(watchdog\); return finish\(reject, _cancelErr\(\)\); \}/.test(sources),
      'his report: cancelled during compress, got "the source has a damaged or unreadable file"');
@@ -451,7 +451,7 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
 // during the FONTS fell through to it and started a BRAND NEW cancel token - one `cancelAll()` had
 // already run past - and hashed all hundred tracks with `shouldStop` false throughout.
 //
-// ⭐ His screenshots are the record: cancelled at *"Comparing with your library · 11 of 31"* on a
+// ⭐ The screenshots are the record: cancelled at *"Comparing with your library · 11 of 31"* on a
 // font, and eight seconds later *"Stopping…"* over a track filename.
 //
 // ⚠️ GATING THE READS WAS NECESSARY AND NOT SUFFICIENT. A per-call token means every new call

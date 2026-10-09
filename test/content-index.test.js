@@ -137,7 +137,7 @@ function incoming(userData, name, body) {
 
   {
     console.log('⚠️ a stale index row does NOT authorise a link');
-    // The dangerous case, and the only one that can lose his audio. Build the
+    // The dangerous case, and the only one that can lose the audio. Build the
     // index, then change the file it points at behind its back. A hit on hash H
     // now names a file that no longer contains H. Linking on the strength of
     // the row would put the WRONG SOUND at the destination and report success.

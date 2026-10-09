@@ -110,7 +110,7 @@ const beats = (a, b) => {
 
 // ── ⭐⭐ IT MUST BE STRUCTURALLY IMPOSSIBLE, NOT CONVENTIONALLY AVOIDED ─────
 //
-// His rule, 2026-09-16: "I don't understand why a line that is supposed to show files
+// The rule, 2026-09-16: "I don't understand why a line that is supposed to show files
 // flying by would ever want to wrap. that shouldn't be possible and always truncate."
 //
 // ⚠️ THE POINT IS "SHOULDN'T BE POSSIBLE". Everything above proves the clamp is correct
@@ -127,7 +127,7 @@ const beats = (a, b) => {
   // ⚠️ ATTRIBUTE ORDER IS NOT A CONTRACT. The first version of this matched
   // `<p class="..." ... id="...">` and silently missed the two elements that write id
   // FIRST (sf-bulk-progress-detail / -elapsed), reporting 9 of 10 while looking
-  // exhaustive. Ryan caught the shape of it: "not sure those are the only way to get
+  // exhaustive. Testing caught the shape of it: "not sure those are the only way to get
   // that progress bar type". Match the TAG, then read its attributes in any order.
   const streamers = [...html.matchAll(/<p\b([^>]*)>/g)]
     .map(m => m[1])
@@ -208,11 +208,11 @@ const beats = (a, b) => {
 
 // ── ⭐ THE LABEL ABOVE THE DETAIL LINE IS THE SAME BUG ─────────────────────
 //
-// His scoping call, 2026-09-16: "it's all part of the same thing to me. it's the exact
+// The scoping call, 2026-09-16: "it's all part of the same thing to me. it's the exact
 // bug I reported. Just because the cause is broader than the initial finding doesn't
 // make it another finding." The label streams names in seven places and had NO clamp at
 // all — so the element one line above the fixed one still wrapped and still grew the
-// modal, which is the symptom he originally reported.
+// modal, which is the symptom it was originally reported.
 //
 // ⚠️ A PLAIN ELLIPSIS WOULD HAVE BEEN THE WRONG FIX. Four of those labels put the count
 // or the byte metric AFTER the name — "Copying <name> · 3 of 8" — so truncating the line

@@ -7,7 +7,7 @@
 // ignores Cancel is the same wait with a nicer frame. Only an actual run can tell the difference
 // between yielding and stopping, so this builds a tree and counts how far the walk gets.
 //
-// His measurement, bulk-importing a board card 2026-10-06: *"just finished... almost 6 min.
+// The measurement, bulk-importing a board card 2026-10-06: *"just finished... almost 6 min.
 // cancelled only a few seconds in."* This pass reads the leading bytes of EVERY file before a byte
 // is copied, and per-file open is the expensive operation over a board's USB mass storage.
 //

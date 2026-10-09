@@ -9,7 +9,7 @@
 // Something did. `identity()` read `if (L !== this.letter || !this.fast)` and cleared `board` on
 // BOTH conditions, so asking `removable()` for the same drive threw away a classify that had
 // already been paid for. `_sfWarnSlowImport` asks `removable()` and THEN `isBoardCard()`, in that
-// order, so the spawn ran twice on every warned import. Found 2026-10-07 when Ryan asked "just
+// order, so the spawn ran twice on every warned import. Found 2026-10-07 when The ask was "just
 // make sure you don't call to find out again since we already know."
 //
 // ⚠️ THIS IS A BEHAVIOURAL TEST, NOT A SOURCE SCAN, and it has to be. The broken and the fixed

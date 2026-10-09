@@ -2,7 +2,7 @@
 //
 // ⭐⭐ WHY THIS IS A TEST AND NOT A CONVENTION. The bar started per-door, and per-door is
 // exactly the shape that has failed here three times: enumerating export doors BY READING
-// the file missed one every single time, and he found each of them by clicking - the zip
+// the file missed one every single time, and testing found each of them by clicking - the zip
 // door, "Export font folder…", the common-folder door. A rule that lives only in a comment
 // gets obeyed by whoever remembers it.
 //
@@ -15,7 +15,7 @@
 // was correct while most doors had no progress surface of their own. Once the runner began
 // supplying a modal to every door, the overlay became a SECOND surface for the same wait, and
 // these assertions were quietly requiring the shape that produced the bug: passing meant the
-// overlay was still wired in. His call was to delete it rather than guard it.
+// overlay was still wired in. The ruling was to delete it rather than guard it.
 //
 // ⭐ So the rule flipped rather than relaxed. The helpers still exist and are still the only
 // door; what they must NOT do any more is paint. The new assertion is the one that would have
@@ -102,7 +102,7 @@ for (const fn of GUARDED) {
                          src.indexOf('// Unified dispatcher'));
   // ⚠️⚠️ RE-ANCHORED 2026-09-22. The rule is unchanged and is the whole point of this file: the
   // probe must run BEFORE anything is on screen, because asking over a live bar is the two-phase
-  // handshake he caught on a 57-file source export ("does the regular progress bar before the
+  // handshake caught on a 57-file source export ("does the regular progress bar before the
   // 'this will take a while' message").
   //
   // ⭐ What changed is WHO enforces it. The door used to sequence probe-then-bar by hand; the
@@ -198,7 +198,7 @@ ok('_sfWarnSlowWrite is gone, not merely uncalled',
 
 // ── Rule: a quantity never wraps away from its unit, and the check is mechanical ──
 //
-// ⭐⭐ WHY THIS IS HERE. His catch on the first real refusal was that the dialog broke the line
+// ⭐⭐ WHY THIS IS HERE. the catch on the first real refusal was that the dialog broke the line
 // mid-quantity - "496.2" above, "MB more room." below - which reads as two separate facts. The
 // fix is a non-breaking space between number and unit, swapped in at the dialog rather than in
 // `_sfFormatBytes`, which other surfaces measure and match against.

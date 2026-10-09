@@ -5,7 +5,7 @@
 // height mid-operation, shrank, and re-centred - and a box that changes size and position is a
 // NEW BOX as far as the eye is concerned.
 //
-// ⚠️⚠️ THE COST OF NOT HAVING THIS WAS AN EVENING. Ryan reported "an extra modal just before the
+// ⚠️⚠️ THE COST OF NOT HAVING THIS WAS AN EVENING. Reported "an extra modal just before the
 // summary" three separate times. Nothing in the code accounted for one, because there was never
 // a second modal. Two full instrument traces came back clean because the instrument watched
 // `.modal-overlay` gaining `.active` - a resize changes no classes and opens nothing, so it was

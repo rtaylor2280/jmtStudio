@@ -101,7 +101,7 @@ ok('the merged multi-folder plan carries a real root',
    + 'both resolve through it and both answer no to a null');
 
 // ── 8. The count in the dialog is named for what it counts. ──
-// The bulk plan's `sources` are FONTS, and the dialog rendered them as "12 files (1.28 GB)". His
+// The bulk plan's `sources` are FONTS, and the dialog rendered them as "12 files (1.28 GB)". The
 // reason this is not cosmetic: *"it matters because even a cancel takes forever."* The dialog
 // exists to make someone stop before a pass that is expensive to abandon, and a count that reads
 // as trivial argues against the warning printing it.

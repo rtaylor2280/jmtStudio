@@ -7,7 +7,7 @@
  *
  * ⭐⭐ AND THEN THE PART THAT MADE IT URGENT: "I did try an SD card import and saw the exact
  * behavior on that as well... I have a feeling that they share the same modal, both the bulk
- * import and the SD card import, and it was broken in both places." He was right. One line,
+ * import and the SD card import, and it was broken in both places." That was right. One line,
  * two doors. And: "that's behavior that worked, not that long ago."
  *
  * ⚠️⚠️ GIT AGREED WITH HIM — regression in edac3cd, 2026-08-31:

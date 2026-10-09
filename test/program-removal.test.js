@@ -301,7 +301,7 @@ try {
       'holding entry deleted immediately, not left for the sweep');
 
     // ⚠️ ITS OWN LABELLED FOLDER, AND ONE TEXT FILE — not loose files with a .json each.
-    // Both came out of the first dev pass: two anonymous icons landed on his Desktop for
+    // Both came out of the first dev pass: two anonymous icons landed on the Desktop for
     // a single finding, and a .json is a developer artifact, not information for a person.
     assert.strictEqual(path.basename(path.dirname(rel.destPath)), 'Quarantined Files',
       'the file itself sits in the labelled subfolder');

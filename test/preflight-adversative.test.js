@@ -1,6 +1,6 @@
 // [B-375] A finding title that states the expectation AND the violation is an adversative.
 //
-// ⭐ HIS CATCH 2026-09-16, and he was explicit that it is a rule and not a typo:
+// ⭐ HIS CATCH 2026-09-16, and it was explicit that it is a rule and not a typo:
 //   "Your config has 2 blades, and 1 preset has 1 of 2 blade styles."
 //   "'and 1 preset' is wrong - should be 'but' since it's describing an error/contradiction."
 //

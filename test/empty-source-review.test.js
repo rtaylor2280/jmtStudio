@@ -2,7 +2,7 @@
  * An archive with no sound font in it is not "ready to import"  [B-296]
  *
  * 2026-09-02, on a 136-font bulk import. The review screen said "136 new sound fonts
- * ready to import." He clicked Import. FORTY-SEVEN MINUTES LATER the summary read
+ * ready to import." The user clicked Import. FORTY-SEVEN MINUTES LATER the summary read
  * "135 sources imported (191 fonts), 1 failed - tr.zip - No fonts found in source."
  *
  * ⚠️ THE REFUSAL IS CORRECT AND IS NOT WHAT THIS IS ABOUT. tr.zip holds tr/tr00.wav ..
@@ -112,7 +112,7 @@ function ok(name, cond, extra) {
 // headline sentence, the review ROW, and Quick import's commit filter. The entry's own
 // warning is that computing it repeatedly is how they start disagreeing — and they did.
 //
-// ⚠️ QUICK IMPORT WAS THE ONE THAT GOT MISSED, and his question found it ("if you try to
+// ⚠️ QUICK IMPORT WAS THE ONE THAT GOT MISSED, and the question found it ("if you try to
 // import an SD card, it doesn't even give you folders that aren't fonts right?"). Analyze
 // zips every source before it can know what is inside, so an empty archive is `_prepared`,
 // is not `_corrupt` and is not `_owned` — it passed all three of Quick's tests and was swept

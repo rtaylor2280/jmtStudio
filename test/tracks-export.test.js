@@ -195,7 +195,7 @@ const TRACKS = {
   // -- the manifest, per file and self-healing ------------------------------
 
   // ⚠️⚠️ [B-402] THE COMPARE NO LONGER WRITES. It returns what it learned and the EXPORT writes
-  // once, at the end, carrying it forward. His rule: "we gather all the information and at the very
+  // once, at the end, carrying it forward. The rule: "we gather all the information and at the very
   // end we drop a single manifest update based on what we learned along the way" — a question must
   // not mutate the thing it is asking about, which is the same principle the mass-storage guard is
   // built on. [B-358] set it in 2026-09-08 for one caller with a `writeCache:false` flag; this is
@@ -225,7 +225,7 @@ const TRACKS = {
     // compare's findings merged with the copies — and the CALLER commits once at the end.
     //
     // ⚠️⚠️ THE FIRST CUT WROTE PER EXPORTED ITEM AND SILENTLY DROPPED ANYTHING IT DID NOT COPY.
-    // His dev test found it: 25 fonts exported, 24 written, "1 already identical" — and that one
+    // A dev test found it: 25 fonts exported, 24 written, "1 already identical" — and that one
     // was scanned, matched, and then absent from the manifest, so its hashes were re-read on
     // every later export. On a card kept in sync that is most of the card.
     const { userData, dest } = setup(TRACKS, TRACKS);

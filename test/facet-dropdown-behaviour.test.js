@@ -5,7 +5,7 @@
  * ⭐ HIS CATCH, 2026-09-16: "we had rules on close dropdown after click... I think this
  * violates it. shouldn't auto close if I can make more selections."
  *
- * He was right, and better than that: THE RULE WAS ALREADY WRITTEN AND DEFERRED TO HERE.
+ * That was right, and better than that: THE RULE WAS ALREADY WRITTEN AND DEFERRED TO HERE.
  * ui-conventions.md:1803 (2026-09-03) — a dropdown closes on pick if it is SINGLE-choice
  * and stays open if it is MULTI-select, because "the test is not 'does one click finish
  * the gesture', it is 'am I likely to want a second one'." Only the sort fix shipped that
@@ -98,11 +98,11 @@ function ok(name, cond, extra) {
 
 // ── 3. ⭐⭐ THE TWO KINDS OF ZERO — run against the real helper ─────────────
 //
-// From his screenshot, filtering WITHOUT bgndrag and bgnlb:
+// From the screenshot, filtering WITHOUT bgndrag and bgnlb:
 //   * `bgndrag ✗ 0` and `bgnlb ✗ 0` are zero BECAUSE HE EXCLUDED THEM. Hiding those
 //     leaves no way to cycle them back off without clearing every filter.
 //   * `ccchange 0`, `lowbatt 0`, `spin 0` are zero because nothing left has them.
-//     Picking one empties the grid — a dead option, and what he was pointing at.
+//     Picking one empties the grid — a dead option, and what it was pointing at.
 // So: hide count-0, EXCEPT anything actively set.
 {
   const lines = html.split('\n');

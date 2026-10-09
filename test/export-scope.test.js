@@ -19,7 +19,7 @@
 // not a guard around the class. So this one checks the RELATIONSHIP instead: every reference,
 // whoever makes it, including functions nobody has written yet.
 //
-// ⭐ His call is what widened it: "means we probably got this wrong on the other doors too."
+// ⭐ The ruling is what widened it: "means we probably got this wrong on the other doors too."
 'use strict';
 
 const fs = require('fs');

@@ -9,8 +9,8 @@
 // paths as the reason their build failed, with the ANSI colour escapes from that
 // table rendered literally as `[92m`.
 //
-// The fixture below is Ryan's real captured output, trimmed in the middle of the
-// long command lines only. The escape bytes are real here; his paste showed them
+// The fixture below is the user's real captured output, trimmed in the middle of the
+// long command lines only. The escape bytes are real here; the paste showed them
 // already stripped by the terminal.
 //
 // ⚠️ THIS FILE USED TO MIRROR THE FUNCTION BODIES instead of importing them,
@@ -49,22 +49,22 @@ function checkThat(label, pass, detail) {
   else console.log(`ok - ${label}`);
 }
 
-// ── Ryan's real failure, 2026-08-12 ────────────────────────────────────────
-const GPP = 'C:\\Users\\Ryan\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\tools\\arm-none-eabi-gcc\\9-2020-q2-update/bin/arm-none-eabi-g++';
-const LONG_CMD = `${GPP} -mcpu=cortex-m4 -mthumb -c -g -Os -w -std=gnu++11 ${'-IC:\\Users\\Ryan\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6/system/CMSIS/Include '.repeat(6)}-o out.o`;
+// ── the user's real failure, 2026-08-12 ────────────────────────────────────────
+const GPP = 'C:\\Users\\maker\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\tools\\arm-none-eabi-gcc\\9-2020-q2-update/bin/arm-none-eabi-g++';
+const LONG_CMD = `${GPP} -mcpu=cortex-m4 -mthumb -c -g -Os -w -std=gnu++11 ${'-IC:\\Users\\maker\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6/system/CMSIS/Include '.repeat(6)}-o out.o`;
 
 const REAL_FAILURE = [
   'Generating function prototypes...',
   LONG_CMD,
-  'C:\\Users\\Ryan\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\builtin\\tools\\ctags\\5.8-arduino11/ctags -u --language-force=c++ -f -',
+  'C:\\Users\\maker\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\builtin\\tools\\ctags\\5.8-arduino11/ctags -u --language-force=c++ -f -',
   'Compiling sketch...',
   LONG_CMD,
-  'Using library Wire at version 1.0 in folder: C:\\Users\\Ryan\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6\\libraries\\Wire',
+  'Using library Wire at version 1.0 in folder: C:\\Users\\maker\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6\\libraries\\Wire',
   'Error during build: exit status 1',
   `${ESC}[92mUsed library${ESC}[0m ${ESC}[92mVersion${ESC}[0m ${ESC}[90mPath${ESC}[0m`,
-  `${ESC}[93mWire${ESC}[0m         1.0     ${ESC}[90mC:\\Users\\Ryan\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6\\libraries\\Wire${ESC}[0m`,
+  `${ESC}[93mWire${ESC}[0m         1.0     ${ESC}[90mC:\\Users\\maker\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6\\libraries\\Wire${ESC}[0m`,
   `${ESC}[92mUsed platform${ESC}[0m        ${ESC}[92mVersion${ESC}[0m ${ESC}[90mPath${ESC}[0m`,
-  `${ESC}[93mproffieboard:stm32l4${ESC}[0m 3.6     ${ESC}[90mC:\\Users\\Ryan\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6${ESC}[0m`,
+  `${ESC}[93mproffieboard:stm32l4${ESC}[0m 3.6     ${ESC}[90mC:\\Users\\maker\\AppData\\Roaming\\jmt-studio\\arduino-data\\3.6.0\\packages\\proffieboard\\hardware\\stm32l4\\3.6${ESC}[0m`,
 ].join('\n');
 
 const out = extractCompileError(REAL_FAILURE);
@@ -108,7 +108,7 @@ check('a real diagnostic beats the arduino-cli summary line',
 //
 // Shortening a fixture for readability removed the only property that breaks it.
 // Any future edit here keeps a REAL path. (2026-08-15)
-const LD = 'C:/Users/Ryan/AppData/Local/Arduino15/packages/proffieboard/tools/'
+const LD = 'C:/Users/maker/AppData/Local/Arduino15/packages/proffieboard/tools/'
          + 'arm-none-eabi-gcc/14-2-rel1-xpack/bin/../lib/gcc/arm-none-eabi/14.2.1/'
          + '../../../../arm-none-eabi/bin/ld.exe';
 
@@ -187,7 +187,7 @@ checkThat('a long tool path is stripped, not clipped through',
 // would cost the user the one thing they need to open.
 const SRC_DIAG = [
   'Compiling sketch...',
-  "C:\\Users\\Ryan\\config\\my_config.h:431:1: error: expected ',' or ';' before 'BladeConfig'",
+  "C:\\Users\\maker\\config\\my_config.h:431:1: error: expected ',' or ';' before 'BladeConfig'",
 ].join('\n');
 
 // ⭐ NO FILENAME, settled 2026-09-14: "I don't want to see <the config>... def don't

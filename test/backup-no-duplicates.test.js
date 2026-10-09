@@ -2,7 +2,7 @@
  * A restore never duplicates audio the library already holds  [B-407]
  *
  * ⭐⭐ HIS RULE, 2026-09-17, stated as absolute: "When we backup/import/merge it can't duplicate
- * a file. No duplicates ever." And his scenario, which is what this file exists to prove:
+ * a file. No duplicates ever." And the scenario, which is what this file exists to prove:
  *
  *     back up  →  delete a track  →  add that same track to a FONT instead  →  merge the backup
  *     "Should only see that track the one time."
@@ -11,7 +11,7 @@
  * recognise them and link. Raw extraction cannot: it has no idea what is already held.
  *
  * ⚠️⚠️ AND THE SECOND HALF IS BIGGER THAN THE FIRST. Hardlinks do not survive a zip, so every
- * NAME in the library becomes its own entry carrying its own bytes. Measured on his real backup:
+ * NAME in the library becomes its own entry carrying its own bytes. Measured on the real backup:
  * 18,465 wav entries, 5,649 distinct — 4.24 GB of a 6.80 GB archive is the same audio stored
  * again. A restore that faithfully rebuilds that inflates the library by the exact amount the
  * linking had saved. So an archive containing the same sound twice must land as ONE blob.
@@ -75,7 +75,7 @@ function wav(size, seed) {
   ok('the fixture archive was written', fs.existsSync(zipPath));
 
   // ── A library that ALREADY holds the track, inside a font ───────────────
-  // This is his scenario exactly: the track was deleted from sharedTracks and added to a font.
+  // This is the scenario exactly: the track was deleted from sharedTracks and added to a font.
   const user = path.join(tmp, 'userData');
   const sfRoot = path.join(user, 'soundFonts');
   const fontDir = path.join(sfRoot, 'library', 'Keeper');
