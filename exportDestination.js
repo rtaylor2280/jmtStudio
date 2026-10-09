@@ -59,13 +59,49 @@ const { execFile } = require('child_process');
 // cleanup is slow enough to be worth OFFERING rather than doing. Same question, so it
 // must be the same numbers.
 //
-// ⚠️ EITHER limb, not both. A folder of many small wavs is slow because of the per-file
-// round trip; one huge track is slow because of the bytes. Neither alone catches both.
-const SLOW_WRITE_MIN_FILES = 150;
+// ⚠️⚠️ BYTES ONLY, AND THE FILE-COUNT LIMB WAS REMOVED ON MEASURED EVIDENCE (2026-10-04).
+//
+// This used to read "EITHER limb, not both - a folder of many small wavs is slow because of
+// the per-file round trip; one huge track is slow because of the bytes." That is a plausible
+// mechanism and it is not what the transport does. Measured on a real board card: an 18 MB
+// set of 200+ files does not take long and does not deserve the warning a 100 MB set earns.
+// So the count limb fired on jobs nobody waits for, which is the wolf-cry the gate exists to
+// avoid - and it fired on the CLEANUP OFFER too (see below), asking about a delete that is
+// instant.
+//
+// ⚠️ DO NOT RE-ADD IT FROM THE ARGUMENT ABOVE. The per-file round trip is real; it is simply
+// not large enough at these counts to cross the threshold where a human perceives a wait.
+// Re-adding it needs a NEW measurement, not the old reasoning.
 const SLOW_WRITE_MIN_BYTES = 60 * 1024 * 1024;
 
-function isSlowWriteJob(fileCount, totalBytes) {
-  return (Number(fileCount) || 0) >= SLOW_WRITE_MIN_FILES
+// ⚠️ THE FIRST ARGUMENT IS IGNORED AND THE SIGNATURE KEPT IT ON PURPOSE. Several call sites
+// pass `(files, bytes)`. Dropping to one parameter means editing every one of them, and a
+// single missed site passes a FILE COUNT where bytes are expected - which reads as "not
+// slow" for a 100 MB job and the warning simply never appears. An invisible failure is
+// worse than an unused parameter, so the arity stays and the name says it is dead.
+function isSlowWriteJob(_fileCountIgnored, totalBytes) {
+  return (Number(totalBytes) || 0) >= SLOW_WRITE_MIN_BYTES;
+}
+
+// ── Is a partial slow enough to ASK about rather than just remove ──
+//
+// ⚠️⚠️ THIS WAS THE SAME FUNCTION AS `isSlowWriteJob` UNTIL 2026-10-04, AND SPLITTING THEM IS
+// THE POINT. They looked like one question and they are two different OPERATIONS:
+//   · the warning asks how long a WRITE takes - measured, and it is bytes (see above)
+//   · this asks how long a DELETE takes, and a delete across a board's USB bridge is one
+//     round trip PER FILE, so several hundred small wavs is minutes regardless of size
+// ⚠️ SO THE COUNT LIMB STAYS HERE. Removing it along with the write limb would silently turn
+// the offer into an unconditional delete for exactly the case it was built for: a cancelled
+// export that left a few hundred small files on a card.
+// ⚠️ AND THE EVIDENCE IS WEAKER THAN IT LOOKS, WHICH IS WHY IT KEEPS THE OLD BEHAVIOUR RATHER
+// THAN A NEW RULE. The ~773 ms per-file figure is cited in the runner as a WRITE cost and in
+// the cleanup block as a DELETE cost; `local/export-doors.md` records that it was measured as
+// a write on 2026-09-19 and that a delete has never been measured. Until one is, this holds
+// the behaviour that was dev-tested instead of inheriting a number from the other operation.
+const SLOW_CLEANUP_MIN_FILES = 150;
+
+function isSlowCleanupJob(fileCount, totalBytes) {
+  return (Number(fileCount) || 0) >= SLOW_CLEANUP_MIN_FILES
       || (Number(totalBytes) || 0) >= SLOW_WRITE_MIN_BYTES;
 }
 
@@ -634,8 +670,8 @@ async function preflight(destDir, {
 
 module.exports = {
   describe, checkFit, onDiskCost, classifyTransport, preflight, driveKind,
-  SLOW_WRITE_MIN_FILES, SLOW_WRITE_MIN_BYTES, FIT_CHECK_MIN_BYTES,
-  isSlowWriteJob, isSlowTransport,
+  SLOW_WRITE_MIN_BYTES, SLOW_CLEANUP_MIN_FILES, FIT_CHECK_MIN_BYTES,
+  isSlowWriteJob, isSlowCleanupJob, isSlowTransport,
   // [B-441] Exported so the check can be exercised against real volumes rather than only
   // through `preflight`, which cannot be pointed at a specific card from a test.
   volumeDirty, destinationHealth, rawVolumePath,

@@ -194,18 +194,6 @@ const PLATFORMS = {
       // MEASURED: the letter stays behind as an empty drive on board cards and USB readers.
       lingersAfterEject: true,
       volumeNoun: 'drive',
-      // What is still visible afterwards, and why it is not a failure.
-      // ⚠️ STATES THE FACT, DOES NOT HEDGE IT. [2026-09-24] This read "Windows may keep showing
-      // <label> until you reconnect it" - and "may" is uncertainty about OUR OWN result, in the
-      // one message whose whole job is to stop a successful eject reading as a failure.
-      // ⭐ RE-MEASURED before rewording, an hour after a real eject: the letter was still listed
-      // with `(no media)`. So it is not "may" and it is not gone - it is an EMPTY DRIVE, which is
-      // also the detail that tells him what he is looking at rather than just that it is fine.
-      // ⚠️ NO LABEL IN HERE. Its one consumer is the post-eject toast, which already opens with
-      // the label ("I: ejected. Safe to remove."), so naming it again produced "I: ... I: stays
-      // listed". The note is the SECOND half of a sentence about a thing already named.
-      lingerNote: () =>
-        'It stays listed as an empty drive until you reconnect it.',
       busyNote: (label) =>
         `Something still has ${label} open, so Windows would not release it.\n\n`
         + `Close anything using it, then try again. Unplugging it now risks damaging what is on it.`,
@@ -239,7 +227,6 @@ const PLATFORMS = {
       // lingering empty slot and the Windows explanation must NOT appear here.
       lingersAfterEject: false,
       volumeNoun: 'volume',
-      lingerNote: null,
       busyNote: (label) =>
         `Something is still using ${label}, so macOS would not eject it.\n\n`
         + `Close anything using it, then try again. Unplugging it now risks damaging what is on it.`,
@@ -271,7 +258,6 @@ const PLATFORMS = {
       // ⚠️ UNVERIFIED but expected: the mount point is removed on unmount.
       lingersAfterEject: false,
       volumeNoun: 'volume',
-      lingerNote: null,
       busyNote: (label) =>
         `Something is still using ${label}, so it could not be unmounted.\n\n`
         + `Close anything reading from the card and try again. Unplugging it now risks `
@@ -327,18 +313,27 @@ const STABLE_MS = 1000;
 // card is in use when it is not, which is advice that cannot be acted on.
 const DEFAULT_EJECT_TIMEOUT_MS = 60000;
 
+// ⭐⭐ `everGone` IS THE WHOLE POINT, AND IT WAS THE ONE THING NOT RECORDED. [2026-10-06]
+// This function watched for a STABLE absence and threw away the fact that it had seen the media
+// leave at all - so the caller, which has to choose between "never left" and "left and came
+// back", had no way to tell them apart and guessed from whether the card was present at that
+// instant. A card that releases and is re-mounted is present, so it was always "never left".
 async function waitForMediaGone(mountPath, timeoutMs = DEFAULT_EJECT_TIMEOUT_MS) {
   const t0 = Date.now();
   let goneSince = null;
+  let everGone = false;
   for (;;) {
     if (!mediaPresent(mountPath)) {
+      everGone = true;    // ⭐ latched: a bounce is still a release
       if (goneSince === null) goneSince = Date.now();
-      if (Date.now() - goneSince >= STABLE_MS) return { gone: true, ms: Date.now() - t0 };
+      if (Date.now() - goneSince >= STABLE_MS) {
+        return { gone: true, ms: Date.now() - t0, everGone: true };
+      }
     } else {
       goneSince = null;   // came back (or never left) - reset rather than concluding
     }
     if (Date.now() - t0 > timeoutMs) {
-      return { gone: false, ms: Date.now() - t0, stillPresent: mediaPresent(mountPath) };
+      return { gone: false, ms: Date.now() - t0, stillPresent: mediaPresent(mountPath), everGone };
     }
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
@@ -414,8 +409,23 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
   }
   // Distinguish "never left" from "left and came back" - they mean different things to the
   // person holding the card, so they must not collapse into one message.
-  return { status: mediaPresent(t.mountPath) ? 'busy' : 'returned', ...t,
-           ms: res.ms, raw: inv.raw };
+  //
+  // ⚠️⚠️ THIS USED TO ASK `mediaPresent(...)`, WHICH IS THE WRONG QUESTION AND MADE THE COMMENT
+  // ABOVE A LIE. [2026-10-06] "Is it here NOW" cannot separate the two cases, because a card that
+  // released and was re-mounted is here now - exactly like one that never moved. So every bounce
+  // was reported as `busy`, and `returned` was very nearly unreachable: it needed the media to be
+  // absent at that instant while never having been stably absent for a whole second.
+  //
+  // ⭐ MEASURED, NOT ARGUED (2026-10-06). An export to a card with eject ticked reported
+  // "Something is still using L:, so it could not be released." An independent eject of the same
+  // volume at the same moment reported that it ejected and the reader re-mounted it straight
+  // away. Nothing had it open.
+  // ⚠️ AND THAT IS THE WORST DIRECTION FOR THIS PARTICULAR LIE: `busy` is advice - close your
+  // files and try again - and it cannot be acted on when there is nothing to close.
+  // ⚠️ The re-mount is NOT a quirk of one dock; any disk can do it. Ordinary behaviour the
+  // classifier has to handle, not hardware to be chased.
+  return { status: res.everGone ? 'returned' : 'busy', ...t,
+           ms: res.ms, raw: inv.raw, everGone: !!res.everGone };
 }
 
 // The OS-specific sentences, resolved here so no renderer string names an operating system.

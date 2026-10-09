@@ -344,6 +344,50 @@ const vendors = [
   // readme content, then two structural file/shape checks) so even
   // most Greyscale fonts skip the broad scan.
   {
+    // BVM Sabers — 26 free fonts and one paid (£5), all shipping a readme that
+    // names the creator. Added 2026-10-07 after an import came through with no
+    // creator match at all: the table was seeded from the 2026-06-11 archive
+    // crawl and this creator was not in it. [B-484]
+    //
+    // ⚠️ TWO FILENAME SPELLINGS, both real and both needed. The free fonts ship
+    // "Read Me.txt" WITH A SPACE; the paid one ships "ReadMe.txt". The
+    // conventional /readme\.txt$/i used by the rows above matches only the paid
+    // one — measured, it hits 1 of the 4 archives on disk.
+    //
+    // ⚠️ THE NAME IS FOUND DIFFERENTLY ON FREE VS PAID, which is why the content
+    // match accepts the domain as an alternative. The paid readme states
+    // authorship in prose ("Sound Font For Proffie ... By BVM-Sabers"); the free
+    // readmes never say it, and are matched only via the creator's own Facebook
+    // handle ("facebook.com/BVMsabers"). A pattern written against the paid
+    // readme's wording matches none of the 26 free fonts.
+    //
+    // purchasedDefault is false because 26 of 27 are free. It is only a default,
+    // and a single boolean cannot express a mixed catalogue — the paid font needs
+    // the box changed by hand.
+    //
+    // ⭐ WHY A HARDCODED ROW WHEN LEARNED MATCHING ALREADY FINDS THIS CREATOR:
+    // the learned layer only fires once the user has already labelled a source
+    // from them by hand, and it is deliberately a SUGGESTION. A curated row makes
+    // it a content match on the FIRST import, for someone who has never heard of
+    // them. Seed and growth, not duplicates.
+    id: 'bvmsabers',
+    displayName: 'BVM Sabers',
+    // ⚠️ THE SITE ROOT, NOT /fonts. Corrected 2026-10-08 by someone who buys
+    // from them: *"https://www.bvm-sabers.co.uk/ — that's the correct website for BVM."* The row
+    // was seeded with a deep link to the font listing, which is where a crawl lands rather than
+    // where a creator would say their site is. A vendor website is an identity, not a route into
+    // their catalogue, and a deep path is the part most likely to rot.
+    website: 'https://www.bvm-sabers.co.uk/',
+    purchasedDefault: false,
+    patterns: [
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)read\s?me\.txt$/i,
+        contentMatch: /BVM[-\s]?Sabers|bvm-sabers\.co\.uk/i,
+      },
+    ],
+  },
+  {
     id: 'greyscale',
     displayName: 'Greyscale Fonts',
     website: 'https://www.greyscalefonts.com',
@@ -613,7 +657,100 @@ async function _findReadmeMatch(source, entries, pattern) {
   return null;
 }
 
-async function detectVendor(source) {
+// ── Learned vendors: the table is a SEED, the library is the growth ────────
+//
+// ⭐⭐ THE GAP THIS CLOSES. The table above is hand-maintained and was seeded from
+// one archive crawl, so a creator who is not in it never matches - even after the
+// user has already labelled a source from that exact creator by hand. Measured
+// 2026-10-07: a second font from a creator imported minutes earlier still came up
+// "No creator matched". The library already knew the name; nothing consulted it.
+// The renderer merges library vendors into its autocomplete list, which is why
+// the name was offered for TYPING but never for MATCHING.
+//
+// ⚠️⚠️ WHY THIS IS A SUGGESTION AND NOT AN AUTO-FILL, and the hazard is measured
+// in a real readme rather than imagined: one creator's readme credits NoSloppy,
+// Fett263 AND Brian Conner in its Special Thanks block. So a readme can easily
+// name three creators who are all already in the library, only one of whom made
+// the font. A wrong auto-filled attribution is worse than no match - it is stored,
+// it propagates to every font from that source, and the user has no reason to
+// doubt it. So a learned hit returns confidence 'structural', which the existing
+// UI renders as "Suggested: <name>" with an Apply link.
+//
+// ⚠️ AND IF MORE THAN ONE LEARNED NAME APPEARS, NOTHING IS SUGGESTED. Guessing
+// between them is exactly the wrong-attribution case above. Declining is honest
+// and costs the user the same typing they do today.
+
+// Compare names the way a human would consider them "the same creator":
+// case-insensitive, and ignoring spaces, hyphens and punctuation - because the
+// same creator writes "BVM Sabers", "BVM-Sabers" and "BVMsabers" in one archive.
+function _vendorNameKey(name) {
+  return String(name == null ? '' : name).toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Harvest the distinct creators the user has already labelled, from the source
+// store's metadata. Shape matches listSources(): [{ uuid, meta }].
+function learnedVendorsFrom(sources) {
+  const byKey = new Map();
+  for (const s of (Array.isArray(sources) ? sources : [])) {
+    const m = (s && s.meta) ? s.meta : s;
+    const name = m && m.vendor;
+    if (!name) continue;
+    // 'Unknown' is a placeholder the UI uses, not a creator.
+    if (/^unknown$/i.test(String(name).trim())) continue;
+    const key = _vendorNameKey(name);
+    // ⚠️ A SHORT NAME IS A SUBSTRING WAITING TO HAPPEN, and this is measured
+    // rather than hypothetical: the real library this was built against contains
+    // a creator named "TEST". Matching is done on text with punctuation and
+    // spaces stripped (so "BVM Sabers" finds "BVMsabers" in a URL), which means a
+    // short key matches inside ordinary words - "TEST" hits any readme saying
+    // "tested on real hardware", which is a sentence sound font creators write
+    // constantly. Six characters is the floor that excludes it.
+    // Creators shorter than that are the ones curated in the table above, where
+    // an exact pattern does the work instead.
+    if (key.length < 6) continue;
+    // Placeholder values a user types to get past a required field. They are not
+    // creators and must never be suggested as one.
+    if (/^(unknown|unknow|various|variousartists|notsure|placeholder|testing|testvendor|sample|default|nonefound)$/.test(key)) continue;
+    if (!byKey.has(key)) byKey.set(key, { name: String(name), website: m.vendorWebsite || '' });
+    else if (!byKey.get(key).website && m.vendorWebsite) byKey.get(key).website = m.vendorWebsite;
+  }
+  return Array.from(byKey.values());
+}
+
+// Text files worth reading for a creator's name. Deliberately narrower than the
+// table's broad .txt scans: this runs only after every curated pattern has
+// failed, and reading every text file in a large archive to look for N names is
+// a different cost profile from one regex over one readme.
+const _LEARNED_DOC_RE = /(^|\/)(read\s?me|readme|_readme|license|credits?|info)\.(txt|rtf|md)$/i;
+
+async function _matchLearnedVendors(source, entries, learned) {
+  if (!learned || !learned.length) return null;
+  const docs = entries.filter(e => !e.isDir && _LEARNED_DOC_RE.test(e.fileName));
+  if (!docs.length) return null;
+  const found = new Map();
+  for (const doc of docs) {
+    let text;
+    try { text = _decodeText(await source.readFile(doc.fileName)); } catch { continue; }
+    // Normalise the document the same way the names are, so "BVMsabers" in a URL
+    // matches the library's "BVM Sabers".
+    const flat = _vendorNameKey(text);
+    for (const v of learned) {
+      const key = _vendorNameKey(v.name);
+      let hit = key && flat.includes(key);
+      // A domain is a second spelling of the same creator, not extra evidence.
+      if (!hit && v.website) {
+        const host = String(v.website).replace(/^https?:\/\//i, '').split('/')[0];
+        if (host && _vendorNameKey(host).length >= 6 && flat.includes(_vendorNameKey(host))) hit = true;
+      }
+      if (hit && !found.has(key)) found.set(key, { vendor: v, matchedFile: doc.fileName });
+    }
+  }
+  if (found.size !== 1) return found.size > 1 ? { ambiguous: [...found.values()].map(f => f.vendor.name) } : null;
+  const only = [...found.values()][0];
+  return { vendor: only.vendor, matchedFile: only.matchedFile };
+}
+
+async function detectVendor(source, opts = {}) {
   if (!source || typeof source.listAll !== 'function') {
     return { vendorId: null, vendor: null, vendorAutoDetected: false };
   }
@@ -732,6 +869,39 @@ async function detectVendor(source) {
     if (nestedRes && nestedRes.vendor) return nestedRes;
   } catch {}
 
+  // LAST: creators the user has already labelled themselves. See the block
+  // above learnedVendorsFrom for why this is a suggestion rather than a fill,
+  // and why two matches suggest nothing. Runs only once every curated pattern
+  // and the generic "by NAME" extractor have failed, so it costs nothing on a
+  // source that was already recognised.
+  try {
+    const hit = await _matchLearnedVendors(source, entries, opts.learned);
+    if (hit && hit.vendor) {
+      return {
+        vendorId: null,
+        vendor: hit.vendor.name,
+        vendorWebsite: hit.vendor.website || null,
+        vendorAutoDetected: true,
+        // 'structural' is the SUGGEST level in the renderer: it shows
+        // "Suggested: <name>" with an Apply link and leaves the field empty.
+        confidence: 'structural',
+        purchasedDefault: undefined,
+        matchedFile: hit.matchedFile,
+        matchedAt: hit.matchedFile,
+        matchType: 'learnedVendor',
+      };
+    }
+    // Several known creators named in one document. Deliberately no guess -
+    // reported so a caller could say "we found more than one" rather than
+    // silently behaving as if nothing was there.
+    if (hit && hit.ambiguous) {
+      return {
+        vendorId: null, vendor: null, vendorAutoDetected: false,
+        matchType: 'learnedVendorAmbiguous', ambiguousVendors: hit.ambiguous,
+      };
+    }
+  } catch {}
+
   return { vendorId: null, vendor: null, vendorAutoDetected: false };
 }
 
@@ -801,4 +971,5 @@ async function _detectVendorInNestedZip(source) {
 module.exports = {
   vendors,
   detectVendor,
+  learnedVendorsFrom,
 };

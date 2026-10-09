@@ -1489,10 +1489,14 @@ async function _vpImportProp(v, opts) {
   // default colour, with the context menu correctly offering Delete on a row that
   // does not look added. The guard defeated the thing it was guarding. [B-446]
   _vpForgetAddedProps();
+  // ⚠️ THE VERSION NAME STAYS. I cut it on 2026-10-04 to make the toast fit one line, and he
+  // put it back: *"i want it back... chance of someone importing from card a prop is low."* The
+  // two-line wrap it causes is a cosmetic cost on a rare path, and the name is worth more than the
+  // layout. Do not trim this again for wrapping reasons.
+  const _propLead = res.replaced
+    ? `${res.file} replaced in ${v.name}`
+    : `${res.file} added to ${v.name}`;
   if (!o.quiet) {
-    window.showToast?.(res.replaced
-      ? `${res.file} replaced in ${v.name}.`
-      : `${res.file} added to ${v.name}.`);
     // The file browser below is now stale by exactly the file just added, and it is
     // the surface the person is looking at when they press this button.
     _vpRenderDetail(v);
@@ -1501,6 +1505,23 @@ async function _vpImportProp(v, opts) {
   // rather than at each call site, because a refresh written beside one caller is
   // exactly the kind that never reaches the other.
   window._populatePropSelect?.();
+  if (!o.quiet) {
+    // ⭐⭐ [B-424] ONE TOAST, CARRYING THE EJECT - not a second one beside it. The rule:
+    // *"the eject offer needs to ride along with whatever is there not something new."*
+    // The first cut of this LEFT the plain `showToast` here and added an eject toast after it,
+    // which stacked two toasts for one action. `_sfOfferEjectInToast` already builds a toast from
+    // the lead it is given, so the existing sentence became that lead and the second toast went.
+    // ⚠️ It is not only an eject surface: with a non-removable source it offers **Show**
+    // instead, so this still ends with a toast when the prop came off an ordinary disk.
+    // ⚠️ INSIDE the quiet guard, where the toast it replaces lived. The first cut had it
+    // outside, so a quiet import would have toasted.
+    // ⚠️ LAST, after the tree and dropdown refresh, so it never sits over a stale list.
+    if (res.sourcePath && window._sfOfferEjectInToast) {
+      await window._sfOfferEjectInToast(res.sourcePath, _propLead, 'from');
+    } else {
+      window.showToast?.(`${_propLead}.`);
+    }
+  }
   return res;
 }
 window._vpImportProp = _vpImportProp;

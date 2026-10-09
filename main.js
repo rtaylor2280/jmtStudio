@@ -242,6 +242,26 @@ app.whenReady().then(() => {
       console.log(`[startup] cleared ${staged.removed.length} staged source(s), ${(staged.bytes / 1048576).toFixed(1)} MB`);
     }
   } catch {}
+
+  // The same thing for ATTACHMENT staging. [B-475] An attachment is stored under
+  // its own content hash, so the streaming store writes into a staging folder and
+  // renames once the last byte names the destination. A cancel or a crash mid-copy
+  // leaves that folder behind.
+  //
+  // ⚠️ `sweepStaging` was written and tested on 2026-10-06 and nothing ever called
+  // it, so abandoned staging folders had no way to leave. Same omission as the
+  // streaming store itself, which this handler was also not pointed at.
+  // ⭐ Here for the reason the block above gives: at startup nothing can be in
+  // flight by definition, so it needs no age test and no judgement.
+  try {
+    // ⚠️ `swept`, not `removed`. The first version of this line read `sw.removed`,
+    // which is undefined, so the sweep would have run and never reported - a
+    // silent success that looks identical to never having been wired.
+    const sw = soundFontAttachments.sweepStaging(app.getPath('userData'));
+    if (sw && sw.swept) {
+      console.log(`[startup] cleared ${sw.swept} abandoned attachment staging folder(s)`);
+    }
+  } catch {}
   // [B-364] Same lifecycle, same reasoning: a program pulled out of the library is held
   // only long enough for the user to say whether they want a copy. If they said yes it
   // was released and deleted already; if they closed the app instead, it dies here.
@@ -870,7 +890,12 @@ ipcMain.handle('styles:import', async () => {
     properties: ['openFile']
   });
   if (canceled || !filePaths.length) return { ok: false };
-  return proffie.importStylesFile(filePaths[0]);
+  // ⭐ `sourcePath` rides back so the renderer can offer an eject. [2026-10-04]
+  // This door picks in MAIN, so the renderer never learned where the file came from - which is
+  // the whole reason it had no eject offer while every Sound Fonts door did. Returning the path
+  // costs nothing and is the only thing that was missing.
+  const _r = await proffie.importStylesFile(filePaths[0]);
+  return (_r && _r.ok) ? { ..._r, sourcePath: filePaths[0] } : _r;
 });
 ipcMain.handle('styles:read', () => proffie.readStagedStyles());
 ipcMain.handle('styles:write', (_, content) => proffie.stageStyles(content));
@@ -883,7 +908,10 @@ ipcMain.handle('styles:export', async () => {
   if (canceled || !filePath) return { ok: false };
   try {
     fs.writeFileSync(filePath, proffie.readStagedStyles(), 'utf8');
-    return { ok: true };
+    // ⭐ `filePath` RIDES BACK so the door can name where it went. [2026-10-08]
+    // It returned a bare ok for its whole life, which left the renderer with nothing to say even
+    // if it had wanted to — and it did not: the call site discarded the result entirely.
+    return { ok: true, filePath };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('styles:replace', async () => {
@@ -895,7 +923,8 @@ ipcMain.handle('styles:replace', async () => {
   if (canceled || !filePaths.length) return { ok: false };
   try {
     const content = fs.readFileSync(filePaths[0], 'utf8');
-    return { ok: true, content };
+    // ⭐ `sourcePath` for the eject offer - same reason as `styles:import` above.
+    return { ok: true, content, sourcePath: filePaths[0] };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
@@ -1935,7 +1964,7 @@ ipcMain.handle('bulkImport:discardPrepared', async (_, { uuids } = {}) => {
 // only when the user opens the guided review, so quick import stays fast.
 // Read-only: no hashing, no copy, no library writes. Streams progress via
 // the bulkImport:enrichProgress event.
-// ⚠️ THE SECOND ONE WITH THE SAME DEFECT. [B-413] He asked "is that the only cancel that was
+// ⚠️ THE SECOND ONE WITH THE SAME DEFECT. [B-413] The ask was "is that the only cancel that was
 // broken?" and the honest answer was no: this held `let _bulkEnrichCancelToken = null`, reassigned
 // per run and nulled in the finally — the identical shared-pointer bug as bulk import, where a new
 // run disarms an older one and an ending run disarms a newer one.
@@ -1954,7 +1983,9 @@ ipcMain.handle('bulkImport:enrichGuided', async (e, { plan } = {}) => {
   }
   try {
     return await soundFontBulkImport.enrichPlanForGuided(
-      { plan },
+      // userData so the enrich pass can read the creators already in the
+      // library and suggest one for a source the curated table does not know.
+      { plan, userData: app.getPath('userData') },
       {
         onProgress: (payload) => {
           try { e.sender.send('bulkImport:enrichProgress', payload); } catch {}
@@ -2068,9 +2099,17 @@ ipcMain.handle('sources:readFile', async (_, { uuid, path: filePath } = {}) => {
 
 ipcMain.handle('sources:detectVendor', async (_, { uuid } = {}) => {
   try {
-    const source = soundFontSources.openSource(app.getPath('userData'), uuid);
+    const ud = app.getPath('userData');
+    const source = soundFontSources.openSource(ud, uuid);
     if (!source) return { ok: false, error: `Source not found: ${uuid}` };
-    const detection = await soundFontVendors.detectVendor(source);
+    // Creators the user has already labelled are the growth on top of the
+    // curated table. Harvested here rather than inside detectVendor so the
+    // detector stays a pure function of the source plus what it is told.
+    let learned = [];
+    try {
+      learned = soundFontVendors.learnedVendorsFrom(soundFontSources.listSources(ud));
+    } catch {}
+    const detection = await soundFontVendors.detectVendor(source, { learned });
     return { ok: true, ...detection };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -2284,15 +2323,13 @@ ipcMain.handle('attachments:list', (_, { uuid } = {}) => {
   try { return { ok: true, attachments: soundFontAttachments.listAttachments(app.getPath('userData'), uuid) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.handle('attachments:add', async (_, { uuid } = {}) => {
-  const res = await dialog.showOpenDialog(win, {
-    title: 'Attach files to this source',
-    properties: ['openFile', 'multiSelections'],
-  });
-  if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true };
-  try { return soundFontAttachments.addAttachments(app.getPath('userData'), uuid, res.filePaths); }
-  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
-});
+// ⚠️ `attachments:add` WAS HERE AND IS GONE (2026-10-04). It opened its own file
+// picker and wrote attachments, and NOTHING in the renderer ever invoked it - the live proof-of-
+// purchase path is `attachments:pickFile` then `attachments:addToSources`. Found while giving the
+// proof-of-purchase door an eject offer: wiring one into this handler would have been wiring a door
+// nobody can open. Its preload bridge (`addAttachments`) went with it, and the module function it
+// called is now unreferenced - left in `soundFontAttachments.js` rather than removed in the same
+// pass, because that is a module's public surface and a separate decision.
 ipcMain.handle('attachments:open', (_, { id } = {}) => {
   try {
     const p = soundFontAttachments.attachmentFilePath(app.getPath('userData'), id);
@@ -2326,16 +2363,68 @@ ipcMain.handle('attachments:linkToSources', (_, { id, uuids } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 ipcMain.handle('attachments:pickFile', async () => {
+  // ⭐⭐ FILTERS AS A STARTING POINT, NOT A GATE. [2026-10-08] The picker offered no filter at
+  // all, so a stray `curstate.tmp` off an SD card sat in the dialog looking as valid as a
+  // receipt - exactly that was hit in testing. The framing, and the filters follow it
+  // literally: *"we don't have to stop them for uploading something they shouldn't if they clear
+  // out the file type, but we could give a starting point of known image types, pdf, doc, txt."*
+  // ⚠️ SO "All files" STAYS, and the list is ordered with it LAST. A receipt can legitimately be
+  // anything - an .eml, a vendor's own odd export - and refusing those would turn a helpful
+  // default into a wall. The first entry is what the dialog opens on; the rest are one click.
+  // ⚠️ Not a security control either. Everything that arrives still goes through
+  // `checkCarryableFile` on the way in; this only decides what the OS dialog shows first.
   const res = await dialog.showOpenDialog(win, {
     title: 'Choose a proof-of-purchase file',
     properties: ['openFile'],
+    filters: [
+      { name: 'Receipts and documents', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic', 'gif', 'txt', 'rtf', 'doc', 'docx', 'odt', 'eml', 'msg', 'html', 'htm'] },
+      { name: 'PDF', extensions: ['pdf'] },
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'heic', 'gif', 'bmp', 'tif', 'tiff'] },
+      { name: 'Text and documents', extensions: ['txt', 'rtf', 'doc', 'docx', 'odt', 'eml', 'msg', 'html', 'htm'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
   });
   if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true };
   return { ok: true, filePath: res.filePaths[0], fileName: path.basename(res.filePaths[0]) };
 });
-ipcMain.handle('attachments:addToSources', (_, { filePath, label, uuids } = {}) => {
-  try { return soundFontAttachments.addAttachmentToSources(app.getPath('userData'), { filePath, label, uuids: uuids || [] }); }
+// ── Attaching a receipt, streamed and cancellable ──────── [B-475]
+//
+// ⚠⚠ THE STREAMING TWIN WAS BUILT AND TESTED ON 2026-10-06 AND THIS HANDLER WAS NEVER POINTED
+// AT IT. `addAttachmentToSourcesStreaming` + `storeFileStreaming` shipped with 29 passing checks
+// in test/attachment-streaming-store.test.js while this line went on calling the SYNCHRONOUS one -
+// so the measured freeze was still live and the fix read as done. That is the "does anything CALL
+// it?" failure: code that merely EXISTS looks finished.
+//
+// One read instead of two (it hashes while it copies), real byte progress, and a cancel that
+// throws the partial away - the rule: *"if I decide I don't want it, you just throw away all the
+// partial bytes. We don't need it."*
+const _attachGate = require('./bulkImportGate').createGate({ exclusive: false });
+ipcMain.handle('attachments:addCancel', () => ({ ok: true, cancelled: _attachGate.cancelAll() }));
+
+ipcMain.handle('attachments:addToSources', async (e, { filePath, label, uuids } = {}) => {
+  const token = _attachGate.begin();
+  try {
+    return await soundFontAttachments.addAttachmentToSourcesStreaming(
+      app.getPath('userData'),
+      { filePath, label, uuids: uuids || [] },
+      {
+        shouldStop: () => token.cancelled,
+        // ⚠️ A re-attach of an already-stored receipt still costs ONE full read - the id IS the
+        // content hash, so there is no way to know it is stored without reading it. That read is
+        // now streamed and cancellable, which is the part that matters.
+        //
+        // ⚠️ THE CALLBACK TAKES AN OBJECT, `{ bytes, total }`, NOT (received, total). My first
+        // wiring here was positional, which would have handed the renderer the whole object as
+        // `received` and `undefined` as the total - a progress bar stuck at nothing, with no error.
+        // Renamed to `received` on the way out so it matches the link-import progress payload the
+        // renderer already knows how to read.
+        onProgress: ({ bytes, total }) => {
+          try { e.sender.send('attachments:addProgress', { received: bytes, total }); } catch {}
+        },
+      });
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  finally { _attachGate.end(token); }
 });
 ipcMain.handle('attachments:removeEverywhere', (_, { id } = {}) => {
   try { return soundFontAttachments.removeAttachmentEverywhere(app.getPath('userData'), id); }
@@ -2393,12 +2482,18 @@ ipcMain.handle('fileOps:createSubfolder', (_, { kind, id, parentSubPath, name } 
 
 ipcMain.handle('fileOps:addFiles', async (event, { kind, id, subPath, sourceFilePaths, destNames } = {}) => {
   // [B-400] `event`, not `_` - same missing channel the tracks door had.
+  // ⚠️⚠️ UNDER THE SHARED GATE, NOT A PRIVATE FLAG. [B-424, 2026-10-08] The gate is what
+  // `export:cancel` flips, and a second copy of this state is the one thing [B-005] item 4 proved
+  // must not be duplicated. Without this wrapper the door's Cancel button would have been a lie:
+  // pressed, acknowledged, and the copy running on regardless - which is the defect door 3 cost
+  // four orphaned sources to find.
   try {
     const emit = _sfByteProgressEmitter(event);
-    const r = await soundFontFileOps.addFilesAt({
-      userData: app.getPath('userData'), kind, id, subPath, sourceFilePaths, destNames,
-      onBytes: emit.onBytes,
-    });
+    const r = await _withExportCancel(async (shouldStop) =>
+      soundFontFileOps.addFilesAt({
+        userData: app.getPath('userData'), kind, id, subPath, sourceFilePaths, destNames,
+        onBytes: emit.onBytes, shouldStop,
+      }));
     emit.flush();
     return r;
   }
@@ -2759,14 +2854,30 @@ ipcMain.handle('common:nameInUse', (_, { name, excludeUuid } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// ── The Common Folders import cancel ────────── [B-424]
+// It was never that this door COULD NOT be cancelled - `importSource` has taken a `shouldStop`
+// since [B-462] and nobody connected one. Non-exclusive gate, like the export and link ones.
+const _commonImportGate = require('./bulkImportGate').createGate({ exclusive: false });
+ipcMain.handle('common:importCancel', () => ({ ok: true, cancelled: _commonImportGate.cancelAll() }));
+
 ipcMain.handle('common:importFromFolder', async (_, { folderPath, name } = {}) => {
-  try { return await soundFontCommon.importCommonFromFolder(app.getPath('userData'), folderPath, name); }
+  const token = _commonImportGate.begin();
+  try {
+    return await soundFontCommon.importCommonFromFolder(
+      app.getPath('userData'), folderPath, name, undefined, () => token.cancelled);
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  finally { _commonImportGate.end(token); }
 });
 
 ipcMain.handle('common:importFromZip', async (_, { zipPath, name } = {}) => {
-  try { return await soundFontCommon.importCommonFromZip(app.getPath('userData'), zipPath, name); }
+  const token = _commonImportGate.begin();
+  try {
+    return await soundFontCommon.importCommonFromZip(
+      app.getPath('userData'), zipPath, name, undefined, () => token.cancelled);
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  finally { _commonImportGate.end(token); }
 });
 
 // [B-340] Content-identity answer for an incoming common folder, so the bulk
@@ -2805,10 +2916,14 @@ ipcMain.handle('common:listFiles', (_, { uuid } = {}) => {
 
 ipcMain.handle('common:addFiles', async (event, { uuid, subPath, sourceFilePaths } = {}) => {
   // [B-400] `event`, not `_` - the third door with no channel to report on.
+  // ⚠️⚠️ The same shared gate as `fileOps:addFiles` and the tracks door. [B-424, 2026-10-08]
+  // This door and the font one carried the identical hole and are fixed as a pair, because fixing
+  // one of two matching branches is exactly what [B-401] is about.
   try {
     const emit = _sfByteProgressEmitter(event);
-    const r = await soundFontCommon.addFilesToCommon(
-      app.getPath('userData'), uuid, subPath, sourceFilePaths, emit.onBytes);
+    const r = await _withExportCancel(async (shouldStop) =>
+      soundFontCommon.addFilesToCommon(
+        app.getPath('userData'), uuid, subPath, sourceFilePaths, emit.onBytes, shouldStop));
     emit.flush();
     return r;
   }
@@ -3300,6 +3415,72 @@ ipcMain.handle('exportDest:identify', async (_, { destDir } = {}) => {
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// ── How big is this thing the user just picked? ──────────────── [B-424]
+//
+// ⭐ ONE SIZER FOR EVERY IMPORT DOOR. The slow-card warning has two limbs - file count and bytes -
+// and the import side could answer neither before starting: a file picker returns paths, and the
+// font import only learns its total from progress events once the copy is already running. Three
+// doors needed the same answer, so this is one handler rather than three workarounds.
+// ⚠️ NO CONTENT IS READ. `scanIncomingCommon` walks a tree too, but it reads 256 bytes per file to
+// classify it - far more than a size question needs, and its name belongs to another feature.
+// Reusing it here would be the "door named for a feature" mistake in miniature.
+// ⚠️ A ZIP IS ONE FILE AND REPORTS ITS COMPRESSED SIZE, which under-reports what lands on disk.
+// That is the safe direction: it can make the warning quieter, never falser.
+// ⚠️ BOUNDED. A pathological tree would otherwise spend longer being measured than copied, so the
+// walk stops past `maxEntries` - the thresholds cannot change after that many files anyway.
+// ⚠️ A CAP WAS ADDED HERE 2026-10-04 AND REVERTED THE SAME HOUR. Recorded because the reasoning
+// was plausible and still wrong. I had put the import warning before the SCAN, which meant
+// measuring a card before the question could be asked, so I made the walk exit at the threshold.
+// Correct placement (before `bulkImport:run`, where the plan already carries the totals) removed
+// the problem entirely - and the cap had quietly introduced one, because it returns a FLOOR and
+// the dialog presents it as a total. Machinery built for a constraint that the right placement
+// deletes is machinery to take back out.
+ipcMain.handle('path:measure', async (_, { path: target, paths = null, maxEntries = 20000 } = {}) => {
+  try {
+    // ⭐ A LIST OF PATHS IS THE SAME QUESTION, SO IT IS THE SAME HANDLER. [2026-10-04]
+    //
+    // The file-picker import doors know exactly which files the user chose and never knew their
+    // sizes, so they were passing a COUNT as a stand-in for a payload. Once the slow-write rule
+    // became bytes-only that stand-in stopped working, and the doors went silent.
+    // ⚠️ A SIBLING IPC WAS THE OTHER OPTION AND IS WORSE: two measurers to keep in agreement
+    // forever, when a list of files is just the degenerate case of the walk below.
+    // ⚠️ `maxEntries` is shared deliberately - a selection of 50,000 files is as able to hang
+    // this as a deep tree, and `truncated` means the same thing to the caller either way.
+    if (Array.isArray(paths)) {
+      let files = 0, bytes = 0, seen = 0;
+      for (const p of paths) {
+        if (seen++ > maxEntries) return { ok: true, result: { files, bytes, truncated: true } };
+        try {
+          const s = fs.statSync(p);
+          if (s.isDirectory()) continue;    // pickers return files; a stray dir is not a payload
+          files++;
+          bytes += s.size;
+        } catch { /* unreadable is best-effort, same as the walk */ }
+      }
+      return { ok: true, result: { files, bytes, truncated: false } };
+    }
+    if (!target || !fs.existsSync(target)) return { ok: true, result: { files: 0, bytes: 0 } };
+    const st = fs.statSync(target);
+    if (!st.isDirectory()) return { ok: true, result: { files: 1, bytes: st.size } };
+    let files = 0, bytes = 0, seen = 0;
+    const walk = (dir) => {
+      if (seen > maxEntries) return;
+      let ents;
+      try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        if (seen++ > maxEntries) return;
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) { walk(abs); continue; }
+        if (!e.isFile()) continue;
+        files++;
+        try { bytes += fs.statSync(abs).size; } catch { /* size is best-effort */ }
+      }
+    };
+    walk(target);
+    return { ok: true, result: { files, bytes, truncated: seen > maxEntries } };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
   try {
     if (!destDir || !fs.existsSync(destDir)) return { ok: true, folders: [] };
@@ -3340,7 +3521,7 @@ ipcMain.handle('soundFonts:listDestFolders', (_, { destDir } = {}) => {
 });
 // ⚠️⚠️ GATED 2026-09-24 [B-420]. This is a pure READ - it hashes tracks to decide what a later
 // export would write - and it had no cancel at all, so the primary export's scan sat through every
-// remaining track after the user pressed Cancel. His report: *"it goes through about 10-20 more
+// remaining track after the user pressed Cancel. Reported: *"it goes through about 10-20 more
 // files before it cancels... it says stopping and files are still flying by."*
 // ⭐ And his argument, which is the whole justification: *"why would it need to do anything if all
 // it was doing was analyzing? there's not a copy being made... so it should just stop."*
@@ -4164,7 +4345,7 @@ ipcMain.handle('sfProgram:discard', async (_, { token } = {}) =>
 ipcMain.handle('sfProgram:delete', async (_, { kind, id, relPath } = {}) =>
   soundFontRemoval.deleteManagedFile(app.getPath('userData'), { kind, id, relPath }));
 
-// Quarantine asks WHERE, every time — his rule: "if they choose quarantine, they
+// Quarantine asks WHERE, every time — the rule: "if they choose quarantine, they
 // have to tell us where to put it." No default location and no silent destination:
 // the user is choosing where to keep a file they may want to analyse, and that is
 // not a choice the app should make on their behalf.
@@ -4638,7 +4819,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     // !! AN ENTIRE CLASS OF BUG WENT WITH IT. The old extract phase emitted no progress at all, so
     // it read as a hang at 0 B; the cancel thrown through it was swallowed by a best-effort catch;
     // the export then reported SUCCESS to a delete that went ahead and destroyed the font while
-    // leaving a half-decorated zip on the card. His report: "it would have sat there at 0 bytes
+    // leaving a half-decorated zip on the card. Reported: "it would have sat there at 0 bytes
     // forever. It is stuck." There is no longer any step between "the archive is written" and
     // "the export is done", which is what made that sequence possible.
     //
@@ -4646,7 +4827,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     // This was zip-only because the sidecar was injected by rebuilding an ARCHIVE, so a folder
     // export had nothing to inject into - a limitation of the mechanism that got written down as
     // if it were a rule. Writing into the tree works for both, so all four export doors produce
-    // the same thing. He asked what was different about the contents of the four; nothing is.
+    // the same thing. The ask was what was different about the contents of the four; nothing is.
     //
     // XX THE INVARIANT, HIS WORDS, AND IT IS THE TEST FOR ANY DOOR ADDED LATER (2026-09-23):
     // "The only difference between the doors is that some of them give options where you can
@@ -5022,6 +5203,24 @@ ipcMain.handle('dialog:pickExportDir', async (_, { title } = {}) => {
 // Import-from-link: peel a purchase/receipt URL down to a font archive and
 // download it to a temp file, streaming honest byte progress to the renderer.
 // On success the renderer hands the temp path to sources:import like any zip.
+// ── The link import's cancel ──────────────── [B-424]
+// Non-exclusive, like the export gate: the import modal already prevents two at once, and
+// refusing a second link import would be a new failure mode in place of a cancel.
+const _linkImportGate = require('./bulkImportGate').createGate({ exclusive: false });
+ipcMain.handle('linkImport:cancel', () => ({ ok: true, cancelled: _linkImportGate.cancelAll() }));
+// ⚠️⚠️ THE BROWSER CAPTURE NEEDS ITS OWN CANCEL, AND A FLAG GATE CANNOT DO IT. [B-424] The headless
+// tier polls `shouldStop` between chunks, so a cancelled token is enough. This tier owns an Electron
+// DownloadItem and a BrowserWindow - stopping it means calling `item.cancel()` on that object, which
+// a flag cannot reach. Hence a direct hook rather than a gate.
+// ⚠️ One capture at a time, which matches the door: the import modal runs one link at a time.
+let _linkBrowserCancel = null;
+ipcMain.handle('linkImport:browserCancel', () => {
+  const hook = _linkBrowserCancel;
+  if (!hook) return { ok: true, cancelled: false };
+  try { hook(); } catch {}
+  return { ok: true, cancelled: true };
+});
+
 ipcMain.handle('linkImport:start', async (event, { url } = {}) => {
   const os = require('os');
   const fsL = require('fs');
@@ -5036,7 +5235,22 @@ ipcMain.handle('linkImport:start', async (event, { url } = {}) => {
     // No destDir here on purpose: resolve() creates the temp dir lazily, only
     // when it actually has an archive to download. A failed fetch (gated, error)
     // leaves nothing behind.
-    return await soundFontLinkImport.resolve(url, { onProgress });
+    //
+    // ⭐ CANCELLABLE AS OF [B-424]. A font archive here is routinely 100 MB+, and
+    // this was the longest wait in the app with no way out: the dialog's Cancel
+    // closed the modal while the download carried on. Same shared gate as every
+    // other cancellable door, non-exclusive like the export one.
+    const token = _linkImportGate.begin();
+    try {
+      return await soundFontLinkImport.resolve(url, {
+        onProgress,
+        shouldStop: () => token.cancelled,
+      });
+    } finally {
+      // Only ever our own token - a leftover makes the NEXT cancel report work
+      // it is not really doing.
+      _linkImportGate.end(token);
+    }
   } catch (e) {
     return { ok: false, reason: 'error', message: String(e && e.message || e) };
   }
@@ -5063,8 +5277,28 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
     let settled = false;
     let gotDownload = false;
     let bw = null;
+    // ⚠️⚠️ THIS CAPTURE HAD NO CANCEL AT ALL, AND IT IS THE TIER MOST USERS LAND ON. [B-424]
+    // The headless tier (`linkImport:start`) has been cancellable since this entry; this one - the
+    // in-app browser the user actually clicks Download in - was never wired. So the modal's Cancel
+    // fell through to the generic close, which cancels the SOURCE-IMPORT gate (not started yet),
+    // the download carried on to completion unwatched, and the renderer then handed the finished
+    // file straight to the importer. Found 2026-10-07 after three cancelled link imports each left
+    // a fully committed source: 25 MB, 129 MB, 224 MB, then 23 MB.
+    let dlItem = null;
+    let cancelled = false;
+    // ⚠️⚠️ THROUGH rmWithRetry, AND THE FIRST TEST RUN PROVED WHY. [B-424] A plain
+    // `rmSync(dir, { recursive: true, force: true })` removed the partial FILE and left the
+    // DIRECTORY, so a cancel came back with no orphan source and an empty `jmt-linkimport-*`
+    // still sitting in temp. That is the exact shape [B-436] documents: with `force: true` the
+    // call can return quietly while the directory survives, so "it did not throw" is not "it is
+    // gone". rmWithRetry verifies and retries instead of assuming.
+    const dropDestDir = async () => {
+      if (!destDir) return;
+      try { await require('./fsRemove').rmWithRetry(destDir); } catch {}
+    };
     const onWillDownload = (_e, item) => {
       gotDownload = true;
+      dlItem = item;
       if (!destDir) {
         try { destDir = fsL.mkdtempSync(pathL.join(os.tmpdir(), 'jmt-linkimport-')); }
         catch (e) { finish({ ok: false, message: String(e && e.message || e) }); return; }
@@ -5088,7 +5322,18 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
         // We have the raw file (or a failure). Close the browser window now so a
         // follow-on download (peeling a captured .txt/.rtf pointer) runs clean.
         try { if (bw && !bw.isDestroyed()) bw.close(); } catch {}
-        if (state !== 'completed') { finish({ ok: false, message: `The download ${state}.` }); return; }
+        // ⚠️⚠️ A CANCEL IS HONOURED EVEN WHEN THE DOWNLOAD COMPLETED. [B-424] This is the case
+        // that produced his 23 MB orphan: a small font finishes in the gap between the click and
+        // the cancel taking effect, so `state` is 'completed' and every success path runs as if
+        // nothing happened. The bytes arriving does not un-ask the question - a stop was asked for, so
+        // the file is dropped rather than handed to the importer.
+        if (cancelled) { await dropDestDir(); finish({ ok: false, cancelled: true }); return; }
+        if (state !== 'completed') {
+          // The partial goes with it. A cancelled import keeps nothing.
+          await dropDestDir();
+          finish({ ok: false, message: `The download ${state}.` });
+          return;
+        }
         try {
           // A gated download may hand back a .txt/.rtf pointer, not the archive —
           // peel it the same way the headless resolver does.
@@ -5103,14 +5348,53 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      // ⚠️ Retired here, not only on success. A hook left pointing at a finished capture makes the
+      // NEXT cancel report work it is not doing - the same discipline as clearCancel/clearEject on
+      // the progress modal, and as the gate tokens that only ever retire their own.
+      if (_linkBrowserCancel === cancelHook) _linkBrowserCancel = null;
       try { ses.removeListener('will-download', onWillDownload); } catch {}
       try { if (bw && !bw.isDestroyed()) bw.destroy(); } catch {}
       resolve(result);
     };
+    // ⭐ LIVE FOR THE WHOLE CAPTURE, including before a download exists. Cancelling at the browser
+    // window (nothing downloading yet) has to close it and return, not wait for an item that may
+    // never come.
+    const cancelHook = () => {
+      cancelled = true;
+      // The item's own 'done' fires right after this with state 'cancelled'; it finds `settled`
+      // already true and no-ops. Dropping the dir there rather than here avoids racing the file
+      // handle that is still closing.
+      try { if (dlItem) dlItem.cancel(); } catch {}
+      if (!dlItem) dropDestDir();
+      finish({ ok: false, cancelled: true });
+    };
+    _linkBrowserCancel = cancelHook;
     ses.on('will-download', onWillDownload);
+    // Sized from the app rather than fixed. A fixed 1040x780 was WIDER than the
+    // app at its own minimum (800x692), so at small sizes it hung off the edges
+    // and at a maximized size it was a small box in a large empty one. The
+    // fraction gives breathing room at normal sizes, the floor keeps it close to
+    // full at the app's minimum, and the cap stops it sprawling on a large
+    // display. Centred on the app so it reads as belonging to it.
+    const geom = (() => {
+      const FALLBACK = { x: undefined, y: undefined, width: 1040, height: 780 };
+      try {
+        if (!win || win.isDestroyed()) return FALLBACK;
+        const p = win.getContentBounds();
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+        const width = Math.round(clamp(p.width * 0.80, Math.min(p.width - 64, 760), 1500));
+        const height = Math.round(clamp(p.height * 0.85, Math.min(p.height - 64, 640), 1000));
+        return {
+          width, height,
+          x: Math.round(p.x + (p.width - width) / 2),
+          y: Math.round(p.y + (p.height - height) / 2),
+        };
+      } catch { return FALLBACK; }
+    })();
     bw = new BrowserWindow({
       parent: win,
-      width: 1040, height: 780,
+      width: geom.width, height: geom.height,
+      ...(geom.x != null && geom.y != null ? { x: geom.x, y: geom.y } : {}),
       show: !autoHidden,
       title: 'Download your font from the creator',
       autoHideMenuBar: true,
@@ -5122,13 +5406,37 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
     // loading (a login screen, or a page that needs a click) and no download has
     // started, reveal the window so the user can finish — and tell the renderer.
     if (autoHidden) {
+      // Two waits, and they answer different questions.
+      //
+      // SETTLE is the honest "did this just download on its own?" grace period.
+      // Most vendors resolve inside it and no window is ever shown, which is the
+      // whole point of the hidden attempt — so nothing before this point may
+      // promise a window, because usually there isn't one.
+      //
+      // READ exists so the window never appears unannounced. Once we have
+      // decided a window IS needed, we say so, hold for a beat so the sentence
+      // can be read, and only then reveal. The reveal is NOT gated on anything
+      // the user does; it is a short pause, not a prompt.
+      const SETTLE_MS = 2500;
+      const READ_MS = 2000;
+      let announced = false;
+      // did-finish-load fires again on redirects, so both stages are idempotent.
+      const stillNeedsWindow = () =>
+        !settled && !gotDownload && bw && !bw.isDestroyed() && !bw.isVisible();
       bw.webContents.on('did-finish-load', () => {
         setTimeout(() => {
-          if (!settled && !gotDownload && bw && !bw.isDestroyed() && !bw.isVisible()) {
+          if (announced || !stillNeedsWindow()) return;
+          announced = true;
+          send({ browserWillShow: true });
+          setTimeout(() => {
+            // Re-checked on purpose: a download that starts during the read
+            // pause means the window was never needed after all, so it stays
+            // hidden and the progress copy takes over by itself.
+            if (!stillNeedsWindow()) return;
             try { bw.show(); } catch {}
             send({ browserShown: true });
-          }
-        }, 2500);
+          }, READ_MS);
+        }, SETTLE_MS);
       });
     }
     // If the page itself comes back as an HTTP error (e.g. Cloudflare 522 when
@@ -5141,8 +5449,22 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
     });
     // A download link that opens via target=_blank / window.open: load it in the
     // same window so its download still fires on our session.
+    //
+    // about:blank is excluded on purpose, and it is not an edge case. A common
+    // vendor pattern opens an EMPTY popup first, inside the click handler, to
+    // keep the browser's user-gesture popup allowance, then asks its own API for
+    // a download URL and points that popup at the answer once it arrives. Both
+    // `window.open("")` and `window.open()` reach this handler as the literal
+    // string "about:blank" (Electron resolves it before we see it), which is
+    // truthy - so the old guard navigated this window to a blank page while the
+    // vendor's request for the real URL was still in flight. That tears down the
+    // document holding both the pending request and the anchor fallback it would
+    // have used, so no download ever starts and nothing reports an error.
+    // Denying without navigating leaves the page intact; window.open returns
+    // null, which is exactly the case those vendors already handle by clicking a
+    // plain <a download> instead.
     bw.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
-      try { if (popupUrl) bw.loadURL(popupUrl); } catch {}
+      try { if (popupUrl && popupUrl !== 'about:blank') bw.loadURL(popupUrl); } catch {}
       return { action: 'deny' };
     });
     bw.on('closed', () => { if (!gotDownload) finish({ ok: false, canceled: true }); });
@@ -5363,10 +5685,29 @@ ipcMain.handle('sources:discardCustomized', (_event, { curationTmp } = {}) => {
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 });
 
+// ⭐⭐ THE IMPORT CANCEL GATE, AND IT IS EXPORT'S, COPIED. [2026-10-04]
+//
+// Ruled: *"there's no reason that discovery shouldn't be cancelable"* and *"its actually the
+// same rule as export... inverted."* Export cancels mid-write and cleans the DESTINATION, offering
+// rather than doing it when the destination is a slow card. Import cancels mid-write and cleans the
+// LIBRARY, which is an internal disk - so the cleanup is instant and unconditional, with nothing to
+// offer and no threshold.
+//
+// ⚠️ NOTHING NEW WAS BUILT FOR THIS. `_cancelErr()`, the checkpoint inside `_extractZipSubtree`
+// and `cleanupPartialSource` in `importSource`'s catch were all already there; the renderer greyed
+// its Cancel button because this wiring was missing, not because a cancel was unsafe. The comment
+// that justified the greying - "an in-flight IPC that can't be torn down cleanly" - was wrong.
+//
+// ⚠️ `exclusive: false`, like `_exportGate`: a cancel flags whatever is live at that instant,
+// and two imports running at once is a state the app already permits.
+const _importGate = require('./bulkImportGate').createGate({ exclusive: false });
+ipcMain.handle('sources:importCancel', () => ({ ok: true, cancelled: _importGate.cancelAll() }));
+
 ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metadata, forceNewSource, knownHash } = {}) => {
   const send = (payload) => {
     try { event.sender.send('sources:importProgress', payload); } catch {}
   };
+  const _token = _importGate.begin();
   try {
     return await soundFontSources.importSource({
       userData: app.getPath('userData'),
@@ -5376,6 +5717,9 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
       forceNewSource,
       knownHash,
       onProgress: send,
+      // ⭐ The same shape `_withExportCancel` hands its runs: a predicate over this token, so
+      // `sources:importCancel` flips it and the next checkpoint throws.
+      shouldStop: () => !!(_token && _token.cancelled),
       // Single-import door: customized fonts ride the review as rows and are
       // restored at Add to Library, checked rows only ([B-311], 2026-09-08).
       // The bulk door calls finalizePreparedSource directly and keeps its
@@ -5383,7 +5727,13 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
       deferCustomized: true,
     });
   } catch (err) {
+    // ⭐ A cancel arrives here as a throw, AFTER `importSource`'s own catch has already removed the
+    // partial - so this only has to name the outcome. Reported as `cancelled` rather than as an
+    // error, because a stop the user asked for is an outcome and not a failure.
+    if (err && err.name === 'ExportCancelled') return { ok: false, cancelled: true };
     return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    _importGate.end(_token);
   }
 });
 
@@ -6036,6 +6386,15 @@ ipcMain.handle('proffieOS:getSelected', () => ({
 // compared against what a connected board reports over serial.
 ipcMain.handle('proffieOS:osVersionMap', () => ({ ok: true, map: proffie.getOSVersionMap() }));
 
+// Which JMT Add-ons release a build of this config against the selected version
+// compiled in, or null. For the CACHE-RESTORE path only: a fresh compile gets the
+// same answer back in its own result, from the same helper. [B-473]
+ipcMain.handle('proffieOS:addonsVersionFor', (_, { configContent, versionName } = {}) => ({
+  ok: true,
+  addonsVersion: proffie.getCompiledAddonsVersion(
+    versionName || proffie.getSelectedVersion(), configContent),
+}));
+
 // Returns [{ name, comment, slot }] for the ArgumentName enum in the given version's
 // styles/edit_mode.h. Falls back to [] when the version / file / enum can't be parsed.
 // Pass null/undefined to use the currently selected version.
@@ -6365,8 +6724,35 @@ async function _coreToStamp() {
   } catch { return installedBest(); }
 }
 
-ipcMain.handle('proffieOS:importVersion', async (_, { sourcePath, versionName, proffieVersion }) => {
-  return proffie.importVersion(sourcePath, versionName, proffieVersion, await _coreToStamp());
+// ── Version import: cancellable, and the window stays alive ──── [B-488]
+//
+// Reuses the tested gate rather than keeping its own token, for the reason
+// written at the top of bulkImportGate.js: a single mutable pointer got this
+// wrong twice, in both directions. Non-exclusive, like the export gate — the
+// modal already prevents two at once, and refusing a second import would be a
+// new failure mode in place of a cancel.
+const _versionImportGate = require('./bulkImportGate').createGate({ exclusive: false });
+ipcMain.handle('versions:importCancel', () => ({ ok: true, cancelled: _versionImportGate.cancelAll() }));
+
+ipcMain.handle('proffieOS:importVersion', async (e, { sourcePath, versionName, proffieVersion }) => {
+  // ⚠️ Resolved BEFORE the token is taken. It is a cached index read (measured at
+  // ~3 ms) but it is also the one await that happens while the dialog already
+  // says "Copying files", so nothing about it belongs inside the cancellable
+  // span — a cancel arriving here has no copy to stop.
+  const core = await _coreToStamp();
+  const token = _versionImportGate.begin();
+  try {
+    return await proffie.importVersion(sourcePath, versionName, proffieVersion, core, {
+      shouldStop: () => token.cancelled,
+      onProgress: ({ copied }) => {
+        try { e.sender.send('versions:importProgress', { copied }); } catch {}
+      },
+    });
+  } finally {
+    // Only ever our own token; a leftover makes the NEXT cancel report work it
+    // is not really doing.
+    _versionImportGate.end(token);
+  }
 });
 
 ipcMain.handle('versions:listDetails', async () => {
@@ -6391,7 +6777,19 @@ ipcMain.handle('versions:listDetails', async () => {
 ipcMain.handle('versions:readNotes',  (_, name) => proffie.readNotes(name));
 ipcMain.handle('versions:writeNotes', (_, { name, content }) => proffie.writeNotes(name, content));
 ipcMain.handle('versions:rename',     (_, { oldName, newName }) => proffie.renameVersion(oldName, newName));
-ipcMain.handle('versions:duplicate',  (_, { name, newName }) => proffie.duplicateVersion(name, newName));
+// Same gate and the same progress channel as the import: one modal, one Cancel
+// button, so both of its paths have to be stoppable. [B-488]
+ipcMain.handle('versions:duplicate',  async (e, { name, newName }) => {
+  const token = _versionImportGate.begin();
+  try {
+    return await proffie.duplicateVersion(name, newName, {
+      shouldStop: () => token.cancelled,
+      onProgress: ({ copied }) => {
+        try { e.sender.send('versions:importProgress', { copied }); } catch {}
+      },
+    });
+  } finally { _versionImportGate.end(token); }
+});
 ipcMain.handle('versions:delete',     (_, name) => proffie.deleteVersion(name));
 ipcMain.handle('versions:openFolder',  (_, name) => {
   const proffieSubdir = path.join(proffie.getUserVersionsPath(), name, 'ProffieOS');
@@ -6424,6 +6822,10 @@ ipcMain.handle('versions:importProp', async (_, { name, sourcePath, overwrite })
   const res = proffie.importProp(name, src, { overwrite: !!overwrite });
   // Hand the path back so the renderer can re-offer the SAME file on confirm.
   if (res && res.exists) res.sourcePath = src;
+  // ⭐ And on SUCCESS too, for the eject offer. [2026-10-04] It was already returned for the
+  // collision case, so the renderer could re-offer the same file - the success case never needed
+  // it until a prop could be imported off a card.
+  if (res && res.ok) res.sourcePath = src;
   return res;
 });
 // Requirement 3 and 4 of the same entry. [B-446]
@@ -6661,7 +7063,10 @@ ipcMain.handle('versions:downloadRelease', async (event, { downloadUrl, versionN
     // newer one is published. Following latest forever would silently change
     // the compiler under a config that was fitting on the old one.
     win.webContents.send('versions:downloadProgress', { phase: 'importing' });
-    return proffie.importVersion(proffieFolder, versionName, proffieVersion, await _coreToStamp());
+    // importVersion is async now; without the await this returned a Promise and
+    // the caller's `result.ok` would have been undefined — a silent failure that
+    // looks like a refused import.
+    return await proffie.importVersion(proffieFolder, versionName, proffieVersion, await _coreToStamp());
   } catch (e) {
     return { ok: false, error: e.message };
   } finally {
@@ -6913,39 +7318,15 @@ ipcMain.handle('sdcard:executables', (_, p) => {
 // contents at all, and corruption is found at import, off the read the import
 // already does. The filesHealth half (the current folder's direct wavs,
 // checked before every paint) went with it.
-// The sync folderHealth above froze the app for minutes on a slow card
-// (~36ms per file OPEN × 7,307 wavs, measured 2026-09-08): a synchronous
-// walk inside an ipcMain.handle blocks the main event loop, and with it
-// every later IPC in the queue. These handlers run the same checks through
-// sdCardDetect's async walk: the event loop breathes between files, progress
-// streams to the caller, and a cancel actually abandons the work.
-// Job registry: renderer passes a jobId it minted; cancel flips the flag the
-// walk polls between files. Entries are cleaned up when the walk returns.
-const _sdHealthJobs = new Map();
-ipcMain.handle('sdcard:subtreeHealth', async (e, { dirPath, dirNames, jobId }) => {
-  _sdHealthJobs.set(jobId, { cancelled: false });
-  // Progress is throttled here, not in the module: per-dir completions always
-  // go out (they carry badges), per-file ticks at most every 250ms.
-  let lastTick = 0;
-  try {
-    return await sdCardDetect.subtreeHealthAsync(dirPath, dirNames || [], {
-      isCancelled: () => _sdHealthJobs.get(jobId)?.cancelled !== false,
-      onDirDone: (p) => { try { e.sender.send('sdcard:healthProgress', { jobId, kind: 'dir', ...p }); } catch {} },
-      tick: (seen) => {
-        const now = Date.now();
-        if (now - lastTick < 250) return;
-        lastTick = now;
-        try { e.sender.send('sdcard:healthProgress', { jobId, kind: 'tick', seen }); } catch {}
-      },
-    });
-  } catch { return { dirs: {}, cancelled: false, seen: 0, notChecked: 0 };
-  } finally { _sdHealthJobs.delete(jobId); }
-});
-ipcMain.handle('sdcard:healthCancel', (_, jobId) => {
-  const j = _sdHealthJobs.get(jobId);
-  if (j) j.cancelled = true;
-  return { ok: !!j };
-});
+// ⚠⚠ `sdcard:subtreeHealth` AND `sdcard:healthCancel` WENT WITH THEM. [2026-10-06]
+//
+// They existed to answer one question - does this folder hold damaged sounds - ahead of two
+// doors that refused a corrupt font. Neither door refuses any more: both now disclose the
+// damage and let the user strip it, off the read the import already performs. That left an
+// async walk, a job registry, a cancel and a progress stream with no caller, which
+// test/door-reachability and test/renderer-orphans both reported.
+// `sdCardDetect.subtreeHealthAsync` is KEPT and still tested: the walk is sound, nothing in the
+// app currently needs it, and re-exposing it is one handler.
 // What KIND of folder is this, for the browser's right-click menu. [B-280/B-281]
 //
 // ⚠️ THE FONT TEST IS soundFontBulkImport.looksLikeProffieDir, NOT A COPY OF IT.

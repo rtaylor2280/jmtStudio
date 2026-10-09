@@ -251,7 +251,7 @@ ok('a cancelled voice-pack export removes its partial when removal is cheap',
    /out\.partialRemoved = removed/.test(common) && /fs\.promises\.rm\(targetDir/.test(common),
    'a half voice pack on a card mounts and then fails when a sound is called for');
 ok('⭐ and OFFERS instead when removal would be slow, exactly as the font door does',
-   /opts\.boardCard && _ed\.isSlowWriteJob/.test(common) && /out\.offerCleanup = junk/.test(common),
+   /opts\.boardCard && _ed\.isSlowCleanupJob/.test(common) && /out\.offerCleanup = junk/.test(common),
    'same shape of job, same destination, same thresholds - it must get the same treatment');
 // ⚠️⚠️ THIS ASSERTED ONE RULE ACROSS TWO FUNCTIONS, AND THEY DO NOT SHARE IT. [B-420,
 // 2026-09-24] `soundFontSharedTracks` exports BOTH `exportToFolderAdditive` - the one every

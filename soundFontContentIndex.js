@@ -470,7 +470,9 @@ function ingestFile({ index, srcAbs, destAbs, allowLink = true }) {
 //
 // Returns { ok, absPath, hash, name, stored } where `stored: false` means the
 // content was already held.
-function storeInPool({ index, srcAbs, preferredName }) {
+// `knownHash` lets a caller that has already read the bytes skip the hash here. It is only safe
+// because the caller passes the path it hashed, so the digest and the bytes come from one read.
+function storeInPool({ index, srcAbs, preferredName, knownHash }) {
   if (!srcAbs) return { ok: false, error: 'Missing srcAbs' };
   let size = 0;
   try {
@@ -481,8 +483,8 @@ function storeInPool({ index, srcAbs, preferredName }) {
     return { ok: false, error: String((err && err.message) || err) };
   }
 
-  let h = null;
-  try { h = fileHash.hashFile(srcAbs); } catch { h = null; }
+  let h = knownHash || null;
+  if (!h) { try { h = fileHash.hashFile(srcAbs); } catch { h = null; } }
   if (!h) return { ok: false, error: 'Hash failed' };
 
   const userData = index && index.userData;

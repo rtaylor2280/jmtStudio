@@ -258,7 +258,11 @@ async function _extractNestedZipToDir(source, innerZipPath, destDir, onProgress)
 //
 // `contentIndex` is built once by the caller and threaded through, so a whole
 // folder costs one pass over the manifests.
-async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex) {
+// `stripDamagedWavs` is OFF by default, and that default is the point. Removing a file is only
+// honest where the user was shown the damage and chose to proceed - "Add from folder…" asks, and
+// passes true. Curation's folder attach asks nothing and keeps every byte it was handed. Stripping
+// unconditionally here would silently drop files for callers that never offered the choice.
+async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex, stripDamagedWavs = false) {
   // Picking an ancestor of the destination would have the walk copying its own
   // output forever. Cheap to rule out, and impossible to recover from if not.
   const srcRes = path.resolve(folderPath);
@@ -268,6 +272,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
   }
   let fileCount = 0, totalBytes = 0, linkedFiles = 0, linkedBytes = 0;
   const refusedIn = [];
+  const strippedIn = [];
   const walk = (dir, relBase) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const rel = relBase ? `${relBase}/${e.name}` : e.name;
@@ -281,7 +286,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
         // added a folder with known threats"). It builds a whole entry out of an
         // arbitrary folder on disk, and this walk was the copy — unchecked. So Studio
         // itself put programs in a font, and the export dialog would then tell the user
-        // something else on their computer had. His rule: never in, never out.
+        // something else on their computer had. The rule: never in, never out.
         // Refused rather than stripped-and-reported: nothing is destroyed, the file
         // simply does not arrive and the user's own folder is untouched.
         {
@@ -291,6 +296,17 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
               reason: _v.reason, disguised: !!_v.disguised });
             continue;
           }
+        }
+        // A damaged sound is STRIPPED where a program is REFUSED, and the difference is whose
+        // file it is. A program was never ours to carry. A damaged wav is part of the font the
+        // user asked for, and the user was shown it and chose to add the font anyway, so the
+        // font arrives without it and the close-out names what is missing. Same predicate as
+        // _selectFolderFiles, so this door and the review doors agree on what "damaged" means.
+        if (stripDamagedWavs && /\.wav$/i.test(e.name)) {
+          let _sz = 0;
+          try { _sz = fs.statSync(abs).size; } catch {}
+          const _h = require('./sdCardDetect').checkWavHealth(abs, _sz);
+          if (_h && _h.corrupt) { strippedIn.push({ relPath: rel, reason: _h.reason }); continue; }
         }
         const dest = path.join(destDir, rel);
         let size = 0;
@@ -324,7 +340,7 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex)
   };
   fs.mkdirSync(destDir, { recursive: true });
   walk(srcRes, '');
-  return { fileCount, totalBytes, linkedFiles, linkedBytes, refused: refusedIn };
+  return { fileCount, totalBytes, linkedFiles, linkedBytes, refused: refusedIn, stripped: strippedIn };
 }
 
 // createEntry({ userData, sourceUuid, candidate, name?, metadata?, onProgress?, folderSource? })
@@ -400,7 +416,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       const contentIndex = require('./soundFontContentIndex').buildIndex(userData);
       result = await _copyFolderIntoDir(folderSource.folderPath, entryDir, (p) => {
         emit('extracting', p);
-      }, contentIndex);
+      }, contentIndex, folderSource.stripDamagedWavs === true);
     } else if (candidate.nested) {
       result = await _extractNestedZipToDir(source, candidate.path, entryDir, (p) => {
         emit('extracting', p);
@@ -574,7 +590,35 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     } catch {}
 
     emit('done', { fileCount: result.fileCount, totalBytes: result.totalBytes });
-    return { ok: true, name: entryName, meta, refused: (result && result.refused) || [] };
+    // ⭐⭐ THE SAVINGS WERE ALREADY COMPUTED AND THEN DROPPED HERE. [2026-10-04]
+    //
+    // The folder writer above counts `linkedFiles`/`linkedBytes` - content this library already
+    // held, so the new entry points at it instead of storing a second copy - and this return
+    // kept only `name`, `meta` and `refused`. So the one door that adds a font from a folder
+    // could not report what the import did, which is what was hit: *"how would i ever see the
+    // things like we see on adding a font that shows new space over already existed etc"*.
+    // ⚠️ SHAPED LIKE `soundFontCommon`'s `savings`, NOT A NEW FIELD SET. The close-out copy and
+    // its brag gate already read that shape, so matching it means no second idea of what a
+    // saving is. `archiveBytes` is 0 because a folder has no archive to have started from, and
+    // the close-out already falls back to `contentBytes` when it is.
+    return {
+      ok: true, name: entryName, meta, refused: (result && result.refused) || [],
+      // Separate from `refused` because the user agreed to these: the damage was named before the
+      // add started. Refused files are a finding; stripped files are the receipt for a choice.
+      stripped: (result && result.stripped) || [],
+      // What ACTUALLY LANDED, which stops being the same as what was inspected the moment a file
+      // is stripped or refused. The close-out used the inspect's totals and so reported 44 files
+      // and 7.7 MB for an add of 43 files and 6.6 MB - overstating a font by exactly the damaged
+      // sound it had just told the user it was leaving out.
+      added: { fileCount: (result && result.fileCount) || 0, totalBytes: (result && result.totalBytes) || 0 },
+      savings: {
+        archiveBytes: 0,
+        contentBytes: (result && result.totalBytes) || 0,
+        crossLinked: null,
+        dedupSaved: (result && result.linkedBytes) || 0,
+        reusedSource: false,
+      },
+    };
   } catch (err) {
     // Cleanup partial entry so the library stays consistent.
     try { fs.rmSync(entryDir, { recursive: true, force: true }); } catch {}
@@ -1683,7 +1727,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
             const _wb = (opts.wrote && opts.wrote.bytes) || 0;
             const junkLeft = out.leftovers.find((p) => /[\\/]DELETE\./.test(p));
             if (junkLeft) {
-              if (opts.boardCard && _ed0.isSlowWriteJob(_wf, _wb)) {
+              if (opts.boardCard && _ed0.isSlowCleanupJob(_wf, _wb)) {
                 // ⚠️ Moved OUT of `leftovers`: naming it and then asking about it would state
                 // the same fact twice, which is the noise this app keeps cutting.
                 out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
@@ -1716,7 +1760,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         const _ed = require('./exportDestination');
         const wroteFiles = (opts.wrote && opts.wrote.files) || 0;
         const wroteBytes = (opts.wrote && opts.wrote.bytes) || 0;
-        if (opts.boardCard && _ed.isSlowWriteJob(wroteFiles, wroteBytes)) {
+        if (opts.boardCard && _ed.isSlowCleanupJob(wroteFiles, wroteBytes)) {
           const junk = path.join(destDir, `DELETE.${targetName}`);
           try {
             if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
@@ -2380,10 +2424,19 @@ function getEntryCustomization(userData, entryName) {
   // open and backfill the tag. Bump on any future change to what
   // "customized" means or carries.
   const st = meta.customization;
+  // ⭐ `hasCustomizedTag` RIDES BOTH RETURN PATHS. [2026-10-08] It is the TAG AS IT IS ON DISK,
+  // which the open detail modal needs so its chips can be kept in step. It used to infer that
+  // from `cached` - "a fresh determination just moved the tag, so sync" - and that was a RACE:
+  // five callers share this handler, whoever lands first gets the fresh result, and everyone
+  // after gets `cached: true` and silently skips the sync. Reported 2026-10-08: the tag was
+  // written to meta.json and the open modal's TAGS row stayed empty, intermittently.
+  const _tagOnDisk = (m) => (Array.isArray(m && m.tags) ? m.tags : [])
+    .some(t => String(t).toLowerCase() === 'customized');
   if (!meta.contentHashDirty && meta.contentHash && st && st.v === 3
       && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
     return { ok: true, known: true, customized: !!st.customized, added: st.added|0,
-             removed: st.removed|0, changed: st.changed|0, tracksOnly: !!st.tracksOnly, cached: true };
+             removed: st.removed|0, changed: st.changed|0, tracksOnly: !!st.tracksOnly, cached: true,
+             hasCustomizedTag: _tagOnDisk(meta) };
   }
   // Persist a KNOWN answer onto the entry. Deliberately never stamps `unknown`:
   // unknown usually means a manifest is missing, and those get backfilled — a
@@ -2412,6 +2465,13 @@ function getEntryCustomization(userData, entryName) {
       if (res.customized && !_hasTag) m.tags = [..._tags, 'Customized'];
       else if (!res.customized && _hasTag) m.tags = _tags.filter(t => String(t).toLowerCase() !== 'customized');
       fs.writeFileSync(p, JSON.stringify(m, null, 2));
+      // ⚠️ SET ONLY AFTER THE WRITE SUCCEEDS, and from what was actually written. Reporting the
+      // INTENDED tag state before the write would be an observation the disk does not support -
+      // and the caller syncs its UI to this. If the write throws, the field stays undefined and
+      // the renderer's `typeof === 'boolean'` guard leaves the chips alone, which is the right
+      // degrade: stale chips beat chips that disagree with the file.
+      res.hasCustomizedTag = (Array.isArray(m.tags) ? m.tags : [])
+        .some(t => String(t).toLowerCase() === 'customized');
     } catch {}
     return res;
   };

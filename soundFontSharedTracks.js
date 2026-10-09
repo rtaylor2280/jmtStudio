@@ -7,11 +7,14 @@
 // library entry.
 
 const fs = require('fs');
-const fsp = require('fs').promises;   // [B-400] async copy, so the loop can yield
 const path = require('path');
 const { copyTreeWithProgress, copyFileWithProgress } = require('./sfExportCopy');
 const { rmWithRetry } = require('./fsRemove');
 const hashIndex = require('./soundFontSharedTracksHash');
+// [B-424] `copyFileHashing` — one read of the source, hashed on its way to a temp beside the
+// destination. Required at the top rather than inline: the add loop is the hot path and a
+// per-file require is a lookup per file.
+const fileHash = require('./soundFontFileHash');
 
 function sharedTracksRoot(userData) {
   return path.join(userData, 'soundFonts', 'sharedTracks');
@@ -102,10 +105,10 @@ function _uniqueName(root, desired) {
 // pair self-corrects on the next message. The backend already knows the total here, so there is
 // nothing to reconstruct.
 //
-// ⚠️⚠️ THE TOTAL COUNTS EACH FILE TWICE WHEN DEDUP IS ON, because each file IS read twice - once
-// to hash for the duplicate check, once to copy. Counting the copy alone would run the bar at half
-// speed and then jump. A duplicate is never copied, so its copy half is CREDITED the moment it is
-// found - otherwise a duplicate-heavy add would stop short of 100%.
+// The total is the data size, counted once. It used to count each file twice, because each file
+// was read twice — hashed for the duplicate check, then copied. copyFileHashing does both in one
+// read, so there is no second half to credit and a duplicate settles its own cost as it streams.
+// [B-424]
 async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shouldStop) {
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No files supplied' };
@@ -145,13 +148,15 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
   const _srcOf = (e) => ((e && typeof e === 'object') ? e.path : e);
   const _sizes = new Map();
   let _bytesTotal = 0;
-  const _hashing = !!_index;
   for (const e of sourceFilePaths) {
     const sp = _srcOf(e);
     let sz = 0;
     try { sz = fs.statSync(sp).size; } catch {}
     _sizes.set(sp, sz);
-    _bytesTotal += _hashing ? sz * 2 : sz;
+    // One pass, so one budget. This was sz * 2 when hashing, because the file was hashed and then
+    // copied; the total is now the data size, which is what the slow-source warning reports for
+    // the same pick and what the user's file manager shows. [B-424]
+    _bytesTotal += sz;
   }
   let _bytesDone = 0;
   const _emit = (name) => {
@@ -203,35 +208,10 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
     // read a file is not evidence that we already have it.
     const _sz = _sizes.get(src) || 0;
     const _label = path.basename(String(src || ''));
-    if (_index) {
-      let _hashed = 0;
-      try {
-        // ⚠️ findByHash returns an ARRAY of matches and `[]` when there are none.
-        // An empty array is truthy, so a bare `if (hit)` reports every track as a
-        // duplicate against an empty library — which is exactly what it did until
-        // the test caught it. Check the length.
-        // [B-400] Streamed, so a single 400 MB wav moves the bar while it is read rather than
-        // being one silent unit - and so it is not pulled into memory whole.
-        const h = await hashIndex.hashFileAsync(src, (n) => { _hashed += n; _credit(n, _label); });
-        const hits = h ? hashIndex.findByHash(_index, h) : null;
-        if (hits && hits.length) {
-          duplicates.push({ src, have: hits[0].name || '' });
-          // ⚠️ CREDIT THE COPY THAT WILL NEVER HAPPEN. The budget charged this file twice;
-          // a duplicate is not copied, so without this the bar stops short by one file's
-          // size for every duplicate - and re-adding a card the user already has is ALL
-          // duplicates, which is the most common way this path is used.
-          _credit(_sz, _label);
-          continue;
-        }
-      } catch {}
-      // A hash that failed part-way still charged the budget for what it read; settle the
-      // rest of the read half so the bar does not drift on an unreadable file.
-      if (_hashed < _sz) _credit(_sz - _hashed, _label);
-    }
     const dest = _uniqueName(root, safe);
     try {
-      // [B-400] fsp.copyFile, not copyFileSync: the await is what yields the event loop so the
-      // ticks emitted above can actually reach the renderer while the add is still running.
+      // [B-400] The copy is awaited rather than synchronous: the await is what yields the event
+      // loop so the ticks emitted above reach the renderer while the add is still running.
       //
       // [B-406] ⭐⭐ AND IT GOES THROUGH THE LIBRARY-WIDE POOL FIRST. His framing, and it is the
       // one that settles this: "tracks is just a font source under a different name" — for
@@ -272,15 +252,36 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       // points at them, so a font linking straight to a track does not need a pool copy to
       // outlive a deleted track.
       const _destAbs = path.join(root, dest);
+      // The source is opened once. It used to be hashed here, then handed to ingestFile, which
+      // hashed and copied it again — three opens per novel track, and per-file open is the
+      // expensive operation across a board's USB mass storage (see soundFontSources.js:189).
+      // ⚠️ ingestFile is pointed at the TEMP, not at src. It still hashes and copies, but off the
+      // local disk. Passing src here would put the second and third opens back. [B-424]
+      const _tmpAbs = _destAbs + '.jmt-add-tmp';
+      const _r = await fileHash.copyFileHashing(src, _tmpAbs,
+        { onBytes: (n) => _credit(n, _label), shouldStop });
+      if (_r && _r.stopped) { _stopped = true; break; }
+      if (!_r || !_r.hash) { skipped.push({ src, reason: 'Could not read the file' }); continue; }
+      // ⚠️ findByHash returns an ARRAY of matches and `[]` when there are none. An empty array is
+      // truthy, so a bare `if (hit)` reports every track as a duplicate against an empty library.
+      const _hits = _index ? hashIndex.findByHash(_index, _r.hash) : null;
+      if (_hits && _hits.length) {
+        // The copy we throw away: a local write and delete instead of a second open of the source.
+        try { fs.rmSync(_tmpAbs, { force: true }); } catch {}
+        duplicates.push({ src, have: _hits[0].name || '' });
+        continue;
+      }
       let _linked = false;
       try {
         if (_CI && _ciIndex) {
-          const r = _CI.ingestFile({ index: _ciIndex, srcAbs: src, destAbs: _destAbs });
+          const r = _CI.ingestFile({ index: _ciIndex, srcAbs: _tmpAbs, destAbs: _destAbs });
           _linked = !!(r && r.ok);
         }
       } catch { _linked = false; }
-      if (!_linked) await fsp.copyFile(src, _destAbs);
-      _credit(_sz, _label);
+      // ⚠️ Either ingest placed the file (link or copy) and the temp is now redundant, or nothing
+      // did and the temp IS the file. Renaming beats a second copy, and it is atomic on one volume.
+      if (_linked) { try { fs.rmSync(_tmpAbs, { force: true }); } catch {} }
+      else { fs.renameSync(_tmpAbs, _destAbs); }
       // Hash + record. Failure here doesn't abort the add — the file
       // is on disk and ensureIndex will backfill it on next read.
       try { hashIndex.recordAdd(userData, dest); } catch {}

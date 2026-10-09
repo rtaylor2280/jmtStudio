@@ -51,7 +51,7 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
 // that already holds rather than inventing the contract at the same time.
 {
   const need = ['osName', 'mountPathOf', 'label', 'invoke', 'vocab'];
-  const vneed = ['lingersAfterEject', 'volumeNoun', 'lingerNote', 'busyNote'];
+  const vneed = ['lingersAfterEject', 'volumeNoun', 'busyNote'];
   for (const osKey of ['win32', 'darwin', 'linux']) {
     const p = E._PLATFORMS[osKey];
     ok(`${osKey} is present`, !!p);
@@ -66,11 +66,13 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
      E._PLATFORMS.win32.vocab.lingersAfterEject === true
      && E._PLATFORMS.darwin.vocab.lingersAfterEject === false
      && E._PLATFORMS.linux.vocab.lingersAfterEject === false);
-  ok('and only Windows carries a lingerNote',
-     typeof E._PLATFORMS.win32.vocab.lingerNote === 'function'
-     && E._PLATFORMS.darwin.vocab.lingerNote === null
-     && E._PLATFORMS.linux.vocab.lingerNote === null,
-     'null is the signal to OMIT the sentence, not to translate it');
+  // The post-eject "it stays listed as an empty drive" note was removed 2026-10-06: the eject
+  // reports its status inline on the door's one ending surface, and Windows raises its own
+  // notification. `lingersAfterEject` stays because it is a behaviour flag, not a string.
+  ok('no platform carries a post-eject linger sentence',
+     !('lingerNote' in E._PLATFORMS.win32.vocab)
+     && !('lingerNote' in E._PLATFORMS.darwin.vocab)
+     && !('lingerNote' in E._PLATFORMS.linux.vocab));
 
   // Path mapping per platform, exercised without needing the OS.
   const CASES = [
@@ -137,9 +139,15 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
   for (const s of ['ejected', 'returned', 'busy']) {
     ok(`'${s}' is a distinct reported outcome`, SRC.includes(`'${s}'`));
   }
-  ok("⚠️ 'returned' and 'busy' are told apart by re-reading the media",
-     /status: mediaPresent\(t\.mountPath\) \? 'busy' : 'returned'/.test(SRC),
-     'collapsing them would tell the user the wrong thing about a card in their hand');
+  // ⚠️ This matched `mediaPresent(t.mountPath) ? 'busy' : 'returned'` until 2026-10-06, which
+  // cannot separate the two: a card that released and was re-mounted is present, same as one that
+  // never moved. Behavioural proof is in test/eject-bounce-is-not-busy.test.js.
+  ok("⚠️ 'returned' and 'busy' are told apart by whether the media EVER left",
+     /status: res\.everGone \? 'returned' : 'busy'/.test(SRC),
+     'collapsing them tells the user the wrong thing about a card in their hand');
+  ok('⚠️ and waitForMediaGone reports that fact rather than discarding it',
+     /everGone/.test(SRC) && /everGone = true/.test(SRC),
+     'the classifier cannot distinguish what the watcher never recorded');
   ok('⚠️ the eject verb\'s return value is NOT used as the verdict',
      /const res = await waitForMediaGone/.test(SRC)
      && !/if \(inv\.ok\) return \{ status: 'ejected'/.test(SRC),

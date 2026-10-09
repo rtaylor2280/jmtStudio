@@ -1361,10 +1361,20 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     // The FQBN rather than the friendly name: it is what was handed to
     // arduino-cli, it is unambiguous about the board variant, and it matches
     // the identity block printed at the top of the build log. (2026-08-15)
+    // addonsVersion rides along for exactly the reason osVersion does, and from
+    // the same place: the tree that was staged and compiled, read at the moment
+    // it succeeded. "ProffieOS 8.10 +JMT" names the tree and not the add-ons
+    // release inside it, so two boards built from that tree a month apart are
+    // otherwise indistinguishable in the record. [B-473]
+    //
+    // The derivation lives in proffieos.getCompiledAddonsVersion because the
+    // cache-restore path needs the same answer and the two must not drift.
+    const _osVersion = proffie.getSelectedVersion();
     return {
       ok: true, buildPath, durationMs, cacheSaveError,
       coreVersion:   getActiveCoreVersion(),
-      osVersion:     proffie.getSelectedVersion(),
+      osVersion:     _osVersion,
+      addonsVersion: proffie.getCompiledAddonsVersion(_osVersion, configContent),
       compiledFqbn:  fqbn,
       compiledUsb:   usb,
       ...sizeReport,
@@ -2415,7 +2425,7 @@ module.exports = {
   // Where our own copy of the core lives. Exported for the same reason
   // coreCanBuildAt is: anything asking about installed cores has to look in the
   // directory the compiler will actually use. portDetector still keeps a local
-  // copy of this rule, which is a drift risk worth collapsing separately.
+  // copy of tthe rule, which is a drift risk worth collapsing separately.
   getArduinoDataPath,
   getCoreTreeRoot,
   getCoreTreePath,

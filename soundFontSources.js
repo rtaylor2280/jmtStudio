@@ -175,7 +175,21 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 //
 // ⚠️ The .filter() callback could not await, so this is an explicit loop. The predicate body below
 // is UNCHANGED - only `return false` became `continue` and `return true` became a push.
-async function _selectFolderFiles(srcDir) {
+//
+// ⚠️⚠️ AND IT TAKES `shouldStop` AS OF 2026-10-06, BECAUSE YIELDING IS NOT STOPPING. [B-462]
+// His measurement, bulk-importing a board card: *"just finished... almost 6 min. cancelled only a
+// few seconds in."* Six minutes of work that could not be interrupted. [B-398] made this pass
+// `breathe()` so the WINDOW stays alive through it, and that fix was right - but a responsive
+// window that ignores Cancel for six minutes is the same wait with a nicer frame around it. The
+// copy loop below has had a checkpoint since 2026-10-04; this pass runs BEFORE it, so a cancel
+// during the inspection never reached one.
+// ⭐ The checkpoint goes where `breathe()` already is. The yield point and the cancel point are
+// the same place by nature - both are "we are between files, it is safe to not continue" - and
+// putting them together costs one comparison per file on a pass that is doing an open per file.
+// ⚠️ THE TRANSPORT IS WHY IT IS MINUTES AND NOT MILLISECONDS. Per-file open is the expensive
+// operation across a board's USB mass storage, and this reads the head of EVERY file before a
+// byte is copied, so a several-hundred-wav bundle is several hundred of them.
+async function _selectFolderFiles(srcDir, shouldStop = null) {
   const strippedFiles = [];   // damaged wavs, removed
   const blockedFiles = [];    // programs, removed ([B-214])
   const notedFiles = [];      // macro documents and un-inspectable archives, KEPT
@@ -185,6 +199,10 @@ async function _selectFolderFiles(srcDir) {
   for (const f of walkFolderSorted(srcDir)) {
     if (_isNoisePath(f.relPath)) continue;
     await breathe();
+    // ⭐ Between files, beside the yield. Nothing has been written at this point on either caller's
+    // path - the zip has not been created and the copy has not started - so a throw here leaves
+    // nothing behind to clean up.
+    if (shouldStop && shouldStop()) throw _cancelErr();
     {
       // ONE read, BOTH predicates. This used to call checkWavHealth, which opens the
       // file itself - so a wav was opened twice, once for the header and again by the
@@ -327,7 +345,11 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   const archiver = require('archiver');
   const { Transform, Readable } = require('stream');
 
-  const { files, strippedFiles, blockedFiles, notedFiles } = await _selectFolderFiles(srcDir);
+  // ⭐ `opts.shouldStop` reaches the SELECTION pass too, not just the archive loop below. [B-462]
+  // The two checks at the archive stage were useless to anyone cancelling during the inspection,
+  // which on a board card is the long half.
+  const { files, strippedFiles, blockedFiles, notedFiles } =
+    await _selectFolderFiles(srcDir, opts.shouldStop || null);
   // ⚠️⚠️ THE EXTRA ENTRIES ARE IN THE ARCHIVE, SO THEY ARE IN THE TOTAL. [B-420, 2026-09-23]
   // His report, exporting a source whose customized font carried a pile of tracks he had added for
   // earlier testing: *"you see the progress bars at 100% for a really long time because it was like
@@ -486,7 +508,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
       // ⚠️⚠️ DESTROY THE SINK TOO, OR NOTHING SETTLES FOR NINETY SECONDS. abort() stops archiver
       // feeding the stream but does not close it, so the promise below sat there until the
       // stall watchdog gave up - and that watchdog's whole job is to say the SOURCE is damaged.
-      // His report: he cancelled during compress and eventually got "the source has a damaged
+      // Reported: he cancelled during compress and eventually got "the source has a damaged
       // or unreadable file", about a font that is perfectly fine. [B-005 item 4]
       try { fileStream.destroy(); } catch {}
       return;
@@ -1148,7 +1170,7 @@ function cleanupPartialSource(uuidDir) {
 // the read the import already performs. Callers no longer have to know in advance
 // that a font is damaged — which they could only learn from a full pre-walk of
 // the card, the cost this entry removed.
-async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, knownHash, deferCustomized }) {
+async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, knownHash, deferCustomized, shouldStop = null }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
   // Sweep corrupt source dirs (meta without archive, archive without
@@ -1225,7 +1247,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // entirely: the forced source stored .jmt-curation/ (sidecar, receipts, the
   // customized-font payload) INSIDE its tree as vendor content, restored
   // nothing, and returned curation:null, which also disarmed the review's
-  // sidecar-outranks-heuristic guard. Ryan hit the full stack live
+  // sidecar-outranks-heuristic guard. This hit the full stack live
   // (2026-09-08 00:44): re-importing his own export through the duplicate
   // prompt lost the restore and the checked state. Proven by headless replay
   // of both doors against his real export.
@@ -1372,15 +1394,16 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // set and this same pass routes our files there while the vendor's go into the pool - replacing
       // a separate strip-and-repack that extracted everything, re-zipped it, and left this call to
       // extract it all over again.
-      // ⚠️ shouldStop is passed through as null because this path never wired a cancel; leaving the
-      // positional gap visible rather than hiding it behind the opts object, so it stays obvious that
-      // an import staging pass is not yet cancellable.
+      // ⭐ `shouldStop` IS WIRED AS OF 2026-10-04. It used to be a deliberate `null` with a note
+      // saying an import staging pass was not yet cancellable - which is why the renderer greyed its
+      // Cancel button rather than offering one that lied. The checkpoint inside `_extractZipSubtree`
+      // was always there; only the caller's half was missing.
       const result = await _extractZipSubtree(sourcePath, '', destDir, (p) => {
         emit('copying', {
           percent: p.percent, bytes: p.totalBytes, totalBytes: p.expectedBytes,
           currentFile: p.currentFile,
         });
-      }, null, { curationPayloadDir });
+      }, shouldStop, { curationPayloadDir });
       // Expand before measuring, so the figures describe what we actually keep
       // rather than the archives we just threw away.
       // Its OWN stage: this is a distinct operation with its own denominator, and
@@ -1430,7 +1453,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // ⚠️ The hash can only be taken AFTER the copy, because there is no
       // container to hash on the way past — so the dedup check below stays where
       // it is, after the write, exactly as the zip-transform needed it.
-      const sel = await _selectFolderFiles(sourcePath);
+      // ⭐ `shouldStop` here as well as in the copy loop below. [B-462] This is the pass that reads
+      // the card; the loop below is the one that writes our disk, and a cancel arrives during the
+      // first far more often than the second.
+      const sel = await _selectFolderFiles(sourcePath, shouldStop);
       strippedFiles = sel.strippedFiles;
       blockedFiles = sel.blockedFiles;
       notedFiles = sel.notedFiles;
@@ -1459,6 +1485,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // ⭐ The ZIP route never had this problem because _extractZipSubtree already awaited —
       // which is why the bug looked intermittent: it depended on whether the source was a folder.
       for (const f of vendorFiles) {
+        // ⭐ CANCEL CHECKPOINT, between files. [2026-10-04] The same place the loop already yields,
+        // so it costs nothing - and a throw here lands in the catch that calls
+        // `cleanupPartialSource`, which is what makes cancelling safe rather than merely possible.
+        if (shouldStop && shouldStop()) throw _cancelErr();
         const abs = path.join(destDir, f.relPath.replace(/\//g, path.sep));
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         await fs.promises.copyFile(f.absPath, abs);
@@ -1576,6 +1606,23 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // sharing. The close-out needs it to say what the font costs on disk
     // (holds minus saved), and it cannot be recovered later without
     // re-walking the tree. ([B-317], 2026-09-06.)
+    // ⭐⭐ THE LAST CHECKPOINT, AND IT RUNS AFTER THE SOURCE IS ALREADY COMMITTED. [B-424]
+    // Every earlier checkpoint protects work still in progress. This one protects work that
+    // FINISHED: a cancel arriving during the commit itself was noticed by nobody. The source
+    // was fully written - meta stamped, candidates computed - `importSource` returned ok, and
+    // the renderer's rollback was left racing a main process that had been busy writing it.
+    // Found 2026-10-07 by his dev pass: a cancelled 129 MB link import left a complete source
+    // with nothing pointing at it, and the same shape had produced a 25 MB orphan an hour before.
+    // ⭐ IT DELETES WHAT IT JUST BUILT, which is the only honest reading of the rule:
+    // *"if I click it, it should just discard on an import."* An import writes nothing to the
+    // user's card, so there is no point at which it is too late to throw OUR copy away - that
+    // "too late" belongs to export, where the bytes are already on their media.
+    // ⚠️ THROUGH deleteSource, not cleanupPartialSource: this dir is committed, not partial, so
+    // it owns a file-hash manifest and possibly attachments that a bare rmSync would strand.
+    if (shouldStop && shouldStop()) {
+      try { deleteSource(userData, uuid); } catch {}
+      throw _cancelErr();
+    }
     return { ...res, strippedFiles, blockedFiles, notedFiles, crossLinked, contentBytes: fileSize,
       archiveBytes: inputArchiveBytes,
       curation: curation || null, curationApplied: res.curationApplied || null,
@@ -1586,6 +1633,15 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   } catch (err) {
     cleanupPartialSource(uuidDir);
     _dropCurationTmp();
+    // ⚠️⚠️ A CANCEL IS NOT A FAILURE, AND THIS CATCH CALLED EVERY ONE OF THEM ONE. [B-424]
+    // The checkpoints throw `ExportCancelled`, which landed here and came back as
+    // "Import failed: ..." - the user's own click reported to them as a red error. That is the
+    // identical defect three export doors already inherited, and the reason `cancelled` is a
+    // flag rather than something callers infer from `ok:false`. The partial (or the committed
+    // source, if the last checkpoint fired) is already gone by this line either way.
+    if (err && (err.name === 'ExportCancelled' || err.cancelled)) {
+      return { ok: false, cancelled: true, error: 'Import cancelled.' };
+    }
     return { ok: false, error: `Import failed: ${err.message}` };
   }
 }

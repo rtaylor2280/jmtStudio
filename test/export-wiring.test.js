@@ -262,7 +262,7 @@ ok('⚠️⚠️ and a door PASSES it to the module that decides cleanup',
    /boardCard: !!token\.boardCard/.test(main),
    'set-and-never-read is exactly what this file exists to catch');
 ok('⚠️⚠️ and the module READS it to choose rename-vs-delete',
-   /opts\.boardCard && _ed\.isSlowWriteJob/.test(read('soundFontEntries.js')),
+   /opts\.boardCard && _ed\.isSlowCleanupJob/.test(read('soundFontEntries.js')),
    'without a reader, the whole board-card cleanup rule is decoration');
 // ⚠️ THIS ASSERTED A VARIABLE NAME (`boardCard: _fontBoardCard`) AND THE NAME WAS THE WRONG
 // THING TO HOLD ON TO. When door 1 moved onto the shared runner the local disappeared - the
@@ -308,7 +308,7 @@ ok('a door threads the tally in', /wrote: token\.wrote/.test(main));
 {
   const common = read('soundFontCommon.js');
   ok('the voice-pack door has the offer branch',
-     /opts\.boardCard && _ed\.isSlowWriteJob/.test(common));
+     /opts\.boardCard && _ed\.isSlowCleanupJob/.test(common));
   // ⚠️ WINDOW WIDENED 2026-09-23, and the reason is worth keeping: this failed on a COMMENT.
   // Three explanatory lines were added between the call and its arguments and pushed
   // `boardCard` past a 400-character window, so a test about wiring went red over prose. The
@@ -526,22 +526,15 @@ ok('the offer requires removable === true',
   // ⭐ Microsoft's own wording for this state is "Safe To Remove Hardware" and explains nothing
   // further, so the inline status now says just that and this note is kept short for wherever
   // it is genuinely worth saying.
-  // ⚠️ THE ASSERTION PINNED THE OLD SENTENCE, NOT THE FACT. [2026-09-24] The note was reworded:
-  // "Windows may keep showing <label>" hedged about our own result, and it repeated a label the
-  // toast had already said one clause earlier. **The behaviour it describes was RE-MEASURED before
-  // rewording** - an hour after a real eject the letter was still listed as `(no media)` - so the
-  // note stays and only its wording changed. What is worth asserting is that Windows still HAS a
-  // note and the other platforms still do not, which is the per-OS behaviour flag this guards.
-  ok('⭐ Windows still has a note about the letter that stays behind',
-     /lingerNote: \(\) =>/.test(eject) && /stays listed as an empty drive/.test(eject),
-     'measured: the letter lingers for board cards and USB readers, so the behaviour is real '
-     + 'even though the inline status no longer explains it');
-  ok('⚠️ and it does not repeat the label the toast already said',
-     !/lingerNote: \([a-z]+\) =>[\s\S]{0,120}\$\{label\}/.test(eject),
-     'the note is the second half of a sentence about a drive already named');
-  ok('⭐⭐ and the other platforms OMIT it rather than translating it',
-     /lingersAfterEject: false,[\s\S]{0,200}?lingerNote: null/.test(eject),
-     'null is the signal to drop the sentence - on macOS the mount point really does go away');
+  // The post-eject linger sentence was removed 2026-10-06. A door ends in one surface and the
+  // eject reports inline on it; Windows raises its own notification, so the app does not add a
+  // second explanation. `lingersAfterEject` remains as a behaviour flag.
+  ok('⚠️ no platform ships a post-eject linger sentence',
+     !/lingerNote/.test(eject),
+     'the eject status is inline on the ending surface and says nothing further');
+  ok('⚠️ the per-OS linger BEHAVIOUR flag is still declared',
+     /lingersAfterEject: true/.test(eject) && /lingersAfterEject: false/.test(eject),
+     'whether the letter stays behind differs by OS and main.js still reports it');
   ok('⚠️ no eject message in the renderer names an operating system',
      (() => {
        const i = H.indexOf('const _sfMaybeOfferEject');

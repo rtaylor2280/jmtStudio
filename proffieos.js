@@ -13,6 +13,10 @@ const { app } = require('electron');
 const path   = require('path');
 const fs     = require('fs');
 const crypto = require('crypto');
+// Shared because a directory something still holds open cannot be removed on
+// Windows, and this app had grown three separate answers to that. Used here to
+// clear a half-copied version tree after a cancel.
+const fsRemove = require('./fsRemove');
 
 // ── Constants ──────────────────────────────────────────
 const CONFIG_FILENAME  = 'my_config.h';
@@ -285,6 +289,74 @@ function copyDirSync(src, dest) {
   }
 }
 
+// The same copy, but the event loop stays alive and a cancel can land. [B-488]
+//
+// ⭐⭐ WHY THIS EXISTS BESIDE copyDirSync RATHER THAN REPLACING IT. This hit the
+// version import with the window reading "JMT Studio (Not Responding)" and the
+// dialog's Cancel unavailable. `copyDirSync` is a synchronous recursive walk, and
+// Electron routes frame presentation AND input dispatch through the main process,
+// so for the whole copy the app cannot repaint and cannot receive the cancel IPC
+// — the button is not ignoring the click, nothing is listening. Exactly the shape
+// written up in [B-462] for the bulk scan.
+//
+// ⚠️ MEASURED on a real source (346 files, 2.6 MB, read from a Drive-backed
+// folder): 2,092 ms cold, 1,638 ms warm, 893 ms local-to-local. Short, and that
+// is the point — the blocking time scales with whatever the user points at, and
+// nothing bounds what that is.
+//
+// ⚠️ THE OTHER TWO copyDirSync CALLERS ARE LEFT ALONE ON PURPOSE (`initWorkspace`
+// and the prop copy). They are different doors with their own sizes and their own
+// walk entries; converting them is not this fix.
+//
+// ⚠️⚠️ YIELDS ON A TIME BUDGET, NOT A FILE COUNT, AND THAT CORRECTION CAME FROM
+// TESTING IT. The first cut yielded every 24 files and it was reported "still
+// went briefly unresponsive because I tried to click again and it wasn't showing
+// canceling". A COUNT CANNOT BOUND THE BLOCK: a ProffieOS tree holds both 2 KB
+// headers and much larger assets, so 24 files is a few milliseconds in one folder
+// and a visible stall in another. Budgeting by elapsed time bounds it regardless
+// of what the files turn out to be.
+//
+// One frame at 60 Hz is ~16 ms, so that is the ceiling on how long a click can sit
+// unpainted. The cost is more setImmediate calls on fast trees, which is cheap
+// next to a window that does not answer.
+const YIELD_AFTER_MS = 16;
+
+async function copyDirCancellable(src, dest, opts = {}) {
+  const shouldStop = typeof opts.shouldStop === 'function' ? opts.shouldStop : () => false;
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+  let copied = 0;
+  let lastYield = Date.now();
+
+  async function walk(s, d) {
+    if (shouldStop()) return false;
+    fs.mkdirSync(d, { recursive: true });
+    for (const entry of fs.readdirSync(s, { withFileTypes: true })) {
+      if (shouldStop()) return false;
+      const sp = path.join(s, entry.name);
+      const dp = path.join(d, entry.name);
+      if (entry.isDirectory()) {
+        if (!await walk(sp, dp)) return false;
+      } else {
+        fs.copyFileSync(sp, dp);
+        copied++;
+        if (Date.now() - lastYield >= YIELD_AFTER_MS) {
+          lastYield = Date.now();
+          onProgress({ copied });
+          // Hand the loop back so a repaint and the cancel IPC can happen. The
+          // check above means this costs at most one frame of latency on the
+          // click, whatever the files weigh.
+          await new Promise((r) => setImmediate(r));
+        }
+      }
+    }
+    return true;
+  }
+
+  const finished = await walk(src, dest);
+  onProgress({ copied });
+  return { completed: finished, copied };
+}
+
 /**
  * Ensures the selected version is in the writable workspace.
  * No-op in dev (source is already writable).
@@ -501,7 +573,7 @@ function readStagedStyles() {
 // a network call, this function is synchronous, and proffieos cannot require
 // toolchain without a cycle. Omitting it leaves the version following latest,
 // which is the correct degradation rather than a failure.
-function importVersion(sourcePath, versionName, proffieVersion, coreVersion) {
+async function importVersion(sourcePath, versionName, proffieVersion, coreVersion, opts = {}) {
   if (path.basename(sourcePath) !== 'ProffieOS') {
     return { ok: false, error: 'Selected folder must be named "ProffieOS".' };
   }
@@ -520,8 +592,19 @@ function importVersion(sourcePath, versionName, proffieVersion, coreVersion) {
     return { ok: false, error: `A version named "${name}" already exists.` };
   }
   try {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    copyDirSync(sourcePath, dest);
+    // ⚠️ A CANCEL MUST NOT LEAVE A HALF-COPIED VERSION ON THE LIST. The version
+    // directory is created here, so if we created it and the copy did not finish,
+    // it is ours to remove — and `versionDir` is the whole of what we made, which
+    // is why the removal targets it rather than `dest`. The existsSync guard
+    // above already refused a name that was in use, so this can only ever remove
+    // a tree this call brought into being. [B-488]
+    const versionDir = path.dirname(dest);
+    fs.mkdirSync(versionDir, { recursive: true });
+    const copy = await copyDirCancellable(sourcePath, dest, opts);
+    if (!copy.completed) {
+      try { await fsRemove.rmWithRetry(versionDir); } catch { /* best effort */ }
+      return { ok: false, cancelled: true, error: 'Import cancelled.' };
+    }
     const ver  = (proffieVersion || '').trim();
     const core = (coreVersion || '').trim();
     if (ver || core) {
@@ -874,6 +957,44 @@ function listVersionsDetails() {
   }).filter(Boolean);
 }
 
+// Which JMT Add-ons release a build of `configContent` against `versionName`
+// actually compiled in, or null. [B-473]
+//
+// ONE DEFINITION BECAUSE THERE ARE TWO CALLERS: a fresh compile asks via
+// toolchain, and a cache restore asks over IPC. They have to agree, and the
+// second copy is where they would stop agreeing.
+//
+// Null has two distinct causes and the caller cannot tell them apart, which is
+// fine - both mean "no add-ons are in this binary": the tree has none
+// installed, or it has them and this config includes none of their headers.
+//
+// The file list is the one the apply step recorded in `.jmt_meta.json`, so this
+// follows the add-ons as they gain and lose files instead of freezing today's
+// filenames - and it covers the headers with no `jmt_` prefix (charge_state.h,
+// charge_full_prop.h) without naming them.
+// Split from the disk read on purpose: THIS half is the decision and it is where
+// the bugs would be, so it has to be reachable by a test without a version folder
+// on disk. A test that has to fabricate a tree ends up asserting over source text
+// instead of running the code.
+function _addonsVersionFromMeta(meta, configContent) {
+  const m = meta || {};
+  if (!m.jmtVersion) return null;
+  const files = Array.isArray(m.jmtInstalledFiles) ? m.jmtInstalledFiles : [];
+  if (!files.length) return null;
+  // `^[ \t]*#include` rather than a loose search: a commented-out `//#include`
+  // is not in the build, so it must not produce a stamp claiming it was.
+  const included = new Set(
+    [...String(configContent || '').matchAll(/^[ \t]*#include[ \t]+"([^"]+)"/gm)]
+      .map(m2 => m2[1].split(/[\\/]/).pop())
+  );
+  const used = files.some(p => included.has(String(p).split(/[\\/]/).pop()));
+  return used ? m.jmtVersion : null;
+}
+
+function getCompiledAddonsVersion(versionName, configContent) {
+  return _addonsVersionFromMeta(readVersionMeta(versionName), configContent);
+}
+
 // ── Version operations ─────────────────────────────────
 
 function _validateVersionName(name) {
@@ -907,7 +1028,13 @@ function renameVersion(oldName, newName) {
   }
 }
 
-function duplicateVersion(versionName, newName) {
+// ⚠️ CANCELLABLE FOR THE SAME REASON AS importVersion, AND IT IS NOT OPTIONAL
+// SCOPE: Duplicate shares the import modal AND its single Cancel button. [B-488]
+// Leaving this one synchronous would ship a button that works on the Import path
+// and is drawn-but-dead on the Duplicate path — which is the precise defect
+// [B-462] was filed for ("it shows a cancrl button but it doesnt work. thats
+// wrong too"). One button, one promise.
+async function duplicateVersion(versionName, newName, opts = {}) {
   const resolved = _resolveVersionFolder(versionName);
   if (!resolved) return { ok: false, error: 'Version not found.' };
   const err = _validateVersionName(newName);
@@ -916,7 +1043,13 @@ function duplicateVersion(versionName, newName) {
   if (_resolveVersionFolder(trimmed)) return { ok: false, error: `A version named "${trimmed}" already exists.` };
   const destPath = path.join(getUserVersionsPath(), trimmed);
   try {
-    copyDirSync(resolved.folderPath, destPath);
+    const copy = await copyDirCancellable(resolved.folderPath, destPath, opts);
+    if (!copy.completed) {
+      // The name was refused above if it already existed, so destPath is only
+      // ever a tree this call created.
+      try { await fsRemove.rmWithRetry(destPath); } catch { /* best effort */ }
+      return { ok: false, cancelled: true, error: 'Duplicate cancelled.' };
+    }
     return { ok: true, newName: trimmed };
   } catch (e) { return { ok: false, error: e.message }; }
 }
@@ -1068,6 +1201,8 @@ module.exports = {
   writeNotes,
   readVersionMeta,
   writeVersionMeta,
+  getCompiledAddonsVersion,
+  _addonsVersionFromMeta,   // exported for test only
   getVersionCore,
   setVersionCore,
   backfillVersionCores,

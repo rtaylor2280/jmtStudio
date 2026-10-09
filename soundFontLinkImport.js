@@ -156,14 +156,41 @@ function isTextPointer(ctype, dispName, finalUrl) {
 }
 
 // Stream a live response to a file, reporting (received, total) as it goes.
-function streamToFile(res, destPath, total, onProgress) {
+//
+// ⭐ CANCELLABLE. [B-424] This is the only long wait on the link route - a font
+// archive is routinely 100 MB+ - and before this there was no way to stop it: the
+// handler took no token, so the dialog's Cancel could close the modal while the
+// download carried on writing into a temp dir nobody was watching. That is the
+// [B-413] shape, which this app has already paid for once.
+//
+// ⚠️ `res.destroy()` is what actually stops it. Returning early without
+// destroying leaves the socket draining the rest of the body in the background,
+// which is the same defect wearing a quieter coat.
+// ⚠️ The check is on `data`, so it lands within one chunk rather than at the end
+// of the response - that is the whole point on a download this size.
+function streamToFile(res, destPath, total, onProgress, shouldStop) {
+  const stop = typeof shouldStop === 'function' ? shouldStop : () => false;
   return new Promise((resolve, reject) => {
     const out = fs.createWriteStream(destPath);
     let received = 0;
-    res.on('data', (c) => { received += c.length; if (onProgress) { try { onProgress(received, total); } catch {} } });
+    let stopped = false;
+    const abort = () => {
+      if (stopped) return;
+      stopped = true;
+      try { res.destroy(); } catch {}
+      try { out.destroy(); } catch {}
+      const err = new Error('Cancelled.');
+      err.cancelled = true;
+      reject(err);
+    };
+    res.on('data', (c) => {
+      if (stop()) return abort();
+      received += c.length;
+      if (onProgress) { try { onProgress(received, total); } catch {} }
+    });
     res.on('error', reject);
     out.on('error', reject);
-    out.on('finish', () => resolve(received));
+    out.on('finish', () => { if (!stopped) resolve(received); });
     res.pipe(out);
   });
 }
@@ -214,10 +241,16 @@ async function peel(inputUrl, opts = {}, depth = 0, referer) {
     const destDir = opts.destDir || fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-linkimport-'));
     const destPath = path.join(destDir, fileName);
     try {
-      const received = await streamToFile(res, destPath, total, opts.onProgress);
+      const received = await streamToFile(res, destPath, total, opts.onProgress, opts.shouldStop);
       return { ok: true, filePath: destPath, fileName, size: received };
     } catch (e) {
+      // The partial goes either way - a half-downloaded archive must never be handed on.
       try { fs.rmSync(destPath, { force: true }); } catch {}
+      // ⚠️ A CANCEL IS NOT A FAILURE. Reporting the user's own click as
+      // 'The download failed partway' would be the red-error-for-your-own-action defect
+      // the export doors already paid for. `cancelled` carries the same spelling the
+      // newer modules use; see test/cancel-flag-spelling.test.js.
+      if (e && e.cancelled) return { ok: false, cancelled: true, reason: 'cancelled', message: 'Cancelled.' };
       return { ok: false, reason: 'download-failed', message: `The download failed partway (${e.message}).` };
     }
   }

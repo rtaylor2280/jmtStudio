@@ -459,12 +459,17 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
   const summary = { imported: [], skipped: [], failed: [], commonsImported: [], commonsSkipped: [], commonsFailed: [], tracksAdded: 0, tracksSkipped: 0, tracksFailed: 0, cancelled: false };
   if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
   const total = plan.sources.length;
+  const learned = _learnedVendors(userData);
   for (let i = 0; i < total; i++) {
     if (shouldCancel()) { summary.cancelled = true; break; }
     const src = plan.sources[i];
     onProgress({ stage: 'source-start', sourceIdx: i, total, label: src.cleanedName || src.rawName });
     try {
-      const result = await importPlannedSource({ userData, src, fromSdCard: !!plan.fromSdCard }, (subProgress) => {
+      const result = await importPlannedSource({
+        userData, src, fromSdCard: !!plan.fromSdCard, learned,
+        // [B-462] So the cancel lands inside the copy, not only at the next source boundary.
+        shouldStop: shouldCancel,
+      }, (subProgress) => {
         onProgress({ stage: 'source-progress', sourceIdx: i, total, label: src.cleanedName || src.rawName, sub: subProgress });
       });
       if (result.dedup) {
@@ -491,6 +496,11 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
         summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
       }
     } catch (err) {
+      // ⚠️ A CANCEL IS NOT A FAILED FONT. [B-462, 2026-10-05] Now that the cancel reaches inside
+      // the copy, `importSource` throws from its checkpoints — and without this the font the user
+      // stopped would be reported as damaged in the summary, and the loop would carry on through
+      // the rest of them. Duck-typed on `.cancelled`, the convention `sfExportCopy` documents.
+      if (err && err.cancelled === true) { summary.cancelled = true; break; }
       summary.failed.push({ src: src.relPath || src.absPath, reason: String(err && err.message || err) });
     }
   }
@@ -620,6 +630,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
   const sources = plan.sources;
   const total = sources.length;
+  const learned = _learnedVendors(userData);
   const results = [];
   let newCount = 0, dupCount = 0, corruptCount = 0;
   // ── [B-314] TWO IDENTICAL FONTS IN ONE BATCH USED TO BE INVISIBLE TO EACH OTHER ──
@@ -672,8 +683,29 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         userData, sourcePath: src.absPath, originalName: path.basename(src.absPath),
         metadata: {}, prepareOnly: true,
         onProgress: (p) => onProgress({ stage: 'source-progress', sourceIdx: i, total, label, sub: p }),
+        // ⭐⭐ THE CANCEL REACHES INSIDE THE SOURCE, NOT JUST BETWEEN SOURCES. [B-462, 2026-10-05]
+        // The loop above checks once per source, and one source is a whole font being hashed off a
+        // card — tens of seconds in which Cancel set a flag nobody read. The modal closed, the work
+        // carried on, and the gate stayed held, so the NEXT import was refused with "An import is
+        // already running". Hit twice in testing: *"the import doesn't really cancel... still."*
+        // ⭐ `shouldStop` is export's mechanism and `importSource` already honoured it in three
+        // places along the hash/copy path — the single-source import door passes it, which is why
+        // its cancel works. Bulk called the same function and left the argument off. His memory is
+        // what found it: *"pretty sure we had the exact scenario before... on export?"*
+        // ⚠️ Safe because analyze only STAGES: cancelling throws the staged work away and nothing
+        // is lost, which is his reasoning for checking often rather than politely.
+        shouldStop: shouldCancel,
       });
-    } catch (e) { res = { ok: false, error: String(e && e.message || e) }; }
+    } catch (e) {
+      // ⚠️ A cancel is not a failure. `importSource` throws `ExportCancelled` from its checkpoints,
+      // and reporting that as a per-source error would mark the font damaged in the results and
+      // leave the loop running through the remaining eleven.
+      // ⭐ DUCK-TYPED, following the convention `sfExportCopy` states and explains: an `instanceof`
+      // fails across module instances, and a `.name` check would be a third spelling of a test
+      // this codebase already has one answer for.
+      if (e && e.cancelled === true) return { ok: true, cancelled: true, results };
+      res = { ok: false, error: String(e && e.message || e) };
+    }
     finally { _probe.end(_probeLabel); }
     // THE VERDICT COMES FROM THE PREPARE'S OWN READ. Shape kept identical to the
     // map it replaces ({ count, reason }) so every consumer downstream — the
@@ -902,7 +934,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       const src = sources[i];
       onProgress({ stage: 'enrich-start', sourceIdx: i, total, label: src.cleanedName || src.rawName });
       let e = null;
-      try { e = await enrichSourceForGuided(src); } catch {}
+      try { e = await enrichSourceForGuided(src, learned); } catch {}
       if (e) {
         const r = results.find(x => x && x.idx === i);
         if (r) r.enrich = e;
@@ -944,7 +976,12 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         onProgress({ stage: 'tracks-check', done, total: wavs.length, label: path.basename(w) });
         let h = null, size = 0;
         try { size = fs.statSync(w).size; } catch {}
-        try { h = hashIndex.hashFile(w); } catch {}
+        // Streamed, not read whole. The synchronous twin holds the main process for the entire
+        // read, so nothing queued behind it can be delivered - including the progress event this
+        // loop emits one line above about this very file. On a card full of tracks that showed up
+        // as "JMT Studio (Not Responding)" while the bar sat on one filename. Same reason
+        // soundFontSharedTracks.js uses the async form for the identical job. [B-400]
+        try { h = await hashIndex.hashFileAsync(w); } catch {}
         let owned = false, matchName = '', ownedIn = '';
         // THE LIBRARY IS CHECKED FIRST, ALWAYS. It used to short-circuit on `seen`,
         // so the second copy of an audio that is ALSO in the library was filed as a
@@ -1039,7 +1076,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // ⭐⭐ [B-415] THE FULL SOURCE WINS - the half that equality cannot reach.
   // Two sources can hold the SAME FONT while one carries five other board flavors around it, and
   // their contentHashes then share nothing at all, so the twin check above never fires and both
-  // import. His words: "those would both import and be called identical fonts."
+  // import. Reported: "those would both import and be called identical fonts."
   // ⚠️ RUNS AFTER the twin back-fill, never instead of it: exact twins are [B-314]'s and are
   // deliberately left undecided by the ranker, so the two mechanisms cannot disagree about a row.
   {
@@ -1147,7 +1184,19 @@ function _optimizeProgressForwarder(onSubProgress) {
 
 // Import one planned source end-to-end: hash + copy via importSource,
 // detect candidates, create entries with needsReview when applicable.
-async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress) {
+// ⚠️ `shouldStop` is threaded in rather than read from a module-level flag: this is the same
+// predicate the caller's loop uses, so the cancel the user clicked reaches both the gap between
+// sources AND the copy inside one. [B-462, 2026-10-05]
+// Creators the user has already labelled. Harvested ONCE PER RUN by the
+// orchestrators below and threaded down, never per-source: it is a directory
+// walk over the whole source store, and a bulk run has hundreds of sources.
+function _learnedVendors(userData) {
+  try {
+    return soundFontVendors.learnedVendorsFrom(soundFontSources.listSources(userData));
+  } catch { return []; }
+}
+
+async function importPlannedSource({ userData, src, fromSdCard, shouldStop = null, learned = [] }, onSubProgress) {
   const sourcePath = src.absPath;
   const originalName = path.basename(sourcePath);
   // importSource handles dedup-by-hash automatically. We don't pre-fill
@@ -1202,6 +1251,10 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
       // number. Consistency wins. (2026-08-31, his call.)
       forceNewSource: !!src._duplicate,
       onProgress: (p) => onSubProgress && onSubProgress({ phase: 'import', ...p }),
+      // ⭐ Same gap as the analyze path, same one-argument fix. [B-462, 2026-10-05] Without this
+      // the commit loop only notices a cancel BETWEEN sources, so a twelve-font run ignored the
+      // click for however long the current font took to copy.
+      shouldStop,
     });
     if (!importRes || !importRes.ok) {
       return { ok: false, error: (importRes && importRes.error) || 'Import failed' };
@@ -1237,7 +1290,7 @@ async function importPlannedSource({ userData, src, fromSdCard }, onSubProgress)
   } else if (!src._enrich) {
     try {
       const sourceObj = soundFontSources.openSource(userData, sourceUuid);
-      if (sourceObj) vendorRes = await soundFontVendors.detectVendor(sourceObj);
+      if (sourceObj) vendorRes = await soundFontVendors.detectVendor(sourceObj, { learned });
     } catch {}
   }
   const detectedVendor = vendorRes && vendorRes.vendor ? vendorRes.vendor : null;
@@ -1659,7 +1712,7 @@ function _pickFirstEffectWav(entries, base) {
 // text docs. fontWav/humWav/textFiles carry an absPath for folder sources
 // (renderer plays/reads them by disk path directly); zip sources get
 // fileName only for now (preview needs extraction — a later slice).
-async function enrichSourceForGuided(src) {
+async function enrichSourceForGuided(src, learned = []) {
   const out = {
     vendor: null, vendorConfidence: null, vendorWebsite: null,
     purchasedDefault: true, fontWav: null, humWav: null, textFiles: [],
@@ -1686,7 +1739,7 @@ async function enrichSourceForGuided(src) {
     const source = soundFontSources.openSourceAtPath(src.absPath);
     if (!source) { out.error = 'unreadable'; return out; }
     let vendorRes = null;
-    try { vendorRes = await soundFontVendors.detectVendor(source); } catch {}
+    try { vendorRes = await soundFontVendors.detectVendor(source, { learned }); } catch {}
     if (vendorRes) {
       out.vendor = vendorRes.vendor || null;
       out.vendorConfidence = vendorRes.confidence || null;
@@ -1762,16 +1815,17 @@ async function enrichSourceForGuided(src) {
 // large library doesn't open hundreds of archives at once; emits per-source
 // progress and honors cancellation. Result `enriched` aligns index-for-index
 // with plan.sources.
-async function enrichPlanForGuided({ plan }, callbacks = {}) {
+async function enrichPlanForGuided({ plan, userData }, callbacks = {}) {
   const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
   const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
   if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
   const total = plan.sources.length;
+  const learned = _learnedVendors(userData);
   const enriched = [];
   for (let i = 0; i < total; i++) {
     if (shouldCancel()) return { ok: true, cancelled: true, enriched };
     const src = plan.sources[i];
-    const result = await enrichSourceForGuided(src);
+    const result = await enrichSourceForGuided(src, learned);
     enriched.push(result);
     // Emit the finished result per candidate so the renderer can fill that
     // row in place and let the user work with it immediately, while the

@@ -74,9 +74,15 @@ ok(`no renderer helper is defined without a caller (found ${orphans.length})`,
 // ── ⚠️⚠️ AND THE CHECK PROVES IT CAN FAIL ────────────────────────────
 // A sweep that reports zero is indistinguishable from a sweep that cannot see anything. Inject
 // a function nobody calls and confirm it is caught.
+//
+// ⚠️ ANCHOR ON SOMETHING THE SWEEP ITSELF REQUIRES. This was `function _sdBusyText(text) {`
+// until 2026-10-06, when that helper was deleted as an orphan - the sweep's own subject became
+// its control's anchor and vanished with it. `findOrphans` cannot run at all without a script
+// block, so the opening tag is as stable as the test is.
 {
-  const mutated = src.replace('function _sdBusyText(text) {',
-    'function _sdOrphanCanary(x) { return x; }\nfunction _sdBusyText(text) {');
+  const ANCHOR = '<script>';
+  const mutated = src.replace(ANCHOR,
+    ANCHOR + '\nfunction _sdOrphanCanary(x) { return x; }');
   ok('the mutation was applied', mutated.length !== src.length,
      'anchor moved - the control below proves nothing without it');
   const caught = findOrphans(mutated).some((o) => o.name === '_sdOrphanCanary');

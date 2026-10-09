@@ -67,11 +67,42 @@ const BOARD_PATTERNS = [
   { key: 'goldenharvest', rx: /(^|[\s_\-/])golden[\s_\-]?harvest([\s_\-/]|$)/i },
 ];
 
-function identifyBoard(name) {
+// A CONVERSION NAME STATES ITS TARGET AFTER THE WORD "to", and the board before
+// that word is what the font was converted FROM. [B-485]
+//
+// This exists because the scan below returns the FIRST pattern in table order and
+// `proffie` is index 0, so "Renamed_PROFFIE_to_ASTERIA" resolved to `proffie` -
+// naming the Asteria build as the Proffie font. Measured on a real archive: all
+// five of that vendor's conversion wrappers reported `proffie`, and the only
+// candidate offered for the whole font was the Asteria build while the real
+// 116-file Proffie font was not offered at all.
+//
+// ⚠️ WHY NOT "THE LAST BOARD TOKEN WINS", which looks like the simpler rule: it
+// breaks a vendor that works today. Two folders in the real corpus are named
+// "JUANSITH´S SATELE PROFFIE AND XENOPIXEL V3" - two board tokens, and `proffie`
+// is the CORRECT answer because that folder IS the Proffie version. Last-token
+// would call it a Xeno font. The word "to" is what distinguishes "contains both"
+// from "converted into", so that is what the override turns on.
+//
+// "to" has to be a delimited word, so a font named "Whispering Crystal_CFX" is
+// untouched (no standalone "to") and still resolves by the ordinary scan.
+const CONVERSION_TARGET_RE = /(?:^|[\s_\-/])to[\s_\-]+(.+)$/i;
+
+function _firstBoardIn(name) {
   for (const { key, rx } of BOARD_PATTERNS) {
     if (rx.test(name)) return key;
   }
   return null;
+}
+
+function identifyBoard(name) {
+  const str = String(name == null ? '' : name);
+  const m = CONVERSION_TARGET_RE.exec(str);
+  if (m) {
+    const target = _firstBoardIn(m[1]);
+    if (target) return target;
+  }
+  return _firstBoardIn(str);
 }
 
 function isProffieBoardName(name) {
@@ -92,7 +123,18 @@ function isProffieBoardName(name) {
 // (Fett263, Kyberphonic, Greyscale, BKSaberSounds, JayDalorian, etc.).
 // Utility-font effects (altchng, trloop, ccchange, choosefont) are
 // included so minimal alt-driven fonts like Fett263's HeMan still
-// register. Auxiliary content (tracks/, quote/, quotes/, common/) is
+// register.
+// ⚠️⚠️ THOSE FOUR ARE DETECTION HINTS ONLY, AND THE RENDERER NOW EXCLUDES THEM
+// FROM "SHOW MISSING". [2026-10-08] This set answers "is this folder a font?";
+// it was also being used verbatim to answer "what does this font LACK?", and
+// those are different questions. Ruled, seeing `choosefont` listed as
+// missing: "don't want to show 'missing' something that really shouldn't or
+// isn't usually in the font sounds" - listing it is advice to put a common-
+// folder sound inside a font folder.
+// ⚠️ DO NOT REMOVE THEM HERE to fix that. Detection needs them; a font that
+// genuinely carries one still registers and still shows the chip as PRESENT.
+// The exclusion lives at the one place that was wrong - `_SF_UTILITY_EFFECTS`
+// in renderer/index.html, beside _SF_KNOWN_EFFECTS. Auxiliary content (tracks/, quote/, quotes/, common/) is
 // excluded — these are bundled alongside fonts but are not effects in
 // the ProffieOS sense.
 //
@@ -347,9 +389,48 @@ function detectMultiBoardSiblings(childFolders, childFiles) {
   }
   const allHits = [...boardFolderHits, ...boardZipHits];
   if (allHits.length < 2) return null;
-  const proffie = allHits.find(h => h.board === 'proffie');
-  if (!proffie) return null;
-  const others = allHits.filter(h => h !== proffie).map(h => h.name);
+  let proffie = allHits.find(h => h.board === 'proffie');
+  let others;
+  if (proffie) {
+    others = allHits.filter(h => h !== proffie).map(h => h.name);
+  } else {
+    // THE PROFFIE SIBLING IS NOT ALWAYS NAMED FOR THE BOARD. [B-485]
+    //
+    // Every archive this detector was built against labels all of its builds,
+    // Proffie included (proffie/ cfx/ asteria/ Verso/ ...), so requiring a
+    // sibling that identifies as `proffie` was safe. One vendor instead labels
+    // only the CONVERSIONS and names the Proffie original after the font:
+    //     Absorbed/Absorbed              <- the Proffie font
+    //     Absorbed/Renamed_to_CFX.zip
+    //     Absorbed/Renamed_to_XENO3.zip
+    // With no `proffie` hit the whole group was abandoned, so each conversion
+    // was then offered as its own importable Proffie font - a CFX build landing
+    // in a Proffie library.
+    //
+    // So: when two or more siblings ARE labelled with a board and exactly one
+    // structural sibling is labelled with none, that unlabelled one is the
+    // Proffie font. Only folders and inner zips count as structural siblings -
+    // loose files are ignored, which also keeps a doc like
+    // "FREE Sound Font For Proffie.txt" from being mistaken for a board folder.
+    //
+    // ⚠️ EXACTLY ONE, on purpose. Two unlabelled siblings is genuinely ambiguous
+    // and guessing there would be worse than declining; the group is abandoned
+    // as before and the old behaviour applies.
+    const structural = [
+      ...childFolders,
+      ...childFiles.filter(f => /\.zip$/i.test(f.name)),
+    ];
+    const unlabelled = structural.filter((f) => {
+      const stem = f.isDir ? f.name : f.name.replace(/\.zip$/i, '');
+      if (identifyBoard(stem)) return false;
+      // Reuse the bundle-noise vocabulary so "_Extras", "Bonus", "Read Me"
+      // can never be promoted to "the Proffie font".
+      return !NON_FONT_BUNDLE_NAME.test(stem);
+    });
+    if (unlabelled.length !== 1) return null;
+    proffie = { ...unlabelled[0], board: 'proffie' };
+    others = allHits.map(h => h.name);
+  }
   return {
     proffieChild: proffie,
     otherFlavors: others,
@@ -949,7 +1030,17 @@ async function inspectFolderAsFont(folderPath) {
       if (e.isDir || e.fileName === 'meta.json') continue;
       fileCount++; totalBytes += (e.size || 0);
     }
-    return { ok: true, verdict: 'font', name, folderPath, candidate: self, fileCount, totalBytes };
+    // Damaged sounds, from the selector every other import door uses. The caller shows the same
+    // sentence the bulk and single reviews show, so a corrupt wav gets one answer and one wording
+    // wherever it is met; a second copy of the test here would be a future disagreement about what
+    // counts as damaged. It costs one bounded head read per file, which is what tells us the
+    // difference between a wav and a wav-shaped file, and _selectFolderFiles yields between files.
+    let damaged = [];
+    try {
+      const sel = await require('./soundFontSources')._selectFolderFiles(folderPath);
+      damaged = sel.strippedFiles || [];
+    } catch {}
+    return { ok: true, verdict: 'font', name, folderPath, candidate: self, fileCount, totalBytes, damaged };
   }
   if (candidates.length) {
     return { ok: true, verdict: 'contains', name, folderPath,

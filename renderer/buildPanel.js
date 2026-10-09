@@ -156,6 +156,37 @@ let _portRefreshSeq    = 0;
 let _lastPortDetectMsg = null;
 let _userChosePort     = false;   // true after user manually picks a port
 let _userChosenPortPath = null;   // the path they chose
+
+// ⭐ PROMOTE THE DISPLAYED PORT TO A REAL SELECTION AT THE CLICK. [B-472, 2026-10-05]
+//
+// A port the app auto-selected is still the port the user is LOOKING AT, and from their
+// side there is no such thing as a tentative selection: what is on screen is what they
+// believe will happen. But refreshPorts only treats an EXPLICIT pick as binding -
+// `manualPath` beats `metaSN` beats `lastPort` - so an auto-selected target stayed
+// re-resolvable by any ports-changed event, including one the user caused themselves by
+// plugging a second board in a moment before clicking.
+//
+// Reproduced exactly that: one board on COM6, nothing picked, Duality plugged in
+// just before Flash, and the dropdown flipped to COM16 while the flash ran on COM6.
+// On a previous run the same mechanism sent a build to a test board and he did not
+// notice - "I never got my OS7 version on the real board because I had a test board
+// sitting on 6."
+//
+// ⚠️ THE AUTO-SELECT IS NOT THE BUG AND MUST NOT BE WEAKENED. It is what finds the board
+// a config remembers, and he wants it: "that's great. that's what it should do... but it
+// has to lock in on a button press otherwise its unpredictable". Promoting at the click
+// gets that from machinery that already exists - no new state, no change to the
+// preference order, no change to auto-select.
+//
+// ⚠️ NOTHING SHOWING IS NOT A CHOICE. If no port is selected we deliberately promote
+// nothing, so a board arriving later can still be picked up - behaviour he confirmed is
+// already correct and must not regress ("if no board was available at the time of compile
+// and one shows up... we can use that / we already do").
+function lockDisplayedPort() {
+  if (!selectedPort) return;
+  _userChosePort      = true;
+  _userChosenPortPath = selectedPort;
+}
 let compileTimerInterval  = null;
 let flashTimerInterval    = null;
 let contentDebounceTimer  = null;
@@ -652,6 +683,9 @@ async function initBuildPanel() {
 // ── Compile ────────────────────────────────────────────
 async function doCompile() {
   if (isBusy) return;
+  // Compile continues into a flash, so the target has to be fixed here too, not only in
+  // doFlash. See lockDisplayedPort. [B-472]
+  lockDisplayedPort();
   if (!toolchainReady) {
     appendLog('Toolchain not ready.', true);
     return;
@@ -790,6 +824,9 @@ async function _flashAfterSdFix() {
 // ── Flash ──────────────────────────────────────────────
 async function doFlash() {
   if (isDfuMode) { await doFlashDFU(); return; }
+  // Fix the target on the press, before anything can re-resolve it. DFU mode returns
+  // above because it has no port to lock. See lockDisplayedPort. [B-472]
+  lockDisplayedPort();
 
   // Clear any note left by a PREVIOUS attempt, so this one can only ever carry
   // its own.
@@ -929,6 +966,16 @@ function _setLinuxUdevNotice(show) {
 
 async function refreshPorts() {
   if (isDfuMode) return; // port selection is locked while in DFU mode
+  // ⭐ AND LOCKED WHILE A FLASH RUNS. [B-471, 2026-10-05]
+  // A flash fires onPortsChanged by definition: the board leaves its port for DFU and comes
+  // back on a different one. Rebuilding the dropdown mid-flash made it disagree with the
+  // modal - it moved to COM16 while the flash correctly ran on COM6, and he could
+  // not tell afterwards which board had the firmware ("actually it did flash 6... not 16").
+  // The dropdown is the one surface people read, so a wrong value there loses the answer.
+  // The post-flash settle calls refreshPorts() again, so the display still lands on the new
+  // port - once, after, instead of during. Same guard already used at the serial-monitor and
+  // chip call sites for the same reason.
+  if (window._isFlashing) return;
   const seq = ++_portRefreshSeq;
   const result = await window.electronAPI.getRecommendedPort();
   // Superseded while we were enumerating. Returning without touching anything is
@@ -1715,7 +1762,7 @@ function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnown
     : 'Flashed from a different version of this config.';
 }
 
-function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sourceChanged, coreVersion, osVersion, compiledFqbn, compiledUsb }) {
+function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sourceChanged, coreVersion, osVersion, addonsVersion, compiledFqbn, compiledUsb }) {
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
@@ -1723,7 +1770,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       _currentBuildKey = null;
       updateCompileButton();
       const durationSec = _compileStartTime ? Math.round((Date.now() - _compileStartTime) / 1000) : null;
-      if (window.setCompiledTimestamp) window.setCompiledTimestamp(undefined, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb);
+      if (window.setCompiledTimestamp) window.setCompiledTimestamp(undefined, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb, addonsVersion);
       stopCompileTimer();
       stopCompileHints();
       appendLog('\n✓ Firmware ready.', false);
@@ -1782,6 +1829,15 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
   }
   if (type === 'flash') {
     window._isFlashing = false;
+    // ⭐ SETTLE THE DROPDOWN NOW, BECAUSE THE EVENT THAT WOULD HAVE DONE IT ALREADY FIRED.
+    // [B-471, 2026-10-05] refreshPorts() ignores ports-changed while _isFlashing, which is the
+    // whole point - the board leaves its port for DFU mid-flash and the dropdown must not chase
+    // it. But that re-enumeration IS the event, and it lands while the flag is still set. With
+    // no later event the dropdown would sit on the pre-flash port forever, which is the same
+    // wrong answer this guard exists to prevent, just frozen instead of flickering. So the
+    // refresh is explicit here, immediately after the flag clears: one update, after, instead
+    // of several during.
+    refreshPorts();
     stopFlashTimer();
     resumeSerialAfterFlash();
     // Whatever we knew about the board's ProffieOS is now about the firmware we
@@ -2203,9 +2259,13 @@ let _suppressPopoverEl = null;
 let _serialCtxMenuEl   = null;
 const SERIAL_MAX_LINES = 1000;
 
-// TEMP: collapse-pause verification — flip to false (or grep-remove all
-// SERIAL_DEBUG references) once the behavior is verified.
-const SERIAL_DEBUG = true;
+// Collapse-pause tracing for the serial monitor. OFF.
+// ⚠️ This was added as a TEMP verification aid and committed as `true` on 2026-05-31 (v1.7.0),
+// so every shipped build since has logged a line to the console on every serial packet —
+// found 2026-10-05 when the noise buried the console we were debugging an import in.
+// Left in place rather than deleted because it is genuinely useful for the collapse/pause
+// behaviour it was written for; flip it to turn it back on for that, and off again after.
+const SERIAL_DEBUG = false;
 let _serialRxBytes = 0;
 function _debugSerial(event, extra) {
   if (!SERIAL_DEBUG) return;
@@ -3243,10 +3303,31 @@ async function checkCacheForConfig(missStatus, opts) {
       // fqbn and usb come from the ENTRY, not from the current controls: they are
       // components of buildPkgHash, so a hit proves the entry was built with
       // exactly these, and the metadata has recorded them since before 1.8.
-      window.setCompiledTimestamp(result.metadata.compiledAt, undefined,
+      // compiled_addons is recoverable from the selection for the same reason the
+      // version NAME is, and the chain is checkable: applying add-ons rewrites
+      // files inside the tree and calls invalidateVersionHash, buildPkgHash is
+      // derived from that source hash, so a hit proves the tree - and therefore
+      // its add-ons release - is the one that produced this entry.
+      // Asked of main rather than derived here, so the fresh-compile path and
+      // this one cannot drift apart. [B-473]
+      let _addons = null;
+      try {
+        const _r = await window.electronAPI.getAddonsVersionFor(content, null);
+        _addons = _r?.addonsVersion || null;
+      } catch {}
+      // ⚠️ The ENTRY's duration, not `undefined`. Passing undefined left whatever the
+      // last fresh compile wrote standing, so a restore described its own build in
+      // every field except this one - four runs on one config made it visible:
+      // a restore of a 98-second build reported 108, the time of an unrelated
+      // compile six minutes earlier. The cache has carried the real value all
+      // along (cacheManager.js:626); it was simply never read. [B-474]
+      // Milliseconds in the entry, seconds in the setter.
+      const _ms  = result.metadata.compileDurationMs;
+      const _dur = (typeof _ms === 'number') ? Math.round(_ms / 1000) : null;
+      window.setCompiledTimestamp(result.metadata.compiledAt, _dur,
                                   result.metadata.coreVersion,
                                   document.getElementById('input-version')?.value || null,
-                                  result.metadata.fqbn, result.metadata.usb);
+                                  result.metadata.fqbn, result.metadata.usb, _addons);
     }
   } else {
     // Cache miss → if we were claiming a valid cached compile, downgrade. The lookup

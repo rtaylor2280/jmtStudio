@@ -15,6 +15,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+// copyFileHashing: one streamed read that yields, so the add loop can report while it works.
+const fileHash = require('./soundFontFileHash');
 
 function _root(userData, kind, id) {
   // sharedTracks is a singleton folder — no id required.
@@ -308,7 +310,8 @@ async function copyAcrossLocations({
           await _pointAtSourceFile(userData, src.id, srcSubPath, destDir, finalName);
           const rel = path.relative(destRoot, path.join(destDir, finalName)).replace(/\\/g, '/');
           added.push(rel);
-        if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
+          // (2026-10-08: this call was duplicated, so the file branch reported every add twice
+          // while the directory branch below reported once.)
           if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
         } else {
           // Directory — extract the whole subtree under a folder-named
@@ -338,8 +341,7 @@ async function copyAcrossLocations({
         failed.push({ source: srcSubPath, error: String(err && err.message || err) });
       }
     }
-    _maybeIndexSharedTracksAdds(userData, dest, added);
-    return { ok: true, added, failed };
+    return _finishCopy(userData, dest, added, failed);
   }
   for (let i = 0; i < srcPaths.length; i++) {
     const srcSubPath = srcPaths[i];
@@ -391,6 +393,26 @@ async function copyAcrossLocations({
       failed.push({ source: srcSubPath, error: String(err && err.message || err) });
     }
   }
+  return _finishCopy(userData, dest, added, failed);
+}
+
+// ⚠️⚠️ THE ONE EXIT FOR `copyAcrossLocations`, AND IT EXISTS BECAUSE HAVING TWO COST A REAL BUG.
+// [2026-10-08] This function has two bodies — an async branch for `src.kind === 'source'` and the
+// on-disk branch below it — and each used to end with its own tail. `_maybeIndexSharedTracksAdds`
+// was correctly called from both (its own comment says so, deliberately). The content-dirty flag
+// arrived later and landed in ONE of them.
+//
+// ⭐ WHAT THAT COST, reported by pressing it: "adding from library isn't marking as customized...
+// if I add from browse it gets customized". The library picker DEFAULTS its target to the entry's
+// own source, so the ordinary Add-from-library is precisely the branch that never flagged the
+// entry — no rehash, so the Customized marker never appeared. Browse goes through `addFilesAt`,
+// which marks, which is why the two doors disagreed.
+//
+// ⚠️ So the repair is not "add the missing line to the other branch" — that leaves two tails to
+// keep in agreement forever, which is the arrangement that just failed. Both branches now return
+// through here, and a third branch added later inherits both steps instead of being the one that
+// forgot.
+function _finishCopy(userData, dest, added, failed) {
   // sharedTracks dest gets per-file hash records — every file that landed
   // needs an index entry so backup merge/replace can use content-identity
   // instead of bare filename matching.
@@ -592,7 +614,15 @@ function createSubfolderAt({ userData, kind, id, parentSubPath, name }) {
 // ⚠️ THE `await` PER ITERATION IS LOAD-BEARING. Pooling resolves to a hardlink and never touches
 // fsp, so without an explicit yield the loop would run to completion synchronously and every tick
 // would flush after the work finished — the exact defect this entry exists for.
-async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames, onBytes }) {
+// ⚠️⚠️ `shouldStop` IS NOT OPTIONAL POLISH ON THIS DOOR. [B-424, 2026-10-08] This is the font
+// detail's "+ Add → Browse…", and it was found by pressing: the eject checkbox was there and the
+// eject toast was there and there was no Cancel at all. The exit from a long add was force-quitting
+// the app, and force-quitting mid-write to a card is the corruption the whole SD line of work
+// exists to prevent - so an add that cannot be stopped pushes people toward the dangerous exit.
+// ⚠️ The gap ran all three layers deep (no param here, no gate in the handler, no `onCancel` at the
+// door), which is why the fix is not a button. The shape is copied from
+// `soundFontSharedTracks.addFiles` rather than re-derived - that door already solved this.
+async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames, onBytes, shouldStop }) {
   if (!kind || !id) return { ok: false, error: 'Missing location' };
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No source paths' };
@@ -611,7 +641,7 @@ async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNa
   // added a .exe into my library"). This module had NO checker of any kind, and this
   // is the font detail's "+ Add" - so Studio itself would put a program in a font, and
   // the export dialog would then tell the user something else on their computer did.
-  // His rule: these files are never allowed to come in or out.
+  // The rule: these files are never allowed to come in or out.
   // ⚠️ NOT A REMOVAL. Nothing is destroyed here - the file simply does not arrive, and
   // the user's own copy stays where they picked it from. So this reports `refused` and
   // the caller says what was not added; Delete and Quarantine belong to the export
@@ -643,8 +673,18 @@ async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNa
     try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
   };
   _emit('');
+  // ⚠️⚠️ CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
+  // Stopping here leaves every file already added in place and complete; files not yet reached are
+  // simply not added. Nothing is half-written and nothing needs cleaning up, which is why this
+  // needs no rollback the way the `creating` phase of the font import door does.
+  let _stopped = false;
   for (let i = 0; i < sourceFilePaths.length; i++) {
+    if (shouldStop && shouldStop()) { _stopped = true; break; }
     const src = sourceFilePaths[i];
+    // What the streamed copy below has already credited for THIS file. The settle at the bottom
+    // of the loop adds only the remainder, so a file that streamed fully is not counted twice and
+    // one that never got that far (not a file, refused, threw) is still settled in full.
+    let _fileStreamed = 0;
     // Name first, so the label names what is being worked on rather than what just finished.
     _emit(path.basename(String(src || '')));
     // Yield BEFORE the work, so the tick above reaches the renderer while this file is in
@@ -666,24 +706,43 @@ async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNa
       const desiredName = (destNames && destNames[i]) || path.basename(src);
       const finalName = _proffieVariantName(destDir, desiredName);
       const destPath = path.join(destDir, finalName);
-      // Give the content a home first. storeInPool returns what we already hold
-      // when we hold it, so nothing is written twice — then the name here is a
-      // link to that home. Any failure falls through to the plain copy, which is
-      // always correct and only larger.
-      const home = CI.storeInPool({ index, srcAbs: src, preferredName: desiredName });
+      // Read the source ONCE, streamed, and work off the local temp from here on. [B-424]
+      // This used to hand `src` straight to storeInPool, which hashes with the SYNCHRONOUS
+      // hashFile and copies with copyFileSync — both on the main process. On a card mounted
+      // through a Proffieboard that froze the window: reported at 0 B of 62.4 MB after 17
+      // seconds with the title bar reading "Not Responding", because nothing could emit while
+      // the main thread was inside those two calls.
+      // ⚠️ The await is the fix, not the read count. A bar cannot report on a loop that never
+      // yields, which is the same thing soundFontSharedTracks' header records.
+      const _tmp = destPath + '.jmt-add-tmp';
+      const _r = await fileHash.copyFileHashing(src, _tmp,
+        { onBytes: (n) => { _fileStreamed += n; _bytesDone += n;
+                      _emit(path.basename(String(src || ''))); },
+          shouldStop });
+      if (_r && _r.stopped) { _stopped = true; break; }
+      if (!_r || !_r.hash) { failed.push({ source: src, error: 'Could not read the file' }); continue; }
+      // Give the content a home. storeInPool returns what we already hold when we hold it, so
+      // nothing is written twice — then the name here is a link to that home.
+      // ⚠️ Pointed at the TEMP and given the digest we already have, so its sync hash and copy
+      // work on the local disk instead of the card. Passing `src` here puts the freeze back.
       let done = false;
+      const home = CI.storeInPool({ index, srcAbs: _tmp, preferredName: desiredName,
+                                    knownHash: _r.hash });
       if (home.ok) {
         if (home.stored) pooled++;
         const r = CI.ingestFile({ index, srcAbs: home.absPath, destAbs: destPath });
         if (r.ok) { done = true; if (r.linked) linkedFiles++; }
       }
-      if (!done) fs.copyFileSync(src, destPath);
+      // Either the pool placed the file and the temp is redundant, or nothing did and the temp
+      // IS the file. Renaming beats re-copying from the source.
+      if (done) { try { fs.rmSync(_tmp, { force: true }); } catch {} }
+      else { fs.renameSync(_tmp, destPath); }
       const rel = path.relative(destRoot, destPath).replace(/\\/g, '/');
       added.push(rel);
     } catch (err) {
       failed.push({ source: src, error: String(err && err.message || err) });
     }
-    _bytesDone += (_sizes.get(src) || 0);
+    _bytesDone += Math.max(0, (_sizes.get(src) || 0) - _fileStreamed);
     _emit(path.basename(String(src || '')));
   }
   // ⭐ Land on 100% whatever route the files took. Files leave this loop four ways — added,
@@ -692,7 +751,13 @@ async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNa
   _bytesDone = _bytesTotal;
   _emit('');
   if (added.length > 0) _markLocationDirty(userData, kind, id);
-  return { ok: true, added, failed, refused, linkedFiles, pooled };
+  // ⚠️ `canceled` travels with the result rather than being an error: a stop the user asked for is
+  // an OUTCOME, and reporting it as a failure is what [B-005] item 4 had to undo across the export
+  // doors. Everything already added is reported in `added`, because it was.
+  // ⚠️⚠️ `ok: true` THEREFORE DOES NOT MEAN "IT WROTE EVERYTHING" - callers must test `canceled`
+  // BEFORE `!ok`, or a cancel reads as a clean full run. That is the exact trap three export doors
+  // fell into.
+  return { ok: true, cancelled: _stopped, added, failed, refused, linkedFiles, pooled };
 }
 
 module.exports = {

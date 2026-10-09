@@ -100,7 +100,12 @@ for (const fn of EJECT_HELPERS) {
   // appears three times - the declaration, the reset in closeModal, and the reset here - and
   // indexOf takes the FIRST, so the slice covered the declaration and the region under test was
   // never read. It reported a real-looking failure about code that was correct.
-  const i = H.indexOf('ARM THE EJECT OFFER');
+  // ⚠️ RE-ANCHORED 2026-10-06 ONTO THE DECLARATION. This read `H.indexOf('ARM THE EJECT OFFER')`,
+  // a comment banner inside `_runAnalyze`. The arming moved out of the analyze that day - a
+  // common-folders-only plan skips the analyze, so arming there meant door 9 got no eject offer at
+  // all - and the banner went with it, leaving the slice empty. A declaration survives a move; a
+  // sentence in a comment does not.
+  const i = H.indexOf('const armEjectOffer = (root) =>');
   const j = H.indexOf('})();', i);
   const arm = (i > 0 && j > i) ? H.slice(i, j) : '';
   ok('the arming block was located', arm.length > 200 && /_sfEjectContext/.test(arm),
@@ -125,10 +130,24 @@ for (const fn of EJECT_HELPERS) {
   const j = H.indexOf('const closeModal = ', i);
   const fn = (i > 0 && j > i) ? H.slice(i, j) : '';
   ok('and it lives inside showPhase', /els\.ejectWrap\.style\.display/.test(fn));
-  ok('⭐ it is run-only, so it cannot collide with the analyze-only offer for the left slot',
-     /phase === 'progress' && runInFlight && ejectOffer\.available/.test(fn),
-     'both controls carry margin-right:auto; they are safe only because their conditions are'
-     + ' mutually exclusive by construction rather than by luck');
+  // ⭐⭐ REWRITTEN 2026-10-05 [B-462]. This asserted the two offers could never be on screen at
+  // once, because both labels carried `margin-right:auto` and two left-aligned children collide.
+  // They now CAN coexist by design: ticking "continue to quick import" is what makes the run
+  // unattended, and that is precisely when the eject offer starts to mean something, so gating the
+  // second on the first is the rule.
+  // ⚠️ The collision the old assertion guarded is REAL and still has to be prevented — so the
+  // check moves from "they are mutually exclusive" to "only one box is left-aligned": the labels
+  // sit in a container that carries the margin for them.
+  ok('⭐ the eject offer is unlocked by the quick-import tick, not by the run starting',
+     /phase === 'progress' && unattended && ejectOffer\.available/.test(fn)
+     && /const unattended = runInFlight \|\| _bulkAutoContinue;/.test(fn),
+     'the offer has to appear while the decision to walk away is being made, not after');
+  ok('⚠️ and only ONE child of the button row is left-aligned, so they cannot fight for the slot',
+     /class="sf-bulk-left-stack"/.test(H)
+     && /\.sf-bulk-left-stack \{[^}]*margin-right: auto/.test(H)
+     && !/id="sf-bulk-prog-auto-wrap"[\s\S]{0,80}margin-right:auto/.test(H)
+     && !/id="sf-bulk-import-eject-wrap"[\s\S]{0,80}margin-right:auto/.test(H),
+     'the container carries margin-right:auto; neither label may carry its own');
 }
 
 // ── The late-arrival race ─────────────────────────────────────────────────────
@@ -153,7 +172,8 @@ for (const fn of EJECT_HELPERS) {
      /shownPhase !== 'summary'/.test(fn),
      'otherwise a late arrival paints a row onto the run screen or a closed dialog');
 
-  const arm = H.slice(H.indexOf('ARM THE EJECT OFFER'), H.indexOf('})();', H.indexOf('ARM THE EJECT OFFER')));
+  const armAt = H.indexOf('const armEjectOffer = (root) =>');
+  const arm = H.slice(armAt, H.indexOf('})();', armAt));
   ok('⭐⭐ a late lookup repairs the SUMMARY, not only the run screen',
      /else syncSummaryEjectRow\(\);/.test(arm),
      'the first version only re-ran showPhase for the progress phase, so a fast import - the'
@@ -288,6 +308,37 @@ for (const fn of EJECT_HELPERS) {
   ok(`the flag is reset at every report entry point (${resets})`, resets >= 2,
      'a stale true suppresses the eject offer on the NEXT card, which reads as the feature'
      + ' silently disappearing rather than as a bug');
+}
+
+// ── The backup restore door: MERGE AND REPLACE GET THE SAME OFFER ────────────
+// Both branches read the same backup from the same card, so both owe the same eject. [B-401] is
+// the entry about fixing one of these two and not the other, and it happened again on 2026-10-07:
+// the row went onto both close-outs but the ARMING only onto merge, so Replace finished with no
+// eject at all. Reported: "eject offer completely missing on replace."
+//
+// Counted rather than merely present, because "it exists somewhere" is what let one branch keep
+// missing it.
+{
+  const arms = (H.match(/_sfArmBackupEject\(zipPath\)/g) || []).length;
+  ok('both backup branches arm the eject offer (merge + replace)', arms === 2,
+     `found ${arms} arming call(s) - one per branch is the requirement; a single call means `
+     + 'whichever branch lacks it ends with no eject at all');
+
+  const wires = (H.match(/_sfWireBackupEjectRow\(\);/g) || []).length;
+  ok('and both close-outs wire the row', wires === 2,
+     `found ${wires} - "Merge complete" and "Import complete" each need one`);
+
+  // No subtraction: the helper is declared `_sfBackupEjectRowHtml = () =>`, which this pattern does
+  // not match, so every hit is a call. (Subtracting one for "the definition" is a mistake I made
+  // twice on 2026-10-07 — check the declaration's spelling before compensating for it.)
+  const rows = (H.match(/_sfBackupEjectRowHtml\(\)/g) || []).length;
+  ok('and both close-outs build the row', rows === 2,
+     `found ${rows} build site(s) - "Merge complete" and "Import complete" each need one`);
+
+  ok('the offer is scoped to the restore, never the backup EXPORT it shares a modal with',
+     /bkEjectWrap/.test(H) && !/sf-backup-eject-wrap[\s\S]{0,400}?display: *''/.test(
+       H.slice(H.indexOf('const _sfOpenExportBackup'), H.indexOf('const _sfOpenExportBackup') + 3000)),
+     'writing a backup TO a card is a different operation about a different volume');
 }
 
 // ⚠️ THE CONTROL. Every check above is a regex over source text, the shape that has passed while

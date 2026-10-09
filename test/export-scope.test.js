@@ -102,9 +102,23 @@ const H = fs.readFileSync(FILE, 'utf8');
 // clean run means anything, it has to catch the ACTUAL defect: put the bare reference back into
 // `_sfPreflightDestination` exactly as it was written this morning and confirm it is reported.
 {
-  const mutated = H.replace(
+  // ⚠️⚠️ THE MUTATION IS ANCHORED INSIDE THE NAMED FUNCTION, NOT ON THE FIRST MATCH IN THE FILE.
+  // It used to be a bare `H.replace('window._sfDeleteProgress.barEl();', …)`, which takes the
+  // FIRST occurrence. On 2026-10-04 `_sfWarnSlowImport` was given the identical borrow block and
+  // placed EARLIER in the file, so the mutation landed in that function instead - and the assert
+  // below, which names `_sfPreflightDestination`, reported that the checker could not catch its
+  // own defect. The checker was fine; the anchor had moved under it.
+  // ⭐ Same failure as the door-table anchor in export-door-map.test.js, and the lesson is the
+  // same: a mutation that does not say WHERE it applies is not a control, it is a coincidence.
+  const TARGET = 'async function _sfPreflightDestination';
+  const at = H.indexOf(TARGET);
+  ok('the mutation target function still exists', at >= 0,
+     're-anchor this, do not delete the self-check');
+  const head = H.slice(0, at);
+  const tail = H.slice(at).replace(
     'window._sfDeleteProgress.barEl();',
     '_sfDeleteProgress.barEl();');
+  const mutated = head + tail;
   ok('the mutation actually applied (the anchor still exists)',
      mutated !== H,
      'the line was renamed - re-anchor this, do not delete the self-check');

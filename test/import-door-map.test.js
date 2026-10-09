@@ -59,7 +59,6 @@ const INWARD = [
   'common:addFiles',
   'sharedTracks:addFiles',
   'fileOps:addFiles',
-  'attachments:add',
   'attachments:addToSources',
   'sfBackup:applyMerge',
   'sfBackup:applyReplace',
@@ -83,6 +82,15 @@ const INWARD = [
 // applyJmtFeatures` writes into an installed OS version tree - it is arguably a door and is
 // flagged as an open question in the register rather than quietly filed here.
 const NOT_INWARD = [
+  // ⭐ `sources:importCancel` sits with `bulkImport:cancel` for the same reason: it flips a gate
+  // token and writes nothing. Added 2026-10-04 when the single-source import became cancellable -
+  // and this test caught it on the first run, which is what the register is for.
+  'sources:importCancel',
+  // ⭐ `linkImport:browserCancel` joins them, 2026-10-07. It aborts an in-flight DownloadItem and
+  // drops the temp dir - it writes nothing into the library. A direct hook rather than a gate
+  // token because stopping an Electron download means calling `cancel()` on that object, which a
+  // flag cannot reach. And the register caught it on the first run again, same as sources:importCancel.
+  'linkImport:browserCancel',
   'bulkImport:pickRoot', 'bulkImport:scan', 'bulkImport:analyze', 'bulkImport:cancel',
   'bulkImport:discardPrepared', 'bulkImport:enrichGuided', 'bulkImport:enrichCancel',
   'bulkImport:readCandidateFile', 'bulkImport:matchGuided',
@@ -98,6 +106,11 @@ const NOT_INWARD = [
   // writes nothing. Caught by the name heuristic on "added", which is the heuristic
   // working as designed; naming it here is the answer, not loosening the pattern.
   'versions:addedProps',
+  // Also a pure READ: given config text it answers which JMT Add-ons release that
+  // build compiled in, by reading `.jmt_meta.json` and matching include basenames.
+  // Touches no file at all. Caught on its first run by this sweep, which is the
+  // register doing its job. [B-473]
+  'proffieOS:addonsVersionFor',
 ];
 
 for (const h of INWARD) {

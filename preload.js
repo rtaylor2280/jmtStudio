@@ -122,11 +122,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listProffieVersions: ()                        => ipcRenderer.invoke('proffieOS:listVersions'),
   getSelectedVersion:  ()                        => ipcRenderer.invoke('proffieOS:getSelected'),
   getOSVersionMap:     ()                        => ipcRenderer.invoke('proffieOS:osVersionMap'),
+  getAddonsVersionFor: (configContent, versionName) => ipcRenderer.invoke('proffieOS:addonsVersionFor', { configContent, versionName }),
   getArgumentNames:    (versionName)             => ipcRenderer.invoke('proffieOS:getArgumentNames', versionName),
   selectVersion:       (name)                    => ipcRenderer.invoke('proffieOS:selectVersion', name),
   selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
   validateVersionSource: (sourcePath)            => ipcRenderer.invoke('proffieOS:validateSource', sourcePath),
   importVersion:       (sourcePath, versionName, proffieVersion) => ipcRenderer.invoke('proffieOS:importVersion', { sourcePath, versionName, proffieVersion }),
+  // [B-488] The import modal's Cancel, for both of its paths (Import and
+  // Duplicate), plus the file count so the dialog can show that work is moving
+  // rather than only that it is busy.
+  cancelVersionImport: ()                                        => ipcRenderer.invoke('versions:importCancel'),
+  // [B-424] Stops a link download in flight. The archive is routinely 100 MB+,
+  // so this is the longest wait on the import side.
+  cancelLinkImport:    ()                                        => ipcRenderer.invoke('linkImport:cancel'),
+  // [B-424] Stops a common-folder import mid-copy. The partial is discarded.
+  cancelCommonImport:  ()                                        => ipcRenderer.invoke('common:importCancel'),
+  // [B-475] Attaching a receipt is streamed now, so it can report bytes and be
+  // stopped per chunk. A cancel throws the staged bytes away.
+  cancelAttachmentAdd: ()                                        => ipcRenderer.invoke('attachments:addCancel'),
+  onAttachmentAddProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('attachments:addProgress', handler);
+    return () => ipcRenderer.removeListener('attachments:addProgress', handler);
+  },
+  onVersionImportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('versions:importProgress', handler);
+    return () => ipcRenderer.removeListener('versions:importProgress', handler);
+  },
   listVersionsDetails: ()                      => ipcRenderer.invoke('versions:listDetails'),
   readVersionNotes:    (name)                  => ipcRenderer.invoke('versions:readNotes', name),
   writeVersionNotes:   (name, content)         => ipcRenderer.invoke('versions:writeNotes', { name, content }),
@@ -201,14 +224,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   volumeInfo: (p) => ipcRenderer.invoke('sdcard:volumeInfo', p),
   // Async health walk ([B-348]): direct-file check, incremental folder
   // badges, cancel, and the progress stream that feeds the browser footer.
-  sdSubtreeHealth: (params) => ipcRenderer.invoke('sdcard:subtreeHealth', params),
   sdExecutables: (p) => ipcRenderer.invoke('sdcard:executables', p),
-  sdHealthCancel: (jobId) => ipcRenderer.invoke('sdcard:healthCancel', jobId),
-  onSdHealthProgress: (cb) => {
-    const handler = (_, data) => cb(data);
-    ipcRenderer.on('sdcard:healthProgress', handler);
-    return () => ipcRenderer.removeListener('sdcard:healthProgress', handler);
-  },
   sdFolderShape: (p) => ipcRenderer.invoke('sdcard:folderShape', p),
   readSdText: (p) => ipcRenderer.invoke('sdcard:readText', p),
   readSdBytes: (p) => ipcRenderer.invoke('sdcard:readBytes', p),
@@ -296,6 +312,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   sourceExistsByHash:    (hash)       => ipcRenderer.invoke('sources:existsByHash', hash),
   importSource:          (params)     => ipcRenderer.invoke('sources:import', params),
+  importSourceCancel:    ()           => ipcRenderer.invoke('sources:importCancel'),
   deleteSource:          (params)     => ipcRenderer.invoke('sources:delete', params),
   updateSourceMeta:      (params)     => ipcRenderer.invoke('sources:updateMeta', params),
   optimizeSource:        (params)     => ipcRenderer.invoke('sources:optimize', params),
@@ -306,6 +323,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   linkImportStart:       (params)     => ipcRenderer.invoke('linkImport:start', params),
   linkImportBrowser:     (params)     => ipcRenderer.invoke('linkImport:browser', params),
+  linkImportBrowserCancel: ()         => ipcRenderer.invoke('linkImport:browserCancel'),
   linkImportCleanup:     (params)     => ipcRenderer.invoke('linkImport:cleanup', params),
   onLinkImportProgress: (cb) => {
     const handler = (_, data) => cb(data);
@@ -355,7 +373,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSourceDocBytes:    (params)     => ipcRenderer.invoke('sources:readDocBytes', params),
   exportSourceDoc:       (params)     => ipcRenderer.invoke('sources:exportDoc', params),
   listAttachments:       (params)     => ipcRenderer.invoke('attachments:list', params),
-  addAttachments:        (params)     => ipcRenderer.invoke('attachments:add', params),
   openAttachment:        (params)     => ipcRenderer.invoke('attachments:open', params),
   unlinkAttachment:      (params)     => ipcRenderer.invoke('attachments:unlink', params),
   listAllAttachments:    ()           => ipcRenderer.invoke('attachments:listAll'),
@@ -415,6 +432,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ⭐ [B-005 item 4] "What have we just been handed?" ~85ms, no PowerShell. Returns
   // { removable, kind } or null for "cannot tell". Cheap enough to sit on a write path.
   identifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:identify', params),
+  // ⭐ [B-424] { files, bytes } for a picked file or folder. Feeds the IMPORT side's slow-card
+  // threshold, which had no way to size a source before the copy started - a file picker returns
+  // paths, and the font import learns its total only from progress events once it is running.
+  measurePath:           (params)     => ipcRenderer.invoke('path:measure', params),
   // ⭐ [B-005 item 4] THE ONE PREFLIGHT. Fit refusal + board-card warning in a single call,
   // and it returns `boardCard` and `removable` so the cancel-cleanup rule and the safe-eject
   // offer reuse that answer instead of each paying for their own device lookup.

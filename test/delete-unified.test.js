@@ -8,7 +8,7 @@
 //
 // ⚠️ HOW IT SURFACED, which is the argument for a structural check rather than more testing: Ryan
 // deleted a font by right-click and got no summary. Two of the four doors spoke, two said nothing,
-// and which one you got depended on where you started. His words: "I thought we got rid of the
+// and which one you got depended on where you started. Reported: "I thought we got rid of the
 // concept of bulk/single and it's all the same" and "shouldn't matter where I delete from."
 // ⭐ The tell was visible from OUTSIDE the code before it was visible inside it: one door called its
 // destination `exportDir` and another `bulkExportDir`, and pasting the wrong one in was a
@@ -55,10 +55,14 @@ ok('⭐ and the thing that speaks', /_sfDeleteOutcome\(/.test(runner),
 // without telling anyone; one that must still be FOUND fails the moment it moves or disappears, and
 // that failure is a prompt to re-read it rather than a false alarm.
 const EXEMPT = [
-  { what: 'import rollback: a cancelled or failed import removes the source it just wrote',
-    find: 'window.electronAPI.deleteSource({ uuid: uuidToClean })' },
-  { what: 'import rollback: the same, on the other import door',
-    find: 'window.electronAPI.deleteSource({ uuid: importRes.uuid })' },
+  // ⭐ WAS TWO DECLARATIONS, NOW ONE. [B-424, 2026-10-07] Both import doors fired their own
+  // `deleteSource(...).catch(() => {})` and walked away — and `deleteSource` reports failure by
+  // RETURNING `{ ok:false }`, so neither catch could ever run and a failed rollback was silent.
+  // That is how a cancelled link import left a committed 25 MB source with nothing pointing at it.
+  // `_sfDiscardSource` is now the single verified discard both doors call: it checks `.ok`, retries
+  // the timing failure, and hands anything it still cannot remove to the orphan sweep.
+  { what: 'import rollback: the one verified discard both import doors call',
+    find: 'try { r = await window.electronAPI.deleteSource({ uuid }); }' },
   { what: 'undo duplicate: removes the copies only - they share a source with the originals, so no '
           + 'source can be orphaned and no cleanup is owed',
     find: 'try { await window.electronAPI.deleteEntry({ name: nm }); } catch {}' },

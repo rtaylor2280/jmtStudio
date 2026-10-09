@@ -93,7 +93,6 @@ const KNOWN_UNGUARDED = [
   'Export Style Library',
   'Replace Style Library',
   'Import Default Template',
-  'Attach files to this source',
   'Choose a proof-of-purchase file',
   'Add files to common folder',
   'Select ProffieOS Folder',

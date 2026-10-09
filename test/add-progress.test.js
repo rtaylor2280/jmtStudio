@@ -89,9 +89,17 @@ function makeWav(dir, name, sizeBytes, seed) {
      `ended at ${last.done} of ${last.total} — [B-389]: a bar always reaches 100% before it moves on`);
   ok('nothing overshoots its total', samples.every(s => s.done <= s.total));
 
-  // Each file is read twice (hash + copy) when dedupe is on, so the budget is 2x.
-  ok('the budget counts the hash read AND the copy', last.total === N * SIZE * 2,
-     `total was ${last.total}, expected ${N * SIZE * 2}`);
+  // ⭐⭐ ONE PASS, SO THE BUDGET IS THE DATA SIZE. [B-424, 2026-10-09] This asserted `* 2`,
+  // because the file used to be hashed and THEN copied. That was two reads of whatever the
+  // user picked from, and on a card mounted through a Proffieboard it was the slowest thing
+  // in the system, paid on every file to save a local write on the occasional duplicate.
+  // ⚠️ THE OLD ASSERTION WAS NOT WRONG WHEN WRITTEN - it pinned a real design. It is inverted
+  // now, which is the point of pinning it: the number could not change quietly.
+  // ⭐ The total is now a figure the user can check - it matches the slow-source warning and
+  // matches what their file manager says those files weigh.
+  ok('the budget is the data size, counted ONCE', last.total === N * SIZE,
+     `total was ${last.total}, expected ${N * SIZE} — a 2x total means the source is being `
+     + 'read twice again');
 
   ok('the current filename is reported', samples.some(s => /trk\d\.wav/.test(s.name || '')));
 
@@ -111,8 +119,10 @@ function makeWav(dir, name, sizeBytes, seed) {
 
   // ── duplicates: the credit that stops the bar ending short ───────────────
   // ⚠️⚠️ Re-adding files already held is the MOST COMMON use of this path (re-importing a card
-  // you already have). Every file is hashed and none is copied, so without crediting the copy
-  // that never happens the bar would stop at exactly 50%.
+  // you already have). Under the one-pass design the read IS the whole budget, so a duplicate
+  // settles its own cost as it streams and there is no skipped-copy credit to forget.
+  // ⚠️ The mid-run assertion below is kept anyway: it is what would catch a future change that
+  // reintroduces an uncredited phase, and it costs nothing to leave in place.
   const dupSamples = [];
   const res2 = await tracks.addFiles(user, paths, null, (p) => dupSamples.push({ ...p }));
   ok('the second add finds them all as duplicates',
@@ -172,8 +182,11 @@ function makeWav(dir, name, sizeBytes, seed) {
   // ⚠️ Match a CALL, not the word. The bare word appears in this function's own comment
   // explaining what it replaced — the first draft of this assertion matched that and failed
   // against correct code, which then made every mutant look caught for the wrong reason.
-  ok('⚠️ the copy in addFiles is awaited, never copyFileSync',
-     /await fsp\.copyFile\(/.test(addBody) && !/fs\.copyFileSync\(/.test(addBody),
+  // ⭐ [B-424] The source now goes through `copyFileHashing` — one streamed read that hashes on
+  // the way to a temp — so the assertion is that the streaming primitive is what the add uses,
+  // and that no synchronous whole-file copy has crept back in beside it.
+  ok('⚠️ the add streams through copyFileHashing, never copyFileSync',
+     /await fileHash\.copyFileHashing\(/.test(addBody) && !/fs\.copyFileSync\(/.test(addBody),
      'a synchronous copy blocks for the whole write — half of every file\'s work');
 
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

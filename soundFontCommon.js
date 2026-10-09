@@ -338,7 +338,7 @@ function writeCommonReadme(userData, uuid, destDir) {
 // picked zip; importSource treats either as a source. Returns
 // { ok, uuid, name, sourceUuid, savings } where savings carries what the
 // close-out sentence needs (archiveBytes / contentBytes / crossLinked).
-async function _importCommonAsSource(userData, sourcePath, name, onProgress) {
+async function _importCommonAsSource(userData, sourcePath, name, onProgress, shouldStop) {
   if (!sourcePath || !fs.existsSync(sourcePath)) {
     return { ok: false, error: 'Source not found' };
   }
@@ -351,9 +351,15 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress) {
   // onProgress rides straight into importSource ([B-352]): the source
   // pipeline has emitted per-byte hashing/copying stages all along — this
   // caller just never asked, so a bulk common import ran with a dead bar.
+  // ⭐ THE PIPELINE WAS ALWAYS CANCELLABLE - `importSource` has taken `shouldStop`
+  // since [B-462]. This caller simply never passed one, which is why the Common
+  // Folders door had no way out of a long copy. [B-424] Not a limitation, an
+  // omission. A stop surfaces as a thrown ExportCancelled; the partial is
+  // discarded, because a cancelled import keeps nothing.
   const imp = await S.importSource({
     userData, sourcePath, originalName: path.basename(sourcePath), metadata: {},
     onProgress: typeof onProgress === 'function' ? onProgress : undefined,
+    shouldStop: typeof shouldStop === 'function' ? shouldStop : null,
   });
   if (!imp || !imp.ok) return { ok: false, error: (imp && imp.error) || 'Source import failed' };
   const sourceUuid = imp.uuid;
@@ -410,6 +416,13 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress) {
     };
     fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
     try { recomputeCommonContentHash(userData, uuid); } catch {}
+    // ⭐ THE SPACE IS ALWAYS KNOWABLE, EVEN WHEN importSource REPORTS NO BYTES.
+    // A reused source short-circuits early and returns only
+    // { ok, isDuplicate, uuid, hash, format } - no contentBytes - so savings came
+    // back all zeros and the summary's space sentence was gated off entirely. The
+    // door then said nothing but "X was added". Measuring the working copy makes
+    // the number independent of which path inside importSource ran. [B-424]
+    const _sig = _walkCommonContentSignals(filesDir);
     return {
       ok: true, uuid, name: cleanName, sourceUuid,
       // ⚠️ CARRY WHAT WAS REFUSED ([B-214], 2026-09-10). importSource already strips
@@ -421,14 +434,32 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress) {
       notedFiles: imp.notedFiles || [],
       savings: {
         archiveBytes: imp.archiveBytes || 0,
-        contentBytes: imp.contentBytes || 0,
+        contentBytes: imp.contentBytes || _sig.totalBytes || 0,
         crossLinked: imp.crossLinked || null,
         dedupSaved,
+        // ⭐ A REUSED SOURCE IS THE LARGEST SAVING THIS DOOR EVER HAS TO REPORT,
+        // and it was the one case that reported nothing at all. The working copy
+        // hardlinks into a source tree that was already on disk, so not one
+        // content byte gets written. Carried separately from dedupSaved because
+        // they are different facts about different work; the renderer sums them.
+        reusedBytes: imp.isDuplicate ? _sig.totalBytes : 0,
         reusedSource: !!imp.isDuplicate,
       },
     };
   } catch (err) {
+    // ⭐ THE PARTIAL GOES EITHER WAY. A cancelled import keeps nothing - the rule,
+    // 2026-10-07: *"A cancelled import just throws away."* The cleanup that was
+    // already here for failures is exactly what a cancel needs, which is part of
+    // why wiring this was small. [B-424]
     _cleanupPartial(uuidDir);
+    // ⚠️ A CANCEL IS NOT A FAILURE. The pipeline throws ExportCancelled when
+    // `shouldStop` fires; reporting the user's own click as "Import failed" is the
+    // red-error-for-your-own-action defect the export doors already paid for.
+    // `cancelled` is the spelling the newer modules use - see
+    // test/cancel-flag-spelling.test.js.
+    if (err && (err.name === 'ExportCancelled' || err.cancelled)) {
+      return { ok: false, cancelled: true, error: 'Import cancelled.' };
+    }
     return { ok: false, error: `Import failed: ${err.message}` };
   }
 }
@@ -439,15 +470,18 @@ function sourcesRoot_(userData) {
 }
 
 // Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
-async function importCommonFromFolder(userData, folderPath, name, onProgress) {
-  return await _importCommonAsSource(userData, folderPath, name, onProgress);
+// ⚠️ `shouldStop` is OPTIONAL and last, so the bulk import runner - which shares
+// this function and is already dev-tested - calls it unchanged and keeps its own
+// cancel. [B-424]
+async function importCommonFromFolder(userData, folderPath, name, onProgress, shouldStop) {
+  return await _importCommonAsSource(userData, folderPath, name, onProgress, shouldStop);
 }
 
 // Import a common folder from a zip file. The zip IS the source now - its
 // bytes are the provenance identity, so no temp extraction happens outside
 // the source pipeline.
-async function importCommonFromZip(userData, zipPath, name) {
-  return await _importCommonAsSource(userData, zipPath, name);
+async function importCommonFromZip(userData, zipPath, name, onProgress, shouldStop) {
+  return await _importCommonAsSource(userData, zipPath, name, onProgress, shouldStop);
 }
 
 // Answer "do I already have this pack?" by CONTENT, not name. ([B-340])
@@ -464,14 +498,18 @@ async function importCommonFromZip(userData, zipPath, name) {
 // you press "Import fonts anyway", and the font review shows what was refused with
 // Cancel as the recommended button. The commons door imported first and reported
 // afterwards, which is a different contract - a fait accompli instead of a choice.
-// His call: "the other imports stop it from importing and check then import anyway...
+// Ruled: "the other imports stop it from importing and check then import anyway...
 // seems inconsistent."
 //
 // So this answers the question the dialog needs BEFORE the copy happens. The strip
 // inside importSource is unchanged and still authoritative; this only decides what
 // to say up front. Reads 256 bytes per file, same as every other check.
+// ⭐ `files` and `bytes` ride along because this walk already has them. [B-424] The import side
+// needs a payload size to decide whether a board card is worth warning about, and the alternative
+// was a SECOND walk of the same tree to count what this one was already touching. Both are
+// best-effort: a file whose size cannot be read still counts toward `files`.
 async function scanIncomingCommon(srcPath) {
-  const out = { blocked: [], noted: [] };
+  const out = { blocked: [], noted: [], files: 0, bytes: 0 };
   if (!srcPath || !fs.existsSync(srcPath)) return out;
   const { classifyFileBuffer } = require('./sdCardDetect');
   const take = (rel, buf) => {
@@ -494,6 +532,9 @@ async function scanIncomingCommon(srcPath) {
         const r = rel ? rel + '/' + e.name : e.name;
         if (e.isDirectory()) { walk(abs, r); continue; }
         if (!e.isFile()) continue;
+        // [B-424] Counted BEFORE the read, so a file we cannot open still counts as payload.
+        out.files++;
+        try { out.bytes += fs.statSync(abs).size; } catch { /* size is best-effort */ }
         let buf = Buffer.alloc(0);
         try {
           const fd = fs.openSync(abs, 'r');
@@ -513,6 +554,10 @@ async function scanIncomingCommon(srcPath) {
     for (const name of Object.keys(entries)) {
       const e = entries[name];
       if (e.isDirectory) continue;
+      // [B-424] UNCOMPRESSED size, not the entry's packed size: the import writes the expanded
+      // bytes to disk, and that is the number the slow-card threshold is measured against.
+      out.files++;
+      out.bytes += Number(e.size) || 0;
       let buf = Buffer.alloc(0);
       try { const full = await zip.entryData(name); buf = full.subarray(0, 256); } catch { continue; }
       take(name, buf);
@@ -840,7 +885,12 @@ function listCommonFiles(userData, uuid) {
 // ⚠️ The `await` per iteration is load-bearing: ingest resolves to a hardlink and never touches
 // fsp, so without an explicit yield the loop runs to completion synchronously and every tick
 // flushes after the work is already done.
-async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onBytes) {
+// ⚠️⚠️ `shouldStop` ARRIVED LATE AND THE GAP WAS REAL. [B-424, 2026-10-08] Found on the font
+// detail's "+ Add → Browse…" by pressing it - eject checkbox present, eject toast present, no
+// Cancel at all - and an audit of the shared byte-progress runner found this door carrying the
+// identical hole. One cause, two faces, same as door 9. The shape is copied from
+// `soundFontSharedTracks.addFiles`, which already solved it, rather than re-derived here.
+async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onBytes, shouldStop) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
     return { ok: false, error: 'No source files provided' };
@@ -877,7 +927,12 @@ async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onByte
     try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
   };
   _emit('');
+  // ⚠️⚠️ CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
+  // Stopping here leaves every file already added in place and complete; files not yet reached are
+  // simply not added, so there is nothing half-written to clean up.
+  let _stopped = false;
   for (const src of sourceFilePaths) {
+    if (shouldStop && shouldStop()) { _stopped = true; break; }
     // Name first, so the label names what is being worked on rather than what just finished.
     _emit(path.basename(String(src || '')));
     await new Promise(r => setImmediate(r));
@@ -923,7 +978,9 @@ async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onByte
   if (added.length) {
     try { markCommonContentDirty(userData, uuid); } catch {}
   }
-  return { ok: true, added, failed, refused: refusedIn };
+  // ⚠️ A stop the user asked for is an OUTCOME, not an error - see the twin in soundFontFileOps.
+  // ⚠️⚠️ So `ok: true` no longer means "it wrote everything": test `canceled` BEFORE `!ok`.
+  return { ok: true, cancelled: _stopped, added, failed, refused: refusedIn };
 }
 
 // Rename one file inside a common. Validates the new name doesn't collide
@@ -1629,7 +1686,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
             const _ed0 = require('./exportDestination');
             const _wf0 = (opts.wrote && opts.wrote.files) || 0;
             const _wb0 = (opts.wrote && opts.wrote.bytes) || 0;
-            if (opts.boardCard && _ed0.isSlowWriteJob(_wf0, _wb0)) {
+            if (opts.boardCard && _ed0.isSlowCleanupJob(_wf0, _wb0)) {
               out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
               out.offerCleanup = junkLeft;
             } else {
@@ -1652,7 +1709,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
         const _ed = require('./exportDestination');
         const _wf = (opts.wrote && opts.wrote.files) || 0;
         const _wb = (opts.wrote && opts.wrote.bytes) || 0;
-        if (opts.boardCard && _ed.isSlowWriteJob(_wf, _wb)) {
+        if (opts.boardCard && _ed.isSlowCleanupJob(_wf, _wb)) {
           const junk = path.join(path.dirname(targetDir), `DELETE.${targetName}`);
           try {
             if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });

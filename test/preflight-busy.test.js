@@ -181,8 +181,11 @@ const pfBody = src.slice(src.indexOf('async function _sfPreflightDestination'),
                          src.indexOf('window._sfPreflightDestination'));
 ok('the shared preflight was located', pfBody.length > 200,
   're-anchor before trusting the positions below');
+// ⚠️ ANCHORED ON THE BYTE CONSTANT SINCE 2026-10-04 - the file-count limb was removed on
+// measurement, so naming the old constant here would have failed for the right reason and
+// read as "the preflight stopped computing its threshold".
 ok('the shared preflight computes the slow-write threshold itself',
-  pfBody.indexOf('SF_SLOW_WRITE_MIN_FILES') >= 0 && pfBody.indexOf('wantsDevice') >= 0);
+  pfBody.indexOf('SF_SLOW_WRITE_MIN_BYTES') >= 0 && pfBody.indexOf('wantsDevice') >= 0);
 ok('and it decides the threshold BEFORE asking for the device lookup',
   pfBody.indexOf('wantsDevice') >= 0
   && pfBody.indexOf('wantsDevice') < pfBody.indexOf('classify: wantsDevice'));

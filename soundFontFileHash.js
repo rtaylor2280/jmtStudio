@@ -204,6 +204,64 @@ function hashFileAsync(absPath) {
   });
 }
 
+// Copy a file and hash it in the same read. Used where the caller needs the digest before it can
+// decide whether to keep the copy, so the source is opened once instead of hashed and then copied.
+// Same pattern as storeFileStreaming in soundFontAttachments.js.
+//
+// Writes to a temp path because the verdict is not known until the last byte, and a half-written
+// file under its real name is indistinguishable from a finished one. The caller renames or
+// unlinks. The temp is removed here on any failure or stop, so nothing is left behind.
+//
+// sha256 over the same bytes as _hashFile and hashFileAsync; these digests decide what counts as
+// the same content, so the three must not diverge.
+//
+// Resolves { hash, bytes } · { stopped: true } · null on error.
+function copyFileHashing(srcAbs, tmpAbs, { onBytes, shouldStop } = {}) {
+  return new Promise((resolve) => {
+    let h;
+    try { h = crypto.createHash('sha256'); } catch { resolve(null); return; }
+    let rs, ws;
+    try {
+      // 64 KiB to match hashFileAsync: the chunk size sets how often onBytes fires, and a 1 MiB
+      // chunk gives a 2 MB file three samples, which reads as a stalled bar.
+      // test/add-progress.test.js asserts progress within a single file.
+      rs = fs.createReadStream(srcAbs, { highWaterMark: 64 * 1024 });
+      ws = fs.createWriteStream(tmpAbs);
+    } catch { resolve(null); return; }
+    let bytes = 0;
+    let settled = false;
+    const cleanup = () => { try { fs.rmSync(tmpAbs, { force: true }); } catch {} };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      if (!value || value.stopped) cleanup();
+      resolve(value);
+    };
+    const abort = (value) => {
+      try { rs.destroy(); } catch {}
+      try { ws.destroy(); } catch {}
+      finish(value);
+    };
+    rs.on('data', (chunk) => {
+      if (typeof shouldStop === 'function' && shouldStop()) { abort({ stopped: true }); return; }
+      h.update(chunk);
+      bytes += chunk.length;
+      if (onBytes) { try { onBytes(chunk.length); } catch {} }
+    });
+    rs.on('error', () => abort(null));
+    ws.on('error', () => abort(null));
+    // `finish` on the WRITE stream, not `end` on the read one: the bytes are not on disk until the
+    // writer says so, and committing a rename before that is how a truncated file gets a real name.
+    ws.on('finish', () => {
+      if (settled) return;
+      let digest = null;
+      try { digest = h.digest('hex'); } catch { digest = null; }
+      finish(digest ? { hash: digest, bytes } : null);
+    });
+    rs.pipe(ws);
+  });
+}
+
 // ⭐ THE ONE YIELD, shared by every per-file loop that had to stop blocking the main thread.
 // [B-398] has five doors and they must all yield the SAME way; five inline copies of this would be
 // five chances to write the microtask version by accident, and that version passes every test
@@ -388,5 +446,5 @@ function dirSignals(root, excludeFn) {
 
 module.exports = {
   uniqueFileHashes, hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
-  hashRecords, hashFile: _hashFile, hashFileAsync, writeFileHashManifest, readFileHashManifest, breathe,
+  hashRecords, hashFile: _hashFile, hashFileAsync, copyFileHashing, writeFileHashManifest, readFileHashManifest, breathe,
   dirSignals };
