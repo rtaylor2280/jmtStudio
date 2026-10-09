@@ -7,7 +7,7 @@
  *     TypeError: Store.delete is not a function
  *         at _recoverInterruptedInstall (main.js:335)
  *
- * ⭐⭐ THE TRAP IS THAT IT LOOKS LIKE A ONE-LINE FIX. Store defined only get and set;
+ * THE TRAP IS THAT IT LOOKS LIKE A ONE-LINE FIX. Store defined only get and set;
  * two call sites used delete. Add the missing method and the code underneath it starts
  * working — and what it does is `cancelCoreInstall(pending)`, which removes the entire
  * versioned core tree.
@@ -23,7 +23,7 @@
  * Measured on the dev profile 2026-09-02 and still true 2026-09-13:
  * pendingPluginInstall = "3.6.0" with a complete, in-use 802 MB core under it.
  *
- * HIS RULING 2026-09-13: "verify first, never auto delete."
+ * THE RULING 2026-09-13: "verify first, never auto delete."
  *
  * Run: node test/install-recovery-safety.test.js
  */
@@ -62,7 +62,7 @@ function ok(name, cond, extra) {
     Store.set('keepMe', 'yes');
     ok('the marker reads back', Store.get('pendingPluginInstall') === '3.6.0');
     Store.delete('pendingPluginInstall');
-    // ⚠️ `== null`, not `=== null`, and the difference is real: Store.get returns
+    // `== null`, not `=== null`, and the difference is real: Store.get returns
     // UNDEFINED for a key missing from a readable file, and NULL when the file itself
     // cannot be read. Both are falsy, so `if (!pending) return;` treats them alike —
     // but a test asserting one exact value would be asserting the wrong thing.
@@ -73,7 +73,7 @@ function ok(name, cond, extra) {
     ok('deleting an absent key is a no-op, not a throw', Store.get('keepMe') === 'yes');
   } finally { try { fs.unlinkSync(tmp); } catch {} }
 
-  // ⚠️ A missing prefs file must not throw either — recovery runs at startup, before
+  // A missing prefs file must not throw either — recovery runs at startup, before
   // anything guarantees the file exists.
   const gone = path.join(process.env.TEMP || '/tmp', `b299-absent-${process.pid}.json`);
   const S2 = { _path: gone,
@@ -91,7 +91,7 @@ function ok(name, cond, extra) {
                         main.indexOf('toolchain.setPluginHooks'));
   ok('_recoverInterruptedInstall was located', fn.length > 100 && fn.length < 4000, `${fn.length} chars`);
 
-  // ⭐⭐ THE ASSERTION THIS FILE EXISTS FOR. If cancelCoreInstall ever comes back into
+  // THE ASSERTION THIS FILE EXISTS FOR. If cancelCoreInstall ever comes back into
   // this function, a healthy 800 MB toolchain is one launch away from deletion.
   ok('recovery NEVER calls cancelCoreInstall', !/cancelCoreInstall/.test(fn),
      'this function must not remove a core tree on the app\'s own initiative');
@@ -104,7 +104,7 @@ function ok(name, cond, extra) {
   ok('it resolves the tree with getCoreTreePath, which adopts the legacy tree',
      /getCoreTreePath\(/.test(fn), 'a hand-built join misreads an in-place upgrade');
 
-  // ⚠️ A verify that FAILED is not a verify that said "incomplete". Knowing nothing
+  // A verify that FAILED is not a verify that said "incomplete". Knowing nothing
   // must leave everything as it is, marker included, so the question is asked again.
   const catchBlock = fn.slice(fn.indexOf('catch (e)'), fn.indexOf('catch (e)') + 500);
   ok('a failed verify returns without clearing the marker',

@@ -79,7 +79,7 @@ async function setup() {
       dest: { kind: 'entry', id: t.b, subPath: '' },
     });
     check('the copy succeeded', r && r.ok && r.added.length === 1, JSON.stringify(r));
-    check('⭐ both fonts name the same file',
+    check('both fonts name the same file',
       ino(t.entFile(t.a, 'mine.wav')) === ino(t.entFile(t.b, 'mine.wav')));
     check('and it reads correctly in the new font',
       fs.readFileSync(t.entFile(t.b, 'mine.wav')).includes('MY-OWN-SOUND'));
@@ -95,9 +95,9 @@ async function setup() {
       dest: { kind: 'entry', id: t.b, subPath: '' },
     });
     check('the copy succeeded', r && r.ok && r.added.length === 1, JSON.stringify(r));
-    check('⭐ it is the source\'s own file', ino(t.entFile(t.b, 'quote1.wav')) === ino(t.srcFile('extras/quote1.wav')));
+    check('it is the source\'s own file', ino(t.entFile(t.b, 'quote1.wav')) === ino(t.srcFile('extras/quote1.wav')));
     check('and reads correctly', fs.readFileSync(t.entFile(t.b, 'quote1.wav')).includes('QUOTE-ONE'));
-    check('⚠️ nothing was pooled — it already had a home in the source',
+    check('nothing was pooled — it already had a home in the source',
       t.pool().length === 0, JSON.stringify(t.pool()));
   }
 
@@ -113,7 +113,7 @@ async function setup() {
     });
     check('the copy succeeded', r && r.ok, JSON.stringify(r));
     for (const f of ['quote1.wav', 'quote2.wav']) {
-      check(`⭐ extras/${f} points at the source`,
+      check(`extras/${f} points at the source`,
         ino(t.entFile(t.b, `extras/${f}`)) === ino(t.srcFile(`extras/${f}`)));
     }
     check('and both read correctly',
@@ -130,13 +130,13 @@ async function setup() {
       dest: { kind: 'entry', id: t.b, subPath: '' },
     });
     check('the copy succeeded', r && r.ok, JSON.stringify(r));
-    check('⭐ the nested files share inodes with the origin',
+    check('the nested files share inodes with the origin',
       ino(t.entFile(t.b, 'extras (1)/quote1.wav')) === ino(t.entFile(t.a, 'extras/quote1.wav'))
       || ino(t.entFile(t.b, 'extras/quote1.wav')) === ino(t.entFile(t.a, 'extras/quote1.wav')));
   }
 
   {
-    console.log('⭐ THE INVARIANT: after every add-from-library, no font folder holds real bytes');
+    console.log('THE INVARIANT: after every add-from-library, no font folder holds real bytes');
     // The general form of all of the above, asserted over the whole library
     // rather than per case — so a NEW copy path added later that forgets to
     // link is caught here even though nobody wrote a case for it.

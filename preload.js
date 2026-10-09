@@ -2,9 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
 
-  // ⭐ THE PLATFORM, AS A VALUE RATHER THAN A CALL. [B-254] It never changes, so an IPC round
+  // THE PLATFORM, AS A VALUE RATHER THAN A CALL. [B-254] It never changes, so an IPC round
   // trip would buy nothing and force every caller to be async. 'win32' | 'darwin' | 'linux'.
-  // ⚠️ NOT navigator.platform or a userAgent sniff - those describe the Chromium build and are
+  // NOT navigator.platform or a userAgent sniff - those describe the Chromium build and are
   // spoofable and deprecated. This is the real process.
   platform: process.platform,
 
@@ -395,7 +395,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reorganizeRenumber:    (params)     => ipcRenderer.invoke('reorganize:renumber', params),
   hashFiles:             (params)     => ipcRenderer.invoke('hash:files', params),
   sfExportFiles:         (params)     => ipcRenderer.invoke('sfFile:export', params),
-  // ⭐ ONE CANCEL FOR EVERY EXPORT DOOR. Takes no argument on purpose: it cancels whatever is in
+  // ONE CANCEL FOR EVERY EXPORT DOOR. Takes no argument on purpose: it cancels whatever is in
   // flight rather than a run the renderer has to identify. Aiming a cancel at one remembered run
   // is the exact bug written up in bulkImportGate.js, where it happened twice. [B-005 item 4]
   exportCancel:          ()           => ipcRenderer.invoke('export:cancel'),
@@ -424,36 +424,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkExportDest:       (params)     => ipcRenderer.invoke('exportDest:check', params),
   // [B-203] What is the destination attached to? ~1.9s (one PowerShell spawn), so start
   // it early and read it later. Never await it between a click and the work starting.
-  // ⚠️ [B-005 item 4] Since 2026-09-21 this answers ONLY "is it a card through a
+  // [B-005 item 4] Since 2026-09-21 this answers ONLY "is it a card through a
   // Proffieboard". If all you need is removable-or-not, use identifyExportDest - it is the
   // same fact for 1/20th of the time, and buying the walk to get it was why several doors
   // quietly never offered a safe eject.
   classifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:classify', params),
-  // ⭐ [B-005 item 4] "What have we just been handed?" ~85ms, no PowerShell. Returns
+  // [B-005 item 4] "What have we just been handed?" ~85ms, no PowerShell. Returns
   // { removable, kind } or null for "cannot tell". Cheap enough to sit on a write path.
   identifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:identify', params),
-  // ⭐ [B-424] { files, bytes } for a picked file or folder. Feeds the IMPORT side's slow-card
+  // [B-424] { files, bytes } for a picked file or folder. Feeds the IMPORT side's slow-card
   // threshold, which had no way to size a source before the copy started - a file picker returns
   // paths, and the font import learns its total only from progress events once it is running.
   measurePath:           (params)     => ipcRenderer.invoke('path:measure', params),
-  // ⭐ [B-005 item 4] THE ONE PREFLIGHT. Fit refusal + board-card warning in a single call,
+  // [B-005 item 4] THE ONE PREFLIGHT. Fit refusal + board-card warning in a single call,
   // and it returns `boardCard` and `removable` so the cancel-cleanup rule and the safe-eject
   // offer reuse that answer instead of each paying for their own device lookup.
-  // ⚠️ Pass classify:true only when the answer is wanted; it is the ~1.9s spawn.
+  // Pass classify:true only when the answer is wanted; it is the ~1.9s spawn.
   preflightExportDest:   (params)     => ipcRenderer.invoke('exportDest:preflight', params),
-  // ⭐ [B-005 item 4] Safe eject. Takes a DRIVE LETTER, not a path - one physical reader can
+  // [B-005 item 4] Safe eject. Takes a DRIVE LETTER, not a path - one physical reader can
   // hold two letters, so the eject is per-volume or it takes a sibling card with it.
   // Resolves with one of three honest outcomes: ejected / returned / busy. Never a success
   // it cannot verify: the shell verb is fire-and-forget, so the module watches the media go.
-  // ⚠️ [B-005 item 4] Removes ONLY a folder this app set aside - main refuses anything whose
+  // [B-005 item 4] Removes ONLY a folder this app set aside - main refuses anything whose
   // name does not start with "DELETE.". Not a general-purpose delete, deliberately.
   removePath:            (params)     => ipcRenderer.invoke('fs:removeSetAside', params),
-  // ⚠️ Takes { destDir }, NOT a drive letter. The module resolves a destination to whatever
+  // Takes { destDir }, NOT a drive letter. The module resolves a destination to whatever
   // its platform watches (E:\, /Volumes/NAME, /media/<user>/NAME), so this contract does not
   // change when macOS and Linux are implemented behind it.
   ejectMedia:            (params)     => ipcRenderer.invoke('media:eject', params),
   isMediaPresent:        (params)     => ipcRenderer.invoke('media:present', params),
-  // ⭐ Per-OS words, asked for once. So a Mac build never says "Windows", and a message that
+  // Per-OS words, asked for once. So a Mac build never says "Windows", and a message that
   // describes a Windows-only BEHAVIOUR (the drive letter that stays behind) is absent rather
   // than translated. See media:vocabulary in main.js.
   // Returns { mountPath, label } or null. Null is the platform saying "nothing to eject here",

@@ -87,7 +87,7 @@ function _hashFile(absPath) {
 // skip it (and, for a dir, not descend). Used to drop non-content noise
 // (AppleDouble ._*, .DS_Store, __MACOSX, Thumbs.db) so the per-file hash set
 // represents only the real font content — matching what the import zips.
-// ⚠️⚠️ ONE WALK, ONE SET OF RULES, TWO DRAINS. [B-398]
+// ONE WALK, ONE SET OF RULES, TWO DRAINS. [B-398]
 //
 // This is a GENERATOR rather than a plain function so the synchronous collector and the async one
 // can share it verbatim. The async twin exists because hashing a whole source tree in one
@@ -95,7 +95,7 @@ function _hashFile(absPath) {
 // importSource, which is within 45ms of the ~5s at which Windows greys the window and offers to
 // kill the app. Yielding lets the loop pump between files.
 //
-// ⚠️ THE ALTERNATIVE WAS A SECOND WALKER, AND IT WAS THE WRONG ANSWER. The exclusion rules here
+// THE ALTERNATIVE WAS A SECOND WALKER, AND IT WAS THE WRONG ANSWER. The exclusion rules here
 // are load-bearing and fiddly — root-only meta.json, the empty-dir marker, the
 // only-child-was-excluded edge case, the streaming threshold — and a copy of them would agree on
 // the day it was written and silently diverge afterwards. Duplicating rules and then testing that
@@ -157,12 +157,12 @@ function _collectRecords(itemRoot, onFile, filter) {
 
 // Drain it with a breath between files, so the main thread can pump messages. [B-398]
 //
-// ⚠️ setImmediate, NOT setTimeout(0) and NOT await null. `await null` resolves on the microtask
+// setImmediate, NOT setTimeout(0) and NOT await null. `await null` resolves on the microtask
 // queue, which runs to exhaustion BEFORE the loop ever gets to I/O or timers — so it would yield
 // to nothing and the window would stay just as frozen while looking like it had been fixed.
 // setImmediate lands in the check phase, after the loop has had its turn.
 //
-// ⚠️ EVERY file, not every Nth. A breath costs microseconds against a hash that costs
+// EVERY file, not every Nth. A breath costs microseconds against a hash that costs
 // milliseconds, and "every Nth" reintroduces exactly the thing being fixed — a window of N files
 // with no yield in it — whose worst case is set by the largest N files in the tree, not by N.
 async function _collectRecordsAsync(itemRoot, onFile, filter) {
@@ -174,21 +174,21 @@ async function _collectRecordsAsync(itemRoot, onFile, filter) {
   return records;
 }
 
-// ⚠️⚠️ A YIELD BETWEEN FILES DOES NOT HELP WHEN ONE FILE IS THE PROBLEM. [B-398]
+// A YIELD BETWEEN FILES DOES NOT HELP WHEN ONE FILE IS THE PROBLEM. [B-398]
 //
 // Measured 2026-09-18, after the per-file breath was already in place: compare:font stalled 2526ms
 // and tracks:planExport 623ms. Both loops yield between every file — so the block was INSIDE a
 // single file. _hashFile reads and hashes a whole file in one synchronous go, and a sound font's
 // tracks are megabytes each.
 //
-// ⭐ THAT IS A DIFFERENT DEFECT FROM EVERYTHING ELSE IN THIS ENTRY. The rest were "many small
+// THAT IS A DIFFERENT DEFECT FROM EVERYTHING ELSE IN THIS ENTRY. The rest were "many small
 // operations with no yield between them". This is "one operation too big to be atomic", and no
 // amount of yielding around it helps.
 //
 // Streams in 64 KiB chunks, so each chunk is its own turn of the event loop no matter how large
-// the file is. ⚠️ Byte-identical to _hashFile — both are sha256 over the same bytes — which is
+// the file is. Byte-identical to _hashFile — both are sha256 over the same bytes — which is
 // load-bearing: these hashes decide what counts as the same content.
-// ⚠️ Resolves null on error rather than throwing, matching hashFileAsync in
+// Resolves null on error rather than throwing, matching hashFileAsync in
 // soundFontSharedTracksHash, because a caller that cannot read a file must treat it as "unknown"
 // and go read it, never as "matches".
 function hashFileAsync(absPath) {
@@ -262,7 +262,7 @@ function copyFileHashing(srcAbs, tmpAbs, { onBytes, shouldStop } = {}) {
   });
 }
 
-// ⭐ THE ONE YIELD, shared by every per-file loop that had to stop blocking the main thread.
+// THE ONE YIELD, shared by every per-file loop that had to stop blocking the main thread.
 // [B-398] has five doors and they must all yield the SAME way; five inline copies of this would be
 // five chances to write the microtask version by accident, and that version passes every test
 // except the one that matters. Exported so the compare and copy paths use this exact definition.
@@ -301,7 +301,7 @@ function collectFileRecords(itemRoot, onFile, filter) {
 // Async twin. IDENTICAL OUTPUT — same records, same order, same null contract — differing only in
 // that it yields to the event loop between files so the window keeps answering Windows. [B-398]
 //
-// ⚠️ NOT A DROP-IN FOR THE 27 SYNC CALL SITES, and deliberately not offered as one. Converting
+// NOT A DROP-IN FOR THE 27 SYNC CALL SITES, and deliberately not offered as one. Converting
 // them would be a rewrite across the whole sound-font surface for a benefit only the long-running
 // import passes actually need. Callers that finish in milliseconds should stay synchronous.
 async function collectFileRecordsAsync(itemRoot, onFile, filter) {
@@ -391,19 +391,19 @@ function hashBucketChildren(bucketRoot) {
 }
 
 
-// ⭐ [B-415] The DISTINCT file digests of a staged tree, for asking whether one source's
+// [B-415] The DISTINCT file digests of a staged tree, for asking whether one source's
 // content is CONTAINED in another's rather than equal to it.
-// ⚠️ Truncated to 16 hex chars deliberately. A batch can hold thousands of files across
+// Truncated to 16 hex chars deliberately. A batch can hold thousands of files across
 // hundreds of sources and these sets are held in memory for the whole analyze; 64 bits is far
 // past collision risk at that scale, and the full digest is still on the record if ever needed.
-// ⚠️ DE-DUPLICATED, so repeated files inside one source cannot inflate it - a set, not a list.
+// DE-DUPLICATED, so repeated files inside one source cannot inflate it - a set, not a list.
 function uniqueFileHashes(records) {
   const out = new Set();
-  // ⚠⚠ THE FIELD IS `fileHash`, NOT `hash`. Reading `r.hash` here returned undefined for every
+  // THE FIELD IS `fileHash`, NOT `hash`. Reading `r.hash` here returned undefined for every
   // record, so this produced an EMPTY ARRAY and the containment ranking silently never ran - it
   // shipped that way and the test looked identical to no fix at all. Nothing threw, no count was
   // wrong, no test failed: the batch simply had nothing to compare.
-  // ⭐ IT SURVIVED THE TESTS BECAUSE THE TESTS BUILT THEIR OWN RECORDS. Every case fed either
+  // IT SURVIVED THE TESTS BECAUSE THE TESTS BUILT THEIR OWN RECORDS. Every case fed either
   // `{hash}` objects or bare hash strings straight to rankByContainment, so this function was
   // never once run against a record collectFileRecords actually produces. Verifying a mapping
   // with a fixture you also authored tests the fixture.
@@ -421,7 +421,7 @@ function uniqueFileHashes(records) {
 // `excludeFn(relPath)` returns truthy to INCLUDE, matching collectFileRecords' contract, so both
 // sides can be measured under the same rules when one carries files the other never will.
 //
-// ⚠️ Root-level meta.json is skipped, because the hash walk skips it too. Measuring it on one
+// Root-level meta.json is skipped, because the hash walk skips it too. Measuring it on one
 // side and not the other would report every folder as different.
 function dirSignals(root, excludeFn) {
   let fileCount = 0, totalBytes = 0;

@@ -3,17 +3,17 @@
  *
  * Found 2026-09-16 by reading the IPC layer while wiring [B-399] into both restore paths.
  *
- * ⭐⭐ THE BACKEND ALWAYS DID THE WORK AND THE ANSWER WAS THROWN AWAY AT THE DOOR.
+ * THE BACKEND ALWAYS DID THE WORK AND THE ANSWER WAS THROWN AWAY AT THE DOOR.
  * applyReplace and applyMerge both collect every declined file into `restoreRefused` and
  * return it as `result.refused` — that is [B-370], built on purpose. Neither ipcMain
  * handler passed it on, so the renderer could not report it.
  *
- * ⚠️⚠️ AND THE DIRECTION OF THE SILENCE IS THE BAD ONE. A restore that strips a program
+ * AND THE DIRECTION OF THE SILENCE IS THE BAD ONE. A restore that strips a program
  * out of the incoming archive is doing exactly the right thing, and then tells the user
  * their library restored cleanly. They have no way to learn their backup contained
  * something we would not put back — precisely the fact [B-370] exists to surface.
  *
- * ⚠️⚠️ THE ENTRY PRESCRIBED THE WRONG DIALOG, and that is the part worth pinning. It said
+ * THE ENTRY PRESCRIBED THE WRONG DIALOG, and that is the part worth pinning. It said
  * to call `_sfShowProgramRefusal`. That dialog IMPOUNDS first, which assumes the file is
  * in the library to be taken out of it. A restore never let it in — `_screenRestored`
  * unlinks the extracted file on the way past and the user's archive is untouched. Calling
@@ -62,28 +62,28 @@ function handlerBody(channel) {
     ok(`${ch} passes refused through`, /refused: \(result && result\.refused\) \|\| \[\]/.test(body),
        'the handler returned ok/manifest/counts and dropped refused on the floor');
   }
-  // ⚠️ The export side was always correct — it is what made this an asymmetry rather than
+  // The export side was always correct — it is what made this an asymmetry rather than
   // a design decision. It must stay correct.
-  ok('⚠️ the export handler still passes refused (no regression)',
+  ok('the export handler still passes refused (no regression)',
      /refused: result\.refused \|\| \[\]/.test(mainJs));
 }
 
 // ── the renderer reports it, on both doors ─────────────────────────────────
 {
-  ok('⭐ the merge completion reads refused',
+  ok('the merge completion reads refused',
      /const _mergeRefused = \(result && result\.refused\) \|\| \[\];/.test(html));
-  ok('⭐ the replace completion reads refused',
+  ok('the replace completion reads refused',
      /const _replRefused = \(result && result\.refused\) \|\| \[\];/.test(html));
 
-  // ⚠️ PRESENCE IS NOT EXECUTION. Reading the field and never acting on it is the same
+  // PRESENCE IS NOT EXECUTION. Reading the field and never acting on it is the same
   // silence wearing a variable name.
-  ok('⭐⭐ merge SHOWS it and skips the plain completion',
+  ok('merge SHOWS it and skips the plain completion',
      /if \(_mergeRefused\.length\) \{ await _sfShowNotAdded\(_mergeRefused, _mergeMsg\); return; \}/.test(html));
-  ok('⭐⭐ replace SHOWS it and skips the plain completion',
+  ok('replace SHOWS it and skips the plain completion',
      /if \(_replRefused\.length\) \{ await _sfShowNotAdded\(_replRefused, _replMsg\); return; \}/.test(html));
 
-  // ⚠️⚠️ BOTH DOORS. This entry exists because only one had been walked through.
-  ok('⚠️⚠️ neither door is left unwired',
+  // BOTH DOORS. This entry exists because only one had been walked through.
+  ok('neither door is left unwired',
      (html.match(/await _sfShowNotAdded\(_(merge|repl)Refused, _(merge|repl)Msg\);/g) || []).length === 2);
 }
 
@@ -96,26 +96,26 @@ function handlerBody(channel) {
     return i >= 0 && j > i ? html.slice(i, j) : '';
   })();
   ok('the restore region could be located', !!restoreRegion);
-  ok('⚠️⚠️ no restore path calls the impounding dialog',
+  ok('no restore path calls the impounding dialog',
      !!restoreRegion && !/_sfShowProgramRefusal/.test(restoreRegion),
      'that dialog removes from the library; a restore never let the file in');
 
   // And the completion folds INTO it rather than showing first.
-  ok('⭐ _sfShowNotAdded accepts a prefix to fold the completion into',
+  ok('_sfShowNotAdded accepts a prefix to fold the completion into',
      /const _sfShowNotAdded = async \(refused, prefixHtml\) => \{/.test(html));
-  ok('⭐⭐ and actually renders it',
+  ok('and actually renders it',
      /\(prefixHtml \? `\$\{prefixHtml\}<div style="height:10px"><\/div>` : ''\)/.test(html),
      'accepting a parameter and ignoring it is the vacuous version of this fix');
 
-  // ⚠️ The pre-existing callers pass ONE argument; the new parameter must stay optional.
-  // ⚠️⚠️ THIS ASSERTION USED TO PIN THE COUNT AT EXACTLY 4 AND WENT RED THE SAME DAY — [B-400]
+  // The pre-existing callers pass ONE argument; the new parameter must stay optional.
+  // THIS ASSERTION USED TO PIN THE COUNT AT EXACTLY 4 AND WENT RED THE SAME DAY — [B-400]
   // converted the tracks +Add caller to the folding two-arg form, which is a correct change the
   // test had no business blocking. A count is a proxy for the property; the property is that a
   // one-argument call still works. Assert the property.
   const oneArg = (html.match(/await _sfShowNotAdded\(res\.refused\);/g) || []).length;
-  ok('⚠️ single-argument callers still exist, so the parameter is optional', oneArg >= 1,
+  ok('single-argument callers still exist, so the parameter is optional', oneArg >= 1,
      'a required second parameter would silently change every other surface');
-  ok('⚠️ and the folding form is in use where a caller has something to fold',
+  ok('and the folding form is in use where a caller has something to fold',
      /_sfShowNotAdded\([^)]+, [^)]+\)/.test(html),
      'prefixHtml exists so a caller with its own report does not show a second dialog first');
 }

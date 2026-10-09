@@ -48,7 +48,7 @@ let _currentBuildKey    = null;   // { configHash, buildPkgHash, configId }
 // which says "the current file is on the board" — false twice over. The flash predates
 // the current build, and there was no board attached at all.
 //
-// ⭐ THE FLASH CHIP WAS A SESSION FLAG, NOT A FACT ABOUT A BUILD. It said a flash had
+// THE FLASH CHIP WAS A SESSION FLAG, NOT A FACT ABOUT A BUILD. It said a flash had
 // succeeded at some point, never WHICH build it put there. Stamping the build identity
 // at flash time is what turns it back into a claim that can be checked.
 let _flashedBuildKey    = null;   // { configHash, buildPkgHash, configId, at } of what we FLASHED
@@ -65,7 +65,7 @@ let _lastKnownBuildPkgHash = null;
 // restart, where the label was right and the hover silently absent. Two correct changes, one
 // bad interaction. (2026-09-15)
 let _openContentIsBuilt    = false;
-// ⚠️ A FAILED FLASH IS STICKY, and this is the one state that must not soften.
+// A FAILED FLASH IS STICKY, and this is the one state that must not soften.
 // A failure means the board is in an unknown and possibly partial state, which is WORSE than
 // stale - so it cannot be replaced by a dated "last flashed" fact on the next status refresh.
 // It used to be: the ownership guard tested /^Flash/, and "Flash error" passes that, so a cache
@@ -86,7 +86,7 @@ function _firstSentence(s, cap = 96) {
   const out = m ? m[1] : line;
   return out.length > cap ? `${out.slice(0, cap - 3)}...` : out;
 }
-// ⚠️ AND THE MISLABEL HAD ITS OWN TRIGGER, pinned the same morning: clicking CLOSE on
+// AND THE MISLABEL HAD ITS OWN TRIGGER, pinned the same morning: clicking CLOSE on
 // the still-open build modal re-runs the content-hash cache check, which HITS — that
 // compile just populated the cache — and relabels this session's own build "restored
 // from cache". The check could not tell "this hit IS the build I just made" from
@@ -157,7 +157,7 @@ let _lastPortDetectMsg = null;
 let _userChosePort     = false;   // true after user manually picks a port
 let _userChosenPortPath = null;   // the path they chose
 
-// ⭐ PROMOTE THE DISPLAYED PORT TO A REAL SELECTION AT THE CLICK. [B-472, 2026-10-05]
+// PROMOTE THE DISPLAYED PORT TO A REAL SELECTION AT THE CLICK. [B-472, 2026-10-05]
 //
 // A port the app auto-selected is still the port the user is LOOKING AT, and from their
 // side there is no such thing as a tentative selection: what is on screen is what they
@@ -172,13 +172,13 @@ let _userChosenPortPath = null;   // the path they chose
 // notice - "I never got my OS7 version on the real board because I had a test board
 // sitting on 6."
 //
-// ⚠️ THE AUTO-SELECT IS NOT THE BUG AND MUST NOT BE WEAKENED. It is what finds the board
+// THE AUTO-SELECT IS NOT THE BUG AND MUST NOT BE WEAKENED. It is what finds the board
 // a config remembers, and it was wants it: "that's great. that's what it should do... but it
 // has to lock in on a button press otherwise its unpredictable". Promoting at the click
 // gets that from machinery that already exists - no new state, no change to the
 // preference order, no change to auto-select.
 //
-// ⚠️ NOTHING SHOWING IS NOT A CHOICE. If no port is selected we deliberately promote
+// NOTHING SHOWING IS NOT A CHOICE. If no port is selected we deliberately promote
 // nothing, so a board arriving later can still be picked up - behaviour it was confirmed is
 // already correct and must not regress ("if no board was available at the time of compile
 // and one shows up... we can use that / we already do").
@@ -288,7 +288,7 @@ function _showNextHint() {
   }, 28); // ~28ms/char ≈ 35 chars/sec
 }
 
-// ⚠️⚠️ PARKED DELIBERATELY, AND THIS IS NOT THE [B-434] DEAD-CODE SHAPE. [B-254, 2026-09-26]
+// PARKED DELIBERATELY, AND THIS IS NOT THE [B-434] DEAD-CODE SHAPE. [B-254, 2026-09-26]
 //
 // The hint below is complete and correct; it is simply not being shown yet. The entry it came
 // from described a phenomenon that turned out to be something else - the erase PROGRESS BAR that
@@ -296,19 +296,19 @@ function _showNextHint() {
 // should say, and whether it should be platform-split at all, is waiting on the version decision
 // rather than on this code.
 //
-// ⭐ FLIPPING THIS ONE CONSTANT TURNS IT ON. That is the whole point of parking it this way:
+// FLIPPING THIS ONE CONSTANT TURNS IT ON. That is the whole point of parking it this way:
 // nothing here has to be rebuilt or remembered, and the copy has already been measured against
 // the line it has to fit in.
 //
-// ⚠️ SO A DEAD-CODE SWEEP MUST NOT TAKE IT. [B-434] removed two IPC doors that had never had a
+// SO A DEAD-CODE SWEEP MUST NOT TAKE IT. [B-434] removed two IPC doors that had never had a
 // caller and that nobody had decided anything about - the danger there was code looking covered
 // while being unreachable. This is the opposite: a decision, written down, with an entry
 // pointing at it. Check [B-254] before deleting.
 const FLASH_HINTS_ENABLED = false;
 
-// ⭐⭐ THE HINT LINE UNDER THE BUILD BOX, AND WHO GETS IT. [B-254, 2026-09-26]
+// THE HINT LINE UNDER THE BUILD BOX, AND WHO GETS IT. [B-254, 2026-09-26]
 //
-// ⚠️ EXTRACTED, NOT EXTENDED. This decision existed as an IDENTICAL 16-line block in doFlash()
+// EXTRACTED, NOT EXTENDED. This decision existed as an IDENTICAL 16-line block in doFlash()
 // and doFlashDFU(), and adding the platform default would have made it a longer duplicate in two
 // places. One occupant list, one order, one function - the second copy is the moment to stop.
 //
@@ -319,14 +319,14 @@ const FLASH_HINTS_ENABLED = false;
 //      after fixing the card). Cleared either way: a loser left set would surface on some later
 //      unrelated flash attached to nothing the user did, and a stale message is worse than none
 //   3. the platform hint - the default, and the reason this line was reserved
-// ⚠️⚠️ `sdFlash` IS A PARAMETER BECAUSE IT WAS NEVER MODULE-LEVEL, AND THAT IS WHAT BROKE IT.
+// `sdFlash` IS A PARAMETER BECAUSE IT WAS NEVER MODULE-LEVEL, AND THAT IS WHAT BROKE IT.
 // [2026-09-28, found the morning after the extraction shipped] The lifted block referenced
 // four identifiers. THREE of them - `_sdFlashLeadMsg`, `_pendingFlashHint`, `FLASH_HINTS_ENABLED`
 // - are module-level and kept working. `_sdFlash` is a `const` local to doFlash() and doFlashDFU(),
 // so the extracted copy resolved three names and threw `ReferenceError` on the fourth.
-// ⚠️ It throws inside an async caller, so the rejection ABORTED THE REST OF THE FLASH: the modal
+// It throws inside an async caller, so the rejection ABORTED THE REST OF THE FLASH: the modal
 // opened, the log box stayed empty, and the status line read "Not flashed". Nothing announced why.
-// ⭐ The partial-survival is the trap worth remembering: an extraction that references mostly
+// The partial-survival is the trap worth remembering: an extraction that references mostly
 // module-level state LOOKS correct and runs correct until the one local is reached.
 function _typeFlashHint(sdFlash) {
   if (sdFlash === 'flash-anyway') {
@@ -344,25 +344,25 @@ function _typeFlashHint(sdFlash) {
   if (hint) typeHintMessage(hint);
 }
 
-// ⭐⭐ WHAT THE HINT IS ACTUALLY ANSWERING: "it deleted my fonts". [B-254]
+// WHAT THE HINT IS ACTUALLY ANSWERING: "it deleted my fonts". [B-254]
 //
 // Reported on the Crucible (topic 7957) by a Steam Deck user who believed the flash was wiping
 // their SOUND FONTS. It is not - a flash never touches the SD card. What was on screen was
 // dfu-util's ERASE pass drawing a progress bar to 100% before the download bar: two
 // identical-looking bars back to back, the first labelled Erase.
 //
-// ⚠️⚠️ THE CONDITION IS WHICH dfu-util IS BUNDLED, NOT WHICH OS. Measured 2026-09-26:
+// THE CONDITION IS WHICH dfu-util IS BUNDLED, NOT WHICH OS. Measured 2026-09-26:
 //   · 0.9  (our Windows, and the Arduino package on ALL platforms) mentions erasing only as a
 //     verbose log line, "Erasing page size %i at address ...". No bar.
 //   · 0.11 (our mac + linux) draws a full `Erase [====] 100%` bar, same treatment as Download.
 // BOTH ERASE. Erasing before writing is how flash memory works; 0.11 simply narrates it. So this
 // is not a platform behaviour and must not be described to anyone as one.
-// ⚠️ The platform test below is therefore a STAND-IN for "does this build ship 0.11" - true as
+// The platform test below is therefore a STAND-IN for "does this build ship 0.11" - true as
 // written, and the thing to re-check before trusting it is the bundled version, not the OS.
 function _platformFlashHint() {
   const p = (window.electronAPI && window.electronAPI.platform) || '';
   if (p === 'win32') return 'This should only take a moment.';
-  // ⚠️ 72 chars. `#bm-hint` is nowrap + overflow:hidden, so it CLIPS rather than wraps; the
+  // 72 chars. `#bm-hint` is nowrap + overflow:hidden, so it CLIPS rather than wraps; the
   // longest hint already shipping in that line is 81, which is the budget this sits under.
   if (p === 'darwin' || p === 'linux') {
     return "That erase is the board's firmware. Your SD card and fonts are untouched.";
@@ -546,7 +546,7 @@ async function initBuildPanel() {
     // makes MOUNT_SD_SETTING dead, and a dead define reads to its owner as SD
     // protection they do not have. Comment it out here, at the control where the
     // choice was actually made, rather than in front of a build later.
-    // ⚠️ Same guard shape as above — only on the TRANSITION out, never on every
+    // Same guard shape as above — only on the TRANSITION out, never on every
     // change, or re-picking a non-MSC mode would fire it again on an already
     // commented define.
     if (!/msc/i.test(selectedUsb) && /msc/i.test(prevUsb || '')) {
@@ -966,7 +966,7 @@ function _setLinuxUdevNotice(show) {
 
 async function refreshPorts() {
   if (isDfuMode) return; // port selection is locked while in DFU mode
-  // ⭐ AND LOCKED WHILE A FLASH RUNS. [B-471, 2026-10-05]
+  // AND LOCKED WHILE A FLASH RUNS. [B-471, 2026-10-05]
   // A flash fires onPortsChanged by definition: the board leaves its port for DFU and comes
   // back on a different one. Rebuilding the dropdown mid-flash made it disagree with the
   // modal - it moved to COM16 while the flash correctly ran on COM6, and it could
@@ -1169,11 +1169,11 @@ const USB_LABELS = {
   none:        'No USB',
 };
 
-// ⭐⭐ [B-385] THIS FIELD ANSWERS ONE QUESTION: does the current selection match the
+// [B-385] THIS FIELD ANSWERS ONE QUESTION: does the current selection match the
 // LAST COMPILED VERSION? Settled 2026-09-14: "it's job is to show if the current
 // selection matches the last compiled version. that's it."
 //
-// ⚠️ IT USED TO COMPARE AGAINST THE SAVED FILE TOO, and that was the whole defect.
+// IT USED TO COMPARE AGAINST THE SAVED FILE TOO, and that was the whole defect.
 // `baselineUsb` resets on Save, so saving cleared the red — and the red means
 // "recompile before flashing", which saving does nothing about. The message said
 // "since last compile" while the test it came from was "differs from the file on
@@ -1181,7 +1181,7 @@ const USB_LABELS = {
 // marker already answers the second one, and a build-readiness signal must never be
 // cleared by an action that builds nothing.
 //
-// ⚠️ THE FIRST FIX REWORDED THE SAVE BRANCH INSTEAD OF REMOVING IT. Better words on
+// THE FIRST FIX REWORDED THE SAVE BRANCH INSTEAD OF REMOVING IT. Better words on
 // the wrong comparison is still the wrong comparison. The correction: "looking at
 // the wrong field... it's supposed to compare compiled not saved."
 function updateUsbChangedIndicator() {
@@ -1501,7 +1501,7 @@ function onBuildStatus({ type, ok, needsProffieOS, message, coreVersion, running
       // has already turned the raw toolchain output into a readable sentence by the time it gets
       // here, so the chip can carry its first line instead of nothing. (2026-09-15)
       if (!ok) {
-        // ⚠️ `message` ONLY. This is onBuildStatus, which does not destructure `error` - main
+        // `message` ONLY. This is onBuildStatus, which does not destructure `error` - main
         // sends the reason AS the message (`message: result.ok ? ... : result.error`). An
         // earlier version said `error || message` here, believing this was onBuildDone, and
         // threw "error is not defined" on every failed compile and every failed flash, killing
@@ -1529,7 +1529,7 @@ function onBuildStatus({ type, ok, needsProffieOS, message, coreVersion, running
           // WHICH BOARD, from the frozen target rather than the live value. The touch-reset
           // sequence nulls selectedPortSN before this handler runs, which is the same race
           // that used to drop the file's @jmt:board_sn - see _flashTargetSN above.
-          // ⚠️ NULL ON A DFU FLASH, DELIBERATELY. That path sets no _flashTargetSN, and
+          // NULL ON A DFU FLASH, DELIBERATELY. That path sets no _flashTargetSN, and
           // selectedPortSN still holds whatever board was selected BEFORE entering the
           // bootloader - which may be a different board entirely. Stamping it produced a
           // confident "A different board was flashed" about the board actually just flashed
@@ -1582,7 +1582,7 @@ function _flashTimeLabel(at) {
 // Hover provenance, so even a CURRENT flash says when it happened. Aged status reading
 // as history is the whole point; a chip with no timestamp cannot do that.
 //
-// ⭐ THE LABEL AND THE HOVER HAVE DIFFERENT EVIDENCE RULES, deliberately, not as a
+// THE LABEL AND THE HOVER HAVE DIFFERENT EVIDENCE RULES, deliberately, not as a
 // convenience. The LABEL speaks only about THIS SESSION - what we did, and whether it still
 // matches. The HOVER may read the persisted @jmt record, because a stored fact is honest as
 // history and dishonest as a present claim: it says what we once did, never that nothing has
@@ -1597,7 +1597,7 @@ function _decorateFlashChip() {
     // Not `${text.textContent} - flashed ${when}`: that repeated the chip's own label back at
     // the reader, which is the thing a hover must never do. The label says the state; the hover
     // carries the specifics - WHEN, and WHICH BOARD.
-    // ⭐ And it SAYS which, rather than printing a serial for the reader to compare against the
+    // And it SAYS which, rather than printing a serial for the reader to compare against the
     // Detected field by eye. The comparison was already made to choose the label, so printing
     // a bare serial and leaving the reader to repeat it is the same failure as a tooltip that
     // repeats its label. (2026-09-15.) Only reached once the SN
@@ -1607,17 +1607,17 @@ function _decorateFlashChip() {
   }
   // No flash this session. Anything we can say comes from the file's own record.
   //
-  // ⚠️ THE SUBJECT IS THE FILE, NOT THE CONTENT IN THE EDITOR, and getting that wrong
+  // THE SUBJECT IS THE FILE, NOT THE CONTENT IN THE EDITOR, and getting that wrong
   // reproduced this entry's own bug in prose. An earlier draft said "This config records a
   // flash on <date>", which reads as a claim about what is open right now - and the file can
   // have been flashed and then edited a dozen times since. Found 2026-09-15: flashed 9:26,
   // saved again at 10:16, hover still implied the open version was on the board.
   //
-  // ⚠️ AND THE QUESTION IS UNANSWERABLE HERE, SO IT IS DECLINED OUT LOUD. The @jmt block
+  // AND THE QUESTION IS UNANSWERABLE HERE, SO IT IS DECLINED OUT LOUD. The @jmt block
   // records WHEN a flash happened and to WHICH board, but not the config hash that went with
   // it - so after a restart there is nothing to compare the open content against. Better to
   // name that gap than to let a true date imply a match nobody checked.
-  // ⚠️⚠️ THE RECORD IS ONLY WORTH SHOWING IF IT COULD POSSIBLY BE ABOUT WHAT IS OPEN.
+  // THE RECORD IS ONLY WORTH SHOWING IF IT COULD POSSIBLY BE ABOUT WHAT IS OPEN.
   // Found 2026-09-15 in dev testing: a config edited since its last compile showed the chip
   // "Not flashed" and hovered "Last flashed Sep 15, 2:00 PM" - while the compile chip beside it
   // read "Config changed, recompile needed". A config that has not even been compiled cannot
@@ -1636,7 +1636,7 @@ function _decorateFlashChip() {
   // Even with no record there is something worth saying: the label "Not flashed" reads as a
   // claim about the BOARD, and this scopes it to what we actually know - our own history.
   if (!metaWhen) { text.title = 'JMT Studio has no record of flashing this config.'; return; }
-  // ⭐ Say WHICH board, not just a serial. The record and the connected board are both in hand,
+  // Say WHICH board, not just a serial. The record and the connected board are both in hand,
   // so the comparison is ours to make rather than left to be made by eye against the
   // Detected field. With nothing connected there is no comparison to state, so it names the serial and
   // stops. (2026-09-15.)
@@ -1650,7 +1650,7 @@ function _decorateFlashChip() {
 // Called when the cache check learns the CURRENT config's hash. Degrades rather than
 // clears: the board really does have something on it, and saying so with a date is more
 // use than going blank.
-// ⚠️ ONLY EVER DOWNGRADES. It must not resurrect a success the flash path never set,
+// ONLY EVER DOWNGRADES. It must not resurrect a success the flash path never set,
 // and it must not fire when no flash has happened this session.
 function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnownBuild) {
   // Remember the identity so triggers that run no cache check can re-evaluate: a board
@@ -1663,7 +1663,7 @@ function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnown
   const dot  = el('bp-status-flash-dot');
   if (!text || !dot) return;
 
-  // ⚠️ OWNERSHIP IS A FACT, NOT A STRING MATCH. This used to test /^Flash/ against the
+  // OWNERSHIP IS A FACT, NOT A STRING MATCH. This used to test /^Flash/ against the
   // label, which "Flash error" passes - so a routine cache check wrote "Flash successful"
   // over a failed flash. Both owners are now asked directly.
   if (window._isFlashing) return;   // the flash path owns the chip while it runs
@@ -1674,7 +1674,7 @@ function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnown
     return;
   }
 
-  // ⚠️ DFU IS A TRANSPORT, NOT A FACT ABOUT THE FIRMWARE, so it has no bearing here and this
+  // DFU IS A TRANSPORT, NOT A FACT ABOUT THE FIRMWARE, so it has no bearing here and this
   // leaves the chip exactly as it was. The board CONNECTION METHOD has no bearing on what the
   // firmware is (2026-09-15). A board in its bootloader still HOLDS whatever was flashed to it;
   // it is only not executing it this instant.
@@ -1685,7 +1685,7 @@ function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnown
   if (isDfuMode) return;
 
   if (!_flashedBuildKey) {
-    // ⭐ SESSION-SCOPED, AND THEREFORE ALWAYS TRUE. This used to read "Not flashed", which
+    // SESSION-SCOPED, AND THEREFORE ALWAYS TRUE. This used to read "Not flashed", which
     // asserts a negative about the BOARD - not ours to claim, and plainly false for anyone
     // who flashed from Arduino IDE, from another machine, or before this app opened. What
     // the file remembers goes in the hover, where a stored fact is honest as history.
@@ -1706,7 +1706,7 @@ function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnown
     // A connected board that reports no serial is the one genuine unknown here - there is
     // nothing to key on. Distinguished from an empty port so we do not tell the user nothing
     // is plugged in while they are looking at it.
-    // ⚠️ THE PORT CHIP ALREADY OWNS BOARD PRESENCE. An earlier draft said "No board connected
+    // THE PORT CHIP ALREADY OWNS BOARD PRESENCE. An earlier draft said "No board connected
     // - last flash <when>", sitting inches from a port chip reading "No Proffieboard detected".
     // Two chips raising the same alarm, and the duplicate spent a whole status slot to do it.
     // That is both wrong and a waste of a slot. So this states the ONE thing nothing
@@ -1752,7 +1752,7 @@ function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnown
     _decorateFlashChip();
     return;
   }
-  // ⭐ SPECIFICS GO IN THE TOOLTIP, NOT THE LABEL (2026-09-15). Every label here
+  // SPECIFICS GO IN THE TOOLTIP, NOT THE LABEL (2026-09-15). Every label here
   // used to carry the timestamp, so the status bar grew wider as the state got worse and the
   // scannable part was buried behind a date. The label is the STATE; the hover is where when,
   // which board and which target belong.
@@ -1829,7 +1829,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
   }
   if (type === 'flash') {
     window._isFlashing = false;
-    // ⭐ SETTLE THE DROPDOWN NOW, BECAUSE THE EVENT THAT WOULD HAVE DONE IT ALREADY FIRED.
+    // SETTLE THE DROPDOWN NOW, BECAUSE THE EVENT THAT WOULD HAVE DONE IT ALREADY FIRED.
     // [B-471, 2026-10-05] refreshPorts() ignores ports-changed while _isFlashing, which is the
     // whole point - the board leaves its port for DFU mid-flash and the dropdown must not chase
     // it. But that re-enumeration IS the event, and it lands while the flag is still set. With
@@ -2142,13 +2142,13 @@ function _setStatusTiered(elm, msg) {
 // "Config staged to: ...\my_config.h", which is correct and is not where anyone looks
 // while reading an error.
 //
-// ⭐ THE LINE NUMBERS ARE RIGHT, WHICH IS WHY THIS IS A FIX AND NOT AN EXPLANATION.
+// THE LINE NUMBERS ARE RIGHT, WHICH IS WHY THIS IS A FIX AND NOT AN EXPLANATION.
 // The staged copy is byte-identical to the buffer, so line 37 IS line 37 of what they
 // are looking at. Only the filename token is wrong, so this is a substitution with
 // nothing to map and no way to point somewhere wrong.
 //
-// ⚠️ OURS ONLY. This rewrites the SUMMARY we render — the Compile Failed dialog and the
-// ⚠ line we append. The toolchain's streamed output in Build Output is never touched:
+// OURS ONLY. This rewrites the SUMMARY we render — the Compile Failed dialog and the
+// line we append. The toolchain's streamed output in Build Output is never touched:
 // that is what gets pasted into a forum thread and it has to match what the toolchain
 // actually said.
 const _STAGED_CONFIG_BASENAME = 'my_config.h';   // must match CONFIG_FILENAME in proffieos.js
@@ -2260,7 +2260,7 @@ let _serialCtxMenuEl   = null;
 const SERIAL_MAX_LINES = 1000;
 
 // Collapse-pause tracing for the serial monitor. OFF.
-// ⚠️ This was added as a TEMP verification aid and committed as `true` on 2026-05-31 (v1.7.0),
+// This was added as a TEMP verification aid and committed as `true` on 2026-05-31 (v1.7.0),
 // so every shipped build since has logged a line to the console on every serial packet —
 // found 2026-10-05 when the noise buried the console we were debugging an import in.
 // Left in place rather than deleted because it is genuinely useful for the collapse/pause
@@ -3153,11 +3153,11 @@ function setStatus(type, state, message) {
   dot.className = `bp-status-dot bp-status-${state}`;
   text.textContent = message;
 
-  // ⭐ A TOOLTIP THAT REPEATS ITS LABEL IS NOT A TOOLTIP (2026-09-15). A label is the short
+  // A TOOLTIP THAT REPEATS ITS LABEL IS NOT A TOOLTIP (2026-09-15). A label is the short
   // version and a tooltip has more room, so a hover that matches its label should not exist at
   // all. This line used to set title = message unconditionally, which manufactured a
   // dead hover on every chip in the bar - hover anything, learn nothing.
-  // ⚠️ It did have a real job, kept here: when the label is ellipsis-truncated the hover is
+  // It did have a real job, kept here: when the label is ellipsis-truncated the hover is
   // the ONLY way to read it. So the title is set when the text is actually clipped, and
   // cleared when it is not. A caller with something better to say overwrites it afterwards,
   // which is unchanged.
@@ -3315,7 +3315,7 @@ async function checkCacheForConfig(missStatus, opts) {
         const _r = await window.electronAPI.getAddonsVersionFor(content, null);
         _addons = _r?.addonsVersion || null;
       } catch {}
-      // ⚠️ The ENTRY's duration, not `undefined`. Passing undefined left whatever the
+      // The ENTRY's duration, not `undefined`. Passing undefined left whatever the
       // last fresh compile wrote standing, so a restore described its own build in
       // every field except this one - four runs on one config made it visible:
       // a restore of a 98-second build reported 108, the time of an unrelated
@@ -3922,14 +3922,14 @@ function applyOSVersionSignal() {
       // go and fix, when the firmware is simply built from source rather than
       // from a release. Nothing here needs retrying, so no RETRY line.
       //
-      // ⚠️⚠️ THE BUILD DATE BELONGS HERE MORE THAN ANYWHERE ELSE, and the first cut
+      // THE BUILD DATE BELONGS HERE MORE THAN ANYWHERE ELSE, and the first cut
       // of this fix left it out. _boardInstalled had exactly ONE reader, inside the
       // branch below that requires _boardOSVersion - which is null by definition in
       // this state. So the date was captured, stored, and rendered nowhere, in the
       // one case where it is the ONLY identifying fact the firmware offers. Same
       // shape as every other value wired into one of the two screens that report it.
       //
-      // ⚠️ SAYS WHAT IS TRUE, AND STOPS. The first draft read "That firmware was
+      // SAYS WHAT IS TRUE, AND STOPS. The first draft read "That firmware was
       // built from source rather than from a release, so there is no version to
       // compare against" - an X-rather-than-Y inversion plus a because-clause, in a
       // shipped string, and it asserted a CAUSE the backlog entry itself records as
@@ -3946,7 +3946,7 @@ function applyOSVersionSignal() {
     }[_boardOSReason] || `${CANT} ${RETRY}`;
     notes.push(why);
   }
-  // ⭐ WHENEVER THE BOARD TOLD US SOMETHING, NOT ONLY WHEN IT DISAGREES. This was
+  // WHENEVER THE BOARD TOLD US SOMETHING, NOT ONLY WHEN IT DISAGREES. This was
   // `mismatch || (_boardOSVersion && !tree)`, so a board AGREEING with the selected
   // tree printed nothing about itself at all - the most common state was the least
   // informative, and the build date disappeared exactly when everything was fine.
@@ -3989,7 +3989,7 @@ function applyOSVersionSignal() {
     // Guarded on the map EXISTING, not just on it having matches: when the load
     // failed it is null, and "no installed version is v7.15" would then be a
     // confident claim about something unread. No map means no sentence.
-    // ⚠️ THE REMEDY STAYS MISMATCH-ONLY. Everything below answers "how do I get onto
+    // THE REMEDY STAYS MISMATCH-ONLY. Everything below answers "how do I get onto
     // the board's version", which is a question nobody is asking when the selected
     // tree already IS that version - there, "You have v8.10 installed as: ..." would
     // list the tree the user is looking at. Widening the gate above must not widen
@@ -4122,7 +4122,7 @@ window.resetBuildStatusForFileLoad = () => {
 };
 window.getToolchainReady        = () => toolchainReady;
 // [B-229] SD Export asks before putting a config on a card that has never been built.
-// ⚠️ A GETTER, NOT THE VALUE. `compileSuccess` is reassigned in a dozen places in this file;
+// A GETTER, NOT THE VALUE. `compileSuccess` is reassigned in a dozen places in this file;
 // exporting it once would freeze whatever it happened to be at load. It means "a build exists
 // for the content currently in the editor" — set by a successful compile AND by a cache hit,
 // and cleared the moment the content changes — which is exactly the question being asked.

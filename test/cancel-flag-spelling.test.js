@@ -1,6 +1,6 @@
 // The cancel flag is spelled `cancelled`. This is a RATCHET, not a blanket rule. [2026-10-07]
 //
-// ⭐⭐ WHY THE SPELLING IS A CORRECTNESS PROBLEM AND NOT TIDINESS. A result object carrying
+// WHY THE SPELLING IS A CORRECTNESS PROBLEM AND NOT TIDINESS. A result object carrying
 // `canceled` read as `result.cancelled` is `undefined`, which is falsy, which reads as
 // "not cancelled" - so the door reports SUCCESS after the user pressed Cancel. That is the
 // identical failure already documented for `ok: true` (a cancel returns ok:true with the flag
@@ -9,18 +9,18 @@
 // tracks committed a sync manifest describing files it never wrote. The spelling split is a
 // SECOND, independent route to the same bug, and it fails open and silent.
 //
-// ⚠️⚠️ WHY THIS ASSERTS THE RIGHT SPELLING RATHER THAN MERELY THAT THE TWO SIDES AGREE.
+// WHY THIS ASSERTS THE RIGHT SPELLING RATHER THAN MERELY THAT THE TWO SIDES AGREE.
 // Ruled 2026-10-07: *"if you're going to write a rule to test against, then it shouldn't just
 // be do they match. It should be, is it the right one, the new one."* A match-test blesses two
 // wrong-but-agreeing sites and freezes the split forever; this one fails on every NEW old-spelling
 // site, so the old ones drain away as their files are touched for other reasons.
 //
-// ⚠️ WHY A RATCHET AND NOT A HARD ZERO. There are 69 old-spelling sites today across doors The library has
+// WHY A RATCHET AND NOT A HARD ZERO. There are 69 old-spelling sites today across doors The library has
 // already tested and signed off. Converting them is real work with a real retest and is filed
 // separately for 1.8.1 - see the backlog. Until then the number may only SHRINK. A file that gains
 // one fails here, named, immediately.
 //
-// ⭐ `cancelled` is the right one because it is what the newer modules already use - the gate,
+// `cancelled` is the right one because it is what the newer modules already use - the gate,
 // backup, export copy, bulk import, proffieos - and what every user-facing string says
 // ("Import cancelled", "Merge cancelled").
 'use strict';
@@ -46,7 +46,7 @@ const strip = (src) => src.replace(/^\s*\/\/.*$/gm, '');
 const WRITE_OLD = /\bcanceled\s*:/g;      // written into a returned object
 const READ_OLD  = /\.canceled\b/g;        // read off a result
 
-// ⚠️⚠️ THE CONTROL, AND IT RUNS BEFORE ANYTHING IS REPORTED. A scanner that returns zero looks
+// THE CONTROL, AND IT RUNS BEFORE ANYTHING IS REPORTED. A scanner that returns zero looks
 // exactly like a codebase that is clean. If the matcher cannot see a known positive, the baseline
 // below is meaningless and this file must not pass.
 {
@@ -62,7 +62,7 @@ const READ_OLD  = /\.canceled\b/g;        // read off a result
 
 // ── The baseline. MEASURED 2026-10-07. These numbers may only go DOWN. ────────
 //
-// ⚠️ PER FILE, not a single total, so a file losing one while another gains one cannot cancel out
+// PER FILE, not a single total, so a file losing one while another gains one cannot cancel out
 // and hide a new site. That is the same reason the door register states counts per door.
 const BASELINE = {
   'main.js':                    32,

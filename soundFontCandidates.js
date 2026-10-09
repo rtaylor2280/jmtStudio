@@ -77,7 +77,7 @@ const BOARD_PATTERNS = [
 // candidate offered for the whole font was the Asteria build while the real
 // 116-file Proffie font was not offered at all.
 //
-// ⚠️ WHY NOT "THE LAST BOARD TOKEN WINS", which looks like the simpler rule: it
+// WHY NOT "THE LAST BOARD TOKEN WINS", which looks like the simpler rule: it
 // breaks a vendor that works today. Two folders in the real corpus are named
 // "JUANSITH´S SATELE PROFFIE AND XENOPIXEL V3" - two board tokens, and `proffie`
 // is the CORRECT answer because that folder IS the Proffie version. Last-token
@@ -124,14 +124,14 @@ function isProffieBoardName(name) {
 // Utility-font effects (altchng, trloop, ccchange, choosefont) are
 // included so minimal alt-driven fonts like Fett263's HeMan still
 // register.
-// ⚠️⚠️ THOSE FOUR ARE DETECTION HINTS ONLY, AND THE RENDERER NOW EXCLUDES THEM
+// THOSE FOUR ARE DETECTION HINTS ONLY, AND THE RENDERER NOW EXCLUDES THEM
 // FROM "SHOW MISSING". [2026-10-08] This set answers "is this folder a font?";
 // it was also being used verbatim to answer "what does this font LACK?", and
 // those are different questions. Ruled, seeing `choosefont` listed as
 // missing: "don't want to show 'missing' something that really shouldn't or
 // isn't usually in the font sounds" - listing it is advice to put a common-
 // folder sound inside a font folder.
-// ⚠️ DO NOT REMOVE THEM HERE to fix that. Detection needs them; a font that
+// DO NOT REMOVE THEM HERE to fix that. Detection needs them; a font that
 // genuinely carries one still registers and still shows the chip as PRESENT.
 // The exclusion lives at the one place that was wrong - `_SF_UTILITY_EFFECTS`
 // in renderer/index.html, beside _SF_KNOWN_EFFECTS. Auxiliary content (tracks/, quote/, quotes/, common/) is
@@ -413,7 +413,7 @@ function detectMultiBoardSiblings(childFolders, childFiles) {
     // loose files are ignored, which also keeps a doc like
     // "FREE Sound Font For Proffie.txt" from being mistaken for a board folder.
     //
-    // ⚠️ EXACTLY ONE, on purpose. Two unlabelled siblings is genuinely ambiguous
+    // EXACTLY ONE, on purpose. Two unlabelled siblings is genuinely ambiguous
     // and guessing there would be worse than declining; the group is abandoned
     // as before and the old behaviour applies.
     const structural = [

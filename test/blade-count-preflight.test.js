@@ -6,7 +6,7 @@
  * so it is just required — which is the point of the registry: a check is data,
  * reads a context, returns findings, and never touches the DOM.
  *
- * ⚠️ WHAT THIS SUITE CANNOT SEE. The dialog is assembled in index.html and is not
+ * WHAT THIS SUITE CANNOT SEE. The dialog is assembled in index.html and is not
  * exercised here — button labels, row layout and the fix affordance are dev-test
  * territory. Do not read a green run as "the gate works"; read it as "the check
  * decides correctly". Those are different claims, and conflating them is how three
@@ -118,7 +118,7 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(${bank
        r.over.items.join(',') === 'Long', r.over.items.join(','));
   }
   {
-    // ⚠️ THE ABSTAIN, AIMED THE OTHER WAY. The under-count side goes quiet when the
+    // THE ABSTAIN, AIMED THE OTHER WAY. The under-count side goes quiet when the
     // crude token count EXCEEDS the parsed slots (the parser under-counts, and that
     // would block a working build). Over-count cannot be manufactured that way — an
     // under-counting parser cannot invent a slot — so it abstains on the opposite
@@ -218,13 +218,13 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
     ok('a preset whose styles the parser missed is NOT blocked', !r.blocked, r.body);
   }
   {
-    // ✅ THE GAP CLOSED 2026-09-13 [B-372], AND THIS ASSERTION FLIPPED ON PURPOSE.
+    // THE GAP CLOSED 2026-09-13 [B-372], AND THIS ASSERTION FLIPPED ON PURPOSE.
     // It used to read "KNOWN GAP: a commented-out style is counted as a slot, so this
     // is silent" and asserted `!r.blocked`. presetParser now masks comments before
     // scanning, so a commented-out style is not a slot, the preset is genuinely one
     // short, and the check says so.
     //
-    // ⭐ THE FIX WENT IN THE PARSER, NOT HERE. Every reader benefits — the preset panel
+    // THE FIX WENT IN THE PARSER, NOT HERE. Every reader benefits — the preset panel
     // was the worse half of that bug, rendering "Styles (2/2 blades)" over a preset
     // holding one real style. A gate that second-guessed the count it was given would
     // have papered over the panel still being wrong.
@@ -285,7 +285,7 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testba
   };
 
   {
-    // ⚠️ b226-test-configs WAS IN THIS LIST UNTIL 2026-09-13 and did not belong.
+    // b226-test-configs WAS IN THIS LIST UNTIL 2026-09-13 and did not belong.
     // Those four files are DELIBERATE over-count fixtures — their own headers say
     // "Presets carry FOUR style slots while NUM_BLADES is 2" — and they sat in the
     // known-good corpus only because the check ignored over-count entirely. The

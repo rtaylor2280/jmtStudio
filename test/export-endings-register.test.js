@@ -52,7 +52,7 @@ ok(`there are ${EXPECTED_DOORS} export doors`, doors.length === EXPECTED_DOORS,
 // summary. The doors that genuinely end in a toast are the two file-selection funnel calls, and
 // they are identified by their TITLE rather than their position.
 //
-// ⚠️ This was a pair of line numbers with a tolerance until 2026-10-06, and it broke the first
+// This was a pair of line numbers with a tolerance until 2026-10-06, and it broke the first
 // time an unrelated edit was made higher in the file - a fixed-position anchor over
 // renderer/index.html has silently stopped covering its target before, which is why
 // test/export-runner-ratchet.test.js carries the same warning. A title moves with its door.
@@ -99,7 +99,7 @@ ok('eject rows: 5 surfaces plus 2 window exports', rowSites.length === 5,
 // verbatim, and THIS test does not strip comments, so the quoted text was being counted as a
 // surface. The comment was rewritten to state the absence in prose instead (soul's rule: a
 // comment explains why the code is as it is, not what used to be there).
-// ⚠️ NOTE THE INCONSISTENCY WITH ITS SIBLING: import-doors-register.test.js strips comments
+// NOTE THE INCONSISTENCY WITH ITS SIBLING: import-doors-register.test.js strips comments
 // before counting and says so; this one counts raw. Either is defensible, but a quoted call
 // is indistinguishable from a live one here, so a comment can move this number.
 // 12 -> 13 on 2026-10-09: the Style Library Export door gained one. It had been discarding

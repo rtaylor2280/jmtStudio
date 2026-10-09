@@ -6,18 +6,18 @@
  * shouldn't be visible when there aren't any. Additionally, when no config is open,
  * these options should also not show up." Then, on the last two: "or greyed out".
  *
- * ⭐⭐ THE SILENT FAILURE IS A SCOPE BUG WEARING A GUARD. `_sfAddPresetWithFont` sits
+ * THE SILENT FAILURE IS A SCOPE BUG WEARING A GUARD. `_sfAddPresetWithFont` sits
  * at ~36176, OUTSIDE `presetSidecarModule` (an IIFE spanning ~39210-47800). Its two
  * cold paths tested `typeof _addFirstPreset === 'function'` against names declared
  * INSIDE that IIFE, which are invisible from outside it. Both tests were false every
  * time. Clicking "Add to config" on a config with no presets produced no preset and no
  * message, and had never once worked.
  *
- * ⚠️ THE GUARD IS WHAT HID IT. Without the typeof, the call throws on first use and is
+ * THE GUARD IS WHAT HID IT. Without the typeof, the call throws on first use and is
  * fixed the same day. With it, an unreachable branch reads as defensive programming and
  * converts a crash into a silence — and nobody reports a silence.
  *
- * HIS RULING on the other two, 2026-09-13: grey-with-a-reason when a config is open but
+ * THE RULING on the other two, 2026-09-13: grey-with-a-reason when a config is open but
  * cannot take the action, HIDE when no config is open.
  *
  * Run: node test/sound-font-card-menu.test.js
@@ -47,7 +47,7 @@ function ok(name, cond, extra) {
   const defInsert = html.indexOf('async function _insertFirstEntryIntoArray');
   ok('and both helpers really are inside it', defAdd > iifeStart && defInsert > iifeStart);
 
-  // ⚠️⚠️ ANCHOR ON THE CONSTRUCT, NEVER ON A SLAB OF SOURCE. Two failures on one day
+  // ANCHOR ON THE CONSTRUCT, NEVER ON A SLAB OF SOURCE. Two failures on one day
   // taught this file the same thing from both directions:
   //   * at a fixed 3000 chars the window cut off `await _insertInto(` the moment a
   //     comment was added above it, and reported unchanged, correct code as broken;
@@ -63,10 +63,10 @@ function ok(name, cond, extra) {
   // The cold paths sit immediately after the guard; a few hundred lines is ample and
   // cannot reach another function.
   const body  = html.slice(addFn, guardAt + 4000);
-  // ⭐ THE ASSERTION THAT MATTERS. A bare `typeof _addFirstPreset` here can only ever
+  // THE ASSERTION THAT MATTERS. A bare `typeof _addFirstPreset` here can only ever
   // be false — if it comes back, the cold paths go silent again.
   //
-  // ⚠️ MATCH THE CODE SHAPE, NOT THE SUBSTRING. The first draft searched for
+  // MATCH THE CODE SHAPE, NOT THE SUBSTRING. The first draft searched for
   // `typeof _addFirstPreset ===` and matched the COMMENT four lines above that explains
   // the bug, so a correct fix reported as broken. An absence-assertion that can be
   // tripped by prose is measuring the wrong text; requiring the `if (...)` wrapper
@@ -81,16 +81,16 @@ function ok(name, cond, extra) {
   ok('a missing bridge is reported to the DEVELOPER',
      /console\.error\('\[B-376\]/.test(body),
      'the whole cost of the original bug was that nothing said anything');
-  // ⭐⭐ AND IT MUST NOT BE REPORTED TO THE USER. A missing bridge is our defect: the
+  // AND IT MUST NOT BE REPORTED TO THE USER. A missing bridge is our defect: the
   // user did not cause it and cannot act on it, so a toast blames the wrong party and
   // offers no way out. It also cannot reach a release — the publication assertions
   // below turn this suite red before a build exists — so the toast was defence for an
   // impossible state, wearing a message that implied the user had done something.
   // Shipped 2026-09-13, removed 2026-09-14.
-  // ⚠️ SCOPED TO THE GUARD BLOCK, not the function — this file raises legitimate toasts
+  // SCOPED TO THE GUARD BLOCK, not the function — this file raises legitimate toasts
   // elsewhere (export, duplicate, remove-duplicates) and an absence check over the whole
   // body would fail on those, which is how the too-wide window was caught.
-  ok('⭐ and NOT to the user — no toast on a development fault',
+  ok('and NOT to the user — no toast on a development fault',
      !/showToast\(/.test(guard),
      'a toast here says "your action failed" about something the user neither caused nor can fix');
   ok('the cold paths await the scaffold',
@@ -99,7 +99,7 @@ function ok(name, cond, extra) {
 
 // ── the module publishes them ──────────────────────────────────────────────
 {
-  // ⭐⭐ THE ASSERTION THIS FILE WAS MISSING, AND A DEV TEST FOUND WHAT IT COULD NOT.
+  // THE ASSERTION THIS FILE WAS MISSING, AND A DEV TEST FOUND WHAT IT COULD NOT.
   // The suite checked the two SCAFFOLD bridges and passed, while the FONT-PATCH bridge
   // was absent: `_commitPresetFont` lives inside presetSidecarModule and the caller sits
   // outside it, so "Add to config" created a preset and then threw on the font write.
@@ -113,13 +113,13 @@ function ok(name, cond, extra) {
        new RegExp(`window\\.${fn}\\s*=\\s*${fn};`).test(html),
        'the SF view calls it from outside presetSidecarModule');
   }
-  // ⚠️ AND THE GUARD MUST NAME THE FUNCTION IT GUARDS. The original line tested
+  // AND THE GUARD MUST NAME THE FUNCTION IT GUARDS. The original line tested
   // `window._commitFieldEdit` and then called `_commitPresetFont` — a guard that can
   // only ever pass, in front of a call that can only ever throw.
   {
     const patchAt = html.indexOf('const _sfPatchFreshPresetFont');
     const patchRaw = html.slice(patchAt, patchAt + 2600);
-    // ⚠️⚠️ STRIP COMMENTS BEFORE AN ABSENCE CHECK. The first version of this assertion
+    // STRIP COMMENTS BEFORE AN ABSENCE CHECK. The first version of this assertion
     // failed against the CORRECT fix, because the comment directly above the code quotes
     // the old broken line to explain it. Identical to the trap in
     // favorites-reorder-freshness.test.js, walked into an hour after fixing it there:
@@ -129,7 +129,7 @@ function ok(name, cond, extra) {
     ok('the font write guards the name it calls',
        !/window\._commitFieldEdit\) _commitPresetFont\(/.test(patch),
        'guarding one name and calling another is a guard that cannot fail');
-    // ⚠️ ANCHORED ON THE `catch`, not measured from the top of the function — adding four
+    // ANCHORED ON THE `catch`, not measured from the top of the function — adding four
     // lines of comment above it pushed this out of a fixed window and failed against
     // correct code. Fourth time in one day; the rule is finally applied rather than
     // written: find the construct, then read from it.
@@ -150,7 +150,7 @@ function ok(name, cond, extra) {
                           html.indexOf('buildSubmenu') + 200);
   ok('the menu region was located', menu.length > 500);
 
-  // ⚠️ fileIsOpen, not currentFilePath: a new unsaved config has no path and is open.
+  // fileIsOpen, not currentFilePath: a new unsaved config has no path and is open.
   // Assert against the STATEMENT, not the region — the region contains a comment saying
   // "NOT currentFilePath", which a substring search reads as the thing it forbids.
   const cfgOpenStmt = (menu.match(/const _cfgOpen = [\s\S]*?;/) || [''])[0];

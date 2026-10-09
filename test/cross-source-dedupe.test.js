@@ -9,7 +9,7 @@
 // directly cannot tell the difference. Every assertion here is about inodes on
 // disk after an ordinary import.
 //
-// ⚠️ EVERY SOURCE HERE GETS AN ENTRY, because the app does. An entry-less source
+// EVERY SOURCE HERE GETS AN ENTRY, because the app does. An entry-less source
 // is swept by cleanupOrphanSources on the next import — designed behaviour, and
 // the first draft of this file imported bare sources and watched them vanish
 // between cases.
@@ -81,16 +81,16 @@ async function importFont(userData, files, entryName) {
 
     check('both imported as separate sources', a.ok && b.ok && a.uuid !== b.uuid,
       JSON.stringify({ a: a.uuid, b: b.uuid }));
-    check('⭐ the shared sound is ONE file on disk',
+    check('the shared sound is ONE file on disk',
       ino(srcFile(userData, a.uuid, 'Ahsoka/hum.wav')) === ino(srcFile(userData, b.uuid, 'Ezra/hum.wav')));
     check('and each bundle still reads its own bytes correctly',
       fs.readFileSync(srcFile(userData, b.uuid, 'Ezra/hum.wav')).includes('SHARED-HUM'));
-    check('⚠️ content unique to each bundle is NOT shared',
+    check('content unique to each bundle is NOT shared',
       ino(srcFile(userData, a.uuid, 'Ahsoka/swing1.wav')) !== ino(srcFile(userData, b.uuid, 'Ezra/clash1.wav')));
   }
 
   {
-    console.log('⭐ every original path still opens and reads what the vendor shipped');
+    console.log('every original path still opens and reads what the vendor shipped');
     // The direction that matters. A source that got SMALLER without staying WHOLE
     // is unrecoverable — the vendor's copy is the only one there was.
     const userData = tmp('ud');
@@ -123,7 +123,7 @@ async function importFont(userData, files, entryName) {
     const b = await importFont(userData, { 'B/hum.wav': wav('SHARED'), 'B/extra.wav': wav('X') }, 'B');
     fs.rmSync(path.join(S.sourcesRoot(userData), a.uuid), { recursive: true, force: true });
 
-    check('⭐ the survivor still reads its audio',
+    check('the survivor still reads its audio',
       fs.readFileSync(srcFile(userData, b.uuid, 'B/hum.wav')).includes('SHARED'));
     check('and nothing dangles', fs.statSync(srcFile(userData, b.uuid, 'B/hum.wav')).isFile());
   }
@@ -141,7 +141,7 @@ async function importFont(userData, files, entryName) {
     await importFont(populated, { 'Z/hum.wav': wav('H'), 'Z/other.wav': wav('O') }, 'Z');
     const withNeighbour = await importFont(populated, files, 'A');
 
-    check('⭐ the same bundle hashes the same either way', solo.hash === withNeighbour.hash,
+    check('the same bundle hashes the same either way', solo.hash === withNeighbour.hash,
       `${solo.hash} vs ${withNeighbour.hash}`);
     check('and the second one really did share a file with its neighbour, so the case is live',
       fs.statSync(srcFile(populated, withNeighbour.uuid, 'A/hum.wav')).nlink >= 2,
@@ -172,7 +172,7 @@ async function importFont(userData, files, entryName) {
   }
 
   {
-    console.log('⚠️ a source whose manifest is behind its files is not linked over');
+    console.log('a source whose manifest is behind its files is not linked over');
     // The failure this must never have: the index says a path holds H, the path
     // has since changed, and the new bundle is pointed at the wrong sound. Here
     // the damage is on the CANDIDATE side, which is what findExisting re-hashes
@@ -183,7 +183,7 @@ async function importFont(userData, files, entryName) {
     fs.writeFileSync(srcFile(userData, a.uuid, 'A/hum.wav'), wav('TAMPERED-DIFFERENT'));
 
     const b = await importFont(userData, { 'B/hum.wav': wav('SHARED'), 'B/x.wav': wav('X') }, 'B');
-    check('⭐ the new bundle keeps the bytes it actually shipped',
+    check('the new bundle keeps the bytes it actually shipped',
       fs.readFileSync(srcFile(userData, b.uuid, 'B/hum.wav')).includes('SHARED'));
     check('and was NOT pointed at the tampered file',
       ino(srcFile(userData, b.uuid, 'B/hum.wav')) !== ino(srcFile(userData, a.uuid, 'A/hum.wav')));
@@ -214,7 +214,7 @@ async function importFont(userData, files, entryName) {
     if (z.ok && !z.isDuplicate) {
       await E.createEntry({ userData, sourceUuid: z.uuid, candidate: { path: 'B' }, name: 'B' });
       const zHum = srcFile(userData, z.uuid, 'B/hum.wav');
-      check('⭐ its shared sound reads correctly', fs.readFileSync(zHum).includes('SHARED-HUM'));
+      check('its shared sound reads correctly', fs.readFileSync(zHum).includes('SHARED-HUM'));
       check('and it is the same file as the folder bundle\'s',
         ino(zHum) === ino(srcFile(userData, a.uuid, 'A/hum.wav')));
       check('while its own unique sound is not shared with anything',

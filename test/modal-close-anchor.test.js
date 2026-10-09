@@ -142,25 +142,25 @@ const CANCEL_WORDS = /\b(cancel|close|done|not now|never mind|back)\b/i;
 const blocks = modalBlocks(bodyHtml);
 ok('modal blocks parsed', blocks.length >= 40, `found ${blocks.length}`);
 
-// ⚠️ THE FIRST VERSION OF THIS PREDICATE WAS "any two non-Cancel buttons anywhere in the
+// THE FIRST VERSION OF THIS PREDICATE WAS "any two non-Cancel buttons anywhere in the
 // dialog", and it swept in the style detail view and the doc viewer — a working surface and a
 // reader, whose buttons are TOOLS, not a choice, and whose ✕ is correctly titled "Close". A
 // predicate that flags four dialogs when the thing it is describing has two is not measuring
 // the thing. What actually distinguishes a chooser: its FOOTER offers two or more competing
 // primary routes and no way to decline. Style detail's footer is five `.modal-btn-cancel`
 // utilities; the doc viewer has no `.modal-btns` at all.
-// ⚠️⚠️ THE WHOLE BLOCK, NOT THE FOOTER - AND THE FOOTER VERSION MISSED A REAL ONE.
+// THE WHOLE BLOCK, NOT THE FOOTER - AND THE FOOTER VERSION MISSED A REAL ONE.
 // This read `class="modal-btns"` rows only, on the reasoning above that a chooser's competing
 // routes live in its footer. On 2026-10-01 the Import Common Folder dialog traded its Cancel
 // button for a ✕ and became exactly the class this guards - three primaries, no way to decline -
 // and the predicate returned false before looking at a single button, because that dialog's
 // buttons sit in `.sf-import-pick-row` and it no longer has a `.modal-btns` at all.
-// ⭐ Same shape as the backdrop sweep that knew one spelling of an idiom: this encoded where
+// Same shape as the backdrop sweep that knew one spelling of an idiom: this encoded where
 // these buttons USUALLY live rather than what makes a dialog a chooser.
-// ⭐ MEASURED BEFORE BROADENING, NOT AFTER. Across all 42 modal blocks the whole-block form flags
+// MEASURED BEFORE BROADENING, NOT AFTER. Across all 42 modal blocks the whole-block form flags
 // 3 where the footer form flagged 2; the difference is exactly that one dialog and nothing is
 // lost. That measurement is why the working-surface control below still holds.
-// ⚠️ The ✕ is excluded explicitly: it is the exit, never one of the competing routes, and counting
+// The ✕ is excluded explicitly: it is the exit, never one of the competing routes, and counting
 // it would make every two-primary dialog that has a close button look like one more.
 function isChooser(b) {
   const btns = [...b.html.matchAll(/<button[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/button>/g)]
@@ -202,7 +202,7 @@ for (const c of choosers) {
 // Each control reconstructs the defect in a copy of the real stylesheet and asserts the
 // predicate flips. A check that cannot fail is not a check.
 //
-// ⚠️ These controls were WRONG on their first run, in a way worth leaving a note about: they
+// These controls were WRONG on their first run, in a way worth leaving a note about: they
 // edited `css` with a bare /\.modal\s*\{/, which matches the tail of `#modal-confirm .modal {`
 // 240 lines earlier. Every "broken" stylesheet they built was therefore a stylesheet with the
 // base rule fully intact, and all three reported a control that had not controlled anything.
@@ -261,7 +261,7 @@ ok('CONTROL the located span really is the base rule',
   ok('CONTROL the same dialog with a Cancel is not flagged', !isChooser(safe));
   ok('CONTROL a working surface with utility buttons is not flagged',
      !isChooser(blocks.find(b => b.id === 'modal-style-detail')));
-  // ⚠️ THE CASE THE OLD PREDICATE MISSED, pinned so the narrowing cannot come back. A chooser
+  // THE CASE THE OLD PREDICATE MISSED, pinned so the narrowing cannot come back. A chooser
   // whose buttons live outside a `.modal-btns` footer is still a chooser; the footer-only version
   // returned false on exactly this markup and let a Cancel-less dialog through unguarded.
   {

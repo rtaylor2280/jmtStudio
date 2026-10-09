@@ -1,12 +1,12 @@
 // A restored build must describe ITS OWN compile, including the duration.  [B-474]
 //
-// ⚠️ THIS IS A SEAM TEST AND SAYS SO. The setter lives in index.html and the
+// THIS IS A SEAM TEST AND SAYS SO. The setter lives in index.html and the
 // conversion sits inside a closure in buildPanel.js, so neither can be required()
 // and every assertion here is over source text. That is a weaker instrument than
 // running the code, and it is the right one for this defect: the bug was never a
 // wrong calculation, it was a value that existed and was not passed.
 //
-// ⭐ WHAT IT IS GUARDING. Four runs on one config, 2026-10-05:
+// WHAT IT IS GUARDING. Four runs on one config, 2026-10-05:
 //      15:42  fresh compile 7.15 +JMT  -> 98
 //      15:48  fresh compile 7.14 +JMT  -> 108
 //      15:54  RESTORE of the 15:42 build -> 108, the time of an unrelated compile
@@ -42,7 +42,7 @@ ok('the restore reads the duration off the ENTRY',
    /const _ms\s*=\s*result\.metadata\.compileDurationMs;/.test(buildPanel),
    'passing undefined is what left the previous build\'s number standing');
 
-// ⚠️ UNITS. The cache stores milliseconds; the setter takes seconds. A missing
+// UNITS. The cache stores milliseconds; the setter takes seconds. A missing
 // conversion is a 1000x error that still looks like a plausible number in a field
 // nobody validates.
 ok('it converts ms to seconds',
@@ -61,7 +61,7 @@ ok('the converted value is the second argument to the setter',
 ok('the setter assigns the duration unconditionally',
    /metaCompileDuration = \(typeof durationSec === 'number'\) \? durationSec : null;/.test(html));
 
-// ⭐ THE ASSERTION THAT WOULD HAVE CAUGHT THE ORIGINAL DEFECT. The old line was
+// THE ASSERTION THAT WOULD HAVE CAUGHT THE ORIGINAL DEFECT. The old line was
 // `if (durationSec) metaCompileDuration = durationSec;` and a truthiness guard
 // simply cannot say "I do not know how long this took".
 ok('the old truthiness guard is gone',
@@ -82,7 +82,7 @@ ok('the Last compile label renders empty rather than "null"',
    'the consumer of getLastCompileDuration must treat null as "no label"');
 
 // ── Control ──────────────────────────────────────────────────────────
-// ⚠️ Every assertion above is a regex over a file. If a file failed to load, or an
+// Every assertion above is a regex over a file. If a file failed to load, or an
 // anchor moved, they could all pass or all fail for reasons unrelated to the fix.
 ok('CONTROL: all three sources loaded and contain their anchors',
    buildPanel.length > 1000 && html.length > 1000 && cacheMgr.length > 1000 &&

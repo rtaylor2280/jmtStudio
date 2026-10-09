@@ -1,15 +1,15 @@
 // The import door register must describe the app that exists.  [B-424, 2026-10-04]
 //
-// ⭐⭐ WHY A TEST AND NOT JUST A DOCUMENT. `local/import-doors.md` is the map of every way content
+// WHY A TEST AND NOT JUST A DOCUMENT. `local/import-doors.md` is the map of every way content
 // gets INTO the library. The export side needed exactly this and the reason is on the record: its
 // count was wrong three times, and every correction came from USING the app rather than from
 // anyone reading code. The import count has the same history - eight doors on 2026-10-01, thirteen
 // on 2026-10-04, twenty-nine once routes were separated from doors.
 //
-// ⚠️ A BEHAVIOUR SWEEP IS NOT A REGISTER. 2026-10-04 swept the check and the eject across every
+// A BEHAVIOUR SWEEP IS NOT A REGISTER. 2026-10-04 swept the check and the eject across every
 // door by hand. That sweep rots the moment someone adds a door; this is what fails when they do.
 //
-// ⚠️ WHAT THIS CAN AND CANNOT SEE. It reconciles COUNTS and HANDLER NAMES. It cannot tell whether a
+// WHAT THIS CAN AND CANNOT SEE. It reconciles COUNTS and HANDLER NAMES. It cannot tell whether a
 // door's eject is on the right surface or whether its ending matches the unit/files rule - those
 // are judgements, and the register records them in prose for a human. A name-shaped detector also
 // misses a door whose name does not admit what it does: `versions:copyProp` slipped past the
@@ -28,7 +28,7 @@ const ok = (name, cond, why) => {
 const root = path.join(__dirname, '..');
 const MAP = path.join(root, 'local', 'import-doors.md');
 
-// ⚠️ local/ IS GITIGNORED, so a fresh clone genuinely has no map. Skip rather than fail - a check
+// local/ IS GITIGNORED, so a fresh clone genuinely has no map. Skip rather than fail - a check
 // that cannot pass on a clean checkout is a check whoever hits it deletes.
 if (!fs.existsSync(MAP)) {
   console.log('  skip  local/import-doors.md not present (gitignored working doc)');
@@ -42,7 +42,7 @@ const vpanel = fs.readFileSync(path.join(root, 'renderer', 'versionsPanel.js'), 
 
 // ── 1. The decisions have to still be in the file ─────────────────────
 //
-// ⚠️ NOT DECORATION. The register exists to hold the rules the doors were built against; a copy
+// NOT DECORATION. The register exists to hold the rules the doors were built against; a copy
 // that keeps the table and loses the reasoning is how the next person re-derives a decision that
 // was already made and lands somewhere different.
 for (const phrase of [
@@ -57,16 +57,16 @@ for (const phrase of [
 
 // ── 2. Call-site counts, reconciled against the register ──────────────
 //
-// ⚠️⚠️ THE COUNTS ARE THE POINT, because the count is what has been wrong every single time. These
+// THE COUNTS ARE THE POINT, because the count is what has been wrong every single time. These
 // fail when a door gains or loses its check or its eject without the register moving with it.
-// ⚠️ Comments are stripped first. A `//` line naming the helper is prose about the code, not a call
+// Comments are stripped first. A `//` line naming the helper is prose about the code, not a call
 // site, and counting it is the same error as reading a stale comment as a fact - which this project
 // has made four times. Anchored on `(` so a definition or a `window.x = x` export is not a call.
 const strip = (src) => src.replace(/^\s*\/\/.*$/gm, '');
 const code = strip(html) + '\n' + strip(vpanel);
 
 const countOf = (re) => (code.match(re) || []).length;
-// ⚠⚠ ONLY THE DEFINITION IS SUBTRACTED, NOT THE `window.x = x` EXPORT. The first cut of this
+// ONLY THE DEFINITION IS SUBTRACTED, NOT THE `window.x = x` EXPORT. The first cut of this
 // subtracted both and reported 8 where the code has 9 - because an export line has no `(` after the
 // name, so it was never in the count to begin with. Subtracting something the counter never saw is
 // the same error as a control that passes for the wrong reason, and it under-reported silently.
@@ -75,14 +75,14 @@ const CHECK_CALLS = countOf(/(?:window\.)?_sfWarnSlowImport\s*\(/g)
 const EJECT_CALLS = countOf(/(?:window\.)?_sfOfferEjectInToast\s*\(/g)
   - countOf(/const _sfOfferEjectInToast\s*=\s*async/g);
 
-// ⚠️⚠️ THE CONTROL COMES FIRST, AND IT REFUSES TO LET THE NUMBERS BE TRUSTED WITHOUT IT. A counter
+// THE CONTROL COMES FIRST, AND IT REFUSES TO LET THE NUMBERS BE TRUSTED WITHOUT IT. A counter
 // that returns zero looks identical to a counter that is broken, and this project has shipped a
 // scan reporting "no space check anywhere" that was simply failing to look. If the known-positive
 // is not found, the counts below mean nothing.
-ok('⚠️ the counter can see a known call site',
+ok('the counter can see a known call site',
    /_sfWarnSlowImport\s*\(\s*runPlan\.rootDir/.test(code),
    'the bulk import check is gone or renamed - re-anchor this before reading any count below');
-ok('⚠️ the eject counter can see a known call site',
+ok('the eject counter can see a known call site',
    /_sfOfferEjectInToast\s*\(\s*closeoutSrc\.sourcePath/.test(code),
    'the font close-out eject is gone or renamed - re-anchor before reading any count below');
 
@@ -112,9 +112,9 @@ if (statedEject !== null) {
 
 // ── 3. Every inward handler the other test knows about is in the map ──
 //
-// ⭐ Reuses `import-door-map.test.js`'s own INWARD list rather than keeping a second copy - two
+// Reuses `import-door-map.test.js`'s own INWARD list rather than keeping a second copy - two
 // lists of the same thing is the drift this pair exists to prevent.
-// ⚠⚠ COMMENTS STRIPPED FIRST, AND THIS IS NOT TIDINESS. The first cut matched the raw source
+// COMMENTS STRIPPED FIRST, AND THIS IS NOT TIDINESS. The first cut matched the raw source
 // with a non-greedy `[...]`, and the list contains a comment mentioning `[B-434]` - so the match
 // ended at that bracket and the check reported "1 checked" while looking like it had passed over
 // the whole list. A truncated instrument that still prints a number is the shape this project has
@@ -126,7 +126,7 @@ ok('the INWARD list was located in import-door-map.test.js', !!inwardBlock,
 if (inwardBlock) {
   const handlers = [...inwardBlock[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
   const missing = handlers.filter((h) => !mapText.includes(h));
-  // ⚠⚠ A SHRINKING LIST MUST FAIL TOO. If the anchor above ever truncates again, `handlers`
+  // A SHRINKING LIST MUST FAIL TOO. If the anchor above ever truncates again, `handlers`
   // goes small and every name happens to be present - a green run that checked almost nothing.
   ok(`the INWARD list parsed to a plausible size (${handlers.length})`, handlers.length >= 10,
      'the list parsed to very few entries - the anchor truncated, so the result below means nothing');

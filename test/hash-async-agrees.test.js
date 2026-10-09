@@ -5,7 +5,7 @@
 // place, because _hashFile reads a whole file in one synchronous go and a font's tracks are
 // megabytes each.
 //
-// ⚠️⚠️ THESE HASHES DECIDE WHAT COUNTS AS THE SAME CONTENT. They drive the export compare, the
+// THESE HASHES DECIDE WHAT COUNTS AS THE SAME CONTENT. They drive the export compare, the
 // sync manifest, and dedup. A twin that disagreed by one byte would not throw - it would quietly
 // re-copy files that were already correct, or worse, call different files identical. So the
 // agreement is asserted directly rather than assumed from "both are sha256".
@@ -48,14 +48,14 @@ const cases = [
       async_ === sync, 'sync  ' + sync + '\n     async ' + async_);
   }
 
-  // ⚠️ A file it cannot read must come back null, NOT a hash of nothing. A caller that receives a
+  // A file it cannot read must come back null, NOT a hash of nothing. A caller that receives a
   // plausible-looking digest for an unreadable file would record it as the destination's content
   // and then believe the card matched. Null means "unknown" and sends the caller to read it.
   const missing = await fhm.hashFileAsync(path.join(dir, 'does-not-exist.bin'));
   check('an unreadable file resolves null, not a digest', missing === null,
     'got ' + JSON.stringify(missing));
 
-  // ⭐ The empty-file case is the one that could silently "work": sha256 of nothing is a real,
+  // The empty-file case is the one that could silently "work": sha256 of nothing is a real,
   // stable digest. Assert the twins agree on it rather than letting it pass by accident.
   const emptySync = fhm.hashFile(path.join(dir, 'empty.bin'));
   check('the empty file has a real digest both ways, not null',

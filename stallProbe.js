@@ -5,15 +5,15 @@
 // loop and nothing else. This measures exactly that: a heartbeat that should fire every 200ms, and
 // a record of how late it actually was — attributed to whatever work was in flight at the time.
 //
-// ⚠️⚠️ THE ENTRY FORBIDS GUESSING WHICH PASS BLOCKS. [B-398]: "NOT DIAGNOSED: which pass is
+// THE ENTRY FORBIDS GUESSING WHICH PASS BLOCKS. [B-398]: "NOT DIAGNOSED: which pass is
 // blocking. Zipping, hashing and buildLibraryIndex are all candidates and picking by plausibility
 // is what produced a wrong diagnosis on [B-296] earlier the same day. Instrument first."
 //
-// ⚠️ INERT UNLESS SWITCHED ON. It ships disabled and costs one absent-file check at startup, so it
+// INERT UNLESS SWITCHED ON. It ships disabled and costs one absent-file check at startup, so it
 // can live in the tree without being a permanent tax. Enable by creating the flag file — no
 // relaunch-from-a-terminal, no env var, because the person running it is testing a GUI app.
 //
-// ⚠️ THE PROBE MUST NOT BE THE THING THAT BLOCKS. Records are buffered in memory and written only
+// THE PROBE MUST NOT BE THE THING THAT BLOCKS. Records are buffered in memory and written only
 // on flush(). A synchronous append per event would add disk I/O to the main thread while measuring
 // main-thread stalls, which is the instrument-changes-the-measurement trap this project keeps
 // finding.
@@ -52,7 +52,7 @@ function init(userData) {
     const late = now - last - TICK_MS;
     last = now;
     if (late >= STALL_MS && records.length < MAX_RECORDS) {
-      // ⚠️⚠️ ATTRIBUTION IS RESOLVED AT FLUSH, NOT HERE, and the self-test is why. A heartbeat can
+      // ATTRIBUTION IS RESOLVED AT FLUSH, NOT HERE, and the self-test is why. A heartbeat can
       // only fire once the loop is free again — by which time the phase that blocked it has
       // already ended and popped. Reading the stack at this moment reported "(idle)" for a
       // deliberate 1.2s block: the instrument naming the wrong phase, which is the single thing
@@ -64,11 +64,11 @@ function init(userData) {
         to: now,                      // when it came back
       });
     }
-    // ⚠️⚠️ CRASH-SAFE. A flush only at the end of the operation loses EVERYTHING if the app is
+    // CRASH-SAFE. A flush only at the end of the operation loses EVERYTHING if the app is
     // killed — and for a bug whose symptom is Windows offering to end the program, being killed is
     // the most likely outcome of a successful reproduction. Write periodically so the worst case
     // costs the last few seconds rather than the whole run.
-    // ⚠️ Interval-gated, not per-stall: the write happens between stalls, never inside one, so
+    // Interval-gated, not per-stall: the write happens between stalls, never inside one, so
     // the probe still cannot be the thing that blocks.
     if (records.length && now - lastFlush >= AUTOFLUSH_MS) {
       lastFlush = now;
@@ -88,7 +88,7 @@ function begin(label) {
 }
 function end(label) {
   if (!enabled) return;
-  // ⚠️ Pop by LABEL, not blindly: an early return or a throw inside a phase would otherwise leave
+  // Pop by LABEL, not blindly: an early return or a throw inside a phase would otherwise leave
   // the stack skewed and every later stall attributed to the wrong work.
   for (let i = stack.length - 1; i >= 0; i--) {
     if (stack[i].label !== label) continue;
@@ -109,17 +109,17 @@ async function around(label, fn) {
   try { return await fn(); } finally { end(label); }
 }
 
-// ⭐ MARK A WHOLE FUNCTION WITHOUT EDITING ITS BODY. [B-398]
+// MARK A WHOLE FUNCTION WITHOUT EDITING ITS BODY. [B-398]
 //
 // Every stall outside the import path reads as "(idle - nothing marked)", which is enough to know
 // something blocked and useless for knowing WHAT. Editing each function to add begin/try/finally
 // means touching working logic in five modules purely to measure it; wrapping at the export site
 // costs nothing and cannot change what the function does.
 //
-// ⚠️ TWO VARIANTS ON PURPOSE. Wrapping a synchronous function in an async one would change its
+// TWO VARIANTS ON PURPOSE. Wrapping a synchronous function in an async one would change its
 // contract for every caller — the exact signature change that broke four callers when addFiles
 // went async. mark() stays sync, markAsync() awaits.
-// ⚠️⚠️ THE `enabled` CHECK IS INSIDE THE WRAPPER, NOT OUTSIDE IT, AND THE FIRST CUT GOT THIS
+// THE `enabled` CHECK IS INSIDE THE WRAPPER, NOT OUTSIDE IT, AND THE FIRST CUT GOT THIS
 // WRONG. It read `if (!enabled) return fn;` at wrap time — which reads like a free optimisation
 // and is actually a dead instrument. These wrappers are applied where a module builds its
 // module.exports, and that runs when main.js REQUIRES the module: before app.whenReady() calls
@@ -205,7 +205,7 @@ function flush(note) {
   try { fs.appendFileSync(logPath(userDataDir), text + '\n'); } catch {}
   records.length = 0;
   phaseTotals.clear();
-  // ⚠️⚠️ RE-SEED THE STILL-OPEN PHASES INSTEAD OF CLEARING THEM AWAY. [B-398]
+  // RE-SEED THE STILL-OPEN PHASES INSTEAD OF CLEARING THEM AWAY. [B-398]
   //
   // Clearing the timeline outright was a real defect, found 2026-09-18 on the first captured run:
   // a phase that began BEFORE an auto-flush and was still running after it lost its 'begin' event,
@@ -229,12 +229,12 @@ function flush(note) {
 // same shape of unhelpful as a stall with no phase attached: enough to know something broke, not
 // enough to know where.
 //
-// ⚠️⚠️ THIS DOES NOT SWALLOW ANYTHING. Installing an uncaughtException handler suppresses
+// THIS DOES NOT SWALLOW ANYTHING. Installing an uncaughtException handler suppresses
 // Electron's dialog, so this re-raises the same visible failure after writing the stack. A
 // diagnostic that quietly turns crashes into non-crashes would hide the very thing it is here to
 // study — and would change behaviour for anyone running without the flag.
 //
-// ⚠️ Gated on the same flag as the probe: off by default, so normal runs keep Electron's behaviour
+// Gated on the same flag as the probe: off by default, so normal runs keep Electron's behaviour
 // exactly.
 function captureCrashes(onFatal) {
   if (!enabled) return false;
@@ -260,7 +260,7 @@ function captureCrashes(onFatal) {
     write('UNCAUGHT EXCEPTION', err);
     if (typeof onFatal === 'function') { try { onFatal(err); } catch {} }
   });
-  // ⚠️ A rejected promise nobody awaited does NOT kill the process by default in every Node
+  // A rejected promise nobody awaited does NOT kill the process by default in every Node
   // version, so it can corrupt a run silently. Record it and keep going.
   process.on('unhandledRejection', (reason) => write('UNHANDLED REJECTION', reason));
   return true;

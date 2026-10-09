@@ -85,7 +85,7 @@ function makeVariantSource(root, name) {
     for (const d of entryDirs) {
       const wavs = walkWavs(path.join(libRoot, d));
       const lone = wavs.filter(f => fs.statSync(f).nlink < 2);
-      check(`⭐ every wav in entry "${d}" shares its inode (none orphaned)`,
+      check(`every wav in entry "${d}" shares its inode (none orphaned)`,
         lone.length === 0,
         `${lone.length} of ${wavs.length} lone: ${lone.map(f => path.basename(f)).join(', ')}`);
     }
@@ -115,7 +115,7 @@ function makeVariantSource(root, name) {
     check('entry created', !!(er && er.ok), er && er.error);
     const wavs = walkWavs(path.join(userData, 'soundFonts', 'library', 'SoloVariant'));
     const lone = wavs.filter(f => fs.statSync(f).nlink < 2);
-    check('⭐ every entry wav shares its inode with the deduped source',
+    check('every entry wav shares its inode with the deduped source',
       wavs.length > 0 && lone.length === 0,
       `${lone.length} of ${wavs.length} lone`);
   }

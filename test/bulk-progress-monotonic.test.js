@@ -10,7 +10,7 @@
  *   1. THE ANALYZE IS THREE SEQUENTIAL PASSES sharing one bar — Analyzing fonts,
  *      Checking your library, Reading creators and previews — and each restarted at
  *      its own sourceIdx/total. That was a deliberate 2026-08-31 call to stop a bar
- *      parked at 100% reading as hung. ⭐ Right diagnosis, wrong cure: the answer to
+ *      parked at 100% reading as hung. Right diagnosis, wrong cure: the answer to
  *      parked-at-100% is a BIGGER DENOMINATOR, not a rewind.
  *
  *   2. WITHIN THE RUN, each stage of a source reported its own 0-100%, so finishing
@@ -18,7 +18,7 @@
  *      three times per source. The code's own comment admitted it: "Phase transitions
  *      cause small discontinuities."
  *
- * ⚠️ A MONOTONIC CLAMP IS NOT THE FIX and this suite is written so it cannot pass by
+ * A MONOTONIC CLAMP IS NOT THE FIX and this suite is written so it cannot pass by
  * clamping alone: the bands and the combined denominator are asserted directly. A
  * clamped-but-stalled bar hides a real regression instead of showing it.
  *
@@ -62,7 +62,7 @@ function ok(name, cond, extra) {
   ok('three full passes never produce a decrease', drops === 0, `${drops} decreases`);
   ok('pass 1 starts where pass 0 ended', Math.abs(pos(1, 0, 0, total) - pos(0, total - 1, 1, total)) < 1e-9,
      `${pos(1, 0, 0, total)} vs ${pos(0, total - 1, 1, total)}`);
-  // ⚠️⚠️ THIS ASSERTION WAS GREEN OVER A LIVE DEFECT AND IS KEPT ONLY WITH ITS LIMIT
+  // THIS ASSERTION WAS GREEN OVER A LIVE DEFECT AND IS KEPT ONLY WITH ITS LIMIT
   // NAMED (2026-09-16). It passes `within = 1`, and the REAL enrich pass never supplies
   // a within at all — soundFontBulkImport.js emits `enrich-start` per source and no
   // sub-percent inside one, so pass 2 only ever runs with within = 0. The arithmetic
@@ -70,12 +70,12 @@ function ok(name, cond, extra) {
   // app cannot produce is testing arithmetic, not behaviour.
   ok('the arithmetic CAN reach 100% (not that it does — see the next block)',
      Math.abs(pos(2, total - 1, 1, total) - 100) < 1e-9);
-  ok('⭐ and with the REAL pass-2 input it does NOT: this is the bug',
+  ok('and with the REAL pass-2 input it does NOT: this is the bug',
      Math.abs(pos(2, total - 1, 0, total) - 100) > 1e-9,
      `pass 2 with within=0 lands at ${pos(2, total - 1, 0, total).toFixed(2)}% — ` +
      'if this ever equals 100 the enrich pass started reporting a percent and the ' +
      'handover below may no longer be needed');
-  // ⭐ THE 2026-08-31 SYMPTOM MUST NOT COME BACK EITHER: pass 0 finishing should read
+  // THE 2026-08-31 SYMPTOM MUST NOT COME BACK EITHER: pass 0 finishing should read
   // as a third done, not as finished.
   ok('finishing the first pass reads as 33%, not 100%',
      Math.abs(pos(0, total - 1, 1, total) - 33.333) < 0.01, `${pos(0, total - 1, 1, total)}`);
@@ -96,7 +96,7 @@ function ok(name, cond, extra) {
      ['hashing', 'copying', 'extracting', 'optimizing', 'skipped'].every(s => bands[s]),
      Object.keys(bands).join(', '));
 
-  // ⭐ THE PROPERTY THAT MATTERS: the bands tile forward with no gaps and no overlap,
+  // THE PROPERTY THAT MATTERS: the bands tile forward with no gaps and no overlap,
   // so a stage ending hands the next one exactly its floor.
   const order = ['hashing', 'copying', 'extracting', 'optimizing'];
   let seams = 0;
@@ -128,7 +128,7 @@ function ok(name, cond, extra) {
   ok('a three-source run never dips at a stage change', dips === 0, `${dips} dips`);
   ok('the run reaches 100%', Math.abs(prev - 100) < 1e-9, `${prev}`);
 
-  // ⚠️ The old behaviour, kept as the counter-example so the test states what it
+  // The old behaviour, kept as the counter-example so the test states what it
   // prevents: every stage on its own 0-100 scale DOES dip, three times per source.
   let oldDips = 0; let oldPrev = -1;
   for (let s = 0; s < totalSrc; s++) {
@@ -163,7 +163,7 @@ function ok(name, cond, extra) {
 {
   ok('the phaser exists', /function makeBarPhaser\(getEl, holdMs = \d+\)/.test(html));
   ok('handover paints a full bar', /handover\(\) \{[\s\S]{0,200}paint\('100%'\);/.test(html));
-  ok('⭐ and HOLDS it, because two writes in one task only paint the last',
+  ok('and HOLDS it, because two writes in one task only paint the last',
      /held = true;[\s\S]{0,120}setTimeout\(/.test(html),
      'without the hold the fill is computed and never rendered');
   ok('writes during the hold are buffered, not dropped',
@@ -182,13 +182,13 @@ function ok(name, cond, extra) {
   // The run: three seams, and the tracks-only case must NOT fill a bar that never ran.
   ok('the run gates the commons handover on sources having run',
      /if \(_runSawSources && !_runHandedToCommons\)/.test(html));
-  ok('⭐ and the tracks handover on SOMETHING having run',
+  ok('and the tracks handover on SOMETHING having run',
      /if \(\(_runSawSources \|\| _runSawCommons\) && !_runHandedToTracks\)/.test(html),
      'a tracks-only import has no preceding phase; filling to 100% there would be a lie');
   ok('both bars are cancelled so a held timer cannot outlive the element',
      /_aBar\.cancel\(\);/.test(html) && /_runBar\.cancel\(\);/.test(html));
 
-  // ⚠️ THE FACT THE WHOLE FIX RESTS ON, asserted against the BACKEND rather than
+  // THE FACT THE WHOLE FIX RESTS ON, asserted against the BACKEND rather than
   // trusted: the enrich pass reports only that a source STARTED. If that ever changes,
   // the arithmetic can reach 100% on its own and this handover becomes redundant —
   // which is worth finding out from a failing test rather than by reading.
@@ -196,7 +196,7 @@ function ok(name, cond, extra) {
   const enrichIdx = bulk.indexOf("stage: 'enrich-start'");
   ok('the backend does emit enrich-start', enrichIdx > 0);
   const enrichBlock = bulk.slice(enrichIdx, enrichIdx + 600);
-  ok('⭐ and emits NO sub-percent inside an enrich item',
+  ok('and emits NO sub-percent inside an enrich item',
      !/stage: 'source-progress'/.test(enrichBlock),
      'if enrich started reporting progress, pass 2 could fill on its own — revisit the handover');
 }

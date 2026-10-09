@@ -2,7 +2,7 @@
 // config uses — settled 2026-09-30: "not the entire thing, just the ones that were used in the
 // config, so we're creating a new one."
 //
-// ⚠️⚠️ THE FAILURE THIS FILE EXISTS FOR IS SILENT AND IT LANDS ON A STRANGER'S CARD. Take only
+// THE FAILURE THIS FILE EXISTS FOR IS SILENT AND IT LANDS ON A STRANGER'S CARD. Take only
 // the styles named in the config and you drop the HELPERS — entries no config ever mentions,
 // referenced only from inside other styles. The card then carries a my_styles.h that looks
 // complete, reads fine, and does not compile. Nobody finds out until the recipient tries to
@@ -28,7 +28,7 @@ function ok(label, cond, detail) {
 }
 
 // Pull a top-level `function NAME(...) { ... }` out of the inline script by brace matching.
-// ⚠️ Brace COUNTING, not a regex to the next `\n}` — style code is full of nested braces and a
+// Brace COUNTING, not a regex to the next `\n}` — style code is full of nested braces and a
 // naive match would truncate the function and then fail for a reason that has nothing to do
 // with what is being tested.
 function lift(name) {
@@ -54,7 +54,7 @@ if (failures) { console.log('\ncannot continue without the real implementations'
 
 // The classifier reads two module-level regexes, which are themselves built from two symbol
 // LISTS. Lifting only the regexes throws at eval — so lift the lists too, in declaration order.
-// ⚠️ These two constants have nothing to do with the subset; they are dependencies of
+// These two constants have nothing to do with the subset; they are dependencies of
 // `_classifyStyleEntries`, which is lifted whole rather than reimplemented so that a change to
 // how the app decides "this is a helper" cannot pass here while breaking the card.
 const symRe = /const (_SL_JMT_DEPENDENT_SYMBOLS|_SL_PIXEL_RELAY_SYMBOLS|_SL_CHARGING_SYMBOL_RE|_SL_PIXEL_RELAY_SYMBOL_RE)\s*=\s*([\s\S]*?);\n/g;
@@ -130,7 +130,7 @@ ok('the file ends with a newline', out.text.endsWith('\n'));
 
 // ── Material the parser does not see as an entry ─────────────────────────────
 //
-// ⚠️⚠️ THIS IS THE CASE THAT BROKE THE FIRST IMPLEMENTATION, and it broke it invisibly.
+// THIS IS THE CASE THAT BROKE THE FIRST IMPLEMENTATION, and it broke it invisibly.
 // `_parseStyleEntries` only recognises `using NAME =` at the start of a line. A library can
 // hold things that are NOT entries and that entries depend on — an alias template, a #define,
 // a mid-file include. The first cut built the output by collecting the kept blocks, so every
@@ -202,7 +202,7 @@ ok('an empty library yields nothing', build('', CONFIG) === null);
 ok('an empty config yields nothing', build(LIB, '') === null);
 
 // ── controls ─────────────────────────────────────────────────────────────────
-// ⚠️ The closure assertions are the ones that matter, so prove they can fail. A single-pass
+// The closure assertions are the ones that matter, so prove they can fail. A single-pass
 // filter — the obvious implementation, and the wrong one — must not satisfy them.
 {
   const entries = new Function(`${syms}\n${sources._parseStyleEntries}\n${sources._findUsingExprEnd}\n${sources._parseStyleMeta}\nreturn _parseStyleEntries;`)()(LIB);

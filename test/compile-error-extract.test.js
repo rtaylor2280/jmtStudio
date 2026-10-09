@@ -13,7 +13,7 @@
 // long command lines only. The escape bytes are real here; the paste showed them
 // already stripped by the terminal.
 //
-// ⚠️ THIS FILE USED TO MIRROR THE FUNCTION BODIES instead of importing them,
+// THIS FILE USED TO MIRROR THE FUNCTION BODIES instead of importing them,
 // because requiring toolchain.js pulls in electron via cacheManager. A test that
 // reimplements its subject is testing itself: on 2026-08-15 the copy below passed
 // while the real extractor handed a user
@@ -100,7 +100,7 @@ check('a real diagnostic beats the arduino-cli summary line',
 
 // ── flash overflow: the linker says neither "error" nor "warning" ──────────
 //
-// ⚠️ THE PATH HERE IS THE POINT. This fixture used to read "c:/.../ld.exe:" -
+// THE PATH HERE IS THE POINT. This fixture used to read "c:/.../ld.exe:" -
 // a tidied-up 12-character stand-in - and the test passed for a year while the
 // real case failed every time. The genuine prefix arm-none-eabi emits is 174
 // characters, which is longer than the 180-char clip budget, so the message got
@@ -190,13 +190,13 @@ const SRC_DIAG = [
   "C:\\Users\\maker\\config\\my_config.h:431:1: error: expected ',' or ';' before 'BladeConfig'",
 ].join('\n');
 
-// ⭐ NO FILENAME, settled 2026-09-14: "I don't want to see <the config>... def don't
+// NO FILENAME, settled 2026-09-14: "I don't want to see <the config>... def don't
 // want my config. that's only because of what we insert our config into the file to
 // achieve our magic. but we don't need to specify a file name at all."
 // One config is open and it is on screen, so naming it adds nothing - and `my_config.h`
 // named the STAGING COPY, a file the user has never seen. [B-373] substituted their own
 // name instead, which was better and still the wrong idea.
-// ⭐ Dropping the name also makes the LINE true: the @jmt block is stripped from the
+// Dropping the name also makes the LINE true: the @jmt block is stripped from the
 // editor (18 lines on a real config), so a FILE reference was off by the header's
 // length, while the number was always right for the buffer that actually got compiled.
 check('a source path keeps its LINE, and names no file',

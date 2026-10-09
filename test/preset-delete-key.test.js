@@ -5,12 +5,12 @@
  * click delete." Select several presets, press Delete → nothing. The only way out was
  * right-click → Delete, found by looking for it.
  *
- * ⭐ NOT A NEW DECISION. [B-336] settled this for the Sound Font Library on 2026-09-07
+ * NOT A NEW DECISION. [B-336] settled this for the Sound Font Library on 2026-09-07
  * (commit c67e252): Delete AND Backspace both fire the same path as the visible
  * control. This is that rule reaching a surface it did not cover, so this suite asserts
  * the sidecar binding MATCHES the font-grid one rather than that it exists.
  *
- * ⚠️ THE GUARDS ARE THE WORK, NOT THE KEY BINDING — and the focus guard matters more
+ * THE GUARDS ARE THE WORK, NOT THE KEY BINDING — and the focus guard matters more
  * here than in the font grid. The sidecar sits beside preset name fields, font and
  * track combos, the inline style editor, and Monaco, whose focused element is a hidden
  * TEXTAREA. A binding that does not yield to a focused input eats a Backspace mid-
@@ -33,7 +33,7 @@ function ok(name, cond, extra) {
 }
 
 // Both handlers, located by the state each one reads — unambiguous, unlike "keydown".
-// ⚠️ SLICE TO THE HANDLER, NOT A CHAR COUNT. A generous window ran past the end of
+// SLICE TO THE HANDLER, NOT A CHAR COUNT. A generous window ran past the end of
 // this listener into _showPresetContextMenu and picked up ITS parsePresets call, so
 // "does not reimplement the deletion" failed against code that does no such thing.
 const sidecar = (() => {
@@ -44,7 +44,7 @@ const sidecar = (() => {
   return h < 0 || end < 0 ? '' : html.slice(h, end + 8);
 })();
 const fontGrid = (() => {
-  // ⚠️⚠️ SLICE TO THE HANDLER'S END, NOT A CHAR COUNT — the same lesson the sidecar slice above
+  // SLICE TO THE HANDLER'S END, NOT A CHAR COUNT — the same lesson the sidecar slice above
   // already carries, learned again the hard way. This was `i + 1600`, and adding a few comment
   // lines to the handler pushed its focus guard past the window, so "the font grid uses the same
   // focus guard" went red against code that had not changed. A fixed-width window is a fixture
@@ -61,7 +61,7 @@ ok('the B-336 font-grid binding is still there to match against', fontGrid.lengt
 
 // ── both keys, per the ruling on B-336 ─────────────────────────────────────
 {
-  // ⚠️⚠️ THIS USED TO REQUIRE BOTH KEYS, and it was right until the file browsers entered the
+  // THIS USED TO REQUIRE BOTH KEYS, and it was right until the file browsers entered the
   // picture. Backspace is up-one-level there ([B-405]), so it can never also be the delete key —
   // a key whose meaning depends on which panel has focus is worse than one that only navigates.
   // Ruled 2026-09-17: "we can remove the backspace from the others". Nothing had shipped:
@@ -69,10 +69,10 @@ ok('the B-336 font-grid binding is still there to match against', fontGrid.lengt
   const deleteOnly = /if \(e\.key !== 'Delete'\) return;/;
   ok('the sidecar takes Delete', deleteOnly.test(sidecar));
   ok('and so does the font grid', deleteOnly.test(fontGrid));
-  // ⚠️⚠️ THE GUARD AGAINST IT COMING BACK. Backspace was added deliberately twice ([B-336], then
+  // THE GUARD AGAINST IT COMING BACK. Backspace was added deliberately twice ([B-336], then
   // [B-374]), so a later pass could reasonably re-add it without knowing why it went.
   const backspaceDeletes = /e\.key !== 'Delete' && e\.key !== 'Backspace'/;
-  ok('⚠️ Backspace no longer deletes on either surface',
+  ok('Backspace no longer deletes on either surface',
      !backspaceDeletes.test(sidecar) && !backspaceDeletes.test(fontGrid),
      'Backspace means up-one-level in the file browsers; it cannot also delete');
 }
@@ -89,7 +89,7 @@ ok('the B-336 font-grid binding is still there to match against', fontGrid.lengt
   ok('no modal may be open above it',
      /document\.querySelector\('\.modal-overlay\.active'\)/.test(sidecar));
 
-  // ⭐ THE ONE THAT PROTECTS TYPING. Monaco's focused element is a TEXTAREA, so this
+  // THE ONE THAT PROTECTS TYPING. Monaco's focused element is a TEXTAREA, so this
   // single check covers the config editor as well as every field in the sidecar.
   const focusGuard = /ae\.tagName === 'INPUT' \|\| ae\.tagName === 'TEXTAREA' \|\| ae\.tagName === 'SELECT'[\s\S]{0,60}?isContentEditable/;
   ok('it yields to any focused text surface', focusGuard.test(sidecar));
@@ -106,7 +106,7 @@ ok('the B-336 font-grid binding is still there to match against', fontGrid.lengt
   ok('it preventDefaults so the key does not also act elsewhere',
      /e\.preventDefault\(\);/.test(sidecar));
 
-  // ⚠️ NO CONFIRM HERE, and that is the rule rather than a miss: the right-click Delete
+  // NO CONFIRM HERE, and that is the rule rather than a miss: the right-click Delete
   // does not confirm either, and a gate on one door and not the other is drift. Undo
   // covers it — _batchDelete is a single atomic edit.
   ok('it adds no confirm the button does not have',

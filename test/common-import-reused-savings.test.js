@@ -58,12 +58,12 @@ const tmp = (n) => fs.mkdtempSync(path.join(os.tmpdir(), `jmt-b424-${n}-`));
   check('second import reused the source',
     !!(second.savings && second.savings.reusedSource), JSON.stringify(second.savings));
 
-  // ⭐ THE REGRESSION. This was 0 and the whole space sentence disappeared.
+  // THE REGRESSION. This was 0 and the whole space sentence disappeared.
   check('second import still states its space',
     second.savings.contentBytes > 0,
     `contentBytes=${second.savings.contentBytes} - the summary gates on > 0 and would say nothing`);
 
-  // ⭐ And the bytes are a saving, not a charge: nothing was written for them.
+  // And the bytes are a saving, not a charge: nothing was written for them.
   check('second import carries the reuse as saved bytes',
     second.savings.reusedBytes > 0, JSON.stringify(second.savings));
   check('saved bytes cover the whole content, so the footprint reconciles to zero',

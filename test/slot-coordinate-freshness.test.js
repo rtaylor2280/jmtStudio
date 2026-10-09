@@ -13,7 +13,7 @@
  * Disk was untouched — the damage was in the buffer — which is the only reason it
  * cost nothing.
  *
- * ⭐ THE FIX IS TO ASK AGAIN, NOT TO TRACK. `_collapseBladeSlot` already re-parsed
+ * THE FIX IS TO ASK AGAIN, NOT TO TRACK. `_collapseBladeSlot` already re-parsed
  * for exactly this reason and found its slot by POSITION. `_liveSlot` makes that the
  * one definition of "where is this slot now", and every writer goes through it.
  *
@@ -71,7 +71,7 @@ function ok(name, cond, extra) {
   ok('the write really did move the slot end',
      presetParser.parsePresets(after).arrays[0].presets[0].styles[0].endCol !== slotBefore.endCol);
 
-  // ⭐ THE BUG, DEMONSTRATED. Using the pre-write coordinates to overwrite with the
+  // THE BUG, DEMONSTRATED. Using the pre-write coordinates to overwrite with the
   // shorter reset string leaves the tail of the long expression behind.
   {
     const l = after.split('\n');
@@ -85,7 +85,7 @@ function ok(name, cond, extra) {
        l[slotBefore.startLine - 1].trim());
   }
 
-  // ⭐ THE FIX. Re-parse and locate by POSITION — preset index and slot index — which
+  // THE FIX. Re-parse and locate by POSITION — preset index and slot index — which
   // is what _liveSlot does. The same reset is then clean.
   {
     const fresh = presetParser.parsePresets(after).arrays[0].presets[0].styles[0];
@@ -107,7 +107,7 @@ function ok(name, cond, extra) {
        reparsed.arrays[0].presets[1].styles.length === 2);
   }
 
-  // ⚠️ REFUSE, DO NOT GUESS. A position that no longer exists (the preset was deleted
+  // REFUSE, DO NOT GUESS. A position that no longer exists (the preset was deleted
   // while the panel was open) must yield nothing, so the caller declines to write.
   // Falling back to the cached object is what this whole change removes.
   {
@@ -120,7 +120,7 @@ function ok(name, cond, extra) {
 
 // ── B. every writer re-derives ─────────────────────────────────────────────
 //
-// ⚠️ THIS IS THE HALF THAT MATTERS IN SIX MONTHS. Five separate writers had the same
+// THIS IS THE HALF THAT MATTERS IN SIX MONTHS. Five separate writers had the same
 // defect because each one independently reached for the slot it was handed. A sixth
 // will too. Naming them here means adding one without _liveSlot fails this suite
 // rather than waiting to corrupt somebody's config.
@@ -150,7 +150,7 @@ function ok(name, cond, extra) {
        body ? 'no _liveSlot call in the first 2600 chars' : 'function not found');
   }
 
-  // ⭐ _resetSlot REFUSES rather than falling back. It is the one writer whose whole
+  // _resetSlot REFUSES rather than falling back. It is the one writer whose whole
   // job is to overwrite a range, so a stale range there is maximally destructive —
   // it is the path that produced the reported corruption.
   const reset = bodyOf(/function _resetSlot\s*\(/);

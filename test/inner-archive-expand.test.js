@@ -58,7 +58,7 @@ function tree(root) {
 
 const srcRoot = (ud, uuid) => path.join(S.sourcesRoot(ud), uuid, 'source');
 
-// ⚠️ A font needs at least MIN_EFFECT_TYPES (3) distinct effect types before the
+// A font needs at least MIN_EFFECT_TYPES (3) distinct effect types before the
 // detector will call it one. A two-file fixture produced ZERO candidates, which
 // made "nothing is flagged nested" pass because there was nothing to flag - a
 // check that could not fail. Three effects is the floor, so this uses four.
@@ -85,7 +85,7 @@ function mkFont(root) {
     const r = await S.importSource({ userData: ud, sourcePath: outer, originalName: 'Power.zip', metadata: {} });
     check('the import succeeded', r && r.ok, r && r.error);
     const files = tree(srcRoot(ud, r.uuid));
-    check('⭐ no archive survives in the stored tree',
+    check('no archive survives in the stored tree',
       !files.some(f => /\.zip$/i.test(f)), files.filter(f => /\.zip$/i.test(f)).join(', '));
     check('each font became a folder of real files',
       files.includes('Indara/Proffie/hum.wav') && files.includes('Osha/Proffie/swing1.wav'),
@@ -94,15 +94,15 @@ function mkFont(root) {
     check('the stored count describes the files, not the archives',
       files.length === 13, String(files.length));
 
-    // ⭐ The point of the whole exercise: sibling fonts inside one bundle can now
+    // The point of the whole exercise: sibling fonts inside one bundle can now
     // share. Before expansion each of these was a sealed archive holding its own
     // complete copy, invisible to dedup.
     const dd = await S.dedupeSource(ud, r.uuid);
     // 13 files: 4 effects x 3 fonts, plus readme.txt = 5 unique.
-    check('⭐ dedup can now see inside the bundle',
+    check('dedup can now see inside the bundle',
       dd.deduped === true && dd.uniqueFiles === 5, JSON.stringify(dd));
     const ino = (p) => fs.statSync(path.join(srcRoot(ud, r.uuid), p)).ino;
-    check('⭐ and sibling fonts share one copy',
+    check('and sibling fonts share one copy',
       ino('Indara/Proffie/hum.wav') === ino('Jecki/Proffie/hum.wav'));
   }
 
@@ -118,7 +118,7 @@ function mkFont(root) {
     const source = S.openSource(ud, r.uuid);
     const cands = (await require('../soundFontCandidates').detectCandidates(source)).candidates || [];
     check('candidates were found', cands.length > 0, String(cands.length));
-    check('⭐ NOTHING is flagged nested', cands.every(c => !c.nested),
+    check('NOTHING is flagged nested', cands.every(c => !c.nested),
       JSON.stringify(cands.map(c => ({ n: c.name, nested: c.nested }))));
     check('and no candidate path names an archive',
       cands.every(c => !/\.zip/i.test(c.path || '')),

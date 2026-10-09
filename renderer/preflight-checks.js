@@ -37,7 +37,7 @@
   // BOTH DIRECTIONS, as of 2026-09-13 — this closes [B-223], which filed the same
   // rule first and always covered both. It shipped under-count only, on the
   // argument that over-count already carries a red "n/m BLADES" header and a
-  // repair tool. ⭐ THAT ARGUMENT DOES NOT SURVIVE BEING SAID OUT LOUD: the
+  // repair tool. THAT ARGUMENT DOES NOT SURVIVE BEING SAID OUT LOUD: the
   // sidecar paints MISSING slots red too, so it would have killed the under-count
   // check equally. A badge does not stop a compile — and a compile here has run as
   // long as 19 minutes for a failure that was knowable before it started.
@@ -45,7 +45,7 @@
   // Over-count is the same hard failure, not a lesser one. `Preset` in
   // common/preset.h holds exactly NUM_BLADES style members plus the name, so an
   // extra style is one initializer more than the struct has room for.
-  // ⚠️ AND IT IS NOT A TYPO CASE — it is what a config BECOMES. Lower NUM_BLADES
+  // AND IT IS NOT A TYPO CASE — it is what a config BECOMES. Lower NUM_BLADES
   // without touching the presets and every preset is over (the B226 fixtures are
   // built from exactly that), and [B-219]'s follower-delete cascade deliberately
   // leaves an OVERRIDDEN preset holding its slot rather than destroying the user's
@@ -93,7 +93,7 @@
           const actual = (p.styles || []).length;
           if (actual === expected) continue;
 
-          // ⚠️ THE PARSER IS NOT CORROBORATION OF ITSELF, and that cost three false
+          // THE PARSER IS NOT CORROBORATION OF ITSELF, and that cost three false
           // positives before it was measured. Across 173 real configs the rule
           // would have blocked 14, and 3 of those compile fine: presetParser
           // under-counts styles on certain configs and reports no parseError while
@@ -103,7 +103,7 @@
           const tokens = _styleTokens(p.raw);
           if (actual < expected && tokens > actual) continue;
 
-          // ⭐ THE SAME INSTRUMENT AIMED THE OTHER WAY, AND IT ABSTAINS ON THE
+          // THE SAME INSTRUMENT AIMED THE OTHER WAY, AND IT ABSTAINS ON THE
           // OPPOSITE DISAGREEMENT. An under-counting parser cannot INVENT a slot,
           // so it can never manufacture an over-count: 3 parsed against 2 expected
           // is still too many even if the truth is 5. What WOULD be a false
@@ -151,7 +151,7 @@
         const slotWord = short.every(s => expected - s.actual === 1) ? 'slot' : 'slots';
 
         findings.push({
-          // ⭐ "but", NOT "and". [B-375] the catch 2026-09-16, and it is a rule not a typo:
+          // "but", NOT "and". [B-375] the catch 2026-09-16, and it is a rule not a typo:
           // "and" joins two compatible facts, and this sentence exists precisely because the two
           // halves CANNOT both be right. The conjunction was doing the opposite of the message's
           // job. Any finding whose title states the expectation AND the violation in one sentence
@@ -171,7 +171,7 @@
       // Too many styles is the same build failure, not a lesser one: `Preset` in
       // common/preset.h carries exactly NUM_BLADES style members plus the name, so
       // an extra style is one initializer more than the struct has room for.
-      // ⚠️ AND THE APP MAKES THIS CASE ITSELF. [B-219]'s follower-delete cascade
+      // AND THE APP MAKES THIS CASE ITSELF. [B-219]'s follower-delete cascade
       // deliberately leaves an OVERRIDDEN preset holding its slot, because that
       // text is the user's own work and must not vanish silently. Those leftovers
       // arrive here.
@@ -186,7 +186,7 @@
         const extraWord = over.every(s => s.actual - expected === 1) ? 'style' : 'styles';
 
         findings.push({
-          // ⭐ "but", NOT "and". [B-375] the catch 2026-09-16, and it is a rule not a typo:
+          // "but", NOT "and". [B-375] the catch 2026-09-16, and it is a rule not a typo:
           // "and" joins two compatible facts, and this sentence exists precisely because the two
           // halves CANNOT both be right. The conjunction was doing the opposite of the message's
           // job. Any finding whose title states the expectation AND the violation in one sentence
@@ -224,7 +224,7 @@
   //     every time you switch to it. The message means "this preset cannot see a
   //     voicepack", not "this saber has none".
   //
-  // ⭐ THIS IS THE REGISTRY'S DESIGN TEST. If the mechanism could not carry this
+  // THIS IS THE REGISTRY'S DESIGN TEST. If the mechanism could not carry this
   // check — its per-preset list, its repair, and its courtesy line about the card —
   // the mechanism would be wrong and building three more checks on it would be
   // building them on sand. Rehoused 2026-09-12, behaviour unchanged.
@@ -373,7 +373,7 @@
       if (!missing.length) return null;
 
       const req = await vpkPropRequirement(ctx);
-      // ⚠️ null means we could not read the prop tree — no version selected, or the
+      // null means we could not read the prop tree — no version selected, or the
       // files were unreadable. That is exactly the case the registry added a third
       // answer for: we have found presets with no shared folder but we do not know
       // whether anything requires one, and guessing in either direction is wrong.
@@ -398,7 +398,7 @@
           title: `${req.via === 'menuspec'
             ? "Your config's OS8 menu system (MENU_SPEC_TEMPLATE) requires a voicepack"
             : 'Your prop requires a voicepack on ProffieOS 8'}, but `
-            // ⭐ "but", same rule as the blade-count titles. [B-375] The requirement and its
+            // "but", same rule as the blade-count titles. [B-375] The requirement and its
             // violation in one sentence is an adversative. The voicepack title carried the
             // identical construction and was found by sweeping for the SHAPE rather than the
             // phrase - which is what the entry asked for. The 'no prop is included' title below
@@ -434,19 +434,19 @@
   // saber prop, every one of those defines became dead code, and the board booted
   // with NO WAY TO NAVIGATE THE SABER.
   //
-  // ⭐ IT COMPILES CLEANLY. There is no compiler diagnostic to translate, no error
+  // IT COMPILES CLEANLY. There is no compiler diagnostic to translate, no error
   // to look up, and nothing anywhere in the world that mentions it — the saber
   // simply does not behave as configured, and it is found after flashing with the
   // hilt closed up. That is the expensive class, which is exactly why `warn` here
   // does not mean "minor".
   //
-  // ⚠️ THE RULE IS PORTED, NOT RE-DERIVED. It was built and measured in the
+  // THE RULE IS PORTED, NOT RE-DERIVED. It was built and measured in the
   // research harness (local/nightly/error-exp/lint_precompile.js, R12) at 0 false
   // positives over 164 configs, with one genuine fault found in the wild. The
   // entry sat open for weeks on "where does a config lint LIVE" — this registry is
   // that answer, and this is its first `warn` consumer.
   //
-  // ⚠️⚠️ ITS FIRST DRAFT MATCHED ON PROP HEADER FILENAMES AND SCORED 6 FALSE
+  // ITS FIRST DRAFT MATCHED ON PROP HEADER FILENAMES AND SCORED 6 FALSE
   // POSITIVES ACROSS THE 8 KNOWN-GOOD CONFIGS, all of which include
   // `../props/jmt_fett_prop.h` — a JMT prop outside the stock props/ directory.
   // The lesson is NOT "add that filename": any allowlist of prop filenames is a
@@ -533,29 +533,29 @@
   // ── A style factory name that does not exist ─────────────────────────────
   //
   // [B-324]. A misspelled wrapper — `StyleRainBowPtr` with a capital B — is a hard
-  // compile error that costs a full build to discover. ⭐ AND PROFFIEOS'S OWN
+  // compile error that costs a full build to discover. AND PROFFIEOS'S OWN
   // DOCUMENTATION CONTAINS THAT EXACT TYPO: config/common_presets.h line 16 reads
   // `//   StyleRainBowPtr<out millis, in millis>()`. Anyone copying that comment
   // out of the OS source gets a config that cannot compile, from the most
   // trustworthy place they could have got it.
   //
-  // ⚠️ THE LIST IS DERIVED, NEVER REMEMBERED, and that is the whole design. [B-321]
+  // THE LIST IS DERIVED, NEVER REMEMBERED, and that is the whole design. [B-321]
   // deliberately deleted a hardcoded list of style NAMES because preserving the
   // user's text with a stale list rewrites valid code. Validating with a stale list
   // is worse: it calls working code broken, which is the false positive that
   // teaches people to ignore every check we have.
-  // ⭐ MEASURED 2026-09-12, AND IT CORRECTED THE ENTRY ON FIRST RUN: the eight
+  // MEASURED 2026-09-12, AND IT CORRECTED THE ENTRY ON FIRST RUN: the eight
   // factories are stable across 7.x and 8.x, but ProffieOS 6.9 has SEVEN — no
   // ChargingStylePtr. A hardcoded eight would have told a 6.9 user their config was
   // fine when it genuinely will not build.
   //
-  // ⚠️ SCOPE IS THE OUTERMOST FACTORY ONLY. `StylePtr<InOutHelper<Red>>()` is
+  // SCOPE IS THE OUTERMOST FACTORY ONLY. `StylePtr<InOutHelper<Red>>()` is
   // checked as `StylePtr`; InOutHelper and everything under it is NOT, because
   // there is no authoritative dictionary for style classes and inventing one is
   // exactly what [B-321] removed. A check without a dictionary is [B-012]'s
   // problem, deliberately solved a different way.
   //
-  // ⚠️ AND THE USER'S OWN SIDE COUNTS. A config or the Style Library can define its
+  // AND THE USER'S OWN SIDE COUNTS. A config or the Style Library can define its
   // own StyleAllocator factory; warning on someone's own helper is the same false
   // positive wearing a different hat. Both sources, one union.
 
@@ -574,7 +574,7 @@
     return out;
   }
 
-  // ⚠️ DERIVED EVERY COMPILE, NOT CACHED, AND THAT IS DELIBERATE.
+  // DERIVED EVERY COMPILE, NOT CACHED, AND THAT IS DELIBERATE.
   //
   // A per-session cache was written first and removed the same hour. It bought
   // 117 ms — measured against the real 8.10 tree, 398 files walked — on an action
@@ -596,7 +596,7 @@
       if (hits && hits.ok && Array.isArray(hits.results)) {
         const names = new Set();
         for (const r of hits.results) {
-          // ⚠️ NOT JUST .h. Measured against the real 8.10 tree: 11 files mention
+          // NOT JUST .h. Measured against the real 8.10 tree: 11 files mention
           // StyleAllocator and only 5 are headers — the rest are ProffieOS.ino and
           // four tests.cpp. None of them DEFINES a factory today, so a .h-only
           // filter would have worked and the assumption would have been invisible.
@@ -607,12 +607,12 @@
           const f = await ctx.readVersionFile(ctx.versionName, r.path);
           if (f && f.ok && f.content) for (const n of factoriesIn(f.content)) names.add(n);
         }
-        // ⚠️ THE DERIVATION HAS TO PROVE ITSELF, because a PARTIAL read is the way
+        // THE DERIVATION HAS TO PROVE ITSELF, because a PARTIAL read is the way
         // this check turns into a liar. An empty result is obviously a failed read.
         // A result missing most of the tree is not obvious at all, and would have us
         // calling perfectly good names unknown.
         //
-        // ⭐ StylePtr IS THE SENTINEL, and it is a fact rather than a threshold.
+        // StylePtr IS THE SENTINEL, and it is a fact rather than a threshold.
         // Every ProffieOS that has ever existed defines StylePtr — it is the one
         // every config uses. Verified across all seven installed trees, 6.9 through
         // 8.10. So a derivation that does not contain it did not read the tree,
@@ -638,7 +638,7 @@
   // A preset's raw text starts at some point in the document; the parser gives us
   // its START LINE but offsets within it are entry-relative. Find the entry's own
   // offset by searching from the start of its line, then convert.
-  // ⚠️ Returns null rather than a guess when the entry cannot be located — a fix
+  // Returns null rather than a guess when the entry cannot be located — a fix
   // that writes to the wrong place is worse than no fix at all.
   function _lineColOf(fullText, preset, offsetInRaw) {
     const lines = String(fullText).split('\n');
@@ -712,7 +712,7 @@
         return { unsure: 'the selected ProffieOS version could not be read' };
       }
 
-      // ⚠️ THE OS IS THE ONLY SOURCE, AND A CONFIG CANNOT ADD TO IT.
+      // THE OS IS THE ONLY SOURCE, AND A CONFIG CANNOT ADD TO IT.
       //
       // An earlier build also read factories out of the config and the Style
       // Library, on the entry's reasoning that a user "can define its own
@@ -726,7 +726,7 @@
       // are types and can never be a factory. Measured: 0 of 173 real configs
       // define one, and a 3,176-line real Style Library has 141 aliases and none.
       //
-      // ⭐ AND THE OLD BEHAVIOUR WAS NOT MERELY DEAD, IT WAS A SUPPRESSION PATH.
+      // AND THE OLD BEHAVIOUR WAS NOT MERELY DEAD, IT WAS A SUPPRESSION PATH.
       // Reading a name out of a config that has one would accept a factory
       // defined by text that itself cannot build — so we would go SILENT on a
       // broken config, which is the opposite of protecting anyone. Defensive code
@@ -747,7 +747,7 @@
         const suggestion = (best && bestD <= 2) ? best : null;
         const one = presets.length === 1;
 
-        // ⭐ A FIX IS OFFERED ONLY ON A SINGLE-CHARACTER MISS, and that narrowness is
+        // A FIX IS OFFERED ONLY ON A SINGLE-CHARACTER MISS, and that narrowness is
         // the whole justification. This is the one check with an AUTHORITATIVE
         // dictionary — the names came out of the OS the user selected — so a rename
         // to a name one edit away is about as safe as the voicepack's `;common`.
@@ -815,17 +815,17 @@
   // thread has NoSloppy diagnosing the same family by eye: "Your first preset is
   // missing a closing brace }".
   //
-  // ⭐ THE FIRST COMPILER ERROR IS THE HONEST ONE. Everything after it is the
+  // THE FIRST COMPILER ERROR IS THE HONEST ONE. Everything after it is the
   // parser guessing once it has lost its place, which is why those threads are
   // full of people reading the LAST error and chasing the wrong thing. A check
   // that runs before the compiler avoids the whole class.
   //
-  // ⚠️⚠️ THIS WAS BUILT ONCE AND LOST. `scratchpad/balance-check.js`, written
+  // THIS WAS BUILT ONCE AND LOST. `scratchpad/balance-check.js`, written
   // 2026-07-24 into a session temp directory and swept; FOUR documents went on
   // citing it as a completed asset. The spec survived in crucible/error-corpus.md
   // and is what this is rebuilt from. It lives in the repo now.
   //
-  // ⚠️ SCOPE IS THE PRESET ARRAY, NOT THE FILE. A config is C++ and can legally
+  // SCOPE IS THE PRESET ARRAY, NOT THE FILE. A config is C++ and can legally
   // contain all sorts of bracket shapes we do not model — but a `Preset x[] = {…}`
   // body is ours, the parser already finds it, and an imbalance inside it is a
   // certain compile failure. Checking the whole file would mean answering for
@@ -868,7 +868,7 @@
       // per-preset check because there ARE no presets — the parser cannot read the
       // array at all.
       //
-      // ⚠️ A FIRST BUILD INFERRED THIS FROM A COUNT MISMATCH — more `Preset x[] = {`
+      // A FIRST BUILD INFERRED THIS FROM A COUNT MISMATCH — more `Preset x[] = {`
       // in the text than parsed arrays — and that was an inference wearing the
       // clothes of an observation. It fired on 11 wild configs, and the first one
       // examined (7230_1.h) turned out to be a forum paste: a bare
@@ -921,7 +921,7 @@
           // ── (b) THE MISSING COMMA, WHICH IS THE HEADLINE CASE ───────────────
           // LiamSaber.h, 2026-07-24: a missing `,` after the track string, and gcc
           // said `expected '}' before 'StylePtr'` — a different line, in a different
-          // preset. ⚠️ THE PARSER IS BLIND TO IT: it reads font, track and styles
+          // preset. THE PARSER IS BLIND TO IT: it reads font, track and styles
           // happily without the separator, so this cannot be inferred from the parse
           // and has to be read off the text.
           // A preset is { font, track, styles…, name }, so whatever follows the
@@ -933,7 +933,7 @@
             const next = after.replace(/^\s+/, '')[0];
             if (next && next !== ',' && next !== '}') {
               const name = (p.displayName || '').trim() || `Preset ${p.index}`;
-              // ⭐ THIS ONE GETS A FIX, and it is the safest in the whole set: we are
+              // THIS ONE GETS A FIX, and it is the safest in the whole set: we are
               // not guessing WHAT is missing or WHERE. The separator goes directly
               // after the track string, that position is known exactly, and a comma
               // is the only thing that can legally sit there. (2026-09-13: "if we
@@ -973,7 +973,7 @@
           const body = _balanceStrip(p.raw);
           const pairs = [['{', '}'], ['(', ')'], ['[', ']'], ['<', '>']];
           for (const [open, close] of pairs) {
-            // ⚠️ ANGLE BRACKETS ARE NOT RELIABLE and are counted only for a REPORT,
+            // ANGLE BRACKETS ARE NOT RELIABLE and are counted only for a REPORT,
             // never alone: `Int<-1>` and comparisons put stray `<` and `>` in valid
             // code. Braces, parens and square brackets are structural in a preset
             // and can be trusted.
@@ -1011,21 +1011,21 @@
   // Today the only feedback is arduino-cli's raw "No such file or directory",
   // pointing at a path the user never typed.
   //
-  // ⭐ THE ERROR-TRANSLATION THESIS IN MINIATURE: an ordinary mistake answered with
+  // THE ERROR-TRANSLATION THESIS IN MINIATURE: an ordinary mistake answered with
   // a preprocessor path. We already know exactly what is wrong and can say it in a
   // sentence before the compile is spent.
   //
-  // ⚠️ THE SHAPE GATE IS WHAT MAKES THIS SAFE, and the entry is explicit about it:
+  // THE SHAPE GATE IS WHAT MAKES THIS SAFE, and the entry is explicit about it:
   // a prop can legitimately live somewhere other than props/, and a user may have
   // hand-edited an include we do not model. So this only speaks when the include
   // matches OUR props/ shape — `props/x.h`, optionally one directory up — and the
   // file is absent from that exact folder. Anything else is silence.
   //
-  // ⚠️ NO PROP AT ALL IS NOT AN ERROR. ProffieOS falls back to saber.h, and that
+  // NO PROP AT ALL IS NOT AN ERROR. ProffieOS falls back to saber.h, and that
   // rule was settled for Link Prop and must stay true. The consequence of having no
   // prop while setting prop options is a different check entirely (B-089).
   //
-  // ⚠️ SEVERITY IS `block`, WHICH IS A DELIBERATE DEPARTURE FROM THE ENTRY'S LEAN.
+  // SEVERITY IS `block`, WHICH IS A DELIBERATE DEPARTURE FROM THE ENTRY'S LEAN.
   // It says "warn-and-continue is probably right, or refuse only when the path
   // matches our own props/ shape and the file is absent" — and the second clause is
   // exactly the condition built here, so the refusal is the narrow one it allows.
@@ -1064,7 +1064,7 @@
 
         let res = null;
         try { res = await ctx.listVersionDir(ctx.versionName, subPath); } catch { res = null; }
-        // ⚠️ A FAILED LISTING IS NOT AN ABSENT FILE. If the folder cannot be read we
+        // A FAILED LISTING IS NOT AN ABSENT FILE. If the folder cannot be read we
         // know nothing about what is in it, and saying "your prop is missing"
         // because our own lookup broke is the worst answer available.
         if (!res || !res.ok || !Array.isArray(res.entries)) {
@@ -1097,7 +1097,7 @@
   // regardless of whether anything was needed from it. That error is the single
   // most-searched pain on the Crucible, 51 threads.
   //
-  // ⚠️⚠️ THIS CLOSES A LIVE REGRESSION, not a gap. [B-326] shipped 2026-09-06 and
+  // THIS CLOSES A LIVE REGRESSION, not a gap. [B-326] shipped 2026-09-06 and
   // made a shared folder recognised by POSITION rather than by being spelled
   // "common" — correct, and the whole point of it. But before that, an unrecognised
   // name made the preset paint red as a missing font: the wrong reason, and a real
@@ -1105,7 +1105,7 @@
   // misspelled shared folder has been completely silent. B-012 said "ship them
   // together" in writing. They did not.
   //
-  // ⭐ FREQUENCY, NOT SPELLING — and then CLOSENESS, which the entry did not have.
+  // FREQUENCY, NOT SPELLING — and then CLOSENESS, which the entry did not have.
   // The entry's rule was lopsidedness alone: one preset using a name, many using
   // another. Measured 2026-09-12 against 173 configs, that over-fires on the only
   // real case available: 7957_9.h runs `common` x11 plus `BalVenos/common` x1 and
@@ -1113,13 +1113,13 @@
   // what reads as a real folder for a particular hilt. So an outlier must ALSO be a
   // near-miss of an established name before we say anything.
   //
-  // ⚠️ THE DISTANCE IS AGAINST THE CONFIG'S OWN NAMES, NEVER A WORD LIST, and that
+  // THE DISTANCE IS AGAINST THE CONFIG'S OWN NAMES, NEVER A WORD LIST, and that
   // distinction is the entry's and is load-bearing. A dictionary of
   // misspellings-of-"common" cannot see `MC` typed as `M C` — and an MC config is
   // exactly what the user runs. Comparing against whatever the config uses 3+ times keeps
   // that property: `M C` is one edit from `MC`, whatever the words are.
   //
-  // ⚠️ MULTIPLE SHARED FOLDERS ARE LEGITIMATE AND ABOUT TO GET COMMONER. commonSith
+  // MULTIPLE SHARED FOLDERS ARE LEGITIMATE AND ABOUT TO GET COMMONER. commonSith
   // and commonJedi used evenly is a real design, and B-326 is what made arbitrary
   // names usable at all — so the corpus predates the feature that will produce more
   // of them. The check must never read "more than one name exists" as a fault: it
@@ -1160,7 +1160,7 @@
       const established = [...counts].filter(([, c]) => c >= SHARED_ESTABLISHED_MIN).map(([n]) => n);
       if (!established.length) return null;
 
-      // ⭐ A NUMBERED VARIANT IS DELIBERATE, HOWEVER FEW PRESETS USE IT (the catch,
+      // A NUMBERED VARIANT IS DELIBERATE, HOWEVER FEW PRESETS USE IT (the catch,
       // 2026-09-12, after watching `common2` used several times stay silent:
       // "given it wouldn't work as a one off... shouldn't the number be another
       // exception to frequency?"). That is right, and the reasoning is mechanical
@@ -1169,7 +1169,7 @@
       // lone one is the ORDINARY case of that — you add the folder, then move one
       // preset onto it first. Frequency cannot see the difference; the trailing
       // digit can.
-      // ⚠️ Deliberately TRAILING digits only. A suppression rule that is too broad
+      // Deliberately TRAILING digits only. A suppression rule that is too broad
       // hides real typos, and `M C` vs `MC` must still fire.
       const _numberedVariant = (a, b) => {
         const strip = x => x.replace(/\d+$/, '');
@@ -1235,14 +1235,14 @@
   // command does not exist. Removed 2026-09-14, and the reason is a rule about this
   // file rather than a judgement about that case.
   //
-  // ⭐⭐ PREFLIGHT IS FOR WHAT BREAKS A COMPILE OR THE SABER. NEVER FOR CONVENIENCE.
+  // PREFLIGHT IS FOR WHAT BREAKS A COMPILE OR THE SABER. NEVER FOR CONVENIENCE.
   // Every other check here catches something that fails to build or misbehaves on the
   // board. That one caught a define doing nothing — real, and wasted code, but it can
   // never cause an error in either place. It was the only convenience-only entry in
   // the registry, and one gate that stops a build to report a harmless condition is
   // what teaches people to click past the gates that matter.
   //
-  // ⚠️ IT ALSO SHIPPED WITH BAD ADVICE, WHICH IS WHAT SURFACED THE RULE. The message
+  // IT ALSO SHIPPED WITH BAD ADVICE, WHICH IS WHAT SURFACED THE RULE. The message
   // ended "Change the USB type to one that includes Mass Storage if you want it" and
   // the check never read ctx.versionName. Below OS8 MOUNT_SD_SETTING is inert whatever
   // the USB type (see _preOs8Why in index.html), so on a pre-OS8 config that advice
@@ -1250,12 +1250,12 @@
   // state the four-touchpoint guard at buildPanel.js:545 exists to prevent. Measured on
   // 88 real configs: it fired on 10, and 8 of those 10 were pre-OS8.
   //
-  // ⭐ WHERE THE IDEA GOES INSTEAD. Turning mass storage ON already offers to add or
+  // WHERE THE IDEA GOES INSTEAD. Turning mass storage ON already offers to add or
   // uncomment the define (offerMountSdSettingOnSelect, index.html:7601). The symmetric
   // move is to offer the reverse when mass storage is turned OFF, at the dropdown,
   // where the user is actually making that choice. Not built.
   //
-  // ⚠️ KEEP THIS MEASUREMENT — it is why any future version must not read the blanket
+  // KEEP THIS MEASUREMENT — it is why any future version must not read the blanket
   // flag. Across the 156-config wild corpus: direct MOUNT_SD_SETTING 0,
   // ENABLE_ALL_EDIT_OPTIONS 61 (39%). ENABLE_ALL means "turn on every edit-mode
   // option", not "I want SD mount", so keying off it would fire on two configs in five.

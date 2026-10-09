@@ -26,7 +26,7 @@ const BACKUP_TYPE = 'jmt-soundfontlibrary';
 //     soundFonts/.filehashes/sources/<sourceUuid>.json
 //     soundFonts/.filehashes/commons/<commonUuid>.json
 //
-// ⭐⭐ WHY BACKUP CARES  [B-399]. soundFontCompare.buildLibraryIndex reads the ENTRIES
+// WHY BACKUP CARES  [B-399]. soundFontCompare.buildLibraryIndex reads the ENTRIES
 // records and has NO fallback: a font with no record is counted unmatchable and skipped, so
 // the whole "do I already own this?" answer disappears for it. The sources and commons
 // records do fall back to a live walk, which makes them a speed cache — the entries ones are
@@ -35,7 +35,7 @@ const BACKUP_TYPE = 'jmt-soundfontlibrary';
 // one. Found 2026-09-16 as the cause of [B-397]: 151 fonts on disk, zero records, and the
 // "Already in your library (skipped)" row gone from both importers.
 //
-// ⚠️ The subdirectory names are NOT uniform and that is not a typo — the on-disk bucket is
+// The subdirectory names are NOT uniform and that is not a typo — the on-disk bucket is
 // `library` but its records live under `entries`, and `common` maps to `commons`. Those
 // spellings are load-bearing; a wrong one silently empties an index instead of erroring.
 const FILEHASH_DIR = '.filehashes';
@@ -129,22 +129,22 @@ function _dirBytes(dir) {
 // folder (counts = number of .wav files, not subdirs). attachments is
 // dir-keyed like sources/common, but the dir NAME is the content sha256,
 // which is what lets the restore side dedup without hashing anything.
-// ⭐⭐ THE ASYNC TWIN, AND IT IS A UI BUG FIX RATHER THAN A PERFORMANCE ONE. [B-420, 2026-09-24]
+// THE ASYNC TWIN, AND IT IS A UI BUG FIX RATHER THAN A PERFORMANCE ONE. [B-420, 2026-09-24]
 //
 // Reported: Cancel on the prep screen "does nothing". Instrumented rather than theorised, and the
 // console settled it — the handler WAS attached, the button WAS enabled with `pointerEvents: auto`,
 // and **no click event was ever dispatched during the 1,917 ms the survey ran**. The report:
 // *"never saw it."* The screen was never on screen.
 //
-// ⚠️⚠️ CAUSE: `surveyLibrary` is a synchronous recursive stat walk, and it runs in the MAIN process.
+// CAUSE: `surveyLibrary` is a synchronous recursive stat walk, and it runs in the MAIN process.
 // Electron coordinates both frame presentation AND input dispatch through the browser process, so
 // while main is blocked the renderer can set `active`, build its frame and attach handlers — and
 // none of it reaches the glass, while the user's clicks queue behind the walk. The modal existed in
 // the DOM for the whole survey and was never painted or clickable.
-// ⭐ That is why every renderer-side theory failed: the renderer was never the blocked process
+// That is why every renderer-side theory failed: the renderer was never the blocked process
 // (measured at 16% CPU throughout). Nothing in the renderer could have fixed this.
 //
-// ⚠️ THE SYNC VERSION STAYS. `exportBackup` calls it internally at a point where nothing is on
+// THE SYNC VERSION STAYS. `exportBackup` calls it internally at a point where nothing is on
 // screen waiting, and rewriting that path would be a change with no symptom behind it.
 //
 // [B-398] established the pattern this follows: yield inside every per-item pass so the window
@@ -162,7 +162,7 @@ async function surveyLibraryAsync(userData) {
     catch { continue; }
     const dirs = names.filter(d => d.isDirectory());
     counts[b] = dirs.length;
-    // ⚠️ THE BREATH IS PER TOP-LEVEL ITEM, NOT PER BUCKET. A bucket is four iterations; a single
+    // THE BREATH IS PER TOP-LEVEL ITEM, NOT PER BUCKET. A bucket is four iterations; a single
     // multi-GB voicepack is the thing that actually holds the loop, and yielding between buckets
     // would leave the longest stretch exactly as blocking as it is now.
     for (const d of dirs) {
@@ -361,21 +361,21 @@ async function exportBackup({
           if (it.isDirectory()) { walk(path.join(dir, it.name)); continue; }
           if (!it.isFile()) continue;
           const fileAbs = path.join(dir, it.name);
-          // ⚠️ DECLINE HERE, WHERE THE COUNT IS MADE ([B-369]). The backup gates each
+          // DECLINE HERE, WHERE THE COUNT IS MADE ([B-369]). The backup gates each
           // top item on its entry events - `await _gateFor(topKey).promise` resolves
           // only once `filesPerTopItem` entries have arrived - so a file filtered out
           // of the archive WITHOUT being removed from this count hangs the export
           // forever, mid-write. Declining in the same pass that counts keeps the two
           // in step by construction rather than by a subtraction that can drift.
           //
-          // ⭐ ATTACHMENTS ARE DELIBERATELY EXEMPT. Proof of purchase is the one place a
+          // ATTACHMENTS ARE DELIBERATELY EXEMPT. Proof of purchase is the one place a
           // macro-enabled document is allowed, in and out (2026-09-11), and
           // programs cannot reach it because soundFontAttachments guards on add. Running
           // the carry test here would strip the user's receipts out of their own backup.
           if (bucket !== 'attachments') {
             const v = checkCarryableFile(fileAbs, it.name);
             if (v.blocked) {
-              // ⚠️⚠️ [B-394] CARRY THE MANAGED IDENTITY, or this finding can only be
+              // [B-394] CARRY THE MANAGED IDENTITY, or this finding can only be
               // reported and never acted on. soundFontRemoval addresses a file as
               // (kind, id, relPath) against its OWN root, and those roots are not the
               // bucket root this relPath is relative to:
@@ -466,7 +466,7 @@ async function exportBackup({
   const sfEntriesMod = require('./soundFontEntries');
   const sfCommonMod = require('./soundFontCommon');
   const sfSourcesMod = require('./soundFontSources');
-  // ⚠️⚠️ [B-394] THE HASH MUST DESCRIBE WHAT THE ARCHIVE CARRIES, NOT WHAT IS ON DISK.
+  // [B-394] THE HASH MUST DESCRIBE WHAT THE ARCHIVE CARRIES, NOT WHAT IS ON DISK.
   //
   // The cached per-item hashes below are computed over the WHOLE tree. The count pass
   // above DECLINES blocked files (checkCarryableFile) and they never reach the zip. So
@@ -475,9 +475,9 @@ async function exportBackup({
   // conflict on an item whose files are byte-identical. Found 2026-09-16 when a Replace
   // still read "2 differ" against a library it had just written itself.
   //
-  // ⭐ ONLY ITEMS THAT ACTUALLY LOST A FILE PAY FOR IT. With nothing declined the whole
+  // ONLY ITEMS THAT ACTUALLY LOST A FILE PAY FOR IT. With nothing declined the whole
   // tree IS the archive, so the cached hash is already correct and the fast path stands.
-  // ⚠️ refusedAbs is complete before this runs: the decline loop is synchronous and ends
+  // refusedAbs is complete before this runs: the decline loop is synchronous and ends
   // at the top of exportBackup; hashPhaseBucket is awaited long after it.
   const _refusedUnder = (abs) => {
     const prefix = abs.endsWith(path.sep) ? abs : abs + path.sep;
@@ -613,26 +613,26 @@ async function exportBackup({
   // .catch() is attached to the unlink promise BEFORE the race so a
   // rejection arriving after the wall doesn't become an unhandled
   // rejection that destabilizes the main process.
-  // ⭐⭐ WAIT FOR OUR OWN HANDLE, THEN RETRY. [B-420, 2026-09-21 — the question found this]
+  // WAIT FOR OUR OWN HANDLE, THEN RETRY. [B-420, 2026-09-21 — the question found this]
   //
   // The ask was why there is a deadline at all: "if there's concern then let them abort knowing we
   // couldn't release the card... but we already had a quick method with renaming so shouldn't
   // be an issue." The right answer turned out to be that the deadline was guarding a race we
   // had ALREADY FIXED ELSEWHERE, in this same codebase, THE SAME MORNING.
   //
-  // ⚠️ THE RACE: `onAbort` calls `ws.destroy()`, which is ASYNCHRONOUS, and cleanup then tried
+  // THE RACE: `onAbort` calls `ws.destroy()`, which is ASYNCHRONOUS, and cleanup then tried
   // to unlink the very file that stream was still closing. The comment above described the
   // symptom exactly — unlink blocks at the OS level while the file is held open by "ANY
   // process, including our own not-yet-fully-closed write stream" — and then worked around it
   // with a 3 s wall instead of removing the cause. That stalled teardown past the 5 s cancel
   // ceiling on slow media, which is what produced the false "Export stopped".
   //
-  // ⭐ `sfExportCopy.dropPartial` solved this on the font path hours earlier: wait for the
+  // `sfExportCopy.dropPartial` solved this on the font path hours earlier: wait for the
   // stream's 'close' event, then retry the unlink on EBUSY/EPERM. Same shape, same OS, same
   // fix — it simply never got carried across. Two files, one defect, one of them already
   // patched. That is the cost of fixing a defect rather than a defect CLASS.
   //
-  // ⚠️ The 2 s wait is a floor on the stream, not on the unlink: once 'close' has fired the
+  // The 2 s wait is a floor on the stream, not on the unlink: once 'close' has fired the
   // handle is gone and the unlink is immediate. The retry ladder covers the case where Windows
   // has not caught up yet, which is exactly what it is for on the font path.
   const cleanupPartialFile = async (p) => {
@@ -643,14 +643,14 @@ async function exportBackup({
       } catch { return r(); }
       setTimeout(r, 2000);     // never hang the cancel on a stream that will not close
     });
-    // ⚠️⚠️ ASYNC, NEVER `unlinkSync`. [B-420] My first cut used the sync form, copied from the
+    // ASYNC, NEVER `unlinkSync`. [B-420] My first cut used the sync form, copied from the
     // font path where it is fine - small files, after a confirmed close. Here the target is a
     // multi-gigabyte archive on a card that writes at ~773 ms/file, and the comment above
     // warns unlink can block at the OS level. A synchronous block there freezes the whole main
     // process, which is the symptom this entire fix exists to remove. The original code used
     // `fs.promises.unlink` for exactly this reason and I undid it.
     //
-    // ⚠️ Each attempt is still raced, so even a blocking unlink cannot trap us - but note the
+    // Each attempt is still raced, so even a blocking unlink cannot trap us - but note the
     // difference from the code this replaced: the race is now a SAFETY NET on a call that
     // should already be instant (the handle is closed above), not the mechanism we rely on.
     const tryOnce = (fn) => new Promise((resolve) => {
@@ -665,20 +665,20 @@ async function exportBackup({
       if (r !== 'EBUSY' && r !== 'EPERM') break;   // timeout or a real error - stop retrying
       await new Promise((r2) => setTimeout(r2, 50 * (i + 1)));
     }
-    // ⭐⭐ IF WE CANNOT DELETE IT, NAME IT. The design, and it is the same convention as the
+    // IF WE CANNOT DELETE IT, NAME IT. The design, and it is the same convention as the
     // font path: "so essentially we want to delete it... but if we can't, then at least it's
     // named DELETE.Ahsoka etc..."
     //
     // A `.partial` left behind is already inert, but it is OUR word for it — `DELETE.` is a
     // word the user reads without being taught, on a card they are looking at in Explorer.
-    // ⚠️ And the other rule holds: no product name in it. "don't blame us for this by putting
+    // And the other rule holds: no product name in it. "don't blame us for this by putting
     // our name int it. juswt mark it for delete... human readable."
     //
-    // ⚠️ A rename can fail too — Windows refuses it while a handle is open without
+    // A rename can fail too — Windows refuses it while a handle is open without
     // FILE_SHARE_DELETE — so this is a better fallback, never a guarantee. Whatever the file
     // ends up called is what gets reported, so the message names the file that is actually
     // there rather than the one we hoped to leave.
-    // ⚠️ Async and raced for the same reason as the unlink above - a rename against a held
+    // Async and raced for the same reason as the unlink above - a rename against a held
     // handle can block too, and a sync one would block the main process with it.
     try {
       const marked = path.join(path.dirname(p), `DELETE.${path.basename(p)}`);
@@ -698,7 +698,7 @@ async function exportBackup({
   // deadlineTimer is cleared in the finally if work wins the race, so
   // the deadline promise never rejects and there's no late unhandled
   // rejection floating in the loop.
-  // ⚠️⚠️ THE CEILING WAS 5 SECONDS AND IT WAS REPORTING A LIE. [B-420, 2026-09-21]
+  // THE CEILING WAS 5 SECONDS AND IT WAS REPORTING A LIE. [B-420, 2026-09-21]
   //
   // On a card mounted through a Proffieboard a write is ~773 ms per file, so archive teardown
   // routinely takes longer than 5 s. The deadline fired, the renderer was told the export had
@@ -707,23 +707,23 @@ async function exportBackup({
   // queued behind work that was supposedly finished. The read of it was exactly right - "we
   // said it was done but it wasn't."
   //
-  // ⭐⭐ AND HE NAMED THE CONSEQUENCE THAT MATTERS MORE THAN THE LOCKUP: "if they then wanted
+  // AND THE CONSEQUENCE NAMED THAT MATTERS MORE THAN THE LOCKUP: "if they then wanted
   // to safe eject the board they couldn't." A false "stopped" on a board card means the eject
   // fails with files still open - or worse, someone who has been told it stopped pulls the
   // card. Safe eject is one of the four requirements this entry exists to deliver; reporting a
   // clean finish we cannot vouch for defeats it.
   //
-  // ⭐ SO THE DEADLINE NO LONGER REPORTS COMPLETION. Two changes:
+  // SO THE DEADLINE NO LONGER REPORTS COMPLETION. Two changes:
   //   • 120 s instead of 5 s - a true last-resort ceiling, not a routine path. Slow media now
   //     finishes inside it, and the UI stays honestly on "Cancelling… (finishing current
   //     file)" while it does, which is the state the user should see.
   //   • if it DOES fire, the error is marked `teardownIncomplete` so nothing downstream claims
   //     the card is safe. We stop saying "done" when what we mean is "we stopped waiting."
   //
-  // ⚠️ The original 5 s existed for a real reason - do not trap the renderer in an endless
+  // The original 5 s existed for a real reason - do not trap the renderer in an endless
   // "Cleaning up…" if our own teardown deadlocks - and that reason still holds. What changes is
   // that the escape hatch now tells the truth instead of dressing a timeout up as success.
-  // ⭐⭐ HIS RULING, AND IT REPLACES THE CLOCK ENTIRELY: "only reason to abort and tell them
+  // THE RULING, AND IT REPLACES THE CLOCK ENTIRELY: "only reason to abort and tell them
   // it's unknown is if the drive stops communicating..."
   //
   // That is exactly right, and it is a better condition than elapsed time in both directions.
@@ -731,12 +731,12 @@ async function exportBackup({
   // with the UI saying so. A drive that has been yanked is not slow - it is gone, and no amount
   // of waiting will resolve it. A timer cannot tell those apart; presence can.
   //
-  // ⚠️ SO THE ABORT CONDITION IS MEDIA PRESENCE, NOT A DEADLINE. Polled every 500 ms once a
+  // SO THE ABORT CONDITION IS MEDIA PRESENCE, NOT A DEADLINE. Polled every 500 ms once a
   // cancel is requested, using the same `existsSync`-on-the-mount-point instrument built for
   // safe eject this morning - measured then across a board card, a USB reader and a built-in
   // slot, all three reading false the moment the media went.
   //
-  // ⚠️ THE LONG BACKSTOP IS KEPT AND I AM FLAGGING IT RATHER THAN HIDING IT. Strictly, the rule
+  // THE LONG BACKSTOP IS KEPT AND I AM FLAGGING IT RATHER THAN HIDING IT. Strictly, the rule
   // says only drive loss earns "unknown", and a genuine deadlock with the drive still present
   // would now hang forever. Ten minutes is far outside any real teardown (the known cause - our
   // own unlink racing an unclosed handle - is fixed above), so it should never fire; it exists
@@ -757,7 +757,7 @@ async function exportBackup({
       const e = new Error('Cancelled');
       e.cancelled = true;
       e.residualPath = partialPath;
-      // ⚠️ Work is still in flight. Nothing downstream may tell the user the destination is
+      // Work is still in flight. Nothing downstream may tell the user the destination is
       // finished with - no completion notice, and above all no safe-eject offer on a card we
       // are still holding open. [B-420]
       e.teardownIncomplete = true;
@@ -804,9 +804,9 @@ async function exportBackup({
   const attachmentsFilesExpected = bucketTops.attachments.reduce(
     (sum, it) => sum + (filesPerTopItem.get(`attachments/${it.name}`) || 0), 0
   );
-  // ⭐⭐ EVERY GATE MUST BE ABLE TO SETTLE ON ABORT. [B-420, 2026-09-21 — the measurement]
+  // EVERY GATE MUST BE ABLE TO SETTLE ON ABORT. [B-420, 2026-09-21 — the measurement]
   //
-  // ⚠️⚠️ THIS IS WHY CANCEL TOOK MINUTES REGARDLESS OF HOW LITTLE WAS WRITTEN. Reported:
+  // THIS IS WHY CANCEL TOOK MINUTES REGARDLESS OF HOW LITTLE WAS WRITTEN. Reported:
   // "I barely coppied anything to it... why is cancel taking so long? it might ahve been like
   // a couple mb." It was never I/O. The dispatch loop does
   //
@@ -817,11 +817,11 @@ async function exportBackup({
   // promise that cannot settle. Every `if (cancelled) break` sits BEFORE an await, so the flag
   // has no way to reach a loop already suspended.
   //
-  // ⭐ Registering the resolvers lets `onAbort` settle them all at once. The loop then unwinds
+  // Registering the resolvers lets `onAbort` settle them all at once. The loop then unwinds
   // immediately, `archive.finalize()` is skipped by the `if (!cancelled)` guards, `done`
   // settles, and teardown finishes in the time it takes to close a stream.
   //
-  // ⚠️ AND THIS IS WHAT THE OLD 5-SECOND DEADLINE WAS REALLY HIDING. It was not covering a
+  // AND THIS IS WHAT THE OLD 5-SECOND DEADLINE WAS REALLY HIDING. It was not covering a
   // slow drive; it was escaping this deadlock - by reporting a clean cancel that had not
   // happened. Removing the lie without fixing the hang made the wait honest and much longer,
   // which is what hit at 1m58s. The lesson is the one from this morning, again: a timeout
@@ -1076,20 +1076,20 @@ async function exportBackup({
     }
     // [B-399] The per-file hash manifests, LAST and deliberately quiet.
     //
-    // ⚠️ NO GATE, AND THAT IS SAFE ONLY BECAUSE IT IS LAST. The gates above exist to stop
+    // NO GATE, AND THAT IS SAFE ONLY BECAUSE IT IS LAST. The gates above exist to stop
     // archiver interleaving two buckets and flipping the on-screen label mid-item; nothing
     // follows this, and archive.finalize() does not resolve until every queued entry has
     // been written. Adding a bucket AFTER this one without giving this one a gate would
     // reintroduce exactly the interleaving the gates were built to prevent.
     //
-    // ⭐ NOT COUNTED IN survey.totalBytes, on purpose. That number is the size of the
+    // NOT COUNTED IN survey.totalBytes, on purpose. That number is the size of the
     // user's LIBRARY — their fonts — and it drives both the estimate and the bar. These
     // manifests are derived data measured in hundreds of KB against multi-GB of audio (540
     // KB for 19 commons on the library this was found on), so folding them in would make
     // the reported library size subtly wrong in exchange for no perceptible accuracy. The
     // bar stays honest because the work here is not perceptible, not because it is hidden.
     //
-    // ⚠️ NOT CARRY-SCREENED EITHER. Every file here is JSON this app wrote itself, keyed by
+    // NOT CARRY-SCREENED EITHER. Every file here is JSON this app wrote itself, keyed by
     // uuid, never user content — the refusal machinery has nothing to decide about them.
     if (!cancelled) {
       const fhRoot = path.join(_soundFontsRoot(userData), FILEHASH_DIR);
@@ -1113,7 +1113,7 @@ async function exportBackup({
       const e = new Error('Cancelled');
       e.cancelled = true;
       e.residualPath = cleaned.residual;
-      // ⚠️ Carried through, or the honest signal is lost one frame after it was created.
+      // Carried through, or the honest signal is lost one frame after it was created.
       // [B-420] Only the DEADLINE path sets this; a cancel that tore down cleanly does not.
       if (err.teardownIncomplete) e.teardownIncomplete = true;
       throw e;
@@ -1130,7 +1130,7 @@ async function exportBackup({
       try { signal.removeEventListener('abort', onAbort); } catch {}
     }
     if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
-    // ⚠️ AND THE PRESENCE POLL. [B-420] Added it and did not tear it down - a 500 ms
+    // AND THE PRESENCE POLL. [B-420] Added it and did not tear it down - a 500 ms
     // `existsSync` against the destination volume, running forever after the export settled,
     // on a card we may be trying to eject. Found by checking rather than assuming, one minute
     // after writing it.
@@ -1172,7 +1172,7 @@ async function exportBackup({
 // from the entry list, so a tampered manifest doesn't silently mismatch
 // the real contents). Errors carry a `reason` code so the renderer can
 // branch UX between "not a backup" vs "wrong schema" vs "unreadable file".
-// ⚠️ A BACKUP ZIP IS AN ARBITRARY FILE ([B-370]). People hand these to each other, and
+// A BACKUP ZIP IS AN ARBITRARY FILE ([B-370]). People hand these to each other, and
 // restore writes straight into the library, so it is an import door like any other and
 // gets the same policy: these files are never allowed in.
 //
@@ -1182,21 +1182,21 @@ async function exportBackup({
 // alone deliberately - they report work performed, and making them agree with what was
 // KEPT would mean touching the same gating that makes the export side fragile.
 //
-// ⭐ NEVER CALL THIS FOR attachments/. Proof of purchase is the one place a macro-enabled
+// NEVER CALL THIS FOR attachments/. Proof of purchase is the one place a macro-enabled
 // document is allowed, so screening a restore there would strip the user's receipts out
 // of their own backup.
 // ── No duplicates, whichever door ──────────────────────────────────── [B-407]
 //
-// ⭐⭐ HIS RULE, 2026-09-17, and it is absolute: "When we backup/import/merge it can't duplicate a
+// THE RULE, 2026-09-17, and it is absolute: "When we backup/import/merge it can't duplicate a
 // file. No duplicates ever." The scenario is what this has to pass: back up, delete a track, add
 // that same track to a FONT instead, then merge the backup back in. Those bytes are already in the
 // library — inside the font — so the restore must recognise them and link, never write a copy.
 //
-// ⚠️⚠️ THIS MODULE HAD ZERO CONTENT-INDEX REFERENCES. [B-399]'s entry described the mechanism
+// THIS MODULE HAD ZERO CONTENT-INDEX REFERENCES. [B-399]'s entry described the mechanism
 // without naming it as a problem: merge "materialises items by raw extraction". Raw extraction
 // cannot know what the library already holds.
 //
-// ⭐ AND THE SECOND HALF IS THE BIGGER WIN. Measured on a real backup: 18,465 wav entries, 5,649
+// AND THE SECOND HALF IS THE BIGGER WIN. Measured on a real backup: 18,465 wav entries, 5,649
 // distinct, so 4.24 GB of a 6.80 GB archive is the SAME audio stored again — hardlinks do not
 // survive a zip, so every name became its own entry. Recording each novel file as it lands means
 // the archive's internal duplication COLLAPSES on the way in rather than being faithfully rebuilt.
@@ -1221,7 +1221,7 @@ function _makeContentDeduper(userData) {
     try {
       const existing = CI.findExisting(index, h);
       if (existing && path.resolve(existing) !== path.resolve(target)) {
-        // ⚠️ Temp-name-then-rename so an interruption leaves either the extracted file or the
+        // Temp-name-then-rename so an interruption leaves either the extracted file or the
         // link, never a hole where the file should be. Same shape ingestFile uses.
         const tmp = `${target}.dedupe-tmp`;
         try { fs.rmSync(tmp, { force: true }); } catch {}
@@ -1405,11 +1405,11 @@ async function applyReplace({
     throw new Error(`Could not create library directory: ${err.message}`);
   }
 
-  // [B-407] ⚠️⚠️ BUILT *AFTER* THE SNAPSHOT RENAME, AND THE TIMING IS THE WHOLE POINT. Replace has
+  // [B-407] BUILT *AFTER* THE SNAPSHOT RENAME, AND THE TIMING IS THE WHOLE POINT. Replace has
   // just moved the old library aside, so this index starts EMPTY and accumulates only what the
   // archive lands. That is deliberate: linking new files to content inside the snapshot — which is
   // deleted on success — would be reasoning about storage that is on its way out.
-  // ⭐ What it still buys is the big one: the archive's OWN duplication collapses on the way in.
+  // What it still buys is the big one: the archive's OWN duplication collapses on the way in.
   // Measured on the backup, 4.24 GB of 6.80 GB is the same audio stored again, because hardlinks
   // do not survive a zip. Without this, a restore faithfully rebuilds every one of those copies.
   const _dedupeExtracted = _makeContentDeduper(userData) || (() => {});
@@ -1779,7 +1779,7 @@ async function applyReplace({
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
         // attachments/ is exempt - see _screenRestored.
-        // [B-407] ⚠️ Dedupe AFTER screening: a refused file is deleted there, and linking
+        // [B-407] Dedupe AFTER screening: a refused file is deleted there, and linking
         // something about to be removed would leave a link to content we just refused.
         if (!normalized.startsWith('attachments/')) {
           if (_screenRestored(target, restoreRefused)) _dedupeExtracted(target);
@@ -1967,12 +1967,12 @@ async function applyReplace({
     }
 
     // --- QUIET: the per-file hash manifests ---  [B-399]
-    // ⭐ THE ORIGINAL BUG WAS THAT THIS STEP DID NOT EXIST. Backup archived five buckets
+    // THE ORIGINAL BUG WAS THAT THIS STEP DID NOT EXIST. Backup archived five buckets
     // and .filehashes was not one of them, so a restore returned the fonts and silently
     // dropped the data that makes them COMPARABLE — and because the full-replace path
     // rmSyncs the whole soundFonts root first, restoring into a HEALTHY library actively
     // deleted a working index rather than merely failing to bring one back.
-    // ⚠️ One label for the whole set. They are uuid-keyed json; a name flying past here
+    // One label for the whole set. They are uuid-keyed json; a name flying past here
     // would tell the user nothing they could act on.
     if (!cancelled && hashManifestFiles.length > 0) {
       onProgress({
@@ -2756,7 +2756,7 @@ async function applyMerge({
         await zip.extract(e.name, target);
         processedBytes += (e.size || 0);
         if (!String(e.name).replace(/\\/g, '/').startsWith('attachments/')) {
-          // ⚠️ Screening first: a refused file is deleted here, and linking something we are
+          // Screening first: a refused file is deleted here, and linking something we are
           // about to remove would leave a link to content we just refused.
           if (_screenRestored(target, restoreRefused)) _dedupeExtracted(target);
         } else {
@@ -2775,13 +2775,13 @@ async function applyMerge({
   // caller.
   // [B-399] Carry the per-file hash record for ONE merged item.
   //
-  // ⭐⭐ WHY MERGE NEEDS ITS OWN, instead of unpacking the archive's whole .filehashes/
+  // WHY MERGE NEEDS ITS OWN, instead of unpacking the archive's whole .filehashes/
   // folder the way a full restore does: a merge takes SOME items and leaves the rest, so
   // unpacking all of them would plant records keyed to ids this library never received —
   // orphan rows describing content that is not here, which is a worse lie than the missing
   // rows this entry is about. Per item, by identity, or not at all.
   //
-  // ⚠️ AND WITHOUT IT, A MERGED FONT IS PERMANENTLY INVISIBLE TO OWNERSHIP. Merge
+  // AND WITHOUT IT, A MERGED FONT IS PERMANENTLY INVISIBLE TO OWNERSHIP. Merge
   // materialises items by raw zip extraction — no entry creation, no hash recompute — so
   // nothing on this path would ever write one, and nothing anywhere rebuilds them. This is
   // the one part of [B-399] that reaches a user who never restored anything.
@@ -3029,7 +3029,7 @@ async function applyMerge({
           const target = path.join(stRootAbs, fileName);
           await zip.extract(entryName, target);
           if (!_screenRestored(target, restoreRefused)) return null;
-          // [B-407] ⚠️⚠️ TRACKS DO NOT GO THROUGH extractPrefix — they have their own extractor,
+          // [B-407] TRACKS DO NOT GO THROUGH extractPrefix — they have their own extractor,
           // so deduping only there would have missed the exact case it was specified: back up, delete
           // a track, add it to a FONT instead, merge the backup. The track's bytes are in the
           // library (inside the font) and must be linked, not written again. Enumerate by what

@@ -43,7 +43,7 @@ ok('cancelling DISABLES rather than unchecks it',
    'clearing one box while merely dimming the other reads as the app changing his answer rather '
    + 'than retiring the question');
 
-// ⚠️ A set with no matching reset is session-sticky: ONE cancel would leave the offer greyed for
+// A set with no matching reset is session-sticky: ONE cancel would leave the offer greyed for
 // every import after it, on a card that is perfectly ejectable. Named four times this session.
 const closeAt = H.indexOf('const closeModal = ');
 const closeEnd = H.indexOf('\n  const ', closeAt + 10);

@@ -15,7 +15,7 @@
  * So the freedom was illusory: the copy invited the click, and the click could never
  * succeed. Two correct decisions made at different times, meeting.
  *
- * ⭐ HIS RULING 2026-09-13: match the SD-card path, which replaced blunt re-importing
+ * THE RULING 2026-09-13: match the SD-card path, which replaced blunt re-importing
  * with adopting the existing entry. No second copy from this door. Duplicate-in-library
  * is the supported way to get one, and it is what the hint names.
  *
@@ -54,9 +54,9 @@ ok('the shared summary builder was lifted', typeof summary === 'function');
 // ── the invitation is gone ─────────────────────────────────────────────────
 {
   const all = [summary(1, 0, 1), summary(1, 0, 5), summary(3, 0, 5), summary(5, 0, 5)];
-  ok('⭐ every variant says the row is SKIPPED, not refused',
+  ok('every variant says the row is SKIPPED, not refused',
      all.every(t => /skipped by default/.test(t)), all.find(t => !/skipped by default/.test(t)));
-  ok('⭐ and every variant says they may take one anyway',
+  ok('and every variant says they may take one anyway',
      all.every(t => /Check (it|one) to import a second copy under a new name\./.test(t)),
      all.find(t => !/Check (it|one) to import/.test(t)));
   ok('no variant sends them somewhere else to do it',
@@ -68,7 +68,7 @@ ok('the shared summary builder was lifted', typeof summary === 'function');
 
 // ── it still reads as English in each shape ────────────────────────────────
 {
-  // ⚠️ The count sentence is dropped when total === 1, so the second sentence has to
+  // The count sentence is dropped when total === 1, so the second sentence has to
   // stand alone there. "It is not imported again" with no antecedent is a fragment.
   const one = summary(1, 0, 1);
   ok('a single-row review does not open with a dangling pronoun',
@@ -97,11 +97,11 @@ ok('the shared summary builder was lifted', typeof summary === 'function');
 {
   const at = html.indexOf('[B-363] UNCHECKED, NEVER INERT');
   ok('the owned-row block was located', at > 0);
-  // ⚠️ Start BEFORE the marker: the `checked = false` this block is about sits a few
+  // Start BEFORE the marker: the `checked = false` this block is about sits a few
   // lines ABOVE the comment explaining it, so a slice anchored at the comment could
   // not see its own subject.
   const block = html.slice(Math.max(0, at - 700), at + 2400);
-  ok('⭐⭐ the owned row does NOT disable its checkbox',
+  ok('the owned row does NOT disable its checkbox',
      !/check\.disabled\s*=\s*true/.test(block),
      'a disabled box shipped here 2026-09-13 and was rejected on dev test');
   ok('it still unchecks by default', /check\.checked = false;/.test(block));

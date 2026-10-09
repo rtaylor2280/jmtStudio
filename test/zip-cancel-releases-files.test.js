@@ -1,6 +1,6 @@
 // A cancelled export must not keep the source files open. [B-420]
 //
-// ⭐⭐ THE DEFECT THIS EXISTS FOR, and it reached a real library the day it shipped. Chunk-level
+// THE DEFECT THIS EXISTS FOR, and it reached a real library the day it shipped. Chunk-level
 // progress meant taking ownership of the read streams — `archive.file(path)` became
 // `archive.append(ourStream)` — and that quietly took on the lifecycle archiver used to handle.
 // `archive.abort()` stops PULLING and drops the source WITHOUT destroying it, so an abandoned
@@ -9,10 +9,10 @@
 // The user cancelled a few exports, then deleted the font and got:
 //     ENOTEMPTY: directory not empty, rmdir '...\soundFonts\library\Decay'
 // with exactly one file locked — the 26.7 MB payload wav ta cancel of export had been reading.
-// ⚠️ NOT A TEST ARTIFACT: any user who cancels an export leaks a handle per in-flight file and
+// NOT A TEST ARTIFACT: any user who cancels an export leaks a handle per in-flight file and
 // then cannot delete that font.
 //
-// ⭐ THIS TEST RUNS THE REAL FUNCTION AND THEN TRIES TO DELETE THE FIXTURE, because that is the
+// THIS TEST RUNS THE REAL FUNCTION AND THEN TRIES TO DELETE THE FIXTURE, because that is the
 // symptom. A grep for `destroy()` would have passed against code that called it on a path the
 // abort never takes — the whole point is that the abort path is the one nobody calls back into.
 'use strict';
@@ -69,11 +69,11 @@ for (let i = 0; i < 6; i++) {
   ok('the export stopped rather than completing', !!threw,
      'if it finished, the fixture is too small to cancel mid-entry and this proves nothing');
 
-  // ⚠️ THE ASSERTION IS THE SYMPTOM. On Windows an open handle makes unlink fail and the parent
+  // THE ASSERTION IS THE SYMPTOM. On Windows an open handle makes unlink fail and the parent
   // rmdir then fails ENOTEMPTY — which is the exact error it was shown.
   let rmErr = null;
   try { fs.rmSync(srcDir, { recursive: true }); } catch (e) { rmErr = e; }
-  ok('⭐⭐ the source folder can be deleted after a cancel', rmErr === null,
+  ok('the source folder can be deleted after a cancel', rmErr === null,
      `rmSync failed: ${rmErr && rmErr.code} ${rmErr && rmErr.message}\n       `
      + 'a cancelled export is still holding a file open — the leak is back');
 

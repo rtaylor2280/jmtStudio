@@ -6,7 +6,7 @@
 //      effects of doing something else, so a badge cleared by accident was gone for good.
 //   2. The one-time-backfill marker lives IN THE LIBRARY, not in prefs.json.
 //
-// ⚠️⚠️ WHY (2) MATTERS, measured not theorised: the marker was a prefs.json key guarding a field
+// WHY (2) MATTERS, measured not theorised: the marker was a prefs.json key guarding a field
 // stored on each entry's meta.json. Two stores desync BOTH ways. Found while staging QA TC-3136
 // (rename prefs.json away and launch): the backfill re-ran and stamped 109 entries that had
 // genuinely never been opened, all now carrying seenAt == createdAt.
@@ -48,7 +48,7 @@ function mkLib(names) {
   check('marking a seen font NEW removes seenAt', entries.markEntryNew(ud, 'Ahsoka') === true
     && read('Ahsoka').seenAt === undefined);
 
-  // ⚠️ Returns false when there is nothing to undo, matching markEntrySeen's "first wins"
+  // Returns false when there is nothing to undo, matching markEntrySeen's "first wins"
   // contract. The caller uses that to avoid claiming work it did not do.
   check('marking an already-New font NEW is a no-op', entries.markEntryNew(ud, 'Dooku') === false);
   check('marking a missing font NEW is a no-op', entries.markEntryNew(ud, 'NoSuchFont') === false);
@@ -57,7 +57,7 @@ function mkLib(names) {
   check('seen -> new -> seen round trips', entries.markEntrySeen(ud, 'Ahsoka') === true
     && typeof read('Ahsoka').seenAt === 'string');
 
-  // ⭐ Everything else on the entry must survive. A read-modify-write that dropped a sibling
+  // Everything else on the entry must survive. A read-modify-write that dropped a sibling
   // field would not throw — it would quietly lose the uuid the whole library is keyed by.
   const m = read('Ahsoka');
   check('other meta fields survive the write', m.entryUuid === 'u1' && m.createdAt === '2026-01-01T00:00:00Z',
@@ -72,19 +72,19 @@ function mkLib(names) {
   check('marking it done is reported', entries.markSeenBackfillDone(ud) === true
     && entries.seenBackfillDone(ud) === true);
 
-  // ⭐ THE WHOLE POINT: it is on disk in the library, so losing prefs.json cannot resurrect the
+  // THE WHOLE POINT: it is on disk in the library, so losing prefs.json cannot resurrect the
   // backfill and re-stamp the real NEW set.
   check('the marker is a file inside the library root',
     fs.existsSync(path.join(lib, '.seen-backfill-done')));
 
-  // ⚠️ And it must not read as a font. listEntries walks this exact directory; a stray file that
+  // And it must not read as a font. listEntries walks this exact directory; a stray file that
   // enumerated as an entry would show an empty card and break counts.
   const listed = entries.listEntries(ud).map(e => e.name);
   check('the marker is not enumerated as an entry', !listed.some(n => n.includes('seen-backfill')),
     JSON.stringify(listed));
   check('the real entry still lists', listed.includes('Ahsoka'), JSON.stringify(listed));
 
-  // ⭐ The other desync direction: a full restore rmSyncs the soundFonts root, so the marker goes
+  // The other desync direction: a full restore rmSyncs the soundFonts root, so the marker goes
   // with the library it describes and the backfill correctly re-runs for the restored entries.
   fs.rmSync(path.join(lib, '.seen-backfill-done'), { force: true });
   check('removing the library (as a restore does) resets the marker',

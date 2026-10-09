@@ -10,7 +10,7 @@
  * sees. The inner detail view resolved it correctly from the helper body, so the card
  * and the detail disagreed about the same slot.
  *
- * ⭐ THE ORDER IS THE FIX. An explicit BASE beats everything; a colour written INTO the
+ * THE ORDER IS THE FIX. An explicit BASE beats everything; a colour written INTO the
  * style beats a DEFAULT for an argument nobody set; the first-RgbArg guess is a last
  * resort rather than a third preference.
  *
@@ -19,7 +19,7 @@
  *   5    hardcoded colour in the slot expression
  *   6-8  first RgbArg of any name — parens, registry, inline
  *
- * ⚠️ ONE IMPLEMENTATION, TWO RENDER PATHS. The card and _resolveSlotColor each carried
+ * ONE IMPLEMENTATION, TWO RENDER PATHS. The card and _resolveSlotColor each carried
  * their own copy of this ladder, which is how they came to disagree. Splitting each
  * "BASE or first" lookup into two rungs is only safe if both move together.
  *
@@ -112,7 +112,7 @@ ok('the ladder was lifted', SRC.length > 500);
   ok('an expression colour reports where it was found',
      r.hardcodedInfo && r.hardcodedInfo.matchStr === R(4, 4, 4), JSON.stringify(r.hardcodedInfo));
   ok('and marks the colour as a default', r.colorIsDefault === true);
-  // ⚠️ Only the expression rung sets these — a helper-body colour is not editable in the
+  // Only the expression rung sets these — a helper-body colour is not editable in the
   // slot, so offering to rewrite it there would edit the wrong file.
   ok('a helper-body colour does NOT claim to be editable in the slot',
      make({ leaf: 'X', helperText: R(3, 3, 3) })({ expr: 'S<>' }).hardcodedInfo === null);
@@ -133,7 +133,7 @@ ok('the ladder was lifted', SRC.length > 500);
   ok('_resolveSlotColor delegates',
      /function _resolveSlotColor\(slot\) \{[\s\S]{0,120}?_pickSlotPrimary\(slot\)\.rgb16;/.test(html));
   ok('the slot card delegates too', /const _pick = _pickSlotPrimary\(slot\);/.test(html));
-  // ⭐ The duplicated ladder is what let the card and the detail disagree. Exactly one
+  // The duplicated ladder is what let the card and the detail disagree. Exactly one
   // implementation of the "BASE or first RgbArg" preference may exist.
   const dupes = (html.match(/find\(a => a\.kind === 'RgbArg' && a\.name === 'BASE_COLOR_ARG'\)\s*\r?\n?\s*\|\| _?\w*[Rr]es\w*\.find\(a => a\.kind === 'RgbArg'\)/g) || []).length;
   ok('no copy of the old combined "BASE or first" lookup survives', dupes === 0, `${dupes} left`);

@@ -15,7 +15,7 @@
  * else. Neither is a syntax error, so `node --check` is blind to them, and the
  * renderer's own suites never execute the paths that would throw.
  *
- * ⚠️ THIS IS DELIBERATELY CRUDE. It is not a scope analyser and does not try to
+ * THIS IS DELIBERATELY CRUDE. It is not a scope analyser and does not try to
  * be — it reads text, so it can only ever be a smoke alarm. Two rules keep it
  * honest:
  *   • It only looks at OUR OWN naming conventions (underscore-prefixed helpers,
@@ -24,7 +24,7 @@
  *     loosened regex. A check that is quietly widened until it passes is a check
  *     that has stopped working.
  *
- * ⭐ A FAILURE HERE IS USUALLY REAL. Before adding to an allowlist, prove the
+ * A FAILURE HERE IS USUALLY REAL. Before adding to an allowlist, prove the
  * name actually exists at runtime. Adding it because "that's probably fine" is
  * how this test becomes decoration.
  *
@@ -45,7 +45,7 @@ function ok(name, cond, extra) {
 // inside a comment explaining that it does not exist, and a scanner that cannot
 // tell those apart reports the explanation as the bug.
 //
-// ⚠️ THIS STRIPPER IS LINE-BASED ON PURPOSE, AND BOTH SIMPLER ALTERNATIVES WERE
+// THIS STRIPPER IS LINE-BASED ON PURPOSE, AND BOTH SIMPLER ALTERNATIVES WERE
 // TRIED AND FAILED ON THE FIRST RUN.
 //
 //   A naive "delete // to end of line" ignores strings, so a `//` inside a URL
@@ -93,7 +93,7 @@ const inlineCode = stripComments(inlineSrc);
 // `_name(` is our convention for a module-private helper, so a call with no
 // definition anywhere in the same script is the _vpkEsc failure exactly.
 {
-  // ⭐ THE ASYMMETRY IS THE DESIGN, AND IT IS WHAT MAKES A CRUDE SCANNER SAFE.
+  // THE ASYMMETRY IS THE DESIGN, AND IT IS WHAT MAKES A CRUDE SCANNER SAFE.
   // DEFINITIONS are collected from the RAW source; CALLS only from the stripped
   // source. Get "defined" wrong and the worst case is a missed catch. Get
   // "called" wrong and the check screams about working code, which is how a test
@@ -107,7 +107,7 @@ const inlineCode = stripComments(inlineSrc);
   for (const re of [/function\s+([A-Za-z_$][\w$]*)/g,
                     /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g,
                     /class\s+([A-Za-z_$][\w$]*)/g,
-                    // ⚠️ OBJECT SHORTHAND METHODS. Added 2026-09-21 with `_sfDestIdentity`,
+                    // OBJECT SHORTHAND METHODS. Added 2026-09-21 with `_sfDestIdentity`,
                     // whose `_letterOf(dir) { … }` and `_startFast(dir) { … }` are DEFINITIONS
                     // that look character-for-character like calls: a name, an argument list,
                     // and nothing before them but whitespace. The scanner reported both as
@@ -115,7 +115,7 @@ const inlineCode = stripComments(inlineSrc);
                     // file's own header names as the failure mode that gets a test switched
                     // off. Their real call sites are `this._letterOf(...)`, already excluded
                     // by the `(?<![.\w$])` lookbehind on the call side.
-                    // ⭐ Generous on definitions, strict on calls - the asymmetry above.
+                    // Generous on definitions, strict on calls - the asymmetry above.
                     /^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*\{\s*$/gm]) {
     for (const m of inlineSrc.matchAll(re)) defined.add(m[1]);
   }
@@ -154,7 +154,7 @@ const inlineCode = stripComments(inlineSrc);
 // through `window`, so a cross-file typo has no compiler to catch it. This is
 // the getSelectedBoardLabel failure.
 {
-  // ⚠️ index.html CONTRIBUTES ITS EXTRACTED SCRIPT, NOT THE RAW FILE. The comment
+  // index.html CONTRIBUTES ITS EXTRACTED SCRIPT, NOT THE RAW FILE. The comment
   // stripper is a JS state machine that tracks string literals, and HTML is full
   // of quotes it has no business interpreting — pointed at the raw file it lost
   // its place and left a `window.getSelectedBoardLabel()` sitting inside a comment

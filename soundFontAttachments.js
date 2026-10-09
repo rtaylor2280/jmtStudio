@@ -31,16 +31,16 @@ function writeSourceMeta(userData, uuid, meta) {
   fs.writeFileSync(sourceMetaPath(userData, uuid), JSON.stringify(meta, null, 2));
 }
 
-// ⚠️⚠️ "SMALL" WAS AN ASSUMPTION AND IT IS WRONG. [B-475, 2026-10-06]
+// "SMALL" WAS AN ASSUMPTION AND IT IS WRONG. [B-475, 2026-10-06]
 // This comment used to read "Attachments are small (receipts, PDFs, screenshots), so buffer-hash
 // is fine", and the whole freeze follows from that one word. The proof-of-purchase picker applies
 // NO file-type filter at all (`properties: ['openFile']`, main.js) - it is an any-file door, not a
 // document door - so a 600 dpi multi-page scan, a phone video or a whole order zip go through here
 // exactly as a 40 KB receipt does.
-// ⚠️ `readFileSync` pulls the ENTIRE file into memory on the MAIN process, and `storeFile` then
+// `readFileSync` pulls the ENTIRE file into memory on the MAIN process, and `storeFile` then
 // calls `copyFileSync`, reading it a second time. Both synchronous, both in main, so every window
 // freezes and Windows paints "Not Responding" - with no progress and no cancel.
-// ⭐ Kept rather than deleted because `storeFile` below is still the synchronous path for callers
+// Kept rather than deleted because `storeFile` below is still the synchronous path for callers
 // that have not been migrated. New work uses `storeFileStreaming`.
 function hashFile(abs) {
   return crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
@@ -48,18 +48,18 @@ function hashFile(abs) {
 
 // ── The streaming store ───────────────────────────────────────── [B-475, 2026-10-06]
 //
-// ⭐⭐ ONE READ, NOT TWO, AND THE PROGRESS FALLS OUT OF IT. The old path read the file once to
+// ONE READ, NOT TWO, AND THE PROGRESS FALLS OUT OF IT. The old path read the file once to
 // compute its content id and again to copy it. Streaming it hashes and writes in the same pass,
 // so the second read disappears and the per-chunk callback IS the byte progress both doors need -
 // produced as a side effect of the work rather than as extra work.
 //
-// ⭐ STAGE THEN RENAME, because an attachment is stored UNDER its own hash and the destination is
+// STAGE THEN RENAME, because an attachment is stored UNDER its own hash and the destination is
 // therefore unknown until the last byte. The staging folder lives inside the attachments root on
 // purpose: same volume means the commit is a rename (one metadata write) rather than a copy.
-// ⚠️ It is also what makes the cancel rule cheap - a cancel is one folder delete, and there is
+// It is also what makes the cancel rule cheap - a cancel is one folder delete, and there is
 // never a partial directory sitting in the store looking like a real attachment.
 //
-// ⚠️⚠️ THE PROGRAM-FILE REFUSAL STAYS AHEAD OF THE COMMIT. An attachment is REFUSED rather than
+// THE PROGRAM-FILE REFUSAL STAYS AHEAD OF THE COMMIT. An attachment is REFUSED rather than
 // stripped, because the file IS the one thing the user asked for - there is nothing left to store
 // if it goes. Easy to lose in a restructure, so it is the first thing this function does.
 //
@@ -79,12 +79,12 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
   try { total = fs.statSync(srcAbsPath).size; } catch { total = 0; }
 
   const root = attachmentsRoot(userData);
-  // ⚠️⚠️ STAGING LIVES OUTSIDE THE ATTACHMENTS ROOT, AND THE FIRST CUT GOT THIS WRONG.
+  // STAGING LIVES OUTSIDE THE ATTACHMENTS ROOT, AND THE FIRST CUT GOT THIS WRONG.
   // It staged into `attachments/_staging/...`, and `listAllAttachments` enumerates that root and
   // hands every entry to `attachmentInfo` - whose missing-sidecar FALLBACK reads the directory and
   // returns the first file it finds as the attachment's name. So `_staging` would have surfaced in
   // the "Link existing proof of purchase" picker as a real, linkable attachment.
-  // ⭐ Sibling of the root rather than inside it: same volume, so the commit is still a rename,
+  // Sibling of the root rather than inside it: same volume, so the commit is still a rename,
   // and no reader that walks a content store can ever see it.
   const staging = path.join(userData, 'soundFonts', '_attach_staging',
                             `${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
@@ -104,7 +104,7 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
       const ws = fs.createWriteStream(stagedFile);
       const fail = (err) => { try { rs.destroy(); } catch {} try { ws.destroy(); } catch {} reject(err); };
       rs.on('data', (chunk) => {
-        // ⚠️ CHECKED PER CHUNK, which is what makes a cancel feel immediate on a slow card
+        // CHECKED PER CHUNK, which is what makes a cancel feel immediate on a slow card
         // instead of after the whole file. [B-398] taught that yielding is not stopping.
         if (typeof shouldStop === 'function' && shouldStop()) {
           stopped = true;
@@ -121,12 +121,12 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
       });
       rs.on('error', fail);
       ws.on('error', fail);
-      // ⚠️⚠️ 'close', NOT 'finish', AND THE DIFFERENCE IS A HARD FAILURE ON WINDOWS.
+      // 'close', NOT 'finish', AND THE DIFFERENCE IS A HARD FAILURE ON WINDOWS.
       // 'finish' means the data reached the OS; the file descriptor is still open. Resolving
       // there meant the commit renamed a directory that still held an open handle, and Windows
       // refused it outright:
       //     EPERM: operation not permitted, rename '..._attach_staging\...' -> '...attachments\...'
-      // ⭐ Found by RUNNING the thing on a real 6 MB file. Nothing about the code reads as wrong,
+      // Found by RUNNING the thing on a real 6 MB file. Nothing about the code reads as wrong,
       // and a source-scanning test would have passed it: every word of the implementation is
       // correct except which event means "done".
       ws.on('close', () => { if (!stopped) resolve(h.digest('hex')); });
@@ -142,9 +142,9 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
   const jp = path.join(dir, 'attachment.json');
   try {
     if (fs.existsSync(dir)) {
-      // ⭐ Already stored - the content hash IS the identity, so the bytes we just staged are
+      // Already stored - the content hash IS the identity, so the bytes we just staged are
       // byte-for-byte what is already there. Discard them and only refresh the label.
-      // ⚠️ A re-attach still costs ONE full read, and that is the floor rather than a defect:
+      // A re-attach still costs ONE full read, and that is the floor rather than a defect:
       // the id cannot be known without reading the file. One read is the floor; two was the bug.
       discard();
       if (label != null) {
@@ -160,7 +160,7 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
     try { size = fs.statSync(stagedFile).size; } catch {}
     fs.writeFileSync(path.join(staging, 'attachment.json'), JSON.stringify(
       { id, name, size, label: label || '', addedAt: new Date().toISOString() }, null, 2));
-    // ⚠️ THE RENAME IS THE COMMIT, and nothing before it is visible to the store. A reader
+    // THE RENAME IS THE COMMIT, and nothing before it is visible to the store. A reader
     // walking attachments/ sees either nothing or a complete attachment, never a half-copied one.
     fs.renameSync(staging, dir);
     return { ok: true, id };
@@ -170,7 +170,7 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
   }
 }
 
-// ⚠️ Staging survives a crash mid-copy, so it needs a sweep. Called at startup; a no-op on a
+// Staging survives a crash mid-copy, so it needs a sweep. Called at startup; a no-op on a
 // healthy store. It deliberately removes EVERY staging folder rather than aging them out: a
 // staging dir is only live for the duration of one copy inside one process, so anything found
 // here at startup is by definition abandoned.
@@ -189,13 +189,13 @@ function sweepStaging(userData) {
 // bytes reuse the existing store dir, so nothing is duplicated on disk. An
 // optional label is the user's display name for the attachment (chips show
 // label || filename); passing one updates it even on an already-stored file.
-// ⚠️ AN ATTACHMENT IS AN IMPORT ([B-214]). Files are attached straight off the
+// AN ATTACHMENT IS AN IMPORT ([B-214]). Files are attached straight off the
 // same cards the fonts come from, so this door is as able to carry a program as
 // the font importer is. Refused rather than stripped, because an attachment IS
 // the one file the user asked for: there is nothing left to store if it goes.
 // Returns { ok:false, blocked } so the caller can say which file and why.
 function storeFile(userData, srcAbsPath, label) {
-  // ⚠️ THROWS rather than returning a verdict, because this function RETURNS AN ID
+  // THROWS rather than returning a verdict, because this function RETURNS AN ID
   // and both callers assign it straight into one. An object here would land in the
   // attachment list as though it were an id. Both callers already sit in a try/catch,
   // and addAttachmentToSources turns the message into its own error string, so

@@ -349,12 +349,12 @@ const vendors = [
     // creator match at all: the table was seeded from the 2026-06-11 archive
     // crawl and this creator was not in it. [B-484]
     //
-    // ⚠️ TWO FILENAME SPELLINGS, both real and both needed. The free fonts ship
+    // TWO FILENAME SPELLINGS, both real and both needed. The free fonts ship
     // "Read Me.txt" WITH A SPACE; the paid one ships "ReadMe.txt". The
     // conventional /readme\.txt$/i used by the rows above matches only the paid
     // one — measured, it hits 1 of the 4 archives on disk.
     //
-    // ⚠️ THE NAME IS FOUND DIFFERENTLY ON FREE VS PAID, which is why the content
+    // THE NAME IS FOUND DIFFERENTLY ON FREE VS PAID, which is why the content
     // match accepts the domain as an alternative. The paid readme states
     // authorship in prose ("Sound Font For Proffie ... By BVM-Sabers"); the free
     // readmes never say it, and are matched only via the creator's own Facebook
@@ -365,14 +365,14 @@ const vendors = [
     // and a single boolean cannot express a mixed catalogue — the paid font needs
     // the box changed by hand.
     //
-    // ⭐ WHY A HARDCODED ROW WHEN LEARNED MATCHING ALREADY FINDS THIS CREATOR:
+    // WHY A HARDCODED ROW WHEN LEARNED MATCHING ALREADY FINDS THIS CREATOR:
     // the learned layer only fires once the user has already labelled a source
     // from them by hand, and it is deliberately a SUGGESTION. A curated row makes
     // it a content match on the FIRST import, for someone who has never heard of
     // them. Seed and growth, not duplicates.
     id: 'bvmsabers',
     displayName: 'BVM Sabers',
-    // ⚠️ THE SITE ROOT, NOT /fonts. Corrected 2026-10-08 by someone who buys
+    // THE SITE ROOT, NOT /fonts. Corrected 2026-10-08 by someone who buys
     // from them: *"https://www.bvm-sabers.co.uk/ — that's the correct website for BVM."* The row
     // was seeded with a deep link to the font listing, which is where a crawl lands rather than
     // where a creator would say their site is. A vendor website is an identity, not a route into
@@ -659,7 +659,7 @@ async function _findReadmeMatch(source, entries, pattern) {
 
 // ── Learned vendors: the table is a SEED, the library is the growth ────────
 //
-// ⭐⭐ THE GAP THIS CLOSES. The table above is hand-maintained and was seeded from
+// THE GAP THIS CLOSES. The table above is hand-maintained and was seeded from
 // one archive crawl, so a creator who is not in it never matches - even after the
 // user has already labelled a source from that exact creator by hand. Measured
 // 2026-10-07: a second font from a creator imported minutes earlier still came up
@@ -667,7 +667,7 @@ async function _findReadmeMatch(source, entries, pattern) {
 // The renderer merges library vendors into its autocomplete list, which is why
 // the name was offered for TYPING but never for MATCHING.
 //
-// ⚠️⚠️ WHY THIS IS A SUGGESTION AND NOT AN AUTO-FILL, and the hazard is measured
+// WHY THIS IS A SUGGESTION AND NOT AN AUTO-FILL, and the hazard is measured
 // in a real readme rather than imagined: one creator's readme credits NoSloppy,
 // Fett263 AND Brian Conner in its Special Thanks block. So a readme can easily
 // name three creators who are all already in the library, only one of whom made
@@ -676,7 +676,7 @@ async function _findReadmeMatch(source, entries, pattern) {
 // doubt it. So a learned hit returns confidence 'structural', which the existing
 // UI renders as "Suggested: <name>" with an Apply link.
 //
-// ⚠️ AND IF MORE THAN ONE LEARNED NAME APPEARS, NOTHING IS SUGGESTED. Guessing
+// AND IF MORE THAN ONE LEARNED NAME APPEARS, NOTHING IS SUGGESTED. Guessing
 // between them is exactly the wrong-attribution case above. Declining is honest
 // and costs the user the same typing they do today.
 
@@ -698,7 +698,7 @@ function learnedVendorsFrom(sources) {
     // 'Unknown' is a placeholder the UI uses, not a creator.
     if (/^unknown$/i.test(String(name).trim())) continue;
     const key = _vendorNameKey(name);
-    // ⚠️ A SHORT NAME IS A SUBSTRING WAITING TO HAPPEN, and this is measured
+    // A SHORT NAME IS A SUBSTRING WAITING TO HAPPEN, and this is measured
     // rather than hypothetical: the real library this was built against contains
     // a creator named "TEST". Matching is done on text with punctuation and
     // spaces stripped (so "BVM Sabers" finds "BVMsabers" in a URL), which means a

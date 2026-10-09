@@ -1,6 +1,6 @@
 // Cancelling a file copy — executed, not grepped.  [B-005 item 4]
 //
-// ⚠️⚠️ WHY THIS FILE EXISTS ALONGSIDE export-cancel.test.js. That suite greps source for the
+// WHY THIS FILE EXISTS ALONGSIDE export-cancel.test.js. That suite greps source for the
 // shape of the fix, which proves the lines are present and nothing about what they do. On
 // 2026-09-19 a feature shipped green and did nothing, because every test built its own input
 // and handed it to the algorithm, never exercising the seam. The claim here — "a cancelled
@@ -27,7 +27,7 @@ const dst = path.join(tmp, 'dst');
 fs.mkdirSync(src, { recursive: true });
 fs.mkdirSync(dst, { recursive: true });
 
-// ⚠️ BIGGER THAN ONE CHUNK, OR THE TEST CANNOT FAIL. The read stream uses a 1 MB
+// BIGGER THAN ONE CHUNK, OR THE TEST CANNOT FAIL. The read stream uses a 1 MB
 // highWaterMark, so a small file arrives as a single 'data' event and completes before any
 // cancel could land — the copy would succeed and the assertion would pass for the wrong
 // reason. 5 MB gives at least five checkpoints.
@@ -47,7 +47,7 @@ fs.writeFileSync(BIG, Buffer.alloc(5 * 1024 * 1024, 0x41));
     ok('a cancelled copy rejects', !!err, 'it resolved as if it had finished');
     ok('and rejects with something isCancel() recognises', isCancel(err),
        'a cancel that reads as a fault surfaces to the user as "Export failed"');
-    ok('⚠️⚠️ and the truncated file is GONE from the destination', !fs.existsSync(out),
+    ok('and the truncated file is GONE from the destination', !fs.existsSync(out),
        'this is the whole safety argument for interrupting mid-write');
     ok('it stopped early rather than copying the whole file', chunks < 5,
        `copied ${chunks} chunks of ~5 — the check is not firing where it should`);
@@ -55,7 +55,7 @@ fs.writeFileSync(BIG, Buffer.alloc(5 * 1024 * 1024, 0x41));
 
   // ── 2. The uncancelled case still copies correctly ──
   //
-  // ⚠️ THE CONTROL. Without it, a shouldStop wired to always-true would pass every
+  // THE CONTROL. Without it, a shouldStop wired to always-true would pass every
   // assertion above while having broken copying entirely.
   {
     const out = path.join(dst, 'ok.wav');
@@ -79,7 +79,7 @@ fs.writeFileSync(BIG, Buffer.alloc(5 * 1024 * 1024, 0x41));
 
   // ── 4. Through the tree walk, the same guarantee holds ──
   //
-  // ⭐ THE SEAM THAT MATTERS: the walk has to hand its predicate DOWN. A walk that stops
+  // THE SEAM THAT MATTERS: the walk has to hand its predicate DOWN. A walk that stops
   // between files while the current write runs to completion is the original complaint —
   // ~15 minutes with Cancel already pressed.
   {
@@ -103,7 +103,7 @@ fs.writeFileSync(BIG, Buffer.alloc(5 * 1024 * 1024, 0x41));
 
     ok('a cancelled tree walk rejects as a cancel', isCancel(err));
     const left = fs.readdirSync(tdst);
-    ok('⚠️⚠️ no truncated file is left in the destination tree',
+    ok('no truncated file is left in the destination tree',
        left.every((n) => fs.statSync(path.join(tdst, n)).size === 3 * 1024 * 1024),
        `destination holds ${JSON.stringify(left.map((n) =>
          [n, fs.statSync(path.join(tdst, n)).size]))} — a short file is a truncated one`);
@@ -112,21 +112,21 @@ fs.writeFileSync(BIG, Buffer.alloc(5 * 1024 * 1024, 0x41));
        `copied ${bytes} bytes of 9 MB — the cancel is landing on file boundaries only`);
   }
 
-  // ── 5. ⚠️⚠️ THE WINDOWS HANDLE RACE, WHICH THIS SUITE ORIGINALLY MISSED ──
+  // ── 5. THE WINDOWS HANDLE RACE, WHICH THIS SUITE ORIGINALLY MISSED ──
   //
   // The user cancelled an export to a board card and the partial folder was STILL THERE. Cause: on
   // Windows, unlinking a file whose write handle is still open fails with EPERM/EBUSY - POSIX
   // permits it, which is why the first implementation looked right. `ws.destroy()` is async,
   // so the immediate `unlinkSync` after it was racing the handle release.
   //
-  // ⭐⭐ AND EVERY ASSERTION ABOVE PASSED ANYWAY, because they copy to a local temp dir where
+  // AND EVERY ASSERTION ABOVE PASSED ANYWAY, because they copy to a local temp dir where
   // the handle releases fast enough to win every time. **A timing bug that resolves quickly on
   // fast storage and slowly on a card cannot be caught by a test that only uses fast storage.**
   // The fixture was faithful to the API and unfaithful to the destination. So this section
   // asserts the STRUCTURE of the fix, which does not depend on the disk underneath it.
   {
     const src = fs.readFileSync(path.join(__dirname, '..', 'sfExportCopy.js'), 'utf8');
-    ok('⚠️⚠️ the unlink waits for the write stream to close',
+    ok('the unlink waits for the write stream to close',
        /ws\.once\('close'/.test(src) && /async \(\) => \{[\s\S]{0,400}?unlinkSync\(destPath\)/.test(src),
        'unlinking straight after destroy() races the handle release and loses on slow media');
     ok('the wait cannot hang a cancel forever',
@@ -135,7 +135,7 @@ fs.writeFileSync(BIG, Buffer.alloc(5 * 1024 * 1024, 0x41));
     ok('EBUSY/EPERM are retried, ENOENT is not an error',
        /EBUSY.*EPERM|EPERM.*EBUSY/.test(src) && /ENOENT.*return/.test(src),
        'a handle held by an indexer or AV outlives close');
-    ok('⚠️ the rejection waits for the cleanup',
+    ok('the rejection waits for the cleanup',
        /dropPartial\(\)\.then\(\(\) => reject\(err\), \(\) => reject\(err\)\)/.test(src),
        'rejecting first lets the caller rm the folder while this handle is still open - which '
        + 'is how one failed unlink became a whole folder left on his card');

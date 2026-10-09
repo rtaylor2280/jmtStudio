@@ -46,7 +46,7 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     const filesDir = path.join(userData, 'soundFonts', 'common', r.uuid, 'files');
     check('working copy exists with the wavs at root',
       fs.existsSync(path.join(filesDir, 'mmain.wav')), filesDir);
-    check('⭐ working-copy wavs are hardlinks into the source (nlink >= 2)',
+    check('working-copy wavs are hardlinks into the source (nlink >= 2)',
       nlink(path.join(filesDir, 'mmain.wav')) >= 2,
       `nlink=${nlink(path.join(filesDir, 'mmain.wav'))}`);
     check('the manifest exists for the index',
@@ -54,7 +54,7 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
 
     console.log('the orphan sweep leaves a common-owned source alone');
     const sweep = S.cleanupOrphanSources(userData);
-    check('⭐ sweep removed nothing', sweep.removed.length === 0, JSON.stringify(sweep.removed));
+    check('sweep removed nothing', sweep.removed.length === 0, JSON.stringify(sweep.removed));
     check('the source is still on disk',
       fs.existsSync(path.join(userData, 'soundFonts', 'sources', r.sourceUuid)));
 
@@ -64,7 +64,7 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     put(fsrc, 'MyFont/clsh1.wav', wav('C'));
     const fi = await S.importSource({ userData, sourcePath: path.join(fsrc, 'MyFont'), originalName: 'MyFont', metadata: {} });
     check('font source imported', fi.ok && !fi.isDuplicate, fi.error);
-    check('⭐ it cross-linked against the common\'s content',
+    check('it cross-linked against the common\'s content',
       !!(fi.crossLinked && fi.crossLinked.savedBytes > 0), JSON.stringify(fi.crossLinked));
 
     console.log('deleting the common leaves the source for the sweep, which then takes it');
@@ -73,7 +73,7 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     check('its manifest went with it',
       !fs.existsSync(path.join(userData, 'soundFonts', '.filehashes', 'commons', `${r.uuid}.json`)));
     const sweep2 = S.cleanupOrphanSources(userData);
-    check('⭐ the now-unowned source is reclaimed', sweep2.removed.includes(r.sourceUuid),
+    check('the now-unowned source is reclaimed', sweep2.removed.includes(r.sourceUuid),
       JSON.stringify(sweep2));
   }
 
@@ -89,12 +89,12 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     check('duplicated', !!(d && d.ok), d && d.error);
     const aFile = path.join(userData, 'soundFonts', 'common', a.uuid, 'files', 'mmain.wav');
     const bFile = path.join(userData, 'soundFonts', 'common', d.uuid, 'files', 'mmain.wav');
-    check('⭐ duplicate shares the inode', fs.statSync(aFile).ino === fs.statSync(bFile).ino);
+    check('duplicate shares the inode', fs.statSync(aFile).ino === fs.statSync(bFile).ino);
     // Delete the ORIGINAL; the duplicate carries the sourceUuid, so the sweep
     // must leave the source standing.
     C.deleteCommon(userData, a.uuid);
     const sweep = S.cleanupOrphanSources(userData);
-    check('⭐ source survives because the duplicate owns it too',
+    check('source survives because the duplicate owns it too',
       !sweep.removed.includes(a.sourceUuid), JSON.stringify(sweep.removed));
   }
 
@@ -123,12 +123,12 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     check('card A common imported', a.summary.commonsImported.length === 1, JSON.stringify(a.summary));
     // Re-run card A: identical content -> honestly skipped, under any name test.
     const a2 = await runCard(cardA);
-    check('⭐ identical pack re-scanned is skipped by CONTENT',
+    check('identical pack re-scanned is skipped by CONTENT',
       a2.summary.commonsSkipped.length === 1 && a2.summary.commonsImported.length === 0,
       JSON.stringify(a2.summary.commonsSkipped));
     // Card B: same folder name, different audio -> imports under a derived name.
     const b = await runCard(cardB);
-    check('⭐ a DIFFERENT pack wearing the shared name is imported, not dropped',
+    check('a DIFFERENT pack wearing the shared name is imported, not dropped',
       b.summary.commonsImported.length === 1, JSON.stringify(b.summary));
     const names = C.listCommons(userData).map(c => c.meta.name).sort();
     check('both packs live in the library under distinct names',
@@ -152,7 +152,7 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     check('first zip import ok', a.ok, a.error);
     const b = await C.importCommonFromZip(userData, zipPath, 'QTwo');
     check('second import of the same zip succeeds under a new name', b.ok, b.error);
-    check('⭐ and reuses the SAME source instead of storing the archive twice',
+    check('and reuses the SAME source instead of storing the archive twice',
       b.sourceUuid === a.sourceUuid && b.savings && b.savings.reusedSource === true,
       JSON.stringify({ a: a.sourceUuid, b: b.sourceUuid }));
   }

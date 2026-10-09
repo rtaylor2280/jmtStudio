@@ -1,13 +1,13 @@
 // Creators the user already labelled are matched, but only as a SUGGESTION. [B-484]
 //
-// ⭐ WHAT THIS MECHANISM IS. The curated vendor table is a seed and cannot know a
+// WHAT THIS MECHANISM IS. The curated vendor table is a seed and cannot know a
 // creator it was never given. Library learning existed for TYPING (the renderer
 // merges library creators into the Creator datalist) but never for MATCHING, so a
 // second font from a creator labelled by hand minutes earlier still came up "No
 // creator matched". This layer closes that, last, after every curated pattern and
 // the generic "by NAME" extractor have failed.
 //
-// ⚠️⚠️ THE THREE THINGS THAT MAKE IT SAFE ARE THE THREE THINGS A TIDY-UP WOULD
+// THE THREE THINGS THAT MAKE IT SAFE ARE THE THREE THINGS A TIDY-UP WOULD
 // REMOVE, so each is asserted here:
 //
 //   1. SUGGESTION, NOT AUTO-FILL. A learned hit returns confidence 'structural',
@@ -35,7 +35,7 @@ const ok = (name, cond, why) => {
   console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${name}` + (cond || !why ? '' : `\n       ${why}`));
 };
 
-// ⚠️⚠️ THE CREATORS BELOW ARE DELIBERATELY NOT IN THE CURATED TABLE, AND THE
+// THE CREATORS BELOW ARE DELIBERATELY NOT IN THE CURATED TABLE, AND THE
 // FIRST VERSION OF THIS FILE GOT THAT WRONG. It used the real "BVM Sabers",
 // which worked only while that creator happened to be absent from the table; the
 // moment a curated row for them was added, the table matched first and every
@@ -61,7 +61,7 @@ const SOURCES = [
 const learned = V.learnedVendorsFrom(SOURCES);
 const names = learned.map(v => v.name);
 
-// ⚠️ PRECONDITION: no curated row may claim these names, or everything below
+// PRECONDITION: no curated row may claim these names, or everything below
 // would be measuring an EARLIER layer. This is the check whose absence broke the
 // first version of this file — it used a real creator, passed while that creator
 // happened to be missing from the table, and failed the moment a curated row for
@@ -77,7 +77,7 @@ ok('harvests distinct labelled creators', names.includes(V_ONE) && names.include
 ok('deduplicates the same creator', names.filter(n => n === V_ONE).length === 1);
 ok('keeps the website from whichever copy had one',
    (learned.find(v => v.name === V_ONE) || {}).website === 'https://hollowforgeaudio.example');
-ok('⚠️ drops the too-short name "TEST"', !names.includes('TEST'),
+ok('drops the too-short name "TEST"', !names.includes('TEST'),
    '"TEST" would match any readme containing the word "tested"');
 ok('drops the "Unknown" placeholder', !names.includes('Unknown'));
 ok('ignores sources with no creator', learned.length === 2, `got ${learned.length}: ${JSON.stringify(names)}`);
@@ -97,14 +97,14 @@ const srcOf = (files) => ({
   let r = await V.detectVendor(srcOf({ 'Fontname/Read Me.txt': freeReadme }), { learned });
   ok('matches a labelled creator written WITHOUT spaces in a URL', r.vendor === V_ONE,
      `got ${JSON.stringify(r.vendor)} - ${JSON.stringify(V_ONE)} must find "HollowForgeAudio"`);
-  ok('⚠️ a learned hit is a SUGGESTION, not an auto-fill', r.confidence === 'structural',
+  ok('a learned hit is a SUGGESTION, not an auto-fill', r.confidence === 'structural',
      `got ${JSON.stringify(r.confidence)} - 'content' would silently fill the field`);
   ok('reports where it matched', !!r.matchedFile);
   ok('is labelled as a learned match', r.matchType === 'learnedVendor', `got ${r.matchType}`);
 
-  // ⚠️ Two known creators in one document: suggest nothing.
+  // Two known creators in one document: suggest nothing.
   //
-  // ⚠️ FIXTURE PRECONDITION, AND THE FIRST VERSION OF THIS TEST GOT IT WRONG.
+  // FIXTURE PRECONDITION, AND THE FIRST VERSION OF THIS TEST GOT IT WRONG.
   // A line that STARTS "Sound font by X" is matched by the pre-existing generic
   // extractor (_CREATOR_LINE_RX is anchored at line start and lists "Sound Font
   // By" as a lead-in), so it returned before the learned layer ran and the
@@ -120,7 +120,7 @@ const srcOf = (files) => ({
      `the generic extractor returned ${JSON.stringify(preflight.vendor)}, so the `
      + 'ambiguity branch below would never run and would pass vacuously');
   r = await V.detectVendor(srcOf({ 'Read Me.txt': twoNames }), { learned });
-  ok('⚠️ two learned creators in one readme suggests NEITHER', !r.vendor,
+  ok('two learned creators in one readme suggests NEITHER', !r.vendor,
      `got ${JSON.stringify(r.vendor)} - guessing here misattributes somebody's work`);
   ok('and says why rather than looking like nothing was found',
      r.matchType === 'learnedVendorAmbiguous' && Array.isArray(r.ambiguousVendors)

@@ -5,7 +5,7 @@
 // these feed content hashes, dedup decisions and the sync manifest, so a twin that disagreed by
 // one record would silently change what the app thinks is identical.
 //
-// ⚠️ THE RULES ARE THE FRAGILE PART, not the recursion: root-only meta.json exclusion, the
+// THE RULES ARE THE FRAGILE PART, not the recursion: root-only meta.json exclusion, the
 // empty-dir marker, the directory whose only child was excluded, and the noise filter. The
 // fixture below exercises every one of them ON PURPOSE — a tree of plain files in one flat folder
 // would pass against almost any wrong implementation.
@@ -83,7 +83,7 @@ const noiseFilter = (rel) => !/(^|\/)\.DS_Store$/.test(rel);
     fhm.collectFileRecords(path.join(root, 'hum.wav')) === null
       && (await fhm.collectFileRecordsAsync(path.join(root, 'hum.wav'))) === null);
 
-  // ⭐ The point of the twin: it must actually hand control back. If it resolved on the microtask
+  // The point of the twin: it must actually hand control back. If it resolved on the microtask
   // queue instead of the event loop, a pending timer could never run mid-walk — which is exactly
   // the bug where a "fixed" import still freezes the window.
   let timerRan = false;

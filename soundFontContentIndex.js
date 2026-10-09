@@ -23,7 +23,7 @@
 // when the last name goes. The filesystem does the refcounting, so there is no
 // table of ours to keep correct and no in-use guard to write.
 //
-// ⚠️ ONLY SAFE BECAUSE NOTHING WRITES CONTENT IN PLACE. Sources are immutable,
+// ONLY SAFE BECAUSE NOTHING WRITES CONTENT IN PLACE. Sources are immutable,
 // and every entry operation is a rename, an unlink, or a create-with-a-free-
 // name. Writing through a shared name would reach into the vendor's copy. That
 // invariant is the precondition for this whole approach — see
@@ -31,7 +31,7 @@
 // remembered.
 //
 // ── THE INDEX IS A CACHE, NEVER A SOURCE OF TRUTH ───────────────────────────
-// ⚠️⚠️ A stale index that reports a match would link to content that has since
+// A stale index that reports a match would link to content that has since
 // changed, and that is the one way to get a WRONG FILE silently — the worst
 // outcome this code can produce, far worse than storing a duplicate. So the
 // index NARROWS THE SEARCH; IT NEVER AUTHORISES THE LINK. Every candidate is
@@ -50,7 +50,7 @@
 // in soundFonts/pool/ and the font gets a pointer, exactly as it gets a pointer
 // into a source. One rule, no second category of file.
 //
-// ⚠️ THE POOL IS NOT A SOURCE, deliberately. Source immutability is load-
+// THE POOL IS NOT A SOURCE, deliberately. Source immutability is load-
 // bearing across the design: `hash` stays stable so dedup can rewrite what we
 // hold while re-import recognition still works, and Customized diffs against a
 // fixed reference point. A source that grew whenever a file was added would
@@ -289,19 +289,19 @@ function buildIndex(userData) {
 
   // Shared tracks ([B-406]): the FOURTH bucket, and the last one outside the index.
   //
-  // ⚠️⚠️ WHY IT WAS MISSING, because it was not a decision: every other bucket publishes per-file
+  // WHY IT WAS MISSING, because it was not a decision: every other bucket publishes per-file
   // records under .filehashes/{sources,entries,commons} in one shape, and this loop reads that
   // shape. Shared tracks keeps its hashes in its OWN sidecar — sharedTracks/.jmt-hashes.json,
   // keyed by a per-track UUID for backup-merge identity — so there was nothing here to pick up.
   // A format mismatch, not an exclusion. That is exactly why nobody noticed: the code looks
   // complete if you only read this function.
   //
-  // ⭐ HIS, 2026-09-17, on being shown the duplication: "that's not how it's supposed to work.
+  // THE, 2026-09-17, on being shown the duplication: "that's not how it's supposed to work.
   // shouldn't matter where it is in the library, if it already exists it uses that instead of new
   // bytes." The contract was already written down at the top of addFilesAt — "content we already
   // hold ANYWHERE ... becomes a second NAME for it" — and held for three of four buckets.
   //
-  // ⚠️ A STALE SIDECAR IS SAFE, for the same reason [B-327] gave when commons joined: findExisting
+  // A STALE SIDECAR IS SAFE, for the same reason [B-327] gave when commons joined: findExisting
   // re-hashes any candidate before handing it out as a link target, so a record that has drifted
   // costs one wasted check and never a wrong link.
   const stRoot = path.join(soundFontsRoot(userData), 'sharedTracks');
@@ -399,7 +399,7 @@ function recordContent(index, hash, absPath) {
 // as a hardlink to bytes we already hold when we hold them, and as a copy when
 // we do not.
 //
-// ⚠️ THE INCOMING FILE IS HASHED HERE AND THE CALLER CANNOT SUPPLY THE ANSWER.
+// THE INCOMING FILE IS HASHED HERE AND THE CALLER CANNOT SUPPLY THE ANSWER.
 // This took a hash argument at first, as an optimisation for a caller that had
 // already hashed the file. That is a way to lose someone's audio: hand it a
 // hash that does not describe srcAbs, and if the library happens to hold THAT
@@ -514,7 +514,7 @@ function storeInPool({ index, srcAbs, preferredName, knownHash }) {
 // filesystem evaluates it: the pool holds one name, so a file with any user has
 // nlink >= 2 and a file with none has nlink === 1.
 //
-// ⚠️ Called AFTER a font is deleted, never before — the link count only falls
+// Called AFTER a font is deleted, never before — the link count only falls
 // once the font's name is gone. deleteSource's refcounted unlinkAttachment
 // carries the same ordering note for the same reason.
 function releasePoolOrphans(userData) {
@@ -532,7 +532,7 @@ function releasePoolOrphans(userData) {
     const abs = path.join(root, e.name);
     let st;
     try { st = fs.statSync(abs); } catch { continue; }
-    // ⚠️ On a filesystem that did not support hardlinks every pooled file reads
+    // On a filesystem that did not support hardlinks every pooled file reads
     // as nlink 1 and this would delete the lot. Only act where the count is
     // meaningful: nlink 0 is impossible for an existing file, and anything
     // reporting < 1 is a filesystem we should not be reasoning about.

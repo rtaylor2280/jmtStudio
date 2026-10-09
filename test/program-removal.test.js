@@ -29,7 +29,7 @@ const WAV = (() => {
 })();
 
 let pass = 0;
-// ⚠️⚠️ ASYNC-AWARE, AND THE AWARENESS IS LOAD-BEARING. [B-400] made addFilesAt async, so one
+// ASYNC-AWARE, AND THE AWARENESS IS LOAD-BEARING. [B-400] made addFilesAt async, so one
 // case below is async too. The old one-liner called fn() and dropped the result: a rejected
 // promise would have become an unhandled rejection AFTER this printed "ok" and counted a pass.
 // A test that reports success over a failed assertion is worse than no test.
@@ -300,7 +300,7 @@ try {
     assert.ok(!fs.existsSync(path.join(removal.holdingRoot(tmp), imp.token)),
       'holding entry deleted immediately, not left for the sweep');
 
-    // ⚠️ ITS OWN LABELLED FOLDER, AND ONE TEXT FILE — not loose files with a .json each.
+    // ITS OWN LABELLED FOLDER, AND ONE TEXT FILE — not loose files with a .json each.
     // Both came out of the first dev pass: two anonymous icons landed on the Desktop for
     // a single finding, and a .json is a developer artifact, not information for a person.
     assert.strictEqual(path.basename(path.dirname(rel.destPath)), 'Quarantined Files',
@@ -316,7 +316,7 @@ try {
     assert.ok(txt.includes('Keep.exe'), 'names the original file');
     assert.match(txt, /SHA-256:\s+[0-9a-f]{64}/, 'carries the hash as text');
     assert.match(txt, /safe to read/i, 'says the text file is safe');
-    // ⭐ Opening the quarantine folder shows an explanation and a clearly named
+    // Opening the quarantine folder shows an explanation and a clearly named
     // subfolder - never the programs themselves sitting at the top.
     const visible = fs.readdirSync(rel.folder).filter(n => !n.startsWith('.'));
     assert.deepStrictEqual(visible.sort(), ['Quarantined Files', 'READ ME.txt']);

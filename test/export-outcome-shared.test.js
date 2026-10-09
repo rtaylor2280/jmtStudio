@@ -1,6 +1,6 @@
 // Every export door must report its ending through one function.  [B-005 item 4]
 //
-// ⭐⭐ THE DEFECT CLASS THIS EXISTS TO KILL. On 2026-09-20 three doors reported a cancelled
+// THE DEFECT CLASS THIS EXISTS TO KILL. On 2026-09-20 three doors reported a cancelled
 // export as a success, and not one of them had a bug in its checks - the fit refusal and the
 // slow-write warning already shared their dialogs, so those had been getting consistent by
 // construction. Reporting the OUTCOME was hand-rolled per door, and that is where all three
@@ -11,12 +11,12 @@
 //   • tracks                  -> said nothing AND committed a sync manifest describing files
 //                                that were never written, which the next export would trust
 //
-// ⚠️⚠️ THE TRAP: `ok: true` DOES NOT MEAN "IT WROTE". A cancel returns ok:true with `canceled`
+// THE TRAP: `ok: true` DOES NOT MEAN "IT WROTE". A cancel returns ok:true with `canceled`
 // set on purpose - ok:false would surface the user's own click as a red failure. So `ok` alone
 // stopped being sufficient, and every door that tested only `ok` inherited the bug silently.
 // Nothing announced it; each door looked locally correct.
 //
-// ⭐ The four right-click "Export…" menu items (doors 2/5/7/9) share one funnel and were ALL
+// The four right-click "Export…" menu items (doors 2/5/7/9) share one funnel and were ALL
 // correct without anyone checking them. One place to be right is the entire argument.
 'use strict';
 
@@ -38,7 +38,7 @@ ok('a single shared outcome handler exists',
 ok('it treats a cancel as its own outcome, before any success path',
    /if \(r\.canceled\) \{[\s\S]{0,600}?_sfExportStoppedNotice/.test(H),
    'a cancel reaching the success path is exactly the Techno_2 bug');
-// ⚠️ ANCHORED ON THE CANCEL BLOCK, NOT A 400-CHARACTER WINDOW. The first cut required the
+// ANCHORED ON THE CANCEL BLOCK, NOT A 400-CHARACTER WINDOW. The first cut required the
 // `return false` within 400 chars of the notice call, and adding the cleanup offer between
 // them broke it - a false failure about correct code. Slice between two markers instead.
 {
@@ -48,12 +48,12 @@ ok('it treats a cancel as its own outcome, before any success path',
   ok('it returns false on a cancel so callers cannot run follow-up work',
      /return false;/.test(block) && /_sfExportStoppedNotice\(/.test(block),
      'the tracks door committed a sync manifest for files never written');
-  ok('⭐ and the slow cleanup is OFFERED inside that same block',
+  ok('and the slow cleanup is OFFERED inside that same block',
      /_sfOfferPartialCleanup\(/.test(block),
      'his rule: on a board card over threshold, ask rather than making them wait for a delete');
 }
 
-// ── ⚠️⚠️ SCOPE, WHICH IS INVISIBLE TO node --check ────────────────────
+// ── SCOPE, WHICH IS INVISIBLE TO node --check ────────────────────
 //
 // `_sfDeleteProgress` and `_sfShowProgramRefusal` are declared in a nested scope and are NOT
 // exposed on window. A helper calling them from top level is a ReferenceError waiting for the
@@ -71,10 +71,10 @@ ok('it treats a cancel as its own outcome, before any success path',
   const progress= at(/const _sfDeleteProgress = /);
 
   ok('all four helpers were found', [outcome, eject, refusal, progress].every((n) => n > 0));
-  ok('⚠️⚠️ the outcome handler shares an indent level with the helpers it calls',
+  ok('the outcome handler shares an indent level with the helpers it calls',
      indentOf(outcome) === indentOf(refusal) && indentOf(outcome) === indentOf(progress),
      'at top level it cannot see them at all and throws on the first completed export');
-  ok('⚠️⚠️ the toast eject offer shares that level too',
+  ok('the toast eject offer shares that level too',
      indentOf(eject) === indentOf(progress),
      'it calls _sfEjectContext and _sfDeleteProgress, neither of which is on window');
 
@@ -87,19 +87,19 @@ ok('it treats a cancel as its own outcome, before any success path',
   for (let i = lo; i < hi - 1; i++) {
     if (/^ {0,5}[})]/.test(lines[i])) { boundary = i + 1; break; }
   }
-  ok('⚠️ and no scope closes between them',
+  ok('and no scope closes between them',
      boundary === 0,
      `a block ends at line ${boundary} - matching indentation there is a coincidence, not shared scope`);
 }
 
 // ── The three doors that were broken now go through it ───────────────
-// ⚠️ RE-ANCHORED 2026-09-22 [B-420], exactly as common-as-zip was the day before: this door
+// RE-ANCHORED 2026-09-22 [B-420], exactly as common-as-zip was the day before: this door
 // migrated onto the shared runner, so it no longer calls `_sfExportOutcome` itself — the runner
 // does, for every door, behind the contract guard. That is a stronger guarantee than this door
 // remembering to. The rule under test is unchanged: this is the door that said
 // Exported as "Techno_2" on a cancel, and a cancel here must never read as a success.
 ok('the font-card quick export reaches the shared ending through the runner',
-   // ⚠️⚠️ A CHARACTER WINDOW IS THE WRONG INSTRUMENT AND IT FAILED TWICE IN ONE AFTERNOON:
+   // A CHARACTER WINDOW IS THE WRONG INSTRUMENT AND IT FAILED TWICE IN ONE AFTERNOON:
    // first at 3000, then at 6000, each time on a door that was correctly migrated and had simply
    // grown a comment between the two anchors. Tuning the number a third time would just move the
    // next failure. Bound the search to the door's own call instead, by brace-matching from
@@ -120,7 +120,7 @@ ok('the font-card quick export reaches the shared ending through the runner',
      return /exportEntryToFolder/.test(H.slice(start, k));
    })(),
    'this is the door that said Exported as "Techno_2" on a cancel');
-// ⚠️ RE-ANCHORED 2026-09-21 [B-420]: this door migrated onto the shared runner, so it no longer
+// RE-ANCHORED 2026-09-21 [B-420]: this door migrated onto the shared runner, so it no longer
 // calls `_sfExportOutcome` itself — `_sfRunExport` does, for every door, which is a stronger
 // guarantee than this door remembering to. The rule under test is unchanged: a cancel here must
 // not be silence, which is what it was before the shared ending existed.
@@ -128,10 +128,10 @@ ok('the common-as-zip door reaches the shared ending through the runner',
    /title: 'Exporting common folder',[\s\S]{0,900}?exportCommonAsZip/.test(H)
    && /await _sfRunExport\(\{[\s\S]{0,400}?title: 'Exporting common folder'/.test(H),
    'this door said nothing at all on a cancel');
-// ⚠️ RE-ANCHORED 2026-09-22 when tracks migrated, the third door to need this. It no longer
+// RE-ANCHORED 2026-09-22 when tracks migrated, the third door to need this. It no longer
 // calls `_sfExportOutcome` itself; the runner does, behind the contract guard.
 //
-// ⭐⭐ BUT THE RULE UNDERNEATH IS THE IMPORTANT ONE AND IT IS SHARPER HERE THAN ELSEWHERE.
+// BUT THE RULE UNDERNEATH IS THE IMPORTANT ONE AND IT IS SHARPER HERE THAN ELSEWHERE.
 // This door committed a sync manifest for a cancelled export: a record of files that were never
 // written, which the NEXT export then trusted and used to SKIP them. So what must be asserted is
 // not that it reaches the shared ending, but that the manifest commit sits where a cancel cannot
@@ -139,7 +139,7 @@ ok('the common-as-zip door reaches the shared ending through the runner',
 ok('the tracks door reaches the shared ending through the runner',
    /title: 'Exporting tracks'[\s\S]{0,400}?await _sfRunExport|await _sfRunExport\(\{[\s\S]{0,400}?title: 'Exporting tracks'/.test(H),
    'this door reported a cancelled export as a success');
-ok('⚠️⚠️ and its manifest commit is inside onCompleted, where a cancel cannot reach it',
+ok('and its manifest commit is inside onCompleted, where a cancel cannot reach it',
    (() => {
      const i = H.indexOf("title: 'Exporting tracks'");
      if (i < 0) return false;
@@ -158,18 +158,18 @@ ok('⚠️⚠️ and its manifest commit is inside onCompleted, where a cancel c
    })(),
    'a cancelled export that commits a manifest tells the NEXT export those files are already '
    + 'there, and it skips them');
-// ⚠️ The cancel still has to report how many files LANDED, not "nothing was copied" over a
+// The cancel still has to report how many files LANDED, not "nothing was copied" over a
 // folder that now holds real ones.
 ok('a cancelled tracks export still reports what landed',
    /wroteCount/.test(H),
    'the shared notice would otherwise say nothing was copied');
 
 // ── The eject offer is only made where it makes sense ────────────────
-// ⚠️ RE-ANCHORED 2026-09-21, NOT LOOSENED. The fact still has to be `=== true`; what changed
+// RE-ANCHORED 2026-09-21, NOT LOOSENED. The fact still has to be `=== true`; what changed
 // is where it comes from. The eject offer used to read `.removable` off a ~1,900 ms
 // `_sfClassifyDest` result - one of FIVE spawns asking about the same destination - and now
 // reads the shared `_sfDestIdentity` cache, whose cheap half answers in ~85 ms.
-// ⭐ The rule under test is unchanged and is the one that matters: never a truthy test. `null`
+// The rule under test is unchanged and is the one that matters: never a truthy test. `null`
 // means "cannot tell", and `if (removable)` would silently demote unknown to no-offer while
 // reading as though it had checked.
 {
@@ -178,14 +178,14 @@ ok('a cancelled tracks export still reports what landed',
      reads.length >= 2,
      'null means "cannot tell" - offering on unknown would prompt about internal disks');
   // The inverse: no site may decide the offer on truthiness alone.
-  ok('⚠️ and no site tests it for truthiness',
+  ok('and no site tests it for truthiness',
      !/if\s*\(\s*(?:await\s+)?_sfDestIdentity\.removable\([^)]*\)\s*\)/.test(H),
      'a bare truthy test reads unknown as false, which is the [B-028] mistake');
 }
-// ⚠️ The renderer COMPARES against these statuses; safeEject.js is what PRODUCES them. The
+// The renderer COMPARES against these statuses; safeEject.js is what PRODUCES them. The
 // first cut asserted `status: 'unsupported'` against the renderer and failed on a string that
 // only ever appears in the module - checking the wrong file for the right fact.
-// ⚠️⚠️ THESE USED TO ASSERT A STANDALONE EJECT DIALOG, WHICH IS THE THING HE RULED AGAINST.
+// THESE USED TO ASSERT A STANDALONE EJECT DIALOG, WHICH IS THE THING TESTING RULED AGAINST.
 // 2026-09-21: "The eject shouldn't be its own modal. It should take place on the summary
 // screen, so it can show the status of it right there." So the statuses are now handled in
 // two places, neither of them a dedicated dialog: the row on the summary, and the toast
@@ -195,11 +195,11 @@ ok('every status is handled on the summary row',
    /res\.status === 'unsupported'/.test(H) && /res\.status === 'ejected'/.test(H)
    && /res\.status === 'returned'/.test(H),
    "'busy' is the fall-through - it is the case the feature exists for");
-ok('⭐ an already-released card is not reported as an eject we performed',
+ok('an already-released card is not reported as an eject we performed',
    /res\.alreadyGone\s*\n?\s*\?/.test(H) || /res\.alreadyGone$/m.test(H)
    || /alreadyGone/.test(H),
    'saying "ejected" for a card that was already out claims credit for nothing');
-ok('⚠️ and the busy case still gets a MODAL even from the toast path',
+ok('and the busy case still gets a MODAL even from the toast path',
    /Could not eject the \$\{\(ctx\.ejectVocab/.test(H),
    'a "do not unplug it" that scrolls away fails exactly when it matters');
 {

@@ -292,7 +292,7 @@ function safeStatSize(p) {
 
 // Walk a candidate source once and return everything the scan needs from it.
 //
-// ⚠️ THE EXECUTABLE NAMES RIDE THIS WALK ON PURPOSE ([B-214], 2026-09-09). The
+// THE EXECUTABLE NAMES RIDE THIS WALK ON PURPOSE ([B-214], 2026-09-09). The
 // scan already opens every directory and stats every file to total the bytes, so
 // the filenames are in hand and testing them costs no I/O at all - measured at
 // -1.2 ms across a 5,900-file card, which is below run-to-run noise. That is what
@@ -496,7 +496,7 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
         summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
       }
     } catch (err) {
-      // ⚠️ A CANCEL IS NOT A FAILED FONT. [B-462, 2026-10-05] Now that the cancel reaches inside
+      // A CANCEL IS NOT A FAILED FONT. [B-462, 2026-10-05] Now that the cancel reaches inside
       // the copy, `importSource` throws from its checkpoints — and without this the font the user
       // stopped would be reported as damaged in the summary, and the loop would carry on through
       // the rest of them. Duck-typed on `.cancelled`, the convention `sfExportCopy` documents.
@@ -616,7 +616,7 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
 // plus aggregate stats for the real-stats screen. This is exactly the hashing
 // quick import does, just run BEFORE the keep/prune decision — the prepared zips
 // are reused at commit (no re-hash). Emits byte progress for the existing bar.
-// ⚠️ `corruptFonts` IS GONE AS AN INPUT ([B-361], 2026-09-09). It used to arrive
+// `corruptFonts` IS GONE AS AN INPUT ([B-361], 2026-09-09). It used to arrive
 // as a folder-name-keyed map produced by the card browser's recursive pre-walk —
 // so the review's corrupt flags existed only for SD-card imports, and only after
 // reading the entire card a second time. Now the verdict comes from the prepare's
@@ -645,12 +645,12 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // other. finalizePreparedSource's own comment says the tree is "dedup-cleared" —
   // true when it was staged, no longer true by the time it commits.
   //
-  // ⭐ SURFACED, NOT SILENTLY SKIPPED. Catching this at COMMIT would make the review
+  // SURFACED, NOT SILENTLY SKIPPED. Catching this at COMMIT would make the review
   // lie: it would say "importing 40" and import 39. Caught here, the row can say which
   // other row it matches and it was decides — the app's normal shape, and it matches the
   // 2026-08-31 ruling that a row ticked despite an owned marker is a row they meant.
   //
-  // ⚠️ NOT THE SAME STATEMENT AS "already in your library". One is about the library,
+  // NOT THE SAME STATEMENT AS "already in your library". One is about the library,
   // the other is about this card. Sharing a phrase would tell someone their card is
   // already imported when it is not.
   const _batchHashes = new Map();
@@ -672,7 +672,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
     // prepared zip (no re-strip/re-hash).
     let res;
     // [B-398] Name the source, so the log says WHICH one held the loop and for how long.
-    // ⚠️ Declared ABOVE the try: a `const` inside it is out of scope in the `finally`, which is a
+    // Declared ABOVE the try: a `const` inside it is out of scope in the `finally`, which is a
     // ReferenceError at runtime that `node --check` passes happily. Same shape as the two invented
     // helpers on 09-17 — the checker proves a file parses, not that an identifier resolves.
     const _probe = require('./stallProbe');
@@ -683,24 +683,24 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         userData, sourcePath: src.absPath, originalName: path.basename(src.absPath),
         metadata: {}, prepareOnly: true,
         onProgress: (p) => onProgress({ stage: 'source-progress', sourceIdx: i, total, label, sub: p }),
-        // ⭐⭐ THE CANCEL REACHES INSIDE THE SOURCE, NOT JUST BETWEEN SOURCES. [B-462, 2026-10-05]
+        // THE CANCEL REACHES INSIDE THE SOURCE, NOT JUST BETWEEN SOURCES. [B-462, 2026-10-05]
         // The loop above checks once per source, and one source is a whole font being hashed off a
         // card — tens of seconds in which Cancel set a flag nobody read. The modal closed, the work
         // carried on, and the gate stayed held, so the NEXT import was refused with "An import is
         // already running". Hit twice in testing: *"the import doesn't really cancel... still."*
-        // ⭐ `shouldStop` is export's mechanism and `importSource` already honoured it in three
+        // `shouldStop` is export's mechanism and `importSource` already honoured it in three
         // places along the hash/copy path — the single-source import door passes it, which is why
         // its cancel works. Bulk called the same function and left the argument off. The memory is
         // what found it: *"pretty sure we had the exact scenario before... on export?"*
-        // ⚠️ Safe because analyze only STAGES: cancelling throws the staged work away and nothing
+        // Safe because analyze only STAGES: cancelling throws the staged work away and nothing
         // is lost, which is the reasoning for checking often rather than politely.
         shouldStop: shouldCancel,
       });
     } catch (e) {
-      // ⚠️ A cancel is not a failure. `importSource` throws `ExportCancelled` from its checkpoints,
+      // A cancel is not a failure. `importSource` throws `ExportCancelled` from its checkpoints,
       // and reporting that as a per-source error would mark the font damaged in the results and
       // leave the loop running through the remaining eleven.
-      // ⭐ DUCK-TYPED, following the convention `sfExportCopy` states and explains: an `instanceof`
+      // DUCK-TYPED, following the convention `sfExportCopy` states and explains: an `instanceof`
       // fails across module instances, and a `.name` check would be a third spelling of a test
       // this codebase already has one answer for.
       if (e && e.cancelled === true) return { ok: true, cancelled: true, results };
@@ -715,7 +715,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
     const corrupt = _stripped.length
       ? { count: _stripped.length, reason: _stripped[0].reason, files: _stripped }
       : null;
-    // ⚠️ THE DEEPER FINDING ([B-214]). The card report can only test NAMES, so a
+    // THE DEEPER FINDING ([B-214]). The card report can only test NAMES, so a
     // program wearing a sound's name is invisible there and is first seen HERE, off
     // the read the prepare performs. The stats screen has to be able to report more
     // than the browser did, or the second check is done and never spoken.
@@ -740,32 +740,32 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
     } else if (res && res.ok && res.prepared) {
       // [B-314] Match against what THIS run has already staged, as well as the library.
       //
-      // ⭐⭐ KEYED ON CONTENT, NOT ON SOURCE IDENTITY. [B-415] `res.hash` identifies the ARTIFACT:
+      // KEYED ON CONTENT, NOT ON SOURCE IDENTITY. [B-415] `res.hash` identifies the ARTIFACT:
       // for a zip it is the sha256 of the archive on disk, for a folder it is the content digest.
       // So a zip and its own extracted copy of the SAME FONT carried two different numbers, never
       // collided here, and both imported - the find 2026-09-19, Energy / Energy_2 byte-identical.
-      // ⚠️ [B-314] was not wrong; its fixture was two twins of the SAME SHAPE, which do collide.
-      // ⚠️ Falls back to res.hash so a source that somehow yields no content digest still gets
+      // [B-314] was not wrong; its fixture was two twins of the SAME SHAPE, which do collide.
+      // Falls back to res.hash so a source that somehow yields no content digest still gets
       // the old same-shape protection rather than none.
       const _h = res.contentHash || res.hash || null;
       const _twin = _h ? _batchHashes.get(_h) : null;
-      // ⭐⭐ THE ZIP WINS, WHATEVER THE WALK ORDER. Ruled 2026-09-19: "take the zip over the
+      // THE ZIP WINS, WHATEVER THE WALK ORDER. Ruled 2026-09-19: "take the zip over the
       // extracted... so extracted is skipped." The zip is what the creator shipped - it carries
       // the extras, and every provenance and savings claim is anchored to it.
-      // ⚠⚠ WITHOUT THIS, WHICH COPY SURVIVES IS AN ACCIDENT OF FILENAME ORDER. The zips happened
+      // WITHOUT THIS, WHICH COPY SURVIVES IS AN ACCIDENT OF FILENAME ORDER. The zips happened
       // to be named "1.1-Energy.zip", and "1" sorts before "E", so the folders became the later
       // twin. Rename the folder and the ZIP would have been the one skipped. Shape decides, not
       // the alphabet.
-      // ⭐⭐ THE RULE IS THE FULLEST SOURCE WINS. The wording 2026-09-19: "it's really the full
+      // THE RULE IS THE FULLEST SOURCE WINS. The wording 2026-09-19: "it's really the full
       // source wins. duplicate font but one has more stuff around it... that wins." The keeper is
       // the copy carrying the most AROUND the font - the extras used to build a customized version,
       // or the exports for another board - because that is the material that cannot be recovered
       // from the other copy.
-      // ⚠️ ZIP-VS-FOLDER IS NOT THE RULE and must not be re-introduced as one. It was my first
+      // ZIP-VS-FOLDER IS NOT THE RULE and must not be re-introduced as one. It was my first
       // draft and it is only a PROXY: a zip straight from the creator usually carries the extras
       // and a hand-extracted folder is often a trimmed subset. Proxy, not principle - so rank on
       // the measurement and let shape break ties.
-      // ⚠⚠ AND FOR AN EXACT TWIN THE RANKING IS ALWAYS A TIE, by definition: contentHash covers
+      // AND FOR AN EXACT TWIN THE RANKING IS ALWAYS A TIE, by definition: contentHash covers
       // the WHOLE staged tree, extras included, so two sources that collide here hold byte-identical
       // material and neither is fuller. Measured on a real pair - Energy/Energy_2, 55 files and one
       // digest on both. The comparison is written anyway because it states the intended rule at the
@@ -797,7 +797,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         // name THIS row on its partner's note without re-deriving it from a different
         // field and drifting out of step with what the screen actually shows.
         label,
-        // ⚠️ The prepared object is kept INTACT for a twin, deliberately: its uuid is
+        // The prepared object is kept INTACT for a twin, deliberately: its uuid is
         // how "import anyway" finalizes without re-extracting. The library-duplicate
         // branch above learned this the hard way — dropping its `staged` field leaked
         // ~1.9 GB per re-analyze of a 12 GB card.
@@ -815,7 +815,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         curation: res.curation || null,
         curationTmp: res.curationTmp || null,
         curationPayloadDir: res.curationPayloadDir || null,
-        // ⚠️ THIS OBJECT IS A FILTER. Cross-linking happens at PREPARE time, and
+        // THIS OBJECT IS A FILTER. Cross-linking happens at PREPARE time, and
         // this hand-picked list is the only bridge to commit — omitting a field
         // here silently zeroes it downstream. crossLinked was omitted, so every
         // UI-flow bulk import recorded crossSaved 0 and the summary undersold
@@ -996,7 +996,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           owned = true; matchName = seen.get(h); ownedIn = 'batch';
         }
         if (h && !seen.has(h)) seen.set(h, path.basename(w));
-        // ⚠️ THE COUNT SPLITS WHERE THE ROWS ALREADY DID ([B-349]). `owned`
+        // THE COUNT SPLITS WHERE THE ROWS ALREADY DID ([B-349]). `owned`
         // lumped library hits and same-card twins into one number the UI
         // labelled "already in your library" — against the user's 3-track library
         // it claimed 42. The per-row ownedIn distinction existed ([B-246]);
@@ -1005,7 +1005,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           tOwned++;
           if (ownedIn === 'library') tLibOwned++; else tBatchDup++;
         } else tNew++;
-        // ⚠️ `ownedIn` EXISTS BECAUSE `matchName` MEANS TWO DIFFERENT THINGS, and the
+        // `ownedIn` EXISTS BECAUSE `matchName` MEANS TWO DIFFERENT THINGS, and the
         // UI had been showing both as "Already in your library as X" — which is a lie
         // for the batch case, where X is a sibling on the same card that the library
         // has never seen. Harmless while the row only had a checkbox; the moment
@@ -1036,12 +1036,12 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
 
   // [B-314] BACK-FILL THE PARTNER, so the fact is stated on BOTH rows.
   //
-  // ⭐⭐ THE RELATIONSHIP IS SYMMETRIC AND THE LOOP ABOVE CANNOT SEE THAT. FoRed is the
+  // THE RELATIONSHIP IS SYMMETRIC AND THE LOOP ABOVE CANNOT SEE THAT. FoRed is the
   // same font as RVJ exactly as much as RVJ is the same font as FoRed; the only reason
   // the second one carried the marker is that it was scanned second. Marking one side is
   // an artifact of walk order dressed up as a statement about the font.
   //
-  // ⚠️ AND IT IS WHAT MAKES THE CHECKBOXES SAFE TO LEAVE ALONE. Reported 2026-09-16: "shouldn't
+  // AND IT IS WHAT MAKES THE CHECKBOXES SAFE TO LEAVE ALONE. Reported 2026-09-16: "shouldn't
   // they trade places if you reverse the selection? should they both state this if both
   // selected? we don't want to toggle between them if we're going to allow direct
   // duplication... but we shouldn't be quiet about it either." Labelling both, always,
@@ -1050,9 +1050,9 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // selection in the first place. The alternative is logic that has to decide when to
   // speak, and that is where a marker learns to disappear at the wrong moment.
   //
-  // ⚠️ Only the DEFAULT tick is decided here, never the claim - the yellow note is on BOTH
+  // Only the DEFAULT tick is decided here, never the claim - the yellow note is on BOTH
   // rows either way, because both are equally true statements about the batch.
-  // ⭐ [B-415] WHICH row is unticked is `keeps`, ranked by fullest-source-wins above. It used to
+  // [B-415] WHICH row is unticked is `keeps`, ranked by fullest-source-wins above. It used to
   // be "the later index", i.e. whichever order the folder happened to be walked in.
   {
     const _byIdx = new Map();
@@ -1073,11 +1073,11 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
     }
   }
 
-  // ⭐⭐ [B-415] THE FULL SOURCE WINS - the half that equality cannot reach.
+  // [B-415] THE FULL SOURCE WINS - the half that equality cannot reach.
   // Two sources can hold the SAME FONT while one carries five other board flavors around it, and
   // their contentHashes then share nothing at all, so the twin check above never fires and both
   // import. Reported: "those would both import and be called identical fonts."
-  // ⚠️ RUNS AFTER the twin back-fill, never instead of it: exact twins are [B-314]'s and are
+  // RUNS AFTER the twin back-fill, never instead of it: exact twins are [B-314]'s and are
   // deliberately left undecided by the ranker, so the two mechanisms cannot disagree about a row.
   {
     const { rankByContainment } = require('./bulkImportContainment');
@@ -1089,33 +1089,33 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         const row = _byIdx.get(lostIdx);
         const keeper = _byIdx.get(info.container);
         if (!row || !keeper) continue;
-        // ⚠⚠ ONLY SKIP A ROW THAT IS ALREADY HELD BACK. The first cut skipped any row carrying
+        // ONLY SKIP A ROW THAT IS ALREADY HELD BACK. The first cut skipped any row carrying
         // `sameInBatch` at all, and that quietly left TWO survivors when the same font appeared
         // three times - the question, and it took about a minute to reproduce:
         //     pkg (font + cfx + readme) | bare1 | bare2   ->   pkg AND bare1 both imported
         // bare1 and bare2 pair off as exact twins, bare1 wins THAT contest and is marked a keeper,
         // and the keeper mark then shielded it from the containment pass that should have put it
-        // inside pkg. ⭐ WINNING ONE CONTEST IS NOT IMMUNITY FROM THE NEXT.
+        // inside pkg. WINNING ONE CONTEST IS NOT IMMUNITY FROM THE NEXT.
         if (row.sameInBatch && row.sameInBatch.keeps === false) continue;
         const _wasKeeper = !!row.sameInBatch;
         const _kLabel = keeper.label != null ? keeper.label : (keeper.prepared && keeper.prepared.name) || '';
         const _lLabel = row.label != null ? row.label : (row.prepared && row.prepared.name) || '';
-        // ⭐⭐ THE SAME CATEGORY AS AN EXACT TWIN, SO IT USES THE SAME FIELD. Ruled 2026-09-19:
+        // THE SAME CATEGORY AS AN EXACT TWIN, SO IT USES THE SAME FIELD. Ruled 2026-09-19:
         // "isn't it the same category as whatever our wording was for duplicate on source? don't
         // need to tell about fuller - that was what informed our choice... but we still only kept 1."
         // Fullness decided WHICH copy survives; it is not a second thing that happened to the user.
-        // ⚠⚠ SO THERE IS NO SECOND NOTE, NO SECOND PREDICATE ARM AND NO SECOND SUMMARY LINE.
+        // SO THERE IS NO SECOND NOTE, NO SECOND PREDICATE ARM AND NO SECOND SUMMARY LINE.
         row.sameInBatch = { idx: info.container, label: _kLabel, keeps: false };
-        // ⭐⭐ `fuller` IS WHY THIS ONE WON, AND THE ROW IS ALLOWED TO SAY SO. Ruled 2026-09-19:
+        // `fuller` IS WHY THIS ONE WON, AND THE ROW IS ALLOWED TO SAY SO. Ruled 2026-09-19:
         // "don't we know that it was more complete so message can say 'Same font as G-Grievous in
         // this import.' and then add 'This one is more complete'".
-        // ⚠⚠ WITHOUT IT BOTH ROWS READ IDENTICALLY - the same sentence on the ticked one and the
+        // WITHOUT IT BOTH ROWS READ IDENTICALLY - the same sentence on the ticked one and the
         // unticked one - so the screen states that a choice was made and then withholds which way.
-        // ⚠️ SET ONLY WHEN FULLNESS DECIDED IT. Exact twins are equal, so there is nothing truthful
+        // SET ONLY WHEN FULLNESS DECIDED IT. Exact twins are equal, so there is nothing truthful
         // to say about either being more complete, and they must NOT inherit this.
         if (!keeper.sameInBatch) keeper.sameInBatch = { idx: lostIdx, label: _lLabel, keeps: true, fuller: true };
         else keeper.sameInBatch.fuller = true;
-        // ⚠⚠ AND ANYONE WHO WAS POINTING AT THIS ROW HAS TO BE RE-POINTED. bare2's note named
+        // AND ANYONE WHO WAS POINTING AT THIS ROW HAS TO BE RE-POINTED. bare2's note named
         // bare1 as the copy being kept; bare1 has just been held back itself, so the note would
         // name a row that is not importing either - true of nothing the user can see.
         if (_wasKeeper) {
@@ -1129,7 +1129,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           // Already counted as a duplicate when it lost the twin contest; do not count it twice.
           batchDupCount++;
         }
-        // ⚠⚠ AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
+        // AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
         // the loop; this ranking can only decide after it, so the row was already counted. Leaving
         // it counted made the summary read "8 new" on a run where 6 imported - indistinguishable,
         // from the outside, from the feature not working at all. Hit exactly that.
@@ -1184,7 +1184,7 @@ function _optimizeProgressForwarder(onSubProgress) {
 
 // Import one planned source end-to-end: hash + copy via importSource,
 // detect candidates, create entries with needsReview when applicable.
-// ⚠️ `shouldStop` is threaded in rather than read from a module-level flag: this is the same
+// `shouldStop` is threaded in rather than read from a module-level flag: this is the same
 // predicate the caller's loop uses, so the cancel the user clicked reaches both the gap between
 // sources AND the copy inside one. [B-462, 2026-10-05]
 // Creators the user has already labelled. Harvested ONCE PER RUN by the
@@ -1251,7 +1251,7 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
       // number. Consistency wins. (2026-08-31, the ruling.)
       forceNewSource: !!src._duplicate,
       onProgress: (p) => onSubProgress && onSubProgress({ phase: 'import', ...p }),
-      // ⭐ Same gap as the analyze path, same one-argument fix. [B-462, 2026-10-05] Without this
+      // Same gap as the analyze path, same one-argument fix. [B-462, 2026-10-05] Without this
       // the commit loop only notices a cancel BETWEEN sources, so a twelve-font run ignored the
       // click for however long the current font took to copy.
       shouldStop,
@@ -1409,7 +1409,7 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // detected above stay valid.
   // Inline and synchronous for the same reasons as ever: idempotent,
   // verify-before-commit, no-op for single-format/folder sources.
-  // ⚠️ THE RESULT IS KEPT, not discarded. dedupeSource reports exactly what it
+  // THE RESULT IS KEPT, not discarded. dedupeSource reports exactly what it
   // reclaimed and this threw it away, so a bulk run had no savings to report even
   // though every source had measured its own. (2026-09-05.)
   let dedupHere = null;
@@ -1718,7 +1718,7 @@ async function enrichSourceForGuided(src, learned = []) {
     purchasedDefault: true, fontWav: null, humWav: null, textFiles: [],
     wavCount: 0,
     suggestedName: null, nameSource: null, // set only when late docx naming upgrades a fallback
-    // ⭐ [B-296] HOW MANY FONTS ARE ACTUALLY IN HERE, answered during ANALYZE.
+    // [B-296] HOW MANY FONTS ARE ACTUALLY IN HERE, answered during ANALYZE.
     //
     // "136 new sound fonts ready to import" → Import → FORTY-SEVEN MINUTES LATER →
     // "135 sources imported (191 fonts), 1 failed - tr.zip - No fonts found in source."
@@ -1749,7 +1749,7 @@ async function enrichSourceForGuided(src, learned = []) {
     if (out.purchasedDefault && /\bfree\b/i.test(src.rawName || '')) out.purchasedDefault = false;
     // [B-296] Same detection the commit will run, asked here instead. Cheap: it is a
     // listAll plus a walk over names, and this pass already has the source open.
-    // ⚠️ Deliberately the SAME function the commit uses, not a second "does this look
+    // Deliberately the SAME function the commit uses, not a second "does this look
     // like a font" rule — two definitions of that would drift and the review would
     // start disagreeing with the import it is previewing.
     try {

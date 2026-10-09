@@ -10,12 +10,12 @@
  * called reorderFavorites with it. That API takes a COMPLETE list, so writing a stale
  * one is not a reorder: it is a restore.
  *
- * ⚠️ THE PART WORTH REMEMBERING: the drop handler ALREADY called getFavorites(), and
+ * THE PART WORTH REMEMBERING: the drop handler ALREADY called getFavorites(), and
  * used the result only for the missing-file paths. So it read current truth for one
  * half of a list it wrote whole, and stale truth for the other. Code that looks
  * careful — it does fetch! — while being wrong in exactly the half that matters.
  *
- * ⭐ SAME CLASS AS [B-371] one layer up: an action computing from a snapshot another
+ * SAME CLASS AS [B-371] one layer up: an action computing from a snapshot another
  * action already invalidated. There it was editor coordinates; here it is a list. Both
  * fixes are the same move — derive from the store at the moment of the write, so there
  * is no snapshot left to go stale.
@@ -85,7 +85,7 @@ function ok(name, cond, extra) {
   ok('missing files are still preserved at the end',
      after[after.length - 1] === 'gone.h', after.join(', '));
 
-  // ⚠️ A drag whose source or target vanished cannot be placed. Writing a whole list
+  // A drag whose source or target vanished cannot be placed. Writing a whole list
   // while unable to locate one of its members is how the resurrection happened.
   const vanished = (() => {
     const all = store().filter(i => i.filePath !== 'a.h');
@@ -97,7 +97,7 @@ function ok(name, cond, extra) {
 
 // ── B. the handlers actually do this ───────────────────────────────────────
 {
-  // ⚠️ ANCHOR ON SOMETHING UNIQUE. The first draft sliced from the first
+  // ANCHOR ON SOMETHING UNIQUE. The first draft sliced from the first
   // `card.addEventListener('drop'` in the file and landed on the STYLE card's drop
   // handler — a different feature entirely — then reported three failures about code
   // this entry never touched. There are two of each of these anchors; `reorderFavorites`
@@ -106,7 +106,7 @@ function ok(name, cond, extra) {
   ok('the favourites drop handler was located', reorderAt > 0);
   const drop = html.slice(Math.max(0, reorderAt - 1800), reorderAt + 400);
 
-  // ⚠️⚠️ AN ORDERING ASSERTION MUST READ CODE, NOT COMMENTARY, AND THIS ONE DID NOT.
+  // AN ORDERING ASSERTION MUST READ CODE, NOT COMMENTARY, AND THIS ONE DID NOT.
   // It compared indexOf('getFavorites()') against indexOf('findIndex') over the raw
   // slice. The `6a1d59c` fix added a comment explaining the race — "...gives null,
   // findIndex returns -1, and the guard below..." — and that sentence sits ABOVE the
@@ -116,7 +116,7 @@ function ok(name, cond, extra) {
   //
   // Same family as the anchor warning above: a static test is only as good as the text
   // it selects, and comments are text. Strip them before asking about order.
-  // ⚠️ `[^\r\n]*`, NOT `.*$`. index.html is CRLF, and `.` does not match `\r` while an
+  // `[^\r\n]*`, NOT `.*$`. index.html is CRLF, and `.` does not match `\r` while an
   // unanchored-by-`m` `$` demands end of STRING — so `/\/\/.*$/` matched nothing at all
   // on a line ending in `\r`, and the first version of this stripper silently stripped
   // no line comments whatsoever. A comment-remover that removes no comments looks

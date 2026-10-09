@@ -1,6 +1,6 @@
 // The JMT Add-ons release a build compiled in, recorded on the config.  [B-473]
 //
-// ⚠️ TWO HALVES, AND THE SECOND ONE IS THE WEAK HALF ON PURPOSE. The decision
+// TWO HALVES, AND THE SECOND ONE IS THE WEAK HALF ON PURPOSE. The decision
 // (`_addonsVersionFromMeta`) is RUN here against real inputs. The five-step seam
 // from the build result to the config file crosses main -> preload -> buildPanel
 // -> index.html and cannot be required() in a test, so it is reconciled over
@@ -9,7 +9,7 @@
 // nothing going red, which is exactly how `r.hash` vs `r.fileHash` shipped a
 // function that returned an empty array forever.
 //
-// ⭐ THE CONTROL IS BUILT IN. The charge_state.h case below is the one a naive
+// THE CONTROL IS BUILT IN. The charge_state.h case below is the one a naive
 // /jmt_/ regex misses, and this file ASSERTS that the fixture would defeat such a
 // regex - so the case cannot quietly stop being the hard case.
 
@@ -46,7 +46,7 @@ ok('the wrapper include stamps the version',
 ok('a leading-whitespace include still counts',
    decide(META, '\t  #include "../props/jmt_fett263_wrapper.h"\n') === '1.1.1');
 
-// ⚠️ A commented include is not in the binary. Stamping it would be the field
+// A commented include is not in the binary. Stamping it would be the field
 // claiming add-ons were compiled in when the preprocessor never saw them.
 ok('a commented-out include does NOT stamp',
    decide(META, '//#include "../props/jmt_fett263_wrapper.h"\n') === null,
@@ -54,7 +54,7 @@ ok('a commented-out include does NOT stamp',
 ok('a commented-out include with a space does NOT stamp',
    decide(META, '  // #include "../props/jmt_fett263_wrapper.h"\n') === null);
 
-// ⭐⭐ THE CASE A NAME-PATTERN WOULD MISS, which is why the installed-file list is
+// THE CASE A NAME-PATTERN WOULD MISS, which is why the installed-file list is
 // the source of truth rather than a regex over "jmt".
 const CHARGE_ONLY = '#include "../functions/charge_state.h"\n';
 ok('a JMT header with no jmt_ prefix still stamps',
@@ -114,7 +114,7 @@ ok('5. the fresh-compile path passes it through',
    /setCompiledTimestamp\(undefined, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb, addonsVersion\)/.test(buildPanel),
    'positional argument - the order is load-bearing');
 
-// ⚠️ THE CACHE PATH IS THE ONE THAT WAS NEARLY MISSED. A cache hit stamps every
+// THE CACHE PATH IS THE ONE THAT WAS NEARLY MISSED. A cache hit stamps every
 // other build record, so leaving this one out would let a restore update the OS,
 // board and USB fields while the add-ons field kept an older claim.
 ok('6. the cache-restore path passes it too',
@@ -125,7 +125,7 @@ ok('6. the cache-restore path passes it too',
 ok('7. the setter takes it as its seventh parameter',
    /window\.setCompiledTimestamp = async \(isoString, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb, addonsVersion\)/.test(html));
 
-// ⚠️ UNCONDITIONAL, unlike its three neighbours. null means "no add-ons in this
+// UNCONDITIONAL, unlike its three neighbours. null means "no add-ons in this
 // build", so a truthiness guard would leave a stale version standing after the
 // include is removed and the config recompiled.
 ok('8. the setter assigns unconditionally so null CLEARS',
@@ -149,7 +149,7 @@ ok('12. it is cleared with the other build records',
    /metaCompiledUsb = metaCompiledAddons = metaFlashed/.test(html),
    'a stale stamp surviving a config switch is worse than no stamp');
 
-// ⚠️ THE ABSENCE THAT IS DELIBERATE. compiled_usb / compiled_os / compiled_board
+// THE ABSENCE THAT IS DELIBERATE. compiled_usb / compiled_os / compiled_board
 // are backfilled at load from saved settings for pre-1.8 configs. Nothing saved
 // corresponds to an add-ons release, and the version installed TODAY is not
 // evidence about an old build - it is the drift this field exists to show.

@@ -1,6 +1,6 @@
 // Nothing in the renderer may be defined without a caller.
 //
-// ⭐⭐ WHY THIS EXISTS. 2026-09-23 swept `renderer/index.html` for `_sf` / `_sd` / `_export`
+// WHY THIS EXISTS. 2026-09-23 swept `renderer/index.html` for `_sf` / `_sd` / `_export`
 // definitions with zero non-comment references and found EIGHT. They were not equally harmless:
 //
 //   • `_sfWarnSlowWrite`  - the old per-door slow-write warner. Its last caller left when door 1
@@ -16,7 +16,7 @@
 //   • `_sdRenderText`     - a second implementation of the card's text viewer, with its own copy
 //                           of the config test and its own "Open in editor" button.
 //
-// ⚠️ The pattern is not "dead code is untidy". It is that a definition with no caller reads as a
+// The pattern is not "dead code is untidy". It is that a definition with no caller reads as a
 // feature that exists, so the thing it was supposed to fix stays broken while looking handled -
 // and a test can keep it alive indefinitely. The reason for fixing rather than filing:
 // "I don't like the idea of continuing to code and test against a moving target even with dead
@@ -35,7 +35,7 @@ const ok = (name, cond, why) => {
   console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${name}` + (cond || !why ? '' : `\n       ${why}`));
 };
 
-// ⚠️ COMMENTS STRIPPED BEFORE COUNTING REFERENCES. A name that survives only in prose - in the
+// COMMENTS STRIPPED BEFORE COUNTING REFERENCES. A name that survives only in prose - in the
 // very comment explaining why it was deleted - is not a caller. Getting this wrong makes the
 // check permanently green, which is the failure mode that matters here.
 const findOrphans = (text) => {
@@ -71,11 +71,11 @@ ok(`no renderer helper is defined without a caller (found ${orphans.length})`,
    orphans.map((o) => `${o.name} @ line ${o.defLine}`).join(', ')
    + ' — either wire it or delete it. A definition nobody calls reads as a working feature.');
 
-// ── ⚠️⚠️ AND THE CHECK PROVES IT CAN FAIL ────────────────────────────
+// ── AND THE CHECK PROVES IT CAN FAIL ────────────────────────────
 // A sweep that reports zero is indistinguishable from a sweep that cannot see anything. Inject
 // a function nobody calls and confirm it is caught.
 //
-// ⚠️ ANCHOR ON SOMETHING THE SWEEP ITSELF REQUIRES. This was `function _sdBusyText(text) {`
+// ANCHOR ON SOMETHING THE SWEEP ITSELF REQUIRES. This was `function _sdBusyText(text) {`
 // until 2026-10-06, when that helper was deleted as an orphan - the sweep's own subject became
 // its control's anchor and vanished with it. `findOrphans` cannot run at all without a script
 // block, so the opening tag is as stable as the test is.
@@ -86,7 +86,7 @@ ok(`no renderer helper is defined without a caller (found ${orphans.length})`,
   ok('the mutation was applied', mutated.length !== src.length,
      'anchor moved - the control below proves nothing without it');
   const caught = findOrphans(mutated).some((o) => o.name === '_sdOrphanCanary');
-  ok('⚠️⚠️ an injected uncalled function IS caught', caught,
+  ok('an injected uncalled function IS caught', caught,
      'the sweep cannot see an orphan, so its clean result means nothing');
 }
 

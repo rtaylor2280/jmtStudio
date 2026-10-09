@@ -90,17 +90,17 @@ function _uniqueName(root, desired) {
 // 2026-09-01: "might be doing the whole folder level rather than the files".)
 // [B-400] ASYNC, and the async is the fix rather than a refactor that came with it.
 //
-// ⚠️⚠️ A SYNCHRONOUS LOOP CANNOT REPORT ON ITSELF. copyFileSync plus a readFileSync hash held the
+// A SYNCHRONOUS LOOP CANNOT REPORT ON ITSELF. copyFileSync plus a readFileSync hash held the
 // main process for the whole add, so every progress event describing this work queued behind the
 // work and flushed after it finished. Wiring a callback into the old loop would have produced a
 // bar that sat at zero and jumped to 100 - passing a three-file test and failing the case he
 // reported. `await` per file is what lets the event loop breathe. Same mechanism [B-398] measured.
 //
-// ⭐ BYTES, NOT FILE COUNT, and that is the correctness point not a polish one: "if the user
+// BYTES, NOT FILE COUNT, and that is the correctness point not a polish one: "if the user
 // selects 100 long wav files... that's real bytes that need to be tracked for sure." A file-count
 // bar sits at 99/100 with a third of the data still to move.
 //
-// ⚠️ WHY `onBytes` REPORTS {done, total} AND NOT A DELTA, unlike _sfExportProgressEmitter: a
+// WHY `onBytes` REPORTS {done, total} AND NOT A DELTA, unlike _sfExportProgressEmitter: a
 // dropped or coalesced delta loses those bytes permanently and the bar ends short. An absolute
 // pair self-corrects on the next message. The backend already knows the total here, so there is
 // nothing to reconstruct.
@@ -165,12 +165,12 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
   };
   const _credit = (n, name) => { _bytesDone += (n || 0); _emit(name); };
   _emit('');
-  // ⚠️⚠️ CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
+  // CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
   // The exit from a long add used to be force-quitting the app, and force-quitting mid-write to a
   // card is the corruption this whole SD line of work exists to prevent - so an add that cannot
   // be stopped is not merely inconvenient, it pushes people toward the dangerous exit. Reported
   // 2026-09-25 at 927 MB of 2.14 GB with nothing to press.
-  // ⚠️ Stopping here leaves every file already copied in place and complete. Files not yet reached
+  // Stopping here leaves every file already copied in place and complete. Files not yet reached
   // are simply not added; nothing is half-written and nothing needs cleaning up.
   let _stopped = false;
   for (const entry of sourceFilePaths) {
@@ -188,7 +188,7 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
     const src = (entry && typeof entry === 'object') ? entry.path : entry;
     const wanted = (entry && typeof entry === 'object' && entry.name) ? entry.name : null;
     if (!src || !/\.wav$/i.test(src)) { skipped.push({ src, reason: 'Not a .wav file' }); continue; }
-    // ⚠️ THE .wav TEST ABOVE IS A SHAPE TEST, NOT A SAFETY ONE ([B-370]). A program
+    // THE .wav TEST ABOVE IS A SHAPE TEST, NOT A SAFETY ONE ([B-370]). A program
     // renamed hum.wav passes it, which is precisely the disguise the content tier
     // exists for. Nothing is destroyed here - the track simply is not added, and the
     // user's own file stays where they picked it.
@@ -213,27 +213,27 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       // [B-400] The copy is awaited rather than synchronous: the await is what yields the event
       // loop so the ticks emitted above reach the renderer while the add is still running.
       //
-      // [B-406] ⭐⭐ AND IT GOES THROUGH THE LIBRARY-WIDE POOL FIRST. The framing, and it is the
+      // [B-406] AND IT GOES THROUGH THE LIBRARY-WIDE POOL FIRST. The framing, and it is the
       // one that settles this: "tracks is just a font source under a different name" — for
       // STORAGE purposes it is a folder of wavs like any other, so "we never store the same bytes
       // twice" has to hold here too. A plain copy meant a track matching a wav already in a font
       // was written fresh, in the direction opposite to the one testing found.
       //
-      // ⚠️⚠️ THE SIDECAR STAYS, AND DOING ONLY ONE OF ITS JOBS IS THE POINT. sharedTracksHash was
+      // THE SIDECAR STAYS, AND DOING ONLY ONE OF ITS JOBS IS THE POINT. sharedTracksHash was
       // doing TWO things: per-track UUID IDENTITY (so a renamed track survives a backup merge —
       // real, and genuinely specific to tracks) and CONTENT DEDUPE (a hash lookup — not specific
       // at all, and duplicated what the content index does for every other bucket). Conflating
       // them is what opted tracks out of the library-wide system. Identity stays here; bytes go
       // to the pool.
       //
-      // ⚠️ ingest falls back to a copy on any failure, so this can only ever save writes, never
+      // ingest falls back to a copy on any failure, so this can only ever save writes, never
       // lose a file. And it re-hashes a candidate before linking, so a stale record costs one
       // wasted check rather than a wrong file.
-      // ⚠️⚠️ THE INDEX IS BUILT ONCE, ABOVE THE LOOP. The first draft of this built it per file —
+      // THE INDEX IS BUILT ONCE, ABOVE THE LOOP. The first draft of this built it per file —
       // measured at 165ms on the store, so a 62-file add would have spent TEN SECONDS rebuilding
       // the same index 62 times. addFilesAt already does it correctly; copying the shape rather
       // than the idea is what avoids this.
-      // ⚠️⚠️ `ingest` ALONE — NOT storeInPool FIRST, and the difference is the whole point.
+      // `ingest` ALONE — NOT storeInPool FIRST, and the difference is the whole point.
       // The model, 2026-09-17: "I just assumed that tracks was its own pool because it's the only
       // dynamic source. so when I add a track, that is its home." That is right, and it is the
       // ORIGINAL design: [B-315] and [B-316] both say the content pool was MODELLED on
@@ -241,28 +241,28 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       // works." Tracks was always a pool. Routing it through storeInPool layered a second pool on
       // top of the first and gave every novel track a redundant name.
       //
-      // ⭐ THE RULE THIS MAKES VISIBLE, and it is worth stating because it was never written down:
+      // THE RULE THIS MAKES VISIBLE, and it is worth stating because it was never written down:
       //     a bucket that IS a home            -> ingest alone   (commons, tracks)
       //     content with no home of its own    -> storeInPool first, then ingest   (font + Add)
       // A font file picked off the desktop has nowhere to live, so the pool gives it somewhere.
       // A track has the tracks folder. So novel audio simply stays here, and ingest still links
       // when the library already holds those bytes anywhere.
       //
-      // ⚠️ The survival argument does not apply either: hardlinks keep bytes alive while ANY name
+      // The survival argument does not apply either: hardlinks keep bytes alive while ANY name
       // points at them, so a font linking straight to a track does not need a pool copy to
       // outlive a deleted track.
       const _destAbs = path.join(root, dest);
       // The source is opened once. It used to be hashed here, then handed to ingestFile, which
       // hashed and copied it again — three opens per novel track, and per-file open is the
       // expensive operation across a board's USB mass storage (see soundFontSources.js:189).
-      // ⚠️ ingestFile is pointed at the TEMP, not at src. It still hashes and copies, but off the
+      // ingestFile is pointed at the TEMP, not at src. It still hashes and copies, but off the
       // local disk. Passing src here would put the second and third opens back. [B-424]
       const _tmpAbs = _destAbs + '.jmt-add-tmp';
       const _r = await fileHash.copyFileHashing(src, _tmpAbs,
         { onBytes: (n) => _credit(n, _label), shouldStop });
       if (_r && _r.stopped) { _stopped = true; break; }
       if (!_r || !_r.hash) { skipped.push({ src, reason: 'Could not read the file' }); continue; }
-      // ⚠️ findByHash returns an ARRAY of matches and `[]` when there are none. An empty array is
+      // findByHash returns an ARRAY of matches and `[]` when there are none. An empty array is
       // truthy, so a bare `if (hit)` reports every track as a duplicate against an empty library.
       const _hits = _index ? hashIndex.findByHash(_index, _r.hash) : null;
       if (_hits && _hits.length) {
@@ -278,7 +278,7 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
           _linked = !!(r && r.ok);
         }
       } catch { _linked = false; }
-      // ⚠️ Either ingest placed the file (link or copy) and the temp is now redundant, or nothing
+      // Either ingest placed the file (link or copy) and the temp is now redundant, or nothing
       // did and the temp IS the file. Renaming beats a second copy, and it is atomic on one volume.
       if (_linked) { try { fs.rmSync(_tmpAbs, { force: true }); } catch {} }
       else { fs.renameSync(_tmpAbs, _destAbs); }
@@ -293,7 +293,7 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       skipped.push({ src, reason: String(err && err.message || err) });
     }
   }
-  // ⭐⭐ LAND ON 100%, ALWAYS. Files leave this loop by SIX routes - copied, duplicate, not a
+  // LAND ON 100%, ALWAYS. Files leave this loop by SIX routes - copied, duplicate, not a
   // .wav, refused, unsafe name, copy error - and only the first two settle their own budget.
   // Crediting at every skip point would work until the seventh route is added and silently
   // stops the bar at 94%. One terminal emit is honest (the work IS finished) and cannot be
@@ -301,7 +301,7 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
   // it moves on.
   _bytesDone = _bytesTotal;
   _emit('');
-  // ⚠️ `canceled` travels with the result rather than being an error: a stop the user asked for
+  // `canceled` travels with the result rather than being an error: a stop the user asked for
   // is an outcome, and reporting it as a failure is what [B-005] item 4 had to undo on the
   // export side. Everything already copied is reported as added, because it was.
   return { ok: true, canceled: _stopped, added, skipped, duplicates, refused: refusedIn };
@@ -335,12 +335,12 @@ function deleteFile(userData, name) {
   try {
     fs.unlinkSync(file);
     try { hashIndex.recordDelete(userData, name); } catch {}
-    // [B-406] ⚠️⚠️ A DEFECT THIS ENTRY ITSELF INTRODUCED, caught before it shipped. Tracks now
+    // [B-406] A DEFECT THIS ENTRY ITSELF INTRODUCED, caught before it shipped. Tracks now
     // store their bytes in the pool and hold a link, so removing the track's name is no longer
     // the same as freeing its space — the pool copy is left at nlink 1 and nothing reclaimed it.
     // Deleting tracks to free space is EXACTLY what it was doing the day this was written, so the
     // change would have quietly defeated the thing it was next to.
-    // ⚠️ The sweep only removes pool files whose link count has fallen to 1, so a file any other
+    // The sweep only removes pool files whose link count has fallen to 1, so a file any other
     // font, common or track still names is never touched. deleteEntry, deleteFiles and removal all
     // already call it; tracks was the fourth door and had never needed it before today.
     try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
@@ -402,15 +402,15 @@ function existsAt(destDir) {
 // per folder, so without this the scan sits on "shared tracks" while hashing a
 // hundred-plus wavs and reads as frozen. The app's convention for a long read is
 // filenames going past, not a stalled bar.
-// ⚠️ ASYNC SINCE [B-398]. Every file here is a music track - megabytes each - and this hashes
+// ASYNC SINCE [B-398]. Every file here is a music track - megabytes each - and this hashes
 // TWO of them per track. Measured 623ms stalled inside tracks:planExport with a per-file yield
 // already in place, because the block is inside ONE hash, not between them.
-// ⚠️⚠️ `shouldStop` ADDED 2026-09-24 [B-420]. This is a READ - it hashes tracks to work out what
+// `shouldStop` ADDED 2026-09-24 [B-420]. This is a READ - it hashes tracks to work out what
 // would be written - and it had NO cancel of any kind. Its caller (the primary export's conflict
 // scan) checks its own flag between ITEMS, and this whole pass is ONE item, so a cancel during the
 // tracks comparison sat through every remaining file before anything noticed.
 //
-// ⭐ HIS POINT, AND IT IS THE RIGHT ONE: *"why would it need to do anything if all it was doing was
+// THE POINT, AND IT IS THE RIGHT ONE: *"why would it need to do anything if all it was doing was
 // analyzing? there's not a copy being made... so it should just stop."* Nothing is written here, so
 // there is nothing to protect and nothing to finish - the only honest behaviour is to stop.
 async function planExport(userData, destDir, onFile = null, shouldStop = null) {
@@ -449,7 +449,7 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
 
   let done = 0;
   for (const name of names) {
-    // ⚠️ CHECKED PER FILE. Each iteration can hash a whole track off slow storage, so a check
+    // CHECKED PER FILE. Each iteration can hash a whole track off slow storage, so a check
     // only at the top of the pass would be no better than none. [B-420, 2026-09-24]
     if (shouldStop && shouldStop()) return { ok: true, canceled: true };
     if (onFile) { try { onFile(name, done, names.length); } catch {} }
@@ -481,25 +481,25 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
   // on, and the one the user set at [B-358] for a different caller ('a read-only question can seed
   // jmt-studio-manifest.json at the destination').
   //
-  // ⭐ NOTHING IS LOST BY DEFERRING IT. Everything here was computed as a side effect of work
+  // NOTHING IS LOST BY DEFERRING IT. Everything here was computed as a side effect of work
   // the compare had to do anyway, so handing it back costs nothing and the caller writes it
   // ONCE, at the end, together with whatever the copies added. A standalone compare - the
   // user only asking - writes nothing at all, and re-asking simply re-hashes.
   //
-  // ⚠ The old code wrote here AND again after copying, so one export touched the manifest
+  // The old code wrote here AND again after copying, so one export touched the manifest
   // twice, seconds apart, the first describing a state that existed only until the copies
   // landed.
-  // ⚠️⚠️ AN ARRAY, NOT THE MAP. [B-173, 2026-09-25] This returned `refreshed` raw, and its
+  // AN ARRAY, NOT THE MAP. [B-173, 2026-09-25] This returned `refreshed` raw, and its
   // sibling `exportToFolder` has always converted to an array for exactly one reason, written
   // on the commit handler: Maps do not reliably survive IPC. This function IS called across
   // IPC by the export scan, so the shape had to match its sibling's.
-  // ⚠️ Safe for the in-process caller too - `exportToFolder` does `new Map(plan.observed || [])`,
+  // Safe for the in-process caller too - `exportToFolder` does `new Map(plan.observed || [])`,
   // which takes an array or a Map.
-  // ⚠️⚠️ `complete` LICENSES THE CALLER TO DELETE RECORDS THIS LIST DOES NOT MENTION. Claimed
+  // `complete` LICENSES THE CALLER TO DELETE RECORDS THIS LIST DOES NOT MENTION. Claimed
   // only when the observations really are the whole folder: nothing in `toAdd` (every library
   // track was FOUND at the destination) and the destination holds no more files than the
   // library has. Counts alone can coincide - one absent, one stray - which is why both.
-  // ⚠️ A cancel returns from inside the loop above with no observations at all, so a partial
+  // A cancel returns from inside the loop above with no observations at all, so a partial
   // pass can never reach this.
   let _destFiles = -2;
   try { _destFiles = require('./soundFontFileHash').dirSignals(targetDir).fileCount; } catch {}
@@ -538,7 +538,7 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
 
   const replaceSet = new Set(replace);
   const added = [], replaced = [], kept = [];
-  // ⚠️ THE LAST UNGUARDED WAY OUT ([B-364], 2026-09-11). Every other export refuses a
+  // THE LAST UNGUARDED WAY OUT ([B-364], 2026-09-11). Every other export refuses a
   // program; this one copied straight through. The .wav filter on the legacy path below
   // is not a substitute - a program renamed to hum.wav passes an extension test and is
   // exactly the case content-checking exists for. Free here: the check reads 256 bytes
@@ -551,7 +551,7 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
       refused.push({ relPath: name, name, kind: v.kind, reason: v.reason, disguised: !!v.disguised });
       return false;
     }
-    // ⚠️ THE NAME IS RIGHT HERE AND WAS BEING THROWN AWAY. [B-420, 2026-09-23]
+    // THE NAME IS RIGHT HERE AND WAS BEING THROWN AWAY. [B-420, 2026-09-23]
     // `copyFileWithProgress` reports bare chunk lengths, so handing it `onBytes` directly loses
     // which track is copying - and this function already has the name as its own argument.
     // Same drop as the two main.js sinks and the archive path; found by sweeping every door
@@ -562,14 +562,14 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
   };
   // ── Cancelling a tracks export ────────────────────────────────── [B-005 item 4]
   //
-  // ⭐⭐ TRACKS DO NOT GET THEIR PARTIAL REMOVED, AND THAT IS A REAL DIFFERENCE, NOT AN
+  // TRACKS DO NOT GET THEIR PARTIAL REMOVED, AND THAT IS A REAL DIFFERENCE, NOT AN
   // INCONSISTENCY. A font is a UNIT: half of one on a card mounts, lists, and then fails when a
   // sound is called for, so the font export takes its partial back. A tracks folder is a BAG OF
   // INDEPENDENT FILES - every track that finished copying is a complete, playable file, and the
   // destination folder is the user's, not ours (additive never created it and never owns it).
   // Deleting what landed would destroy finished work to tidy up something that is not broken.
   //
-  // ⭐ AND THE RULE ABOVE SURVIVED THE MID-FILE CANCEL INTACT - it got SHARPER, not weaker.
+  // AND THE RULE ABOVE SURVIVED THE MID-FILE CANCEL INTACT - it got SHARPER, not weaker.
   // Copies are now interruptible inside a file, and the in-flight track's truncated remains
   // are deleted by `copyFileWithProgress`. That is the same principle, not an exception to
   // it: the argument for keeping what landed is that each one is "a complete, playable
@@ -587,7 +587,7 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
       else kept.push(name);
     }
   } catch (err) {
-    // ⚠️⚠️ A CANCEL IS AN OUTCOME, NOT A FAILURE, AND THIS CATCH IS WHERE IT WOULD HAVE
+    // A CANCEL IS AN OUTCOME, NOT A FAILURE, AND THIS CATCH IS WHERE IT WOULD HAVE
     // BECOME ONE. Interrupting mid-file means `copy` can now THROW where before it only
     // ever returned - and this handler stringifies anything it catches into `error`, so a
     // user's own Cancel would have come back as a red "Export failed: Export cancelled".
@@ -614,12 +614,12 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
   //     them is its job - `plan.observed`.
   //   • the COPIES know the library hash of what they just wrote, already in memory, so the
   //     card is never re-read to learn what we put on it.
-  // ⚠ ORDER MATTERS: the copies go in SECOND so a file we just replaced overwrites the
+  // ORDER MATTERS: the copies go in SECOND so a file we just replaced overwrites the
   // compare's record of the old version, not the other way round.
   //
-  // ⚠⚠ NO SEPARATE PASS, EVER. Building the manifest as its own task would re-read the card
+  // NO SEPARATE PASS, EVER. Building the manifest as its own task would re-read the card
   // to learn what it already told us - adding cost to reduce cost.
-  // ⚠️ RETURNED, NOT WRITTEN. The CALLER commits everything the operation learned in ONE write at
+  // RETURNED, NOT WRITTEN. The CALLER commits everything the operation learned in ONE write at
   // the end, so an item that was only LOOKED at still gets recorded. Writing per item here dropped
   // exactly those, and a card kept in sync is mostly items that need no copying.
   let _observed = null;
@@ -636,7 +636,7 @@ async function exportToFolderAdditive(userData, destDir, opts = {}) {
     }
     _observed = [...observed];
   } catch {}
-  // ⚠️ THE MANIFEST IS STILL WRITTEN FOR WHAT LANDED. A cancelled export leaves real files at
+  // THE MANIFEST IS STILL WRITTEN FOR WHAT LANDED. A cancelled export leaves real files at
   // the destination, and a manifest that does not mention them is how the next run re-hashes
   // work already done - [B-005] item 1's whole argument, which holds however an export ends.
   return { ok: true, canceled: _canceled, destPath: targetDir, added, replaced, kept,
@@ -664,7 +664,7 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
     catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
   }
   let targetName = 'tracks';
-  // ⚠️ Declared out here because the `replace` branch writes it and the three exits below read
+  // Declared out here because the `replace` branch writes it and the three exits below read
   // it. See the twin in soundFontCommon - neither file is in strict mode, so a `let` inside the
   // branch would not throw, it would make a silent global. [B-420, 2026-09-24]
   let asideDir = null;
@@ -674,15 +674,15 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
       return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
     }
     if (mode === 'replace') {
-      // ⚠️ AWAITED — recursive delete of a whole item on the CARD, no yielding. [B-398]
+      // AWAITED — recursive delete of a whole item on the CARD, no yielding. [B-398]
       // Same defect and same fix as soundFontEntries.exportEntryToFolder; it only fires when the
       // destination already exists, so re-exporting is the reproduction.
-      // ⚠️⚠️ SET ASIDE, DO NOT DELETE - the twin of the common folder's replace, changed at the
+      // SET ASIDE, DO NOT DELETE - the twin of the common folder's replace, changed at the
       // same time and for the same reason. [B-420, 2026-09-24] That one was REPORTED: a recursive
       // delete failed partway, and because it deletes before it writes, the reply was an error
       // AND the user's existing folder was already gutted. This path is the identical shape and
       // was one report away from the identical outcome.
-      // ⭐ Fixing only the one that was reported is how a codebase grows two answers to one
+      // Fixing only the one that was reported is how a codebase grows two answers to one
       // question. The pattern is the font export's, which has always renamed rather than deleted.
       asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
       if (fs.existsSync(asideDir)) {
@@ -709,7 +709,7 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
     // Flat folder — only .wav files at the top level (matches listFiles
     // contract). The .jmt-hashes.json sidecar stays in userData and never
     // ships to the SD card. Streamed copy with write-paced byte progress.
-    // ⚠️ The .wav fileFilter is a SHAPE test, not a safety one - a program renamed to
+    // The .wav fileFilter is a SHAPE test, not a safety one - a program renamed to
     // hum.wav passes it. `refused` is what reads the bytes ([B-364]).
     const _refused = [];
     try {
@@ -721,12 +721,12 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
         shouldStop: opts.shouldStop || null,
       });
     } catch (err) {
-      // ⚠️ Same reasoning as the additive path above: finished tracks are complete, playable
+      // Same reasoning as the additive path above: finished tracks are complete, playable
       // files and are left where they landed. Nothing is removed. [B-005 item 4]
       if (require('./sfExportCopy').isCancel(err)) {
         const out = { ok: true, canceled: true, destPath: targetDir, refused: _refused,
                       restored: false, leftovers: [] };
-        // ⭐ RESTORE FIRST, DISPOSE SECOND - see the twin in soundFontCommon for why the order
+        // RESTORE FIRST, DISPOSE SECOND - see the twin in soundFontCommon for why the order
         // matters. Finished tracks are complete playable files and are left where they landed,
         // but on a REPLACE the user's previous folder is parked aside and must come back.
         if (asideDir) {
@@ -754,9 +754,9 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
       }
       throw err;
     }
-    // ⭐ Past this line the new folder is complete and the parked copy is superseded. Renamed
+    // Past this line the new folder is complete and the parked copy is superseded. Renamed
     // before removal so an interrupted disposal leaves something whose NAME says what it is.
-    // ⚠️ Not fatal: the export succeeded, so a leftover is a note rather than an error.
+    // Not fatal: the export succeeded, so a leftover is a note rather than an error.
     let replacedLeftover = null;
     if (asideDir) {
       const junk = path.join(destDir, `DELETE.${targetName}`);
@@ -774,7 +774,7 @@ async function exportToFolder(userData, destDir, mode = 'rename', onBytes = null
     return { ok: true, destPath: targetDir, refused: _refused, replacedLeftover };
   } catch (err) {
     try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
-    // ⚠️ And put their folder back on any non-cancel failure, for the same reason as the twin:
+    // And put their folder back on any non-cancel failure, for the same reason as the twin:
     // before the set-aside there was nothing to restore because it had already been deleted.
     let _restoreNote = '';
     if (asideDir && fs.existsSync(asideDir)) {

@@ -1,13 +1,13 @@
 /**
  * A backup carries the per-file ownership records, and merge carries them too  [B-399]
  *
- * ⭐ THE SYMPTOM, found in testing 2026-09-16: the "Already in your library (skipped)" row
+ * THE SYMPTOM, found in testing 2026-09-16: the "Already in your library (skipped)" row
  * vanished from the import breakdown. Cause, traced: the library held 151 fonts and
  * `.filehashes/entries/` held ZERO files, so `soundFontCompare.buildLibraryIndex` — which
  * reads those records and has NO fallback — returned an empty index, the ownership pass
  * never ran, and every font in the library became invisible to "do I already have this?".
  *
- * ⚠️⚠️ ONLY THE ENTRIES RECORDS ARE CORRECTNESS. Checked every consumer 2026-09-16:
+ * ONLY THE ENTRIES RECORDS ARE CORRECTNESS. Checked every consumer 2026-09-16:
  *   entries  -> buildLibraryIndex, NO fallback. A missing record is a font that cannot be
  *               matched, silently. This is the bug.
  *   commons  -> classifyIncomingCommon falls back to hashItemDir on a live walk.
@@ -16,7 +16,7 @@
  * all carried anyway because carrying costs 2.4 MB on a 6.18 GB archive and rebuilding
  * costs a full re-read of the library — but the entry is about fonts.
  *
- * ⭐⭐ AND THE SCOPE SHRANK TWICE, BOTH TIMES BECAUSE HE PUSHED. The first build also
+ * AND THE SCOPE SHRANK TWICE, BOTH TIMES UNDER PUSHBACK. The first build also
  * REPAIRED degraded libraries — warmed missing records before archiving, rebuilt them after
  * restoring. Reported: "there is zero chance anyone could ever need it once this is repared...
  * we don't want to maintian code that isn't needed." That was right: the Sound Font Library is
@@ -24,11 +24,11 @@
  * hold an archive that predates the records, and no shipped library can be degraded once
  * the carry works. The repair had no audience and came out.
  *
- * ⭐ WHAT THE STRIP UNCOVERED, and it is the one part that reaches a user who never restored
+ * WHAT THE STRIP UNCOVERED, and it is the one part that reaches a user who never restored
  * anything: MERGE materialises items by raw zip extraction — no entry creation, no hash
  * recompute — so a merged font landed with no record and nothing anywhere to ever make one.
  *
- * ⚠️ REAL ROUND TRIPS, not source-text matching. The original defect was an ABSENT string,
+ * REAL ROUND TRIPS, not source-text matching. The original defect was an ABSENT string,
  * which no matcher looking for one can see.
  *
  * Run: node test/hash-records-survive-backup.test.js
@@ -110,7 +110,7 @@ async function warmRecords(ud, ids) {
   const sourcesMod = require(path.join(ROOT, 'soundFontSources'));
   for (const e of ids.entries) entriesMod.recomputeEntryContentHash(ud, e.name);
   for (const c of ids.commons) commonMod.recomputeCommonContentHash(ud, c);
-  // ⚠ SOURCES NEED THEIR OWN CALL, and forgetting it produced a FALSE FAILURE the first
+  // SOURCES NEED THEIR OWN CALL, and forgetting it produced a FALSE FAILURE the first
   // time this suite ran: the merge assertion said no source record rode along, and the real
   // reason was that the fixture library never had one to carry. A fixture that does not
   // reach the state under test reports on nothing.
@@ -121,7 +121,7 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
 
 (async () => {
 
-// ── ⭐⭐ THE SYMPTOM ITSELF: no record, no ownership answer ────────────────
+// ── THE SYMPTOM ITSELF: no record, no ownership answer ────────────────
 {
   const ud = store();
   const { SF, ids } = buildLibrary(ud, { entries: 2, commons: 0, sources: 0 });
@@ -130,19 +130,19 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
   ok('a normal library answers ownership for every font',
      healthy.index.length === 2 && healthy.unmatchable === 0);
 
-  // ⚠️ The stamped hash and the cheap signals still match the tree, so nothing recomputes
+  // The stamped hash and the cheap signals still match the tree, so nothing recomputes
   // and nothing ever rewrites the record. That is why it never self-heals.
   fs.rmSync(path.join(SF, '.filehashes'), { recursive: true, force: true });
   const meta = JSON.parse(fs.readFileSync(path.join(SF, 'library', 'Font_a0', 'meta.json'), 'utf8'));
-  ok('⚠️ setup is honest: the hash IS stamped and NOT dirty',
+  ok('setup is honest: the hash IS stamped and NOT dirty',
      !!meta.contentHash && meta.contentHashDirty === false);
   const blind = cmp.buildLibraryIndex(ud);
-  ok('⭐⭐ without the records the index is EMPTY while the fonts sit on disk',
+  ok('without the records the index is EMPTY while the fonts sit on disk',
      blind.index.length === 0 && blind.unmatchable === 2,
      'this is what emptied ownedCount and deleted the "Already in your library" row');
 }
 
-// ── ⚠️ the other two buckets are NOT this bug, and the test says so ────────
+// ── the other two buckets are NOT this bug, and the test says so ────────
 //
 // Asserted rather than assumed, because the first version of this fix treated all three
 // alike and built a repair pass for buckets that repair themselves.
@@ -161,7 +161,7 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
 
   fs.rmSync(path.join(SF, '.filehashes'), { recursive: true, force: true });
   const without = commonMod.classifyIncomingCommon(ud, incoming);
-  ok('⭐ and STILL recognised with no record at all — it falls back to a live walk',
+  ok('and STILL recognised with no record at all — it falls back to a live walk',
      without.ownedByContent === true,
      'commons records are a speed cache, not correctness; treating them as broken is what produced a repair nobody needed');
 }
@@ -178,22 +178,22 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
   const zip = new StreamZip.async({ file: dest, skipEntryNameValidation: true });
   const names = Object.keys(await zip.entries());
   const carried = names.filter(n => n.startsWith('.filehashes/') && !n.endsWith('/'));
-  ok('⭐⭐ THE ARCHIVE CONTAINS THE RECORDS — the line that did not exist',
+  ok('THE ARCHIVE CONTAINS THE RECORDS — the line that did not exist',
      carried.length >= 3, `found ${carried.length}`);
-  ok('⭐ including one per FONT, keyed by entryUuid not by folder name',
+  ok('including one per FONT, keyed by entryUuid not by folder name',
      ids.entries.every(e => names.includes(`.filehashes/entries/${e.uuid}.json`)),
      'the directory name is the font name; the record key lives inside its meta.json');
   ok('the fonts are still carried too', names.some(n => n.startsWith('library/Font_a0/')),
      'adding a bucket must not disturb the five already carried');
 
-  // ⚠️ The size shown to the user is the size of their LIBRARY, and it drives the estimate.
+  // The size shown to the user is the size of their LIBRARY, and it drives the estimate.
   const t = r.manifest.totals;
-  ok('⚠️ the records are NOT counted in the reported library size',
+  ok('the records are NOT counted in the reported library size',
      t.totalBytes === t.sources + t.library + t.common + t.sharedTracks + t.attachments,
      `totalBytes=${t.totalBytes}`);
 
-  // ⭐ The repair is gone. Nothing rebuilds, nothing warms, nothing declares a survey.
-  ok('⭐⭐ export reports no rebuild — that machinery is gone',
+  // The repair is gone. Nothing rebuilds, nothing warms, nothing declares a survey.
+  ok('export reports no rebuild — that machinery is gone',
      !('hashBackfill' in r) && !r.manifest.hashManifests,
      'a repair pass for libraries that cannot exist is code nobody can maintain');
   await zip.close();
@@ -209,23 +209,23 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
 
   fs.rmSync(SF, { recursive: true, force: true });
   const rr = await backup.applyReplace({ userData: ud, zipPath: dest });
-  ok('⭐⭐ a restored library can answer ownership again',
+  ok('a restored library can answer ownership again',
      cmp.buildLibraryIndex(ud).index.length === 2,
      'the whole point: comparison works, not just whole-archive dedup');
   ok('and the records are physically there',
      countIn(path.join(SF, '.filehashes', 'entries')) === 2);
-  ok('⭐ restore reports no rebuild either', !('hashBackfill' in rr));
+  ok('restore reports no rebuild either', !('hashBackfill' in rr));
 
-  // ⚠️⚠️ THE REGRESSION THAT WAS WORSE THAN THE BUG: the full-replace path rmSyncs the
+  // THE REGRESSION THAT WAS WORSE THAN THE BUG: the full-replace path rmSyncs the
   // ENTIRE soundFonts root before unpacking, so restoring into a HEALTHY library used to
   // delete a working index and put nothing back.
   await backup.applyReplace({ userData: ud, zipPath: dest });
-  ok('⭐⭐ restoring into a HEALTHY library leaves it healthy',
+  ok('restoring into a HEALTHY library leaves it healthy',
      cmp.buildLibraryIndex(ud).index.length === 2 &&
      countIn(path.join(SF, '.filehashes', 'entries')) === 2);
 }
 
-// ── ⭐⭐ MERGE: the half that reaches a user who never restored anything ───
+// ── MERGE: the half that reaches a user who never restored anything ───
 {
   // Library A is backed up; library B is a DIFFERENT library that merges A's fonts in.
   const a = store();
@@ -249,12 +249,12 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
   const mr = await backup.applyMerge({ userData: b, zipPath, plan });
   ok('the merge took the fonts', mr.counts.library.added === 2);
 
-  ok('⭐⭐ EVERY MERGED FONT CAN ANSWER OWNERSHIP',
+  ok('EVERY MERGED FONT CAN ANSWER OWNERSHIP',
      cmp.buildLibraryIndex(b).index.length === 3,
      'merge extracts raw files — without this it creates no record and nothing ever will');
-  ok('⚠️ B\'s own font was not disturbed',
+  ok('B\'s own font was not disturbed',
      fs.existsSync(path.join(SFB, '.filehashes', 'entries', `${B.ids.entries[0].uuid}.json`)));
-  ok('⭐ the merged records fold to their own digests',
+  ok('the merged records fold to their own digests',
      A.ids.entries.every(e => {
        const m = fh.readFileHashManifest(path.join(SFB, '.filehashes', 'entries', `${e.uuid}.json`));
        return m && fh.hashRecords(m.records) === m.contentHash;
@@ -263,18 +263,18 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
      fs.existsSync(path.join(SFB, '.filehashes', 'commons', `${A.ids.commons[0]}.json`)) &&
      fs.existsSync(path.join(SFB, '.filehashes', 'sources', `${A.ids.sources[0]}.json`)));
 
-  // ⭐⭐ NO ORPHANS. This is why merge extracts per item instead of unpacking the folder:
+  // NO ORPHANS. This is why merge extracts per item instead of unpacking the folder:
   // library A carried records for items B did not take in other runs, and a record for
   // content this library does not hold is a worse lie than a missing one.
   const orphan = path.join(SFB, '.filehashes', 'entries');
   const have = new Set(fs.readdirSync(orphan).map(f => f.replace(/\.json$/, '')));
   const expected = new Set([B.ids.entries[0].uuid, ...A.ids.entries.map(e => e.uuid)]);
-  ok('⭐⭐ exactly the records for what is actually here, no more',
+  ok('exactly the records for what is actually here, no more',
      have.size === expected.size && [...have].every(h => expected.has(h)),
      `have ${[...have].join(',')}`);
 }
 
-// ── ⚠️ a merge of only SOME items must not drag the rest in ───────────────
+// ── a merge of only SOME items must not drag the rest in ───────────────
 {
   const a = store();
   const A = buildLibrary(a, { entries: 3, commons: 0, sources: 0, tag: 'a' });
@@ -288,14 +288,14 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
   await backup.applyMerge({ userData: b, zipPath,
     plan: { library: { [A.ids.entries[0].name]: 'install' }, common: {}, sources: {} } });
 
-  ok('⭐⭐ one font merged means ONE record, not three',
+  ok('one font merged means ONE record, not three',
      countIn(path.join(SFB, '.filehashes', 'entries')) === 1,
      'unpacking the archive\'s whole folder would plant records for fonts this library never received');
   ok('and it is the right one',
      fs.existsSync(path.join(SFB, '.filehashes', 'entries', `${A.ids.entries[0].uuid}.json`)));
 }
 
-// ── ⚠️ an OLD archive still merges and restores, it just brings no records ─
+// ── an OLD archive still merges and restores, it just brings no records ─
 {
   const a = store();
   const A = buildLibrary(a, { entries: 1, commons: 0, sources: 0, tag: 'a' });
@@ -323,23 +323,23 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
   }
 
   const insp = await backup.inspectBackup(legacy);
-  ok('⚠️ a pre-change archive still inspects cleanly', insp.ok === true);
+  ok('a pre-change archive still inspects cleanly', insp.ok === true);
 
   const b = store();
   const SFB = path.join(b, 'soundFonts');
   await backup.applyMerge({ userData: b, zipPath: legacy,
     plan: { library: { [A.ids.entries[0].name]: 'install' }, common: {}, sources: {} } });
-  ok('⭐ it merges without throwing, and simply carries no record',
+  ok('it merges without throwing, and simply carries no record',
      fs.existsSync(path.join(SFB, 'library', A.ids.entries[0].name)) &&
      countIn(path.join(SFB, '.filehashes', 'entries')) === 0,
      'best-effort: a font with no record degrades exactly as it does today, it does not fail the merge');
-  // ⚠⚠ AND IT LEAVES NO EMPTY SHELL. Found by mutation: dropping the "is it in the zip?"
+  // AND IT LEAVES NO EMPTY SHELL. Found by mutation: dropping the "is it in the zip?"
   // check still passed every assertion above, because the extract simply throws into the
   // catch and a directory holding no files still counts zero. What actually changed was
   // that mkdirSync ran first and left an empty .filehashes tree behind on every legacy
   // merge — a store that LOOKS like it has records until you open it. Counting files could
   // not see that; asking whether the folder exists at all can.
-  ok('⚠⚠ and creates no empty record folder at all',
+  ok('and creates no empty record folder at all',
      !fs.existsSync(path.join(SFB, '.filehashes')),
      'an empty .filehashes tree reads as "records live here" to anyone looking at the store');
 }

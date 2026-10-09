@@ -1,7 +1,7 @@
 /**
  * A restore never duplicates audio the library already holds  [B-407]
  *
- * ⭐⭐ HIS RULE, 2026-09-17, stated as absolute: "When we backup/import/merge it can't duplicate
+ * THE RULE, 2026-09-17, stated as absolute: "When we backup/import/merge it can't duplicate
  * a file. No duplicates ever." And the scenario, which is what this file exists to prove:
  *
  *     back up  →  delete a track  →  add that same track to a FONT instead  →  merge the backup
@@ -10,13 +10,13 @@
  * At merge time those bytes ARE in the library — inside the font — so the restore has to
  * recognise them and link. Raw extraction cannot: it has no idea what is already held.
  *
- * ⚠️⚠️ AND THE SECOND HALF IS BIGGER THAN THE FIRST. Hardlinks do not survive a zip, so every
+ * AND THE SECOND HALF IS BIGGER THAN THE FIRST. Hardlinks do not survive a zip, so every
  * NAME in the library becomes its own entry carrying its own bytes. Measured on the real backup:
  * 18,465 wav entries, 5,649 distinct — 4.24 GB of a 6.80 GB archive is the same audio stored
  * again. A restore that faithfully rebuilds that inflates the library by the exact amount the
  * linking had saved. So an archive containing the same sound twice must land as ONE blob.
  *
- * ⚠️ MEASURE BY INODE, NEVER BY SIZE OR COUNT. Apparent size cannot see this: a folder reports
+ * MEASURE BY INODE, NEVER BY SIZE OR COUNT. Apparent size cannot see this: a folder reports
  * the same whether its files share storage or not. Only counting unique inodes distinguishes one
  * blob with several names from several blobs.
  *
@@ -51,7 +51,7 @@ function wav(size, seed) {
   const SIZE = 256 * 1024;
 
   // ── Build an archive by hand, so the fixture states the contract ────────
-  // ⚠️ archiver is what the real export uses, so the zip is shaped the same way.
+  // archiver is what the real export uses, so the zip is shaped the same way.
   const archiver = require(path.join(__dirname, '..', 'node_modules', 'archiver'));
   const zipPath = path.join(tmp, 'library.zip');
 
@@ -67,7 +67,7 @@ function wav(size, seed) {
       type: 'jmt-soundfontlibrary', version: 1, createdAt: new Date(0).toISOString(),
     }), { name: 'manifest.json' });
     ar.append(TRACK, { name: 'sharedTracks/theme.wav' });
-    // ⚠️ THE SAME BYTES UNDER TWO NAMES — what a zip of a hardlinked library actually looks like.
+    // THE SAME BYTES UNDER TWO NAMES — what a zip of a hardlinked library actually looks like.
     ar.append(TWIN, { name: 'library/FontA/hum.wav' });
     ar.append(TWIN, { name: 'library/FontB/hum.wav' });
     ar.finalize();
@@ -98,7 +98,7 @@ function wav(size, seed) {
     res = await backup.applyMerge({
       userData: user,
       zipPath,
-      // ⚠️ A PLAN ENTRY IS A MODE STRING, NOT A BOOLEAN. The first draft passed `true` and both
+      // A PLAN ENTRY IS A MODE STRING, NOT A BOOLEAN. The first draft passed `true` and both
       // fonts were silently skipped by `if (!mode || mode === 'keep') continue` — so the test
       // failed against working code and looked like a dedup bug. Valid modes: install / replace
       // / both / keep.
@@ -107,10 +107,10 @@ function wav(size, seed) {
   } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
   ok('the merge completed', !!(res && (res.ok !== false)), JSON.stringify(res && res.error));
 
-  // ── HIS CASE: the track comes back as a NAME, not a copy ────────────────
+  // ── THE CASE: the track comes back as a NAME, not a copy ────────────────
   const restoredTrack = path.join(sfRoot, 'sharedTracks', 'theme.wav');
   ok('the track was restored', fs.existsSync(restoredTrack));
-  ok('⭐⭐ the restored track LINKS to the copy already in the font',
+  ok('the restored track LINKS to the copy already in the font',
      ino(restoredTrack) !== null && ino(restoredTrack) === before,
      `restored inode ${ino(restoredTrack)} vs held ${before} — a different inode means a second `
      + 'physical copy, which is exactly what he said must never happen');
@@ -119,17 +119,17 @@ function wav(size, seed) {
   const a = path.join(sfRoot, 'library', 'FontA', 'hum.wav');
   const b = path.join(sfRoot, 'library', 'FontB', 'hum.wav');
   ok('both fonts restored their file', fs.existsSync(a) && fs.existsSync(b));
-  ok('⭐⭐ one sound stored twice in the zip lands as ONE blob',
+  ok('one sound stored twice in the zip lands as ONE blob',
      ino(a) !== null && ino(a) === ino(b),
      'hardlinks do not survive a zip, so an archive holds every name separately — restoring that '
      + 'faithfully is what inflates a library by the amount the linking had saved');
-  ok('⚠️ and it really is shared, not merely equal', nlink(a) >= 2, `nlink ${nlink(a)}`);
+  ok('and it really is shared, not merely equal', nlink(a) >= 2, `nlink ${nlink(a)}`);
 
   // ── The content must still be CORRECT, not just shared ──────────────────
-  ok('⚠️⚠️ the restored track has the right bytes',
+  ok('the restored track has the right bytes',
      fs.readFileSync(restoredTrack).equals(TRACK),
      'linking to the wrong blob would be silent corruption — worse than a duplicate');
-  ok('⚠️⚠️ and so do both font files',
+  ok('and so do both font files',
      fs.readFileSync(a).equals(TWIN) && fs.readFileSync(b).equals(TWIN));
 
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

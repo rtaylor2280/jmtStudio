@@ -1,30 +1,30 @@
 // The archive's bytes are load-bearing, so changing HOW we feed archiver needs an assertion.
 // [B-420]
 //
-// ⭐⭐ WHY THIS EXISTS, STATED CORRECTLY THE SECOND TIME. I first wrote that this archive's sha256
+// WHY THIS EXISTS, STATED CORRECTLY THE SECOND TIME. I first wrote that this archive's sha256
 // IS the source identity dedup runs on, and repeated it while arguing for the change. **It is not.**
 // A picked archive is identified by the sha256 of the file on the USER'S disk, taken before
 // anything is written and never recomputed - and `zipFolderToFile`'s returned `hash` has no reader
 // at all: every call site takes `fileCount`, `totalBytes`, `blockedFiles`, `notedFiles` and drops
 // it. Checked, after asserting the opposite three times. (2026-09-24)
 //
-// ⭐ SO WHAT IT IS ACTUALLY FOR: this archive is a DELIVERABLE and a rebuildable artifact - the
+// SO WHAT IT IS ACTUALLY FOR: this archive is a DELIVERABLE and a rebuildable artifact - the
 // slim archive the space-optimizer writes is one of these - and its construction being
 // reproducible is the property that lets a repack be compared, verified and reasoned about at all.
 // A change to level, order, mode, date or entry construction is invisible to every other suite
 // here, because an archive with entirely different bytes still has the right count of the right
 // files. That is the gap this closes: not identity, reproducibility.
 //
-// ⭐ WHAT IS ACTUALLY ASSERTED: production's output, against a reference archive this file builds
+// WHAT IS ACTUALLY ASSERTED: production's output, against a reference archive this file builds
 // independently from the same inventory. Not a golden hash - a pinned digest would go red on an
 // archiver or zlib bump for a reason that has nothing to do with us, and the thing worth pinning
 // is the RELATIONSHIP, not the number.
 //
-// ⚠️⚠️ THE CONTROL GATES EVERYTHING. A comparison that cannot detect a difference answers
+// THE CONTROL GATES EVERYTHING. A comparison that cannot detect a difference answers
 // "identical" to every question, and that reads exactly like a clean result. So a deliberately
 // different archive is built too, and if the comparison calls THAT identical, this file refuses
 // to report anything else.
-// ⚠️ The first control written here FAILED and the instrument was fine: it perturbed a date to
+// The first control written here FAILED and the instrument was fine: it perturbed a date to
 // 1970-01-02, and a zip stores DOS time, which cannot represent a year before 1980 - so the
 // perturbed date and EPOCH clamped to the same stored value. A control is a hypothesis too.
 'use strict';
@@ -44,10 +44,10 @@ const ok = (name, cond, why) => {
   console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${name}` + (cond || !why ? '' : `\n       ${why}`));
 };
 
-// ⚠️ DETERMINISTIC CONTENT, NOT crypto.randomBytes. A failure has to be reproducible on the next
+// DETERMINISTIC CONTENT, NOT crypto.randomBytes. A failure has to be reproducible on the next
 // run, and random fixtures make a red test a different red test every time.
 //
-// ⚠️⚠️ AND IT IS MID-ENTROPY ON PURPOSE, WHICH IS THE WHOLE DIFFERENCE BETWEEN THIS FILE BEING A
+// AND IT IS MID-ENTROPY ON PURPOSE, WHICH IS THE WHOLE DIFFERENCE BETWEEN THIS FILE BEING A
 // RATCHET AND BEING DECORATION. The first fixture here used full-range pseudo-random bytes and
 // blocks of zeros - and a deliberate mutation of the compression level SURVIVED it. Measured:
 // deflate emits byte-identical output at level 1 and level 2 for both incompressible and
@@ -83,7 +83,7 @@ const extraDir = path.join(root, 'payload');
 fs.mkdirSync(path.join(srcDir, 'xenopixelv3'), { recursive: true });
 fs.mkdirSync(extraDir, { recursive: true });
 
-// ⚠️ The shapes that have actually bitten this archive: a name with a space and parentheses
+// The shapes that have actually bitten this archive: a name with a space and parentheses
 // (the screenshots was `track (3).wav`), a large incompressible entry, a very compressible one,
 // and a nested folder. Not a generic fixture - these are the cases that exist in real fonts.
 const tree = [
@@ -121,7 +121,7 @@ function reference(destZip, { perturb = false } = {}) {
     archive.pipe(tap).pipe(out);
     archive.on('error', reject);
     out.on('close', () => resolve(hasher.digest('hex')));
-    // ⚠️⚠️ EVERY ENTRY GOES IN THE SAME WAY, AND THAT IS THE POINT OF THIS REFERENCE.
+    // EVERY ENTRY GOES IN THE SAME WAY, AND THAT IS THE POINT OF THIS REFERENCE.
     // The production code used to MIX `archive.file()` for disk entries with `archive.append()`
     // for the buffer sidecar, and those use two different queues: an entry carrying stats goes
     // straight onto the ordered queue while a bare `file()` waits in `_statQueue` to be stat-ed
@@ -151,18 +151,18 @@ function reference(destZip, { perturb = false } = {}) {
   const refHash = await reference(path.join(root, 'ref.zip'));
   const ctrlHash = await reference(path.join(root, 'ctrl.zip'), { perturb: true });
 
-  // ⚠️⚠️ NOTHING BELOW IS REPORTED IF THE CONTROL CANNOT TELL TWO ARCHIVES APART.
+  // NOTHING BELOW IS REPORTED IF THE CONTROL CANNOT TELL TWO ARCHIVES APART.
   if (refHash === ctrlHash) {
-    console.log('  FAIL ⚠️⚠️ CONTROL: a deliberately different archive hashed the same');
+    console.log('  FAIL CONTROL: a deliberately different archive hashed the same');
     console.log('       The comparison is blind, so every identity result here would be vacuous.');
     fs.rmSync(root, { recursive: true, force: true });
     process.exit(1);
   }
-  ok('⭐ control: a deliberately different archive does NOT match', refHash !== ctrlHash);
+  ok('control: a deliberately different archive does NOT match', refHash !== ctrlHash);
 
   const r = await sfs.zipFolderToFile(srcDir, path.join(root, 'prod.zip'), null, { extraEntries });
 
-  ok('⭐⭐ zipFolderToFile is byte-identical to the reference archive', r.hash === refHash,
+  ok('zipFolderToFile is byte-identical to the reference archive', r.hash === refHash,
      `production ${r.hash}\n       reference  ${refHash}\n`
      + '       The stored source hash is what dedup matches on, so this changing means every '
      + 'export re-hashes and stops matching sources already in the library.');
@@ -172,7 +172,7 @@ function reference(destZip, { perturb = false } = {}) {
   const vendorBytes = sfs.walkFolderSorted(srcDir).reduce((s, f) => s + f.size, 0);
   const extraBytes = extraEntries.reduce(
     (s, e) => s + (e.buffer ? e.buffer.length : fs.statSync(e.absPath).size), 0);
-  ok('⭐ twas reported total counts the payload, not just the vendor tree',
+  ok('twas reported total counts the payload, not just the vendor tree',
      r.totalBytes === vendorBytes + extraBytes,
      `reported ${r.totalBytes}, vendor ${vendorBytes} + payload ${extraBytes} `
      + `= ${vendorBytes + extraBytes}`);
@@ -180,10 +180,10 @@ function reference(destZip, { perturb = false } = {}) {
      r.fileCount === tree.length + extraEntries.length,
      `reported ${r.fileCount}, expected ${tree.length + extraEntries.length}`);
 
-  // ⭐⭐ THE ORDER IS ASSERTED SEPARATELY FROM THE BYTES, because a hash comparison says only
+  // THE ORDER IS ASSERTED SEPARATELY FROM THE BYTES, because a hash comparison says only
   // "something moved" and this says WHAT. The sidecar landing first was invisible for as long as
   // it existed: it broke no test, produced a valid archive, and contradicted only a comment.
-  // ⚠️ node-stream-zip, because that is what the app itself reads archives with. A test that
+  // node-stream-zip, because that is what the app itself reads archives with. A test that
   // opens the artifact with a different library is answering a slightly different question.
   const namesInZip = await (async () => {
     const zip = new StreamZip.async({ file: path.join(root, 'prod.zip'),
@@ -192,7 +192,7 @@ function reference(destZip, { perturb = false } = {}) {
   })();
   const sidecarAt = namesInZip.indexOf('.jmt-curation.json');
   const lastVendorAt = namesInZip.indexOf('xenopixelv3/zeros.bin');
-  ok('⭐ the curation payload is written AFTER the vendor tree, as the code says it is',
+  ok('the curation payload is written AFTER the vendor tree, as the code says it is',
      sidecarAt > lastVendorAt && sidecarAt !== -1 && lastVendorAt !== -1,
      `sidecar at ${sidecarAt}, last vendor entry at ${lastVendorAt}\n       `
      + `order: ${JSON.stringify(namesInZip)}`);

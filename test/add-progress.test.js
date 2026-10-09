@@ -1,16 +1,16 @@
 /**
  * +Add reports real byte progress, and the loop actually yields  [B-400]
  *
- * ⭐ Reported 2026-09-17: "+Add can actually bring in many files. and that's good, but if the user
+ * Reported 2026-09-17: "+Add can actually bring in many files. and that's good, but if the user
  * selects 100 long wav files... that's real bytes that need to be tracked for sure."
  *
- * ⚠️⚠️ THE ASSERTION THAT MATTERS IS THE YIELD, NOT THE NUMBERS. The old loop was
+ * THE ASSERTION THAT MATTERS IS THE YIELD, NOT THE NUMBERS. The old loop was
  * `copyFileSync` plus a `readFileSync` hash, which holds the main process for the whole add —
  * so progress events describing the work queued *behind* the work and flushed after it
  * finished. Wiring a callback into that would produce a bar that sits at zero and jumps to
  * 100: green on a three-file test, broken for the case reported.
  *
- * ⭐⭐ SO THIS TEST RUNS A TIMER ALONGSIDE THE ADD. If the timer never fires, the loop never
+ * SO THIS TEST RUNS A TIMER ALONGSIDE THE ADD. If the timer never fires, the loop never
  * yielded and the bar cannot move, however correct the byte arithmetic is. That is the one
  * assertion a "did the callback fire" test cannot make — and the exact class of gap that let
  * [B-403] ship broken past a fully green suite.
@@ -67,35 +67,35 @@ function makeWav(dir, name, sizeBytes, seed) {
   ok(`all ${N} files landed`, !!res && (res.added || []).length === N,
      `added ${(res && res.added || []).length}, skipped ${JSON.stringify(res && res.skipped)}`);
 
-  // ⭐⭐ THE ONE THAT PROVES THE FIX.
-  ok('⭐⭐ the event loop ran DURING the add (the loop yields)', timerTicks > 0,
+  // THE ONE THAT PROVES THE FIX.
+  ok('the event loop ran DURING the add (the loop yields)', timerTicks > 0,
      'a timer that never fired means the main process was blocked end to end — '
      + 'the bar would sit at zero and jump to 100');
 
   // ── the byte arithmetic ──────────────────────────────────────────────────
   ok('progress was reported at all', samples.length > 0);
 
-  // ⚠️ Not just first and last. A bar needs intermediate frames to be a bar.
+  // Not just first and last. A bar needs intermediate frames to be a bar.
   const distinct = new Set(samples.map(s => s.done)).size;
-  ok('⭐ progress is CONTINUOUS, not two endpoints', distinct >= 10,
+  ok('progress is CONTINUOUS, not two endpoints', distinct >= 10,
      `only ${distinct} distinct values across ${samples.length} samples`);
 
   let monotonic = true;
   for (let i = 1; i < samples.length; i++) if (samples[i].done < samples[i - 1].done) monotonic = false;
-  ok('⚠️ progress never goes backwards', monotonic);
+  ok('progress never goes backwards', monotonic);
 
   const last = samples[samples.length - 1] || {};
-  ok('⚠️⚠️ the bar LANDS on 100%', !!last.total && last.done === last.total,
+  ok('the bar LANDS on 100%', !!last.total && last.done === last.total,
      `ended at ${last.done} of ${last.total} — [B-389]: a bar always reaches 100% before it moves on`);
   ok('nothing overshoots its total', samples.every(s => s.done <= s.total));
 
-  // ⭐⭐ ONE PASS, SO THE BUDGET IS THE DATA SIZE. [B-424, 2026-10-09] This asserted `* 2`,
+  // ONE PASS, SO THE BUDGET IS THE DATA SIZE. [B-424, 2026-10-09] This asserted `* 2`,
   // because the file used to be hashed and THEN copied. That was two reads of whatever the
   // user picked from, and on a card mounted through a Proffieboard it was the slowest thing
   // in the system, paid on every file to save a local write on the occasional duplicate.
-  // ⚠️ THE OLD ASSERTION WAS NOT WRONG WHEN WRITTEN - it pinned a real design. It is inverted
+  // THE OLD ASSERTION WAS NOT WRONG WHEN WRITTEN - it pinned a real design. It is inverted
   // now, which is the point of pinning it: the number could not change quietly.
-  // ⭐ The total is now a figure the user can check - it matches the slow-source warning and
+  // The total is now a figure the user can check - it matches the slow-source warning and
   // matches what their file manager says those files weigh.
   ok('the budget is the data size, counted ONCE', last.total === N * SIZE,
      `total was ${last.total}, expected ${N * SIZE} — a 2x total means the source is being `
@@ -104,7 +104,7 @@ function makeWav(dir, name, sizeBytes, seed) {
   ok('the current filename is reported', samples.some(s => /trk\d\.wav/.test(s.name || '')));
 
   // ── ONE file must move the bar on its own ────────────────────────────────
-  // ⚠️⚠️ Found by mutation: reverting ONLY the hash to readFileSync left the yield assertion
+  // Found by mutation: reverting ONLY the hash to readFileSync left the yield assertion
   // GREEN, because the awaited copy still yields once per file. That is not good enough — a
   // sync hash of a 400 MB wav freezes for the whole read, and the user watching a single large
   // track sees nothing move. The honest test is WITHIN one file: a streamed hash reports many
@@ -112,16 +112,16 @@ function makeWav(dir, name, sizeBytes, seed) {
   const solo = [];
   await tracks.addFiles(user, [makeWav(src, 'solo.wav', SIZE, 1234)], null, (p) => solo.push({ ...p }));
   const soloDistinct = new Set(solo.map(s => s.done)).size;
-  ok('⭐⭐ a SINGLE file reports progress while it is read, not just when it finishes',
+  ok('a SINGLE file reports progress while it is read, not just when it finishes',
      soloDistinct >= 10,
      `one file produced only ${soloDistinct} distinct values — a whole-file read gives ~3, `
      + 'a streamed read gives one per chunk');
 
   // ── duplicates: the credit that stops the bar ending short ───────────────
-  // ⚠️⚠️ Re-adding files already held is the MOST COMMON use of this path (re-importing a card
+  // Re-adding files already held is the MOST COMMON use of this path (re-importing a card
   // you already have). Under the one-pass design the read IS the whole budget, so a duplicate
   // settles its own cost as it streams and there is no skipped-copy credit to forget.
-  // ⚠️ The mid-run assertion below is kept anyway: it is what would catch a future change that
+  // The mid-run assertion below is kept anyway: it is what would catch a future change that
   // reintroduces an uncredited phase, and it costs nothing to leave in place.
   const dupSamples = [];
   const res2 = await tracks.addFiles(user, paths, null, (p) => dupSamples.push({ ...p }));
@@ -130,15 +130,15 @@ function makeWav(dir, name, sizeBytes, seed) {
      `duplicates ${(res2 && res2.duplicates || []).length}, added ${(res2 && res2.added || []).length}`);
 
   const dupLast = dupSamples[dupSamples.length - 1] || {};
-  ok('⭐⭐ an all-duplicate add still lands on 100%', !!dupLast.total && dupLast.done === dupLast.total,
+  ok('an all-duplicate add still lands on 100%', !!dupLast.total && dupLast.done === dupLast.total,
      `ended at ${dupLast.done} of ${dupLast.total} — without the skipped-copy credit this stops at 50%`);
 
-  // ⚠️⚠️ AND IT MUST GET THERE HONESTLY, NOT BY THE TERMINAL EMIT ALONE. Found by mutation:
+  // AND IT MUST GET THERE HONESTLY, NOT BY THE TERMINAL EMIT ALONE. Found by mutation:
   // deleting the per-duplicate credit left the endpoint assertion above GREEN, because the
   // terminal `done = total` covers for it. The two mask each other, so only a MID-RUN
   // assertion can tell them apart. Without the credit the bar crawls to 50% and then snaps.
   const dupMidMax = dupSamples.slice(0, -1).reduce((m, s) => Math.max(m, s.total ? s.done / s.total : 0), 0);
-  ok('⭐⭐ an all-duplicate add passes 50% BEFORE the final tick',
+  ok('an all-duplicate add passes 50% BEFORE the final tick',
      dupMidMax > 0.6,
      `highest mid-run fraction was ${(dupMidMax * 100).toFixed(1)}% — the skipped-copy credit is `
      + 'not being applied, and the terminal emit is hiding it');
@@ -149,11 +149,11 @@ function makeWav(dir, name, sizeBytes, seed) {
   await tracks.addFiles(user, [makeWav(src, 'new1.wav', SIZE, 99), missing], null,
     (p) => mixSamples.push({ ...p }));
   const mixLast = mixSamples[mixSamples.length - 1] || {};
-  ok('⚠️ a missing source still lets the bar finish', !!mixLast.total && mixLast.done === mixLast.total,
+  ok('a missing source still lets the bar finish', !!mixLast.total && mixLast.done === mixLast.total,
      `ended at ${mixLast.done} of ${mixLast.total}`);
 
   // ── the route that only the TERMINAL emit covers ─────────────────────────
-  // ⚠️⚠️ Found by mutation: deleting the terminal `done = total` left every assertion above
+  // Found by mutation: deleting the terminal `done = total` left every assertion above
   // green, because in the happy path the per-file credits reach the total on their own. It
   // earns its place on the routes that settle NOTHING — a file rejected before any work is
   // charged for. Files leave that loop six ways and only two pay their own budget; this is
@@ -166,12 +166,12 @@ function makeWav(dir, name, sizeBytes, seed) {
   ok('the non-wav is skipped', !!res3 && (res3.skipped || []).length === 1,
      JSON.stringify(res3 && res3.skipped));
   const skipLast = skipSamples[skipSamples.length - 1] || {};
-  ok('⭐⭐ a file rejected before any work still lets the bar reach 100%',
+  ok('a file rejected before any work still lets the bar reach 100%',
      !!skipLast.total && skipLast.done === skipLast.total,
      `ended at ${skipLast.done} of ${skipLast.total} — its bytes were budgeted and never spent`);
 
   // ── structural: the copy must stay async ─────────────────────────────────
-  // ⚠️ HONEST ABOUT WHAT THIS IS. A behavioural test cannot separate an async copy from a
+  // HONEST ABOUT WHAT THIS IS. A behavioural test cannot separate an async copy from a
   // sync one at a fixture size that keeps this suite quick — a 2 MB copyFileSync returns in
   // milliseconds. Inflating the fixture to hundreds of MB to catch it would trade a fast
   // suite for one assertion. So this reads the source instead, and says so rather than
@@ -179,13 +179,13 @@ function makeWav(dir, name, sizeBytes, seed) {
   const modSrc = fs.readFileSync(path.join(__dirname, '..', 'soundFontSharedTracks.js'), 'utf8');
   const addBody = modSrc.slice(modSrc.indexOf('async function addFiles'),
                                modSrc.indexOf('function renameFile'));
-  // ⚠️ Match a CALL, not the word. The bare word appears in this function's own comment
+  // Match a CALL, not the word. The bare word appears in this function's own comment
   // explaining what it replaced — the first draft of this assertion matched that and failed
   // against correct code, which then made every mutant look caught for the wrong reason.
-  // ⭐ [B-424] The source now goes through `copyFileHashing` — one streamed read that hashes on
+  // [B-424] The source now goes through `copyFileHashing` — one streamed read that hashes on
   // the way to a temp — so the assertion is that the streaming primitive is what the add uses,
   // and that no synchronous whole-file copy has crept back in beside it.
-  ok('⚠️ the add streams through copyFileHashing, never copyFileSync',
+  ok('the add streams through copyFileHashing, never copyFileSync',
      /await fileHash\.copyFileHashing\(/.test(addBody) && !/fs\.copyFileSync\(/.test(addBody),
      'a synchronous copy blocks for the whole write — half of every file\'s work');
 

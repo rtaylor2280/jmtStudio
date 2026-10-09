@@ -1,6 +1,6 @@
 // Every blocking destination call goes through one helper.            [B-203, B-238]
 //
-// ⭐⭐ WHY THIS IS A TEST AND NOT A CONVENTION. The bar started per-door, and per-door is
+// WHY THIS IS A TEST AND NOT A CONVENTION. The bar started per-door, and per-door is
 // exactly the shape that has failed here three times: enumerating export doors BY READING
 // the file missed one every single time, and testing found each of them by clicking - the zip
 // door, "Export font folder…", the common-folder door. A rule that lives only in a comment
@@ -10,22 +10,22 @@
 // sourceExportSize on the bridge directly. It goes through _sfCheckFit, _sfClassifyDest or
 // _sfSourceExportSize. A new door written next year has no other way to ask the question.
 //
-// ⚠️⚠️ THIS FILE INVERTED ON 2026-09-23 AND THAT IS THE POINT OF THE REWRITE. It used to
+// THIS FILE INVERTED ON 2026-09-23 AND THAT IS THE POINT OF THE REWRITE. It used to
 // assert that each helper WRAPS `_sfPreflightBusy` - a 150 ms-delayed `_sdBusy` overlay. That
 // was correct while most doors had no progress surface of their own. Once the runner began
 // supplying a modal to every door, the overlay became a SECOND surface for the same wait, and
 // these assertions were quietly requiring the shape that produced the bug: passing meant the
 // overlay was still wired in. The ruling was to delete it rather than guard it.
 //
-// ⭐ So the rule flipped rather than relaxed. The helpers still exist and are still the only
+// So the rule flipped rather than relaxed. The helpers still exist and are still the only
 // door; what they must NOT do any more is paint. The new assertion is the one that would have
 // caught this class: nothing on the export path may reach `_sdBusy`.
 //
-// ⚠️ KNOWN AND TEMPORARY: doors 3, 4, 11, 12 and 13 now check their destination with nothing
+// KNOWN AND TEMPORARY: doors 3, 4, 11, 12 and 13 now check their destination with nothing
 // on screen, because they are not on the runner yet. Silence is the deliberate signal for
 // "not migrated" in a dev build. When the OFF list is empty this stops being a trade-off.
 //
-// ⚠️ ONE EXEMPTION, AND IT IS SPELLED OUT IN THE SOURCE: the background transport prime.
+// ONE EXEMPTION, AND IT IS SPELLED OUT IN THE SOURCE: the background transport prime.
 // Nothing awaits it, so it never blocked anyone. It carries a `preflight-busy-exempt:` marker
 // within a few lines of the call; nothing else may.
 const fs = require('fs');
@@ -46,7 +46,7 @@ const GUARDED = ['checkExportDest', 'classifyExportDest', 'sourceExportSize'];
 
 // The helper definitions are the intended direct calls; find them by the shape they are
 // written in rather than by line number, which moves with every edit.
-// ⚠️ RE-ANCHORED 2026-09-23 with the overlay's removal: the helpers used to be a two-line
+// RE-ANCHORED 2026-09-23 with the overlay's removal: the helpers used to be a two-line
 // wrapped form and are now a one-line direct call, so the old shape matched nothing and every
 // helper definition would have been reported as a bare violation of its own rule.
 const isWrapperLine = (l) =>
@@ -76,11 +76,11 @@ for (const fn of GUARDED) {
   const bad = [];
   lines.forEach((line, i) => {
     if (!/probe:\s*true/.test(line)) return;
-    // ⚠️ A comment that NAMES the rule is not a violation of it. The first run of this
+    // A comment that NAMES the rule is not a violation of it. The first run of this
     // test failed on its own explanatory comment, which is the source-grep version of a
     // test passing for the wrong reason - in reverse.
     if (/^\s*(\/\/|\*)/.test(line)) return;
-    // ⚠️ RE-ANCHORED 2026-09-23: the probe used to be identified by the `_sfPreflightBusy` wrap
+    // RE-ANCHORED 2026-09-23: the probe used to be identified by the `_sfPreflightBusy` wrap
     // on its own or the preceding line. With the wrap gone the anchor is the helper's own name.
     if (line.includes('_sfProbeExport') || lines[i - 1]?.includes('_sfProbeExport')) return;
     bad.push(`${i + 1}: ${line.trim().slice(0, 80)}`);
@@ -95,17 +95,17 @@ for (const fn of GUARDED) {
 }
 
 // ── Rule: the multi-path door asks before it raises the bar ──
-// ⚠️ THE ACTUAL BUG HE REPORTED: "does the regular progress bar before the 'this will
+// THE ACTUAL BUG TESTING REPORTED: "does the regular progress bar before the 'this will
 // take a while' message." The probe must precede _sfRunWithByteProgress, not follow it.
 {
   const door = src.slice(src.indexOf('const _sfExportFiles = async'),
                          src.indexOf('// Unified dispatcher'));
-  // ⚠️⚠️ RE-ANCHORED 2026-09-22. The rule is unchanged and is the whole point of this file: the
+  // RE-ANCHORED 2026-09-22. The rule is unchanged and is the whole point of this file: the
   // probe must run BEFORE anything is on screen, because asking over a live bar is the two-phase
   // handshake caught on a 57-file source export ("does the regular progress bar before the
   // 'this will take a while' message").
   //
-  // ⭐ What changed is WHO enforces it. The door used to sequence probe-then-bar by hand; the
+  // What changed is WHO enforces it. The door used to sequence probe-then-bar by hand; the
   // runner now calls `plan()` before it raises the modal, so the ordering is structural. The
   // assertion moves with it: the probe must live inside `plan`, and `plan` must come before
   // `produce` in the door object.
@@ -116,7 +116,7 @@ for (const fn of GUARDED) {
      probeAt > -1 && planAt > -1 && produceAt > -1 && planAt < probeAt && probeAt < produceAt,
      'the probe belongs in plan(), which the runner calls before it raises anything. Outside '
      + 'plan it either asks over a live bar or does not size the runner\'s preflight at all');
-  // ⚠️ RE-ANCHORED 2026-09-22. This asserted the door caught main's `slowWrite` REPLY and
+  // RE-ANCHORED 2026-09-22. This asserted the door caught main's `slowWrite` REPLY and
   // raised the dialog itself - the shape of a door that lets the backend ask. The single-item
   // branch now picks its own destination up front and the runner asks before any work, so there
   // is no reply to catch: the door passes `confirmSlow: true` precisely because the question has
@@ -137,12 +137,12 @@ for (const [name, fn] of [['_sfCheckFit', 'checkExportDest'],
 
 // ── Rule: the export path never reaches the small overlay ──
 //
-// ⭐⭐ THIS IS THE ASSERTION THAT WOULD HAVE CAUGHT THE DOUBLE SURFACE, and it is written as a
+// THIS IS THE ASSERTION THAT WOULD HAVE CAUGHT THE DOUBLE SURFACE, and it is written as a
 // REACHABILITY rule rather than a spelling one. `_sdBusy` is a legitimate shared overlay - the
 // SD read, the config scan and the health check all use it. What must never happen again is an
 // export-side helper raising it while the runner's modal is saying the same words.
 //
-// ⚠️ The old version of this file asserted the opposite and passed the whole time.
+// The old version of this file asserted the opposite and passed the whole time.
 {
   const helpersFrom = src.indexOf('// ── The only four ways a door talks to a destination');
   const helpersTo = src.indexOf('window._sfProbeExport');
@@ -168,20 +168,20 @@ for (const [name, fn] of [['_sfCheckFit', 'checkExportDest'],
 
 // ── Rule: the slow-write threshold is tested before any device lookup is made ──
 //
-// ⚠️⚠️ THESE THREE ASSERTIONS USED TO CHECK `_sfWarnSlowWrite`'s INTERNALS, AND THAT FUNCTION
+// THESE THREE ASSERTIONS USED TO CHECK `_sfWarnSlowWrite`'s INTERNALS, AND THAT FUNCTION
 // HAD NO CALLERS. [2026-09-23] They passed the whole time - it named the threshold constant, it
 // made the board-card call, it did them in order - describing a function the last door stopped
-// calling on 2026-09-22. ⭐ A test can keep a corpse warm, and green over dead code is
+// calling on 2026-09-22. A test can keep a corpse warm, and green over dead code is
 // indistinguishable from green over working code. The function is deleted; the RULE it was
 // protecting is real and now asserted where the behaviour actually lives.
 //
-// ⭐ The rule: a job under the limits must not trigger the ~1.9s device lookup at all, so the
+// The rule: a job under the limits must not trigger the ~1.9s device lookup at all, so the
 // threshold has to be computed before `classify` is requested, not after.
 const pfBody = src.slice(src.indexOf('async function _sfPreflightDestination'),
                          src.indexOf('window._sfPreflightDestination'));
 ok('the shared preflight was located', pfBody.length > 200,
   're-anchor before trusting the positions below');
-// ⚠️ ANCHORED ON THE BYTE CONSTANT SINCE 2026-10-04 - the file-count limb was removed on
+// ANCHORED ON THE BYTE CONSTANT SINCE 2026-10-04 - the file-count limb was removed on
 // measurement, so naming the old constant here would have failed for the right reason and
 // read as "the preflight stopped computing its threshold".
 ok('the shared preflight computes the slow-write threshold itself',
@@ -198,18 +198,18 @@ ok('_sfWarnSlowWrite is gone, not merely uncalled',
 
 // ── Rule: a quantity never wraps away from its unit, and the check is mechanical ──
 //
-// ⭐⭐ WHY THIS IS HERE. the catch on the first real refusal was that the dialog broke the line
+// WHY THIS IS HERE. the catch on the first real refusal was that the dialog broke the line
 // mid-quantity - "496.2" above, "MB more room." below - which reads as two separate facts. The
 // fix is a non-breaking space between number and unit, swapped in at the dialog rather than in
 // `_sfFormatBytes`, which other surfaces measure and match against.
 //
-// ⚠️⚠️ AND IT WAS NOT ACTUALLY APPLIED FOR AN UNKNOWN NUMBER OF DAYS. [2026-09-23] Both shared
+// AND IT WAS NOT ACTUALLY APPLIED FOR AN UNKNOWN NUMBER OF DAYS. [2026-09-23] Both shared
 // dialogs read `.replace(' ', ' ')` - a PLAIN space replaced by a PLAIN space, which does
 // nothing at all. The one correct copy, with a real U+00A0, lived in `_sfFmtSpace` in the
 // primary export - a function with zero callers. So the fix existed only where it could never
 // run, and the two places that do run looked right and did nothing.
 //
-// ⭐ THE READING LESSON: a literal non-breaking space is INVISIBLE in a diff, in a review and in
+// THE READING LESSON: a literal non-breaking space is INVISIBLE in a diff, in a review and in
 // an editor. It survives being typed once and is lost by every copy-paste after. So the source
 // now uses the ESCAPE `\u00A0`, which cannot be flattened silently, and this asserts the escape
 // rather than the character.

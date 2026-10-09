@@ -1,6 +1,6 @@
 // `_selectFolderFiles` must STOP when asked, not merely yield.
 //
-// ⚠️⚠️ WHY THIS IS A BEHAVIOURAL TEST AND NOT A SOURCE SCAN. The defect was "cancel does nothing
+// WHY THIS IS A BEHAVIOURAL TEST AND NOT A SOURCE SCAN. The defect was "cancel does nothing
 // for six minutes", and the thing that made it invisible is that the pass already looked correct:
 // [B-398] made it `await breathe()` per file so the window stays responsive through it, and a
 // source scan for "does this loop yield" would have come back green. A responsive window that
@@ -49,7 +49,7 @@ try {
   (async () => {
     // ── The control. Without it, "it threw" and "it is broken" look identical. ──
     const all = await sources._selectFolderFiles(root, null);
-    ok('⚠️ control: the walk reads every file when nothing cancels it',
+    ok('control: the walk reads every file when nothing cancels it',
        all && all.files.length === TOTAL,
        `expected ${TOTAL} files, got ${all && all.files.length} - the fixture is wrong and every `
        + 'result below is meaningless');

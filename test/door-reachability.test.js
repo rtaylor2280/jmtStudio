@@ -1,19 +1,19 @@
 // A progress channel with no consumer is a measurement nobody shows.  [B-389, B-435]
 //
-// ⚠️⚠️ THIS FILE EXISTS BECAUSE OF WHAT AUDITING PROGRESS BARS TURNED UP, WHICH IS NOT WHERE
+// THIS FILE EXISTS BECAUSE OF WHAT AUDITING PROGRESS BARS TURNED UP, WHICH IS NOT WHERE
 // ANYONE WOULD LOOK FOR IT. Three IPC channels were being emitted with nothing subscribed. Two of
 // them belonged to doors nothing could invoke - `sources:extractTo` and `soundFonts:importFont`,
 // each with a handler, a preload bridge and zero callers, and `git log -S` said neither ever had
 // one. Both were REMOVED 2026-09-26 [B-434]: one wrote to the pre-library layout and the other
 // duplicated a capability `sources:import` already owns.
 //
-// ⭐⭐ AND THE REASON THAT MATTERED WAS NOT THE DEAD CODE. `sources:extractTo` was named by
+// AND THE REASON THAT MATTERED WAS NOT THE DEAD CODE. `sources:extractTo` was named by
 // export-door-map, import-door-map AND export-cancel as a live door, and on 2026-09-20 it was
 // given a cancel it had been missing. A hardening pass and three maps spent on a door nobody
 // could open, every test green - because they check MAIN-SIDE properties (the handler exists, it
 // runs under the cancel gate) and not one of them asked whether a user can reach it.
 //
-// ⭐ SO WHAT THIS FILE KEEPS DOING, now that those two are gone: it watches the channel that is
+// SO WHAT THIS FILE KEEPS DOING, now that those two are gone: it watches the channel that is
 // still orphaned, and it will not let the removed ones come back unnoticed. A send() with no
 // listener fails silently - no error, no warning - so nothing else in the suite can see it.
 'use strict';
@@ -40,7 +40,7 @@ const rendererText = fs.readdirSync(rendererDir)
 
 // ── 1. The removed doors stay removed ────────────────────────────────
 //
-// ⚠️ NOT HOUSEKEEPING. Re-adding either handler without a renderer caller rebuilds exactly the
+// NOT HOUSEKEEPING. Re-adding either handler without a renderer caller rebuilds exactly the
 // state that cost a cancel and three map entries: something that looks covered and cannot be
 // reached. If one is genuinely wanted, it arrives WITH its caller and this entry comes out.
 const REMOVED = {
@@ -78,7 +78,7 @@ for (const [channel, note] of Object.entries(ORPHAN_CHANNELS)) {
 
 // ── 3. No NEW channel may be emitted with nothing listening ──────────
 //
-// ⭐ The generalisation, and the reason this file is worth more than its three assertions: the
+// The generalisation, and the reason this file is worth more than its three assertions: the
 // two dead doors were found by noticing an emit with no listener. This catches the next one
 // instead of waiting for another audit to stumble over it.
 const emitted = new Set(

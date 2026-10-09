@@ -64,7 +64,7 @@ async function setup() {
     console.log('an unmodified font folder is pointers, not copies');
     const t = await setup();
     const a = fs.statSync(t.srcFile('hum.wav')), b = fs.statSync(t.entFile('hum.wav'));
-    check('⭐ the entry file IS the source file', a.ino === b.ino, `${a.ino} vs ${b.ino}`);
+    check('the entry file IS the source file', a.ino === b.ino, `${a.ino} vs ${b.ino}`);
     check('link count reflects both names', b.nlink === 2, String(b.nlink));
     check('and it reads correctly', fs.readFileSync(t.entFile('hum.wav')).includes('HUM-VENDOR'));
   }
@@ -78,7 +78,7 @@ async function setup() {
     });
     check('the rename succeeded', r && r.ok !== false, JSON.stringify(r));
     check('the entry now has the new name', fs.existsSync(t.entFile('hum01.wav')));
-    check('⭐ the source still has its own name', fs.existsSync(t.srcFile('hum.wav')));
+    check('the source still has its own name', fs.existsSync(t.srcFile('hum.wav')));
     check('and they are still the same content',
       fs.statSync(t.entFile('hum01.wav')).ino === fs.statSync(t.srcFile('hum.wav')).ino);
   }
@@ -91,7 +91,7 @@ async function setup() {
     });
     check('the delete succeeded', r && r.ok !== false, JSON.stringify(r));
     check('the entry no longer has it', !fs.existsSync(t.entFile('hum.wav')));
-    check('⭐ the source still does', fs.existsSync(t.srcFile('hum.wav')));
+    check('the source still does', fs.existsSync(t.srcFile('hum.wav')));
     check('and its bytes are intact',
       fs.readFileSync(t.srcFile('hum.wav')).includes('HUM-VENDOR'));
     check('the link count dropped rather than the file dying',
@@ -109,7 +109,7 @@ async function setup() {
     });
     check('the add succeeded', r && r.ok, JSON.stringify(r && r.failed));
     check('the entry has it', fs.existsSync(t.entFile('custom.wav')));
-    check('⭐ the source does NOT', !fs.existsSync(t.srcFile('custom.wav')));
+    check('the source does NOT', !fs.existsSync(t.srcFile('custom.wav')));
     // This asserted nlink === 1 until [B-316] gave added content a home of its
     // own. An added file is now stored in the pool and the entry holds a link to
     // it, so the count is 2 — the change the entry asked for, not a regression.
@@ -117,7 +117,7 @@ async function setup() {
     // reach into the vendor's copy, and that is asserted directly below rather
     // than through a count that only happened to imply it.
     const added = fs.statSync(t.entFile('custom.wav'));
-    check('⭐ it shares nothing with the source bundle', (() => {
+    check('it shares nothing with the source bundle', (() => {
       const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
         e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]);
       return walk(path.join(S.sourcesRoot(t.userData), t.sourceUuid))
@@ -150,9 +150,9 @@ async function setup() {
 
     check('the untouched sound links to the vendor copy we already held',
       fs.statSync(att('hum.wav')).ino === fs.statSync(t.srcFile('hum.wav')).ino);
-    check('⭐ the CUSTOMIZED sound is a pointer, not a real file in the folder',
+    check('the CUSTOMIZED sound is a pointer, not a real file in the folder',
       fs.statSync(att('swing1.wav')).nlink >= 2, `nlink=${fs.statSync(att('swing1.wav')).nlink}`);
-    check('⭐ so is the track that exists nowhere else',
+    check('so is the track that exists nowhere else',
       fs.statSync(att('tracks/mine.wav')).nlink >= 2, `nlink=${fs.statSync(att('tracks/mine.wav')).nlink}`);
     check('and every one of them reads back correctly',
       fs.readFileSync(att('hum.wav')).includes('HUM-VENDOR')
@@ -163,14 +163,14 @@ async function setup() {
     const pool = () => fs.existsSync(CI.poolRoot(t.userData))
       ? fs.readdirSync(CI.poolRoot(t.userData)).filter(f => !f.startsWith('.')) : [];
     check('the pool is holding the novel content', pool().length === 2, JSON.stringify(pool()));
-    // ⚠️ AWAITED. `deleteEntry` became async on 2026-09-24 so it can retry a transient lock
+    // AWAITED. `deleteEntry` became async on 2026-09-24 so it can retry a transient lock
     // without freezing the main process. Unawaited, the pool check below ran before the delete
     // finished and reported two files still held - a failure that describes the TEST, not the
     // retention rule it is asserting.
     await E.deleteEntry(t.userData, r.name);
-    check('⭐ deleting the font takes its pooled sounds with it', pool().length === 0,
+    check('deleting the font takes its pooled sounds with it', pool().length === 0,
       JSON.stringify(pool()));
-    check('⚠️ but the vendor source is untouched — it was never the pool\'s to free',
+    check('but the vendor source is untouched — it was never the pool\'s to free',
       fs.readFileSync(t.srcFile('hum.wav')).includes('HUM-VENDOR'));
   }
 
@@ -190,12 +190,12 @@ async function setup() {
     check('one sound, added twice, is stored once', pool().length === 1, JSON.stringify(pool()));
 
     fileOps.deleteFilesAt({ userData: t.userData, kind: 'entry', id: t.entryName, subPaths: ['quote.wav'] });
-    check('⚠️ one font dropping it is NOT the last user', pool().length === 1, JSON.stringify(pool()));
+    check('one font dropping it is NOT the last user', pool().length === 1, JSON.stringify(pool()));
     check('and the other font still reads it',
       fs.readFileSync(path.join(E.entriesRoot(t.userData), second.name, 'quote.wav')).includes('SHARED-QUOTE'));
 
     fileOps.deleteFilesAt({ userData: t.userData, kind: 'entry', id: second.name, subPaths: ['quote.wav'] });
-    check('⭐ the last one does', pool().length === 0, JSON.stringify(pool()));
+    check('the last one does', pool().length === 0, JSON.stringify(pool()));
   }
 
   {
@@ -204,13 +204,13 @@ async function setup() {
     // The whole reason hardlinks were chosen over a reference table: there is no
     // in-use guard to write, because the content outlives any single name.
     fs.rmSync(path.join(S.sourcesRoot(t.userData), t.sourceUuid), { recursive: true, force: true });
-    check('⭐ the entry still reads its audio',
+    check('the entry still reads its audio',
       fs.readFileSync(t.entFile('hum.wav')).includes('HUM-VENDOR'));
     check('nothing dangles - it is a real file', fs.statSync(t.entFile('hum.wav')).isFile());
   }
 
   {
-    console.log('⚠️  THE INVARIANT: nothing may write content through a shared name');
+    console.log(' THE INVARIANT: nothing may write content through a shared name');
     // This does NOT test app code. It demonstrates the failure mode the design
     // forbids, so the reason for the rule is executable rather than a comment
     // someone has to read and believe.
@@ -232,7 +232,7 @@ async function setup() {
       userData: t2.userData, kind: 'entry', id: t2.entryName,
       subPath: '', sourceFilePaths: [outside],
     });
-    check('⭐ adding a file whose NAME collides did not overwrite the pointer',
+    check('adding a file whose NAME collides did not overwrite the pointer',
       fs.readFileSync(t2.srcFile('hum.wav')).equals(srcBytes));
     check('the source file is still the same inode',
       fs.statSync(t2.srcFile('hum.wav')).ino === srcIno);
@@ -253,17 +253,17 @@ async function setup() {
     });
     check('both duplicates were created', dupC.ok && dupS.ok, JSON.stringify([dupC.error, dupS.error]));
     const f = (n, rel) => path.join(E.entriesRoot(t.userData), n, rel);
-    check('⭐ Duplicate shares bytes with the original',
+    check('Duplicate shares bytes with the original',
       fs.statSync(f('Copy_current', 'hum.wav')).ino === fs.statSync(t.entFile('hum.wav')).ino);
-    check('⭐ Duplicate-from-source shares them too',
+    check('Duplicate-from-source shares them too',
       fs.statSync(f('Copy_source', 'hum.wav')).ino === fs.statSync(t.srcFile('hum.wav')).ino);
 
-    // ⚠️ The case that nearly shipped: meta.json must NOT be shared, because the
+    // The case that nearly shipped: meta.json must NOT be shared, because the
     // duplicate rewrites it. A link here would rename the ORIGINAL font.
-    check('⚠️ meta.json is NOT shared between the two',
+    check('meta.json is NOT shared between the two',
       fs.statSync(f('Copy_current', 'meta.json')).ino !== fs.statSync(t.entFile('meta.json')).ino);
     const origMeta = JSON.parse(fs.readFileSync(t.entFile('meta.json'), 'utf8'));
-    check('⭐ and the original still knows its own name',
+    check('and the original still knows its own name',
       origMeta.name === t.entryName, origMeta.name);
     const dupMeta = JSON.parse(fs.readFileSync(f('Copy_current', 'meta.json'), 'utf8'));
     check('while the duplicate has its own', dupMeta.name === 'Copy_current', dupMeta.name);

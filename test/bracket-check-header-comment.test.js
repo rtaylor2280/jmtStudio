@@ -11,7 +11,7 @@
  * failed, the function returned null, and NULL MEANS "no bracket error". A style that
  * could not be read reported as clean.
  *
- * ⭐ THE USER IT HURT IS THE CAREFUL ONE: the person who comments their styles got no
+ * THE USER IT HURT IS THE CAREFUL ONE: the person who comments their styles got no
  * bracket checking at all, and nothing said so. Every caller goes through this one
  * function (six call sites), so all of them were blind together.
  *
@@ -64,7 +64,7 @@ const BROKEN = 'using L = Layers<Black,Red;';
 {
   ok('a broken style with NO header is caught', !!_findBracketError(BROKEN));
 
-  // ⭐⭐ THE REGRESSION THAT MATTERS.
+  // THE REGRESSION THAT MATTERS.
   ok('a broken style WITH a block header is caught',
      !!_findBracketError(`/* My style */\n${BROKEN}`),
      'this returned null before the fix, which reads as "no bracket error"');
@@ -86,7 +86,7 @@ const BROKEN = 'using L = Layers<Black,Red;';
   ok('and a broken templated style is still caught',
      !!_findBracketError('template<int d = 0>\nusing L = Layers<Black,Int<d>;'));
 
-  // ⭐⭐⭐ A HEADER **ABOVE A TEMPLATE PREFIX**, WHICH IS THE CASE THIS FILE MISSED.
+  // A HEADER **ABOVE A TEMPLATE PREFIX**, WHICH IS THE CASE THIS FILE MISSED.
   // Comments were covered. Templates were covered. The COMBINATION never was, and
   // that is precisely the shape a wrapper entry takes: a `/*---*/` header from the
   // source library, then `template<...>`, then `using`. A real BootAccelSpin.
@@ -97,11 +97,11 @@ const BROKEN = 'using L = Layers<Black,Red;';
   // line and returned null. Silently, which is the fault this entry is named for.
   // Found by dev test 2026-09-14, after this suite was green.
   //
-  // ⚠️ Two features each tested alone and never together is how a gap like this
+  // Two features each tested alone and never together is how a gap like this
   // survives a passing suite. When two independent prefixes can both appear, the
   // case that matters is BOTH.
   const TMPL = 'template< int START_MS, int W = 8000 >';
-  ok('⭐ a comment above a TEMPLATE prefix does not hide a fault',
+  ok('a comment above a TEMPLATE prefix does not hide a fault',
      !!_findBracketError(`/*TEST*/\n${TMPL}\nusing L = Layers<Black,Int<START_MS>;`),
      'comment + template + using — the shape a library wrapper actually has');
   ok('a // line above a template prefix does not hide it either',
@@ -117,7 +117,7 @@ const BROKEN = 'using L = Layers<Black,Red;';
        !!e && src[e.offsetInCode] === '<',
        e ? `offset ${e.offsetInCode} -> ${JSON.stringify(src.slice(e.offsetInCode, e.offsetInCode + 12))}` : 'no error');
   }
-  // ⚠️ Angle brackets inside the expression's own comments must not count — that was
+  // Angle brackets inside the expression's own comments must not count — that was
   // the 2026-07-13 false positive (`/* >>> INNER-START >>> */` underflowing the stack).
   ok('brackets inside an inline comment do not count',
      _findBracketError('using L = Layers<Black,/* <<< x >>> */Red>;') === null);
@@ -143,7 +143,7 @@ const BROKEN = 'using L = Layers<Black,Red;';
 {
   const calls = (html.match(/_findBracketError\(/g) || []).length;
   ok('every caller still routes through the one checker', calls >= 6, `${calls} references`);
-  // ⚠️ THIS USED TO PIN AN EXACT LINE (`const body = usingCode.slice(skip);`) and
+  // THIS USED TO PIN AN EXACT LINE (`const body = usingCode.slice(skip);`) and
   // failed the moment the function was restructured to fix a real bug — a test that
   // asserts a spelling rather than a property. Asserting the ORDER instead, which is
   // what actually broke: comments must be skipped BEFORE the template prefix is split.
@@ -152,7 +152,7 @@ const BROKEN = 'using L = Layers<Black,Red;';
   const skipAt  = fn.indexOf('usingCode.slice(skip)');
   const splitAt = fn.indexOf('_splitTemplatePrefix(');
   ok('the leading-comment skip runs on the raw input', skipAt > 0, fn.slice(0, 160));
-  ok('⭐ and it runs BEFORE the template prefix is split',
+  ok('and it runs BEFORE the template prefix is split',
      skipAt > 0 && splitAt > skipAt,
      '_splitTemplatePrefix anchors on ^template, so a comment in front of it defeats '
      + 'the split and the ^using match then fails on the template line');

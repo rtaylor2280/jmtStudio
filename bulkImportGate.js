@@ -12,11 +12,11 @@
 //      one still going became permanently un-cancellable — the click set a flag nobody read.
 //   2. The `finally` nulled the pointer, so when the OLD run ended it disarmed the NEW one.
 //
-// ⚠️ OBSERVED, NOT THEORISED, 2026-09-18: the user cancelled a 136-source import and the probe kept
+// OBSERVED, NOT THEORISED, 2026-09-18: the user cancelled a 136-source import and the probe kept
 // naming new sources for eight minutes, marching alphabetically past the cancel point, while the
 // modal was gone and the library was being written. From the UI there was nothing to see at all.
 //
-// ⚠️⚠️ THE FIX'S OWN TRAP, HIT WHILE WRITING IT: a `clear()` in the finally reads as tidy and is
+// THE FIX'S OWN TRAP, HIT WHILE WRITING IT: a `clear()` in the finally reads as tidy and is
 // the original bug wearing new clothes — it disarms every other live run exactly as `= null` did.
 // A run may only ever retire ITS OWN token.
 // ── ALSO THE EXPORT GATE NOW ─────────────────────────────────── [B-005 item 4, 2026-09-19]
@@ -26,7 +26,7 @@
 // a finishing run disarm only itself". Exports need exactly that, and a second copy of state that
 // has already gone wrong twice would be the worst possible thing to duplicate.
 //
-// ⚠️ ONE DIFFERENCE, AND IT IS OPT-IN. Import is exclusive - a second one must be refused. Export
+// ONE DIFFERENCE, AND IT IS OPT-IN. Import is exclusive - a second one must be refused. Export
 // is not: the progress modal already prevents two at once in practice, and REFUSING an export
 // because the gate thinks something is running would turn a cancellation bug into a "nothing
 // happens when I click export" bug. So exports pass { exclusive: false } and always get a token.
@@ -41,7 +41,7 @@ function createGate(opts = {}) {
   return {
     // Returns null when something is already running. The caller must treat null as "refuse",
     // not as "carry on with no token" — a run with no token cannot be cancelled at all.
-    // ⚠️ A non-exclusive gate never returns null: every run is cancellable, always.
+    // A non-exclusive gate never returns null: every run is cancellable, always.
     begin() {
       if (exclusive && busy) return null;
       busy = true;
@@ -56,7 +56,7 @@ function createGate(opts = {}) {
       busy = false;
     },
 
-    // ⭐ Cancels EVERYTHING in flight. If a run somehow survived its own retirement, the user's
+    // Cancels EVERYTHING in flight. If a run somehow survived its own retirement, the user's
     // click still has to reach it — that is the failure this whole module exists to prevent.
     cancelAll() {
       let n = 0;

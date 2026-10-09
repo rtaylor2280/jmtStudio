@@ -76,7 +76,7 @@ const PACK = {
 
 
 // [B-398] commonMatchesAt became async when its per-file hash loop started yielding, so the
-// whole body runs inside one async IIFE. ⚠️ WITHOUT the awaits these assertions compare a
+// whole body runs inside one async IIFE. WITHOUT the awaits these assertions compare a
 // PROMISE against an expected object - they fail loudly rather than passing wrongly, which is
 // the only reason this conversion was safe to do mechanically.
 (async () => {

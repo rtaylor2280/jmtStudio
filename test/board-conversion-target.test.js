@@ -1,6 +1,6 @@
 // A conversion name resolves to the board it was converted TO, not FROM. [B-485]
 //
-// ⭐⭐ WHY THIS EXISTS. `identifyBoard` returns the first match in BOARD_PATTERNS
+// WHY THIS EXISTS. `identifyBoard` returns the first match in BOARD_PATTERNS
 // order and `proffie` is index 0, so a wrapper named "Renamed_PROFFIE_to_ASTERIA"
 // resolved to `proffie`. Measured consequence on the real archive: all five of
 // that vendor's conversion wrappers reported `proffie`, `detectMultiBoardSiblings`
@@ -8,7 +8,7 @@
 // whole font was the Asteria build - while the real 116-file Proffie font was not
 // offered at all. A non-Proffie build landing in a Proffie library.
 //
-// ⚠️⚠️ THE REGRESSION THIS FILE REALLY GUARDS IS THE OTHER DIRECTION. The obvious
+// THE REGRESSION THIS FILE REALLY GUARDS IS THE OTHER DIRECTION. The obvious
 // fix - "the last board token wins" - breaks a vendor that works today. Two real
 // folders in the corpus are named "JUANSITH´S SATELE PROFFIE AND XENOPIXEL V3":
 // two board tokens, and `proffie` is CORRECT because that folder IS the Proffie
@@ -61,7 +61,7 @@ eq('real proffie font', 'Absorbed', null);
 eq('real proffie font', 'Astral Projection', null);
 
 console.log('');
-console.log('— ⚠️ REGRESSION: names that legitimately CONTAIN a board token —');
+console.log('— REGRESSION: names that legitimately CONTAIN a board token —');
 // "contains both builds", not "converted into". proffie is the right answer.
 eq('juansith', 'JUANSITH´S SATELE PROFFIE AND XENOPIXEL V3', 'proffie');
 eq('juansith', 'JUANSITH´S HE-MAN 83 PROFFIE AND XENOPIXEL V3', 'proffie');

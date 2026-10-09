@@ -13,12 +13,12 @@
  * "Config staged to: ...\my_config.h", which is correct and is not where anyone looks
  * while reading an error.
  *
- * ⭐ THE LINE NUMBERS ARE RIGHT, and that is what makes this a fix rather than an
+ * THE LINE NUMBERS ARE RIGHT, and that is what makes this a fix rather than an
  * explanation. The staged copy is byte-identical to the buffer, so line 37 IS line 37
  * of what the user is looking at. Only the filename token is wrong — a substitution
  * with nothing to map and no way to point somewhere wrong.
  *
- * ⚠️ OURS ONLY. The toolchain's streamed output in Build Output is never rewritten:
+ * OURS ONLY. The toolchain's streamed output in Build Output is never rewritten:
  * that is what gets pasted into a forum thread and must match what the toolchain said.
  *
  * Run: node test/error-config-filename.test.js
@@ -84,7 +84,7 @@ const ERR = "my_config.h:37 — cannot convert 'const char*' to 'StyleFactory*' 
 
 // ── the edges ──────────────────────────────────────────────────────────────
 {
-  // ⚠️ A config with no name yet: the staging basename IS what the user would
+  // A config with no name yet: the staging basename IS what the user would
   // recognise, because `my_config` is also the default in the filename field. Nothing
   // to substitute, and inventing a name would be worse than leaving it.
   ok('an empty filename field leaves the text alone', make('')(ERR) === ERR);
@@ -112,7 +112,7 @@ const ERR = "my_config.h:37 — cannot convert 'const char*' to 'StyleFactory*' 
   ok('our appended summary line goes through it',
      /appendLog\(`\\n⚠ \$\{_withUserConfigName\(error\)\}`/.test(src));
 
-  // ⚠️ THE ONE THING THAT MUST NOT BE REWRITTEN. onLog streams the toolchain's own
+  // THE ONE THING THAT MUST NOT BE REWRITTEN. onLog streams the toolchain's own
   // lines; if that ever gets wrapped, a forum paste stops matching what gcc said.
   const streamed = src.slice(0, src.indexOf('function _withUserConfigName'));
   ok('the raw toolchain stream is not rewritten',

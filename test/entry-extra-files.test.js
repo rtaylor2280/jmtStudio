@@ -65,24 +65,24 @@ const FONT = {
   }
 
   {
-    // ⭐ The reported case: three files added to the card that the library never had.
+    // The reported case: three files added to the card that the library never had.
     const { userData, dest } = setup(FONT, {
       ...FONT,
       'song1.wav': 'XXXX', 'song2.wav': 'YYYY', 'song3.wav': 'ZZZZ',
     });
     const r = await entryMatchesAt(userData, 'Ahsoka', dest);
-    ok('⭐⭐ extra files on the card make the folder DIFFER',
+    ok('extra files on the card make the folder DIFFER',
        r.exists === true && r.identical === false,
        'every library file still matches, so without a look at what else is in that folder the '
        + 'app reports a match and Replace is never offered');
   }
 
   {
-    // ⚠️ Nested, because the walk has to recurse. A font is folders of wavs, and an extra file
+    // Nested, because the walk has to recurse. A font is folders of wavs, and an extra file
     // one level down is the same problem wearing a subdirectory.
     const { userData, dest } = setup(FONT, { ...FONT, 'bgndrag/song.wav': 'XXXX' });
     const r = await entryMatchesAt(userData, 'Ahsoka', dest);
-    ok('⚠️ and an extra file in a SUBFOLDER counts too',
+    ok('and an extra file in a SUBFOLDER counts too',
        r.identical === false,
        'a walk that only reads the top level would miss most of a font');
   }
@@ -100,17 +100,17 @@ const FONT = {
   }
 
   {
-    // ⭐⭐ The deferred half. The compare stops as soon as counts prove a difference, so nothing is
+    // The deferred half. The compare stops as soon as counts prove a difference, so nothing is
     // recorded then. Answering Skip is what makes the folder ours to maintain, and this is what
     // records it - the library's files AND the ones it has never seen.
     const { recordFolderAt } = require('../soundFontEntries');
     const { dest } = setup(FONT, { ...FONT, 'song1.wav': 'XXXX', 'bgndrag/song2.wav': 'YYYY' });
     const r = await recordFolderAt(dest, 'Ahsoka');
     const rels = (r.observed || []).map(([rel]) => rel).sort();
-    ok('⭐ recording a kept folder covers the library files',
+    ok('recording a kept folder covers the library files',
        rels.includes('hum.wav') && rels.includes('swing1.wav') && rels.includes('bgndrag/drag1.wav'),
        `got ${JSON.stringify(rels)}`);
-    ok('⭐⭐ and the files the library has never seen',
+    ok('and the files the library has never seen',
        rels.includes('song1.wav') && rels.includes('bgndrag/song2.wav'),
        'these are the whole point: hashing them now is what lets a later import of the same files '
        + 'into the library resolve without re-reading the card');
@@ -124,7 +124,7 @@ const FONT = {
   }
 
   {
-    // ⚠️⚠️ THE ONLY DIRECTION THAT DELETES. A record for a file that is not on the card
+    // THE ONLY DIRECTION THAT DELETES. A record for a file that is not on the card
     // contradicts the claim that we maintain this, so a comparison that accounted for the WHOLE
     // folder may drop what it did not see. Everything else still merges, because a compare walks
     // the library's file list and knows nothing about the rest of the folder.
@@ -134,32 +134,32 @@ const FONT = {
     // Two records for files that are not there, as a deleted extra would leave behind.
     sync.mergeItems(dest, { Ahsoka: [['ghost1.wav', [1, 2, 'G1']], ['ghost2.wav', [1, 2, 'G2']]] });
     const m = await entryMatchesAt(userData, 'Ahsoka', dest);
-    ok('⭐ a folder that matches the library reports its observations as complete',
+    ok('a folder that matches the library reports its observations as complete',
        m.identical === true && m.complete === true,
        'without this the sweep never runs on the case that produces stale records');
 
     sync.mergeItems(dest, { Ahsoka: m.observed });
     const merged = (sync.read(dest).items.Ahsoka.files || []).map((f) => f[0]);
-    ok('⚠️ a plain merge still keeps everything, including the stale records',
+    ok('a plain merge still keeps everything, including the stale records',
        merged.includes('ghost1.wav'),
        'merging must stay additive - a compare cannot speak for files it never looked at');
 
     sync.mergeItems(dest, { Ahsoka: m.observed }, { complete: ['Ahsoka'] });
     const swept = (sync.read(dest).items.Ahsoka.files || []).map((f) => f[0]).sort();
-    ok(`⭐⭐ a complete observation drops records for files that are gone (${swept.length})`,
+    ok(`a complete observation drops records for files that are gone (${swept.length})`,
        JSON.stringify(swept) === JSON.stringify(['bgndrag/drag1.wav', 'hum.wav', 'swing1.wav']),
        `the item should describe exactly the folder. Got ${JSON.stringify(swept)}`);
   }
 
   {
-    // ⚠️⚠️ THE GUARD, AND THE CASE THAT MAKES COUNTS ALONE INSUFFICIENT. One library file absent
+    // THE GUARD, AND THE CASE THAT MAKES COUNTS ALONE INSUFFICIENT. One library file absent
     // and one stray present leaves the counts equal while the folders differ - so a claim based
     // on counts would delete records for files it never examined.
     const card = { ...FONT, 'stray.wav': 'ZZZ' };
     delete card['swing1.wav'];
     const { userData, dest } = setup(FONT, card);
     const m = await entryMatchesAt(userData, 'Ahsoka', dest);
-    ok('⭐⭐ counts can match while the folders differ, and completeness is REFUSED',
+    ok('counts can match while the folders differ, and completeness is REFUSED',
        m.complete === false,
        'one absent plus one stray is 3 against 3. Claiming completeness here would license '
        + 'deleting records for a file that was never looked at');

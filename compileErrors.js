@@ -255,7 +255,7 @@ function extractCompileError(raw, ctx) {
     if (!m) {
       return line.length > MAX_MSG ? line.slice(0, MAX_MSG) + '…' : line;
     }
-    // ⭐⭐ NO FILENAME. Settled 2026-09-14: "I don't want to see <the config>... def
+    // NO FILENAME. Settled 2026-09-14: "I don't want to see <the config>... def
     // don't want my config. that's only because of what we insert our config into the
     // file to achieve our magic. but we don't need to specify a file name at all."
     //
@@ -264,20 +264,20 @@ function extractCompileError(raw, ctx) {
     // the user has never seen. [B-373] substituted their own filename instead, which was
     // an improvement and still the wrong idea.
     //
-    // ⭐ AND DROPPING IT MAKES THE LINE NUMBER TRUE. The @jmt block is stripped from the
+    // AND DROPPING IT MAKES THE LINE NUMBER TRUE. The @jmt block is stripped from the
     // editor on load and re-injected on save - 18 lines on a real config - so
     // a `<config>.h:102` reference was a claim about a FILE whose line 102 is something else
     // entirely. The staged copy is the EDITOR's content, so the number has always been
     // correct for the buffer. Name no file and it means what it says.
     //
-    // ⚠️ The raw toolchain output in Build Output is untouched and still says my_config.h:
+    // The raw toolchain output in Build Output is untouched and still says my_config.h:
     // that is what arduino-cli printed and what gets pasted into a forum thread.
     const ln   = m[2];
     let msg    = m[3];
     if (msg.length > MAX_MSG) msg = msg.slice(0, MAX_MSG) + '…';
     return `Line ${ln} — ${msg}`;
   };
-  // ⚠️ DEDUPE **AFTER** SUMMARISING, NOT BEFORE. summarize() drops the column, so two
+  // DEDUPE **AFTER** SUMMARISING, NOT BEFORE. summarize() drops the column, so two
   // diagnostics that gcc distinguishes only by column - 103:5 and 103:22 - become the
   // same sentence and were printed twice in a four-line dialog. Deduping the RAW lines
   // would not have caught it, because the raw lines genuinely differ.
@@ -285,7 +285,7 @@ function extractCompileError(raw, ctx) {
   // The count has to come from the deduped list too, or "…and 2 more" describes rows
   // nobody is being shown.
   //
-  // ⚠️ THIS IS COSMETIC, AND THE REAL PROBLEM IS ONE LEVEL UP: five errors here are ONE
+  // THIS IS COSMETIC, AND THE REAL PROBLEM IS ONE LEVEL UP: five errors here are ONE
   // missing comma. Collapsing a cascade to its cause belongs to the matrix ([B-268]
   // position-before-specificity, [B-266] translate to structure), not to this formatter.
   // All this does is stop the same sentence appearing twice.

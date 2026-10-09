@@ -1,18 +1,18 @@
 // [B-424] A CANCEL THAT ARRIVES AFTER THE SOURCE IS COMMITTED MUST STILL DISCARD IT.
 //
-// ⭐⭐ THE DEFECT, found by the dev pass 2026-10-07 and twice in one evening. Every checkpoint in
+// THE DEFECT, found by the dev pass 2026-10-07 and twice in one evening. Every checkpoint in
 // `importSource` guarded work still IN PROGRESS. None guarded the moment just after the commit -
 // meta written, candidates stamped - so a cancel landing there was noticed by nobody: the function
 // returned `ok:true`, and the renderer's rollback was racing a main process that had been busy
 // writing the very thing it was supposed to remove. Result on disk: a complete 25 MB source, then
 // a complete 129 MB source, each with nothing in the library or commons pointing at it.
 //
-// ⭐ HIS RULE, which is what makes "too late" wrong here: *"if I click it, it should just discard
+// THE RULE, which is what makes "too late" wrong here: *"if I click it, it should just discard
 // on an import."* An import writes nothing to the user's card, so there is no point at which our
 // copy cannot be thrown away. The "too late" instinct belongs to EXPORT, where bytes are
 // already on the user's media.
 //
-// ⚠️ AND A CANCEL IS NOT A FAILURE. The catch reported every cancel as "Import failed: ...", which
+// AND A CANCEL IS NOT A FAILURE. The catch reported every cancel as "Import failed: ...", which
 // is the user's own click shown back to them as a red error.
 const fs = require('fs');
 const os = require('os');
@@ -58,7 +58,7 @@ const liveSources = (ud) => {
     put(src, 'MyFont/swing.wav', wav('S'));
     put(src, 'MyFont/font.wav', wav('F'));
 
-    // ⭐ FIRES ONLY ONCE A SOURCE IS COMMITTED. Returning true from the start would be caught by
+    // FIRES ONLY ONCE A SOURCE IS COMMITTED. Returning true from the start would be caught by
     // an EARLY checkpoint and prove nothing about the one being added - the whole point is a
     // cancel that arrives too late for every guard that already existed.
     const shouldStop = () => {
@@ -74,15 +74,15 @@ const liveSources = (ud) => {
     });
 
     check('the import reports NOT ok', !!(r && r.ok === false), JSON.stringify(r));
-    check('⭐ and reports it as CANCELLED, not failed',
+    check('and reports it as CANCELLED, not failed',
       !!(r && r.cancelled === true),
       `a cancel surfaced as a failure: ${JSON.stringify(r)}`);
-    check('⚠️ and does not say "Import failed"',
+    check('and does not say "Import failed"',
       !/Import failed/i.test(String((r && r.error) || '')), (r && r.error) || '');
 
-    // ⭐⭐ THE ASSERTION THAT MATTERS. Before this fix the directory survived in full.
+    // THE ASSERTION THAT MATTERS. Before this fix the directory survived in full.
     const left = liveSources(userData);
-    check('⭐⭐ nothing is left on disk', left.length === 0,
+    check('nothing is left on disk', left.length === 0,
       `${left.length} source dir(s) survived the cancel: ${left.join(', ')} - this is the orphan`);
 
     try { fs.rmSync(userData, { recursive: true, force: true }); } catch {}
@@ -90,7 +90,7 @@ const liveSources = (ud) => {
   }
 
   // ── 2. THE CONTROL: an uncancelled import of the same shape must SURVIVE ───
-  // ⚠️ Without this, a checkpoint that threw unconditionally would pass every check above.
+  // Without this, a checkpoint that threw unconditionally would pass every check above.
   {
     console.log('\nthe same import, uncancelled, keeps its source');
     const userData = tmp('ud2');
@@ -106,7 +106,7 @@ const liveSources = (ud) => {
 
     check('the import succeeds', !!(r && r.ok), JSON.stringify(r && r.error));
     check('it is not flagged cancelled', !(r && r.cancelled), JSON.stringify(r));
-    check('⭐ and the source is still there', liveSources(userData).length === 1,
+    check('and the source is still there', liveSources(userData).length === 1,
       `expected exactly one source, found ${liveSources(userData).length}`);
 
     try { fs.rmSync(userData, { recursive: true, force: true }); } catch {}

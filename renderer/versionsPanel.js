@@ -423,7 +423,7 @@ function _vpRenderDetail(v) {
   });
 
   // File tree — start inside ProffieOS/
-  // ⚠️ Provenance is warmed BEFORE the tree is built, not alongside it. The rows read
+  // Provenance is warmed BEFORE the tree is built, not alongside it. The rows read
   // it synchronously, so a fetch racing the render paints every prop in the default
   // colour and only corrects on the next repaint - which looks like the feature not
   // working rather than like a race.
@@ -908,7 +908,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
 // Which props the user added, per version, cached so a TREE ROW can ask the question
 // synchronously while it renders. [B-446]
 //
-// ⚠️ The context menu deliberately does NOT read this cache - it re-fetches. A menu
+// The context menu deliberately does NOT read this cache - it re-fetches. A menu
 // opens on demand and must answer for the state right now; a row is painted in bulk
 // and cannot await. Two readers, two correct answers, and the difference is the cost
 // of being wrong: a stale ROW is the wrong colour until the next render, a stale MENU
@@ -1088,7 +1088,7 @@ async function _vpLoadTree(versionName, subPath, container, depth) {
       // already uses everywhere for a file the user touched rather than one that
       // shipped (ui-conventions: the Customized badge, "the marker's colour
       // everywhere else"). [B-446]
-      // ⭐ The knowledge was already there - addedProps decides whether Remove and
+      // The knowledge was already there - addedProps decides whether Remove and
       // Copy are even offered - so this exposes a fact the menu was already acting
       // on rather than computing a second one.
       if (_vpAddedPropsFor(versionName).includes(entry.name)
@@ -1231,12 +1231,12 @@ function _vpCloseCtxMenus() {
 //   Copy to All OS Versions         only with TWO OR MORE
 //   ✕ Remove                        only for props THIS APP added
 //
-// ⚠️ THE CONFIG-OPEN GUARD USED TO GATE THE WHOLE MENU, because Link was the only
+// THE CONFIG-OPEN GUARD USED TO GATE THE WHOLE MENU, because Link was the only
 // item. Copy and Remove need no config, so the guard moved onto the Link item; left
 // where it was, the two new actions would have been unreachable on the one screen
 // that is most natural for them.
 //
-// ⚠️ NO CONFIRM DIALOGS ANYWHERE IN HERE, by design. The destination ROW says what
+// NO CONFIRM DIALOGS ANYWHERE IN HERE, by design. The destination ROW says what
 // it will do - "(replaces)", "(different major)" - so picking it IS the consent. A
 // confirm interrupts after the decision and asks you to make it twice; a labelled
 // row tells you while you are still choosing. Nothing may be replaced by a row that
@@ -1298,7 +1298,7 @@ function _vpAttachPropCtxMenu(row, filePath, fileName, versionName) {
     } else if (others.length > 1) {
       const copyTo = mkItem('Copy to…', { cls: 'has-submenu' }, null);
       _vpWirePropCopySubmenu(copyTo, versionName, fileName, others);
-      // ⚠️ The only item that cannot name its destinations inline, so it is the one
+      // The only item that cannot name its destinations inline, so it is the one
       // that still has to speak: the toast afterwards says what it replaced, where.
       mkItem(`Copy to All OS Versions (${others.length})`, null,
              () => _vpDoPropCopy(versionName, fileName, others));
@@ -1308,7 +1308,7 @@ function _vpAttachPropCtxMenu(row, filePath, fileName, versionName) {
     // know", which is true; a disabled row claiming the file is protected would be
     // asserting a permission we do not hold.
     if (userAdded) {
-      // ⚠️ The menu is already ON this file, so naming it again is telling the reader
+      // The menu is already ON this file, so naming it again is telling the reader
       // something their cursor is pointing at. The DESTINATION earns its place - there
       // are seven versions and the row must say which one it acts on - the subject does
       // not. "Delete" rather than "Remove" because Delete is this app's word for it
@@ -1401,7 +1401,7 @@ async function _vpDoPropCopy(fromVersion, fileName, toVersions) {
 }
 
 async function _vpDoPropRemove(versionName, fileName) {
-  // ⚠️ Warn when the OPEN config names this prop: removing it turns a working build
+  // Warn when the OPEN config names this prop: removing it turns a working build
   // into "No such file or directory" at compile. Not a refusal - the Prop field
   // already goes red and the preflight already blocks, so the honest move is to say
   // so and let them decide.
@@ -1454,7 +1454,7 @@ async function _vpExport(v) {
 // The alternative it replaces is the 📂 button, which opens the app's userData
 // folder in a file manager - teaching the exact habit the app exists to remove.
 //
-// ⚠️ Shared with the Prop dropdown's ＋ Import prop… row (index.html), which is why
+// Shared with the Prop dropdown's ＋ Import prop… row (index.html), which is why
 // the whole flow lives in one exported function rather than twice. The two entry
 // points differ only in what happens afterwards: the dropdown selects what it just
 // imported, the version card refreshes its file tree.
@@ -1482,14 +1482,14 @@ async function _vpImportProp(v, opts) {
     if (res?.error) window.promptError('Import Prop failed', res.error);
     return null;
   }
-  // ⚠️⚠️ INVALIDATE BEFORE RENDERING, NEVER AFTER, AND THIS ORDER IS THE WHOLE BUG.
+  // INVALIDATE BEFORE RENDERING, NEVER AFTER, AND THIS ORDER IS THE WHOLE BUG.
   // _vpRenderDetail starts `_vpWarmAddedProps(...).then(buildTree)`. Clearing the
   // cache on the line AFTER that call runs synchronously, lands between the fetch and
   // its .then(), and the tree then paints from an empty cache - every prop in the
   // default colour, with the context menu correctly offering Delete on a row that
   // does not look added. The guard defeated the thing it was guarding. [B-446]
   _vpForgetAddedProps();
-  // ⚠️ THE VERSION NAME STAYS. I cut it on 2026-10-04 to make the toast fit one line, and he
+  // THE VERSION NAME STAYS. I cut it on 2026-10-04 to make the toast fit one line, and he
   // put it back: *"i want it back... chance of someone importing from card a prop is low."* The
   // two-line wrap it causes is a cosmetic cost on a rare path, and the name is worth more than the
   // layout. Do not trim this again for wrapping reasons.
@@ -1506,16 +1506,16 @@ async function _vpImportProp(v, opts) {
   // exactly the kind that never reaches the other.
   window._populatePropSelect?.();
   if (!o.quiet) {
-    // ⭐⭐ [B-424] ONE TOAST, CARRYING THE EJECT - not a second one beside it. The rule:
+    // [B-424] ONE TOAST, CARRYING THE EJECT - not a second one beside it. The rule:
     // *"the eject offer needs to ride along with whatever is there not something new."*
     // The first cut of this LEFT the plain `showToast` here and added an eject toast after it,
     // which stacked two toasts for one action. `_sfOfferEjectInToast` already builds a toast from
     // the lead it is given, so the existing sentence became that lead and the second toast went.
-    // ⚠️ It is not only an eject surface: with a non-removable source it offers **Show**
+    // It is not only an eject surface: with a non-removable source it offers **Show**
     // instead, so this still ends with a toast when the prop came off an ordinary disk.
-    // ⚠️ INSIDE the quiet guard, where the toast it replaces lived. The first cut had it
+    // INSIDE the quiet guard, where the toast it replaces lived. The first cut had it
     // outside, so a quiet import would have toasted.
-    // ⚠️ LAST, after the tree and dropdown refresh, so it never sits over a stale list.
+    // LAST, after the tree and dropdown refresh, so it never sits over a stale list.
     if (res.sourcePath && window._sfOfferEjectInToast) {
       await window._sfOfferEjectInToast(res.sourcePath, _propLead, 'from');
     } else {

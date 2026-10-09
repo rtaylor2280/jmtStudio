@@ -7,7 +7,7 @@
  * visibly grew taller for long paths — the exact vertical jump the one-line rule
  * exists to prevent.
  *
- * ⭐⭐ THE CAUSE, AND IT READS AS IMPOSSIBLE UNTIL YOU LOOK AT THE SHORTHANDS.
+ * THE CAUSE, AND IT READS AS IMPOSSIBLE UNTIL YOU LOOK AT THE SHORTHANDS.
  * `.sf-import-progress-detail` already carried `white-space: nowrap`. What beat it:
  *
  *     .modal p                   -> text-wrap: balance   => text-wrap-mode: wrap
@@ -18,12 +18,12 @@
  * longhand and switched wrapping back on. Nothing was missing; two shorthands were
  * fighting over one longhand that neither of their names mentions.
  *
- * ⚠️ THE OLD EXPLANATION WAS INVENTED. A comment on the backup modal's override blamed
+ * THE OLD EXPLANATION WAS INVENTED. A comment on the backup modal's override blamed
  * `word-break: break-all` on the shared class. That property is not there and was not
  * then. The entry flagged the note as partly stale; the specificity half was right, the
  * word-break half was a guess that read as a finding for months.
  *
- * ⭐ AND THE FIX IS NOT A THIRD !important BLOCK. Two modals had needed the same clamp
+ * AND THE FIX IS NOT A THIRD !important BLOCK. Two modals had needed the same clamp
  * on the same class; a third would have. One rule that wins on specificity, and the
  * per-modal override deleted rather than left to drift.
  *
@@ -87,7 +87,7 @@ const beats = (a, b) => {
      !/#modal-sf-backup-progress \.sf-import-progress-detail \{/.test(html),
      'two copies of one rule is how they drift apart');
 
-  // ⚠️ The element-name clamp beside it is a DIFFERENT class and is out of scope; it
+  // The element-name clamp beside it is a DIFFERENT class and is out of scope; it
   // must survive, or the backup modal's item-name line starts wrapping instead.
   ok('the backup item-name clamp is untouched',
      /#modal-sf-backup-progress \.sf-backup-progress-item-name \{/.test(html));
@@ -108,12 +108,12 @@ const beats = (a, b) => {
      'matching the element is how the rule outranks .modal p without !important');
 }
 
-// ── ⭐⭐ IT MUST BE STRUCTURALLY IMPOSSIBLE, NOT CONVENTIONALLY AVOIDED ─────
+// ── IT MUST BE STRUCTURALLY IMPOSSIBLE, NOT CONVENTIONALLY AVOIDED ─────
 //
 // The rule, 2026-09-16: "I don't understand why a line that is supposed to show files
 // flying by would ever want to wrap. that shouldn't be possible and always truncate."
 //
-// ⚠️ THE POINT IS "SHOULDN'T BE POSSIBLE". Everything above proves the clamp is correct
+// THE POINT IS "SHOULDN'T BE POSSIBLE". Everything above proves the clamp is correct
 // TODAY. It cannot prove the next rule someone writes will not silently undo it — which
 // is exactly how this happened TWICE: `.modal p` beat the bare class in the bulk modal,
 // and an ID rule beat the shared clamp in the backup modal. Both were written by someone
@@ -124,7 +124,7 @@ const beats = (a, b) => {
 {
   // Every element that streams a name past the user. Enumerated from the markup rather
   // than remembered — a tenth one added later joins this list automatically.
-  // ⚠️ ATTRIBUTE ORDER IS NOT A CONTRACT. The first version of this matched
+  // ATTRIBUTE ORDER IS NOT A CONTRACT. The first version of this matched
   // `<p class="..." ... id="...">` and silently missed the two elements that write id
   // FIRST (sf-bulk-progress-detail / -elapsed), reporting 9 of 10 while looking
   // exhaustive. Testing caught the shape of it: "not sure those are the only way to get
@@ -140,10 +140,10 @@ const beats = (a, b) => {
   ok('every streaming line is enumerable from the markup', streamers.length >= 10,
      `${streamers.length} found - a drop here means an element stopped carrying the class ` +
      'or started writing its attributes in an order this no longer reads');
-  ok('⭐ and the count is attribute-order independent',
+  ok('and the count is attribute-order independent',
      streamers.some(s => s.id === 'sf-bulk-progress-detail'),
      'that element writes id before class; requiring class-first missed it');
-  ok('⭐ and every one of them is a <p>', streamers.length > 0,
+  ok('and every one of them is a <p>', streamers.length > 0,
      'the shared clamp is `.modal p.<class>` - a div would not match it and would wrap');
 
   // Properties that turn wrapping back on, in any of the spellings that reach the same
@@ -158,7 +158,7 @@ const beats = (a, b) => {
   const CLAMP = '.modal p.sf-import-progress-detail';
   const ids = new Set(streamers.map(s => s.id));
 
-  // ⚠️ WHICH MODALS ACTUALLY HOLD ONE. A `.modal p` rule scoped to a modal with no
+  // WHICH MODALS ACTUALLY HOLD ONE. A `.modal p` rule scoped to a modal with no
   // streaming line cannot reach these elements, and counting it makes the check cry
   // wolf: `#modal-confirm .modal p { text-wrap: wrap }` is legitimate and beats the
   // clamp on specificity, but that modal has no progress line in it. Derived from the
@@ -187,7 +187,7 @@ const beats = (a, b) => {
 
   const unbeaten = dangerous.filter(r => r.sel !== CLAMP && !beats(CLAMP, r.sel));
 
-  ok('⭐⭐ no rule that could reach these elements re-enables wrapping unbeaten',
+  ok('no rule that could reach these elements re-enables wrapping unbeaten',
      unbeaten.length === 0,
      unbeaten.map(r => `${r.sel}  ->  ${r.body.trim().slice(0, 90)}`).join('\n      '));
 
@@ -198,15 +198,15 @@ const beats = (a, b) => {
      `${beaten.length} rule(s) re-enable wrapping and are beaten: ` +
      beaten.map(r => r.sel).join(', '));
 
-  // ⚠️ The specific regression that shipped: an ID rule clamping the backup detail to
+  // The specific regression that shipped: an ID rule clamping the backup detail to
   // two lines. An ID beats the clamp on specificity, so nothing above would have saved
   // it - only not writing it does.
-  ok('⭐ no ID rule clamps a streaming line to multiple lines',
+  ok('no ID rule clamps a streaming line to multiple lines',
      ![...ids].some(id => new RegExp('#' + id + '\\s*\\{[^}]*line-clamp\\s*:\\s*[2-9]').test(html)),
      'an ID outranks the shared clamp, so this can only be prevented by not existing');
 }
 
-// ── ⭐ THE LABEL ABOVE THE DETAIL LINE IS THE SAME BUG ─────────────────────
+// ── THE LABEL ABOVE THE DETAIL LINE IS THE SAME BUG ─────────────────────
 //
 // The scoping call, 2026-09-16: "it's all part of the same thing to me. it's the exact
 // bug I reported. Just because the cause is broader than the initial finding doesn't
@@ -214,7 +214,7 @@ const beats = (a, b) => {
 // all — so the element one line above the fixed one still wrapped and still grew the
 // modal, which is the symptom it was originally reported.
 //
-// ⚠️ A PLAIN ELLIPSIS WOULD HAVE BEEN THE WRONG FIX. Four of those labels put the count
+// A PLAIN ELLIPSIS WOULD HAVE BEEN THE WRONG FIX. Four of those labels put the count
 // or the byte metric AFTER the name — "Copying <name> · 3 of 8" — so truncating the line
 // eats the part being read. Hence the parts form: only the name shrinks.
 {
@@ -227,17 +227,17 @@ const beats = (a, b) => {
   ok('the parts form exists and only the NAME shrinks', !!partsName
      && /flex:\s*0 1 auto/.test(partsName[0])
      && /text-overflow:\s*ellipsis/.test(partsName[0]), partsName && partsName[0]);
-  ok('⭐ and min-width: 0 is on it', !!partsName && /min-width:\s*0/.test(partsName[0]),
+  ok('and min-width: 0 is on it', !!partsName && /min-width:\s*0/.test(partsName[0]),
      'without it a flex item refuses to shrink below its content and the row overflows');
 
   const partsFixed = html.match(/\.sf-import-progress-label\.has-parts > \.sf-prog-label-fixed\s*\{[^}]*\}/);
   ok('the fixed segments hold their width', !!partsFixed && /flex:\s*0 0 auto/.test(partsFixed[0]),
      'the count must survive when the name is truncated');
 
-  // ⚠️ THE ONE THAT ACTUALLY PREVENTS THE REGRESSION: no raw write to the bulk label.
+  // THE ONE THAT ACTUALLY PREVENTS THE REGRESSION: no raw write to the bulk label.
   // A textContent assignment both skips the parts form AND leaves `has-parts` behind
   // from a previous call, turning the row into one unshrinkable flex item.
-  ok('⭐⭐ nothing writes the bulk label with raw textContent',
+  ok('nothing writes the bulk label with raw textContent',
      !/els\.progLabel\.textContent\s*=/.test(html),
      'every write goes through setProgLabel or setProgLabelPlain');
 

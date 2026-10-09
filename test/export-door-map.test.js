@@ -1,12 +1,12 @@
 // The door map must describe the app that exists.  [B-005 item 4, B-203, B-238]
 //
-// ⭐⭐ WHY A TEST AND NOT JUST A DOCUMENT. `local/export-doors.md` is the map of every way a
+// WHY A TEST AND NOT JUST A DOCUMENT. `local/export-doors.md` is the map of every way a
 // user can get a file OUT of JMT Studio, and its value is entirely in being complete. A map
 // that has quietly gone stale is worse than none, because it reads as coverage - which is
 // exactly how the previous list failed: `exportDestination.js` asserted "NINE such doors" in
 // a comment, nothing checked it, and there were eleven.
 //
-// ⚠️ THIS IS THE THIRD TIME A LIST OF EXPORT PATHS BUILT BY READING CODE WAS CORRECTED BY
+// THIS IS THE THIRD TIME A LIST OF EXPORT PATHS BUILT BY READING CODE WAS CORRECTED BY
 // SOMEBODY USING THE APP - 09-11 (five doors missing, incl. library Backup), 09-19 (cancel
 // wired to the doors named in conversation), 09-20 (three doors reporting a cancel as a
 // success). A rule that spans call sites needs a reconciliation, not a reminder.
@@ -28,7 +28,7 @@ const ok = (name, cond, why) => {
 const root = path.join(__dirname, '..');
 const MAP = path.join(root, 'local', 'export-doors.md');
 
-// ⚠️ local/ IS GITIGNORED, so a fresh clone genuinely has no map. Skip rather than fail -
+// local/ IS GITIGNORED, so a fresh clone genuinely has no map. Skip rather than fail -
 // a check that cannot pass on a clean checkout would just get deleted by whoever hit it.
 if (!fs.existsSync(MAP)) {
   console.log('  skip  local/export-doors.md not present (gitignored working doc)');
@@ -41,12 +41,12 @@ const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
 
 // ── What the app actually exposes ────────────────────────────────────
 //
-// ⚠️ MATCH ON THE HANDLER NAME, NOT ON THE WORD "export". `sources:extractTo` and
+// MATCH ON THE HANDLER NAME, NOT ON THE WORD "export". `sources:extractTo` and
 // `fileOps:copy` were both export doors whose names said nothing about exporting - and they
 // are precisely the two that were found with no cancel at all, because every earlier sweep
 // searched for the feature's name instead of its effect. The lesson stands; keep classifying
 // by EFFECT.
-// ⚠️⚠️ `sources:extractTo` WAS REMOVED 2026-09-26 [B-434] and is deliberately not in the
+// `sources:extractTo` WAS REMOVED 2026-09-26 [B-434] and is deliberately not in the
 // list below. It had a handler, a bridge and ZERO callers - never reachable, born unwired -
 // so the cancel it was given on 2026-09-20 and its place in this map were both coverage of
 // something no user could open. `test/door-reachability.test.js` fails if it returns.
@@ -60,12 +60,12 @@ const KNOWN = [
   'sources:exportToDownloads',
 ];
 
-// ⚠️⚠️ `fileOps:copy` WAS ON THE ORIGINAL NINE AND DOES NOT BELONG THERE. Its `dest` is a
+// `fileOps:copy` WAS ON THE ORIGINAL NINE AND DOES NOT BELONG THERE. Its `dest` is a
 // LIBRARY LOCATION - `{ kind, id, subPath }` - not a filesystem path, and it moves content
 // between entries/sources/common/sharedTracks by HARDLINK. It never writes to a user-chosen
 // destination, so it cannot fill a card, cannot be on a board card, and has nothing to eject.
 //
-// ⭐ The count was wrong in BOTH directions: nine handlers undercounted the ways IN (four menu
+// The count was wrong in BOTH directions: nine handlers undercounted the ways IN (four menu
 // items share sfFile:export) and overcounted the doors, by including an internal operation
 // whose name reads like an export. **Classify by what a call WRITES TO, never by its name.**
 // (It could still use a cancel - a paste of thirty tracks hashes synchronously and is a long
@@ -89,16 +89,16 @@ for (const h of KNOWN) {
 
 // ── 2. A NEW export-shaped handler must be added to the map ──────────
 //
-// ⚠️ Deliberately loose: anything whose name mentions export/extract/backup counts as a
+// Deliberately loose: anything whose name mentions export/extract/backup counts as a
 // candidate. A false positive costs one line here; a false negative is an undocumented way
 // for a file to leave the app, which is the thing being prevented.
 //
-// ⭐ IT PAID ON ITS FIRST RUN. The sweep surfaced `styles:export`, `entries:exportDoc` and
+// IT PAID ON ITS FIRST RUN. The sweep surfaced `styles:export`, `entries:exportDoc` and
 // `sources:exportDoc` - three real file-writing doors that were in no previous list,
 // including the register written a few hours earlier on the same day. Two of them write
 // straight to Downloads with no picker, so they touch none of the destination machinery.
 //
-// ⚠️⚠️ EVERYTHING EXEMPTED BELOW NEEDS A REASON, NOT JUST AN ENTRY. An allowlist is how a
+// EVERYTHING EXEMPTED BELOW NEEDS A REASON, NOT JUST AN ENTRY. An allowlist is how a
 // check quietly stops checking: the easiest way to make this file green is to paste the
 // failing name in. Each one here writes NO user-destination bytes - it cancels, sizes,
 // plans, or opens a picker. If a handler ever gains a write, it comes off this list.
@@ -117,10 +117,10 @@ const NOT_DOORS = {
   'dialog:selectBackupImportPath':  'opens an open dialog and returns a path',
 };
 
-// ⭐⭐ WRITES, BUT INWARD. These restore a backup INTO the library, so they are import doors
+// WRITES, BUT INWARD. These restore a backup INTO the library, so they are import doors
 // wearing an `sfBackup:` prefix - the direction is the thing that matters, not the noun in
 // the name. They are exempted from the EXPORT map and named here so the import register has
-// a starting list rather than a blank page. ⚠️ Do not fold them into NOT_DOORS: these very
+// a starting list rather than a blank page. Do not fold them into NOT_DOORS: these very
 // much write, and a future reader skimming that list would conclude otherwise.
 const IMPORT_DOORS = {
   'sfBackup:applyMerge':   'merges a backup into the library',
@@ -136,7 +136,7 @@ for (const h of candidates) {
      `if it writes nothing, add it to NOT_DOORS here WITH the reason`);
 }
 
-// ⚠️ And the exemptions must still exist. A renamed handler whose old name sits in
+// And the exemptions must still exist. A renamed handler whose old name sits in
 // NOT_DOORS would be silently unexamined - the allowlist protecting a door that moved.
 for (const h of Object.keys(NOT_DOORS)) {
   ok(`exempt handler ${h} still exists`, handlers.has(h),
@@ -146,17 +146,17 @@ for (const h of Object.keys(NOT_DOORS)) {
 // ── 3. The eleven-door claim has to stay anchored to the UI ──────────
 //
 // The count is the thing that was wrong before, so it gets asserted rather than described.
-// ⚠️ SCOPED TO THE ONE TABLE, NOT THE WHOLE FILE. The first version counted every numbered
+// SCOPED TO THE ONE TABLE, NOT THE WHOLE FILE. The first version counted every numbered
 // table row in the document and reported 29 - the capability matrix and the out-of-tab table
 // both have numbered rows. An instrument that sweeps a whole file to answer a question about
 // one section is measuring something adjacent to the question.
-// ⚠️⚠️ AND THE END ANCHOR HAS TO BE THE END OF THE TABLE, NOT THE NEXT HEADING THAT HAPPENS TO
+// AND THE END ANCHOR HAS TO BE THE END OF THE TABLE, NOT THE NEXT HEADING THAT HAPPENS TO
 // FOLLOW IT. On 2026-09-22 a section was added between this table and "Three more", and its own
 // table rows were swept into the count - 17 where the door table holds 12. The instrument was
 // still measuring "everything between two landmarks" rather than the table itself, which is the
 // same shape as the bug the comment above already describes, one landmark further out.
-// ⭐ So: stop at the first blank line after the table starts. A markdown table cannot contain one.
-// ⚠️⚠️ THE ANCHOR IS ASSERTED BEFORE IT IS USED, AND THAT IS NOT DEFENSIVE PADDING.
+// So: stop at the first blank line after the table starts. A markdown table cannot contain one.
+// THE ANCHOR IS ASSERTED BEFORE IT IS USED, AND THAT IS NOT DEFENSIVE PADDING.
 // On 2026-09-24 the heading was corrected from "The eleven" to "The fourteen" - the count in the
 // prose had been stale since 8b, 12 and 13 arrived. `indexOf` returned -1, and `slice(-1)` is not
 // an empty string, it is the LAST CHARACTER of the file: the table parsed to zero rows and the
@@ -175,23 +175,23 @@ const sfTable = (() => {
   return sfSection.slice(firstRow, end < 0 ? undefined : end);
 })();
 const rows = (sfTable.match(/^\|\s*\d+[a-z]?\s*\|/gm) || []).length;
-// ⚠️ 14: eleven enumerated off the screen 2026-09-20, plus 8b ("Export common folder…", added
+// 14: eleven enumerated off the screen 2026-09-20, plus 8b ("Export common folder…", added
 // 2026-09-22), plus doors 12 and 13 - the two export-before-delete paths, which the RUNNER had been
 // naming by number since 09-21 while this table left them out. The correction: "technically 14...
 // the two delete paths. delete last source with export and delete source."
-// ⚠️ Superseded note: "Export common folder…" (8b) was added because there was no way to write a
+// Superseded note: "Export common folder…" (8b) was added because there was no way to write a
 // common onto a card before it — the one Export item only ever produced a zip.
-// ⚠️ The row id pattern allows a letter suffix, because 8b sits beside 8 rather than renumbering
+// The row id pattern allows a letter suffix, because 8b sits beside 8 rather than renumbering
 // nine rows and every reference to them in the code and the commit history.
 ok(`the Sound Fonts tab lists 14 user-facing doors (found ${rows})`, rows === 14,
    'Eleven were enumerated from the screen on 2026-09-20 and 8b was added 2026-09-22; if the UI ' +
-   'gained or lost one, update the map AND this number together. ⚠️ The funnel is reached from ' +
+   'gained or lost one, update the map AND this number together. The funnel is reached from ' +
    'ten call sites and the map records that as an OPEN question — if those become doors, this ' +
    'number moves again and it moves by his ruling, not by a grep');
 
 // ── 4. The stale-number trap must not come back ──────────────────────
 //
-// ⚠️ The specific failure being blocked: a comment asserting a door count, with nothing
+// The specific failure being blocked: a comment asserting a door count, with nothing
 // checking it. It was wrong for weeks and read as authoritative the whole time.
 const dest = fs.readFileSync(path.join(root, 'exportDestination.js'), 'utf8');
 ok('exportDestination.js no longer asserts a door count in prose',

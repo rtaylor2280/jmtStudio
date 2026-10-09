@@ -9,7 +9,7 @@
 // when 4.7 lands" explains today's code rather than promising tomorrow's). The check exists for
 // one purpose: the number must not go UP.
 //
-// ⚠️ WHAT THIS CANNOT CATCH, said plainly so nobody mistakes a green run for a good comment: it
+// WHAT THIS CANNOT CATCH, said plainly so nobody mistakes a green run for a good comment: it
 // finds roadmap VOCABULARY. It cannot see forty lines of narrative wrapped around a four-line
 // conditional, or a paragraph of provenance where one sentence of reasoning would do. The only
 // test for those is asked while writing: does this line stop someone making a wrong change? If
@@ -21,7 +21,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 
-// ⚠️ `renderer/vs` is vendored Monaco - not ours to hold to this, and it carries its own hits.
+// `renderer/vs` is vendored Monaco - not ours to hold to this, and it carries its own hits.
 const SKIP_DIRS = new Set(['node_modules', '.git', 'local', 'qa', 'dist', 'staging', '.claude', 'vs']);
 
 const PATTERN = /(\bTODO\b|\bFIXME\b|⏭|\bwhen (?:it|that|this|[0-9][0-9a-z.]*) lands\b|will be (?:built|added|wired|done)\b|\bis being built\b|\bnot yet built\b|\bsomeday\b)/i;
@@ -29,20 +29,20 @@ const PATTERN = /(\bTODO\b|\bFIXME\b|⏭|\bwhen (?:it|that|this|[0-9][0-9a-z.]*)
 // Frozen 2026-09-25. Lower it when real ones are removed; never raise it.
 const BASELINE = 11;
 
-// ⚠️⚠️ WHICH SITES, not just how many - so a failure can name the one that is actually NEW.
+// WHICH SITES, not just how many - so a failure can name the one that is actually NEW.
 // The report used to be `hits.slice(BASELINE)`: everything past the eleventh in directory-walk
 // order, which has nothing to do with which one was added. On 2026-10-01 it blamed
 // `toolchain.js:654` for a line added in `renderer/index.html`, simply because index.html walks
 // later. A check that fails loudly and points at the wrong file costs more than one that only
 // says the number moved - the first thing it buys is a wasted search.
 //
-// ⚠️ MEASURED, NOT REMEMBERED. The first draft of this list was written from memory and got
+// MEASURED, NOT REMEMBERED. The first draft of this list was written from memory and got
 // seven of eleven wrong: it named cacheManager.js, versionsPanel.js and preflight-checks.js,
 // which have none, and missed compileErrors.js, sdCardDetect.js and four test files entirely.
 // Regenerate it by running the same walk rather than by editing it by hand.
 //
-// ⚠️ Keyed on FILE + WORD and counted, not on line numbers. Lines shift constantly; a count per
-// key survives that, and `filter-chip-grouping.test.js` genuinely holds two `⏭` so a plain Set
+// Keyed on FILE + WORD and counted, not on line numbers. Lines shift constantly; a count per
+// key survives that, and `filter-chip-grouping.test.js` genuinely holds two `` so a plain Set
 // would silently merge them and hide the next one.
 const FROZEN = new Map(Object.entries({
   'compileErrors.js|when that lands':             1,
@@ -72,7 +72,7 @@ function walk(dir, out) {
 
 const hits = [];
 for (const file of walk(ROOT, [])) {
-  // ⚠️ Skip this file. It quotes the very words it looks for, so without this the check counts
+  // Skip this file. It quotes the very words it looks for, so without this the check counts
   // itself and the baseline drifts by however many examples the explanation needs.
   if (path.resolve(file) === path.resolve(__filename)) continue;
   let text;

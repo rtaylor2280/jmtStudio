@@ -5,16 +5,16 @@
  * which is really short and hard to read. I think in SD card read we solved this by
  * naming it..."
  *
- * ⭐ That is right that it was already solved — `_sdDriveLabel` renders "RevantedJMT (F:)"
+ * That is right that it was already solved — `_sdDriveLabel` renders "RevantedJMT (F:)"
  * and, for a card with no volume name, "Removable Disk (K:)". Both were on the screen at
  * the same moment the export summary said "Saved to K:\". Two surfaces, one card, two
  * names. This reuses the existing form rather than inventing a second one.
  *
- * ⚠️ ONLY A DRIVE ROOT IS SUBSTITUTED. A deeper path already ends in a folder name that
+ * ONLY A DRIVE ROOT IS SUBSTITUTED. A deeper path already ends in a folder name that
  * carries meaning, and replacing its prefix would produce a hybrid that is neither a name
  * nor a path you could type.
  *
- * ⚠️⚠️ THE ONE THAT ACTUALLY BROKE, and the reason this file lifts the regex out of the
+ * THE ONE THAT ACTUALLY BROKE, and the reason this file lifts the regex out of the
  * source instead of restating it: the character class shipped as `[\/]` rather than
  * `[\\/]` — one backslash eaten in transit — so `K:\`, the single most common form on
  * Windows, silently failed to match while `K:` and `K:/` passed. A retyped copy of the
@@ -43,15 +43,15 @@ function ok(name, cond, extra) {
   ok('_sfDestDisplay exists',
      /async function _sfDestDisplay\(destDir\) \{/.test(html));
 
-  // ⚠️ PRESENCE IS NOT EXECUTION. A helper nothing calls is a helper that fixes nothing.
-  ok('⭐ the summary link is built from it, not from the raw path',
+  // PRESENCE IS NOT EXECUTION. A helper nothing calls is a helper that fixes nothing.
+  ok('the summary link is built from it, not from the raw path',
      /id="sf-export-summary-path"[^`]*\$\{esc\(await _sfDestDisplay\(destDir\)\)\}/.test(html),
      'the link text must come through the helper');
-  ok('⚠️ and the raw path is no longer what the link wears',
+  ok('and the raw path is no longer what the link wears',
      !/id="sf-export-summary-path"[^`]*\$\{esc\(destDir\)\}/.test(html));
 
   // The label is cosmetic; the link must still open the real folder.
-  ok('⚠️ clicking still opens destDir itself',
+  ok('clicking still opens destDir itself',
      /window\.electronAPI\.openFolder\(destDir\)/.test(html),
      'naming the destination must not change how it is reached');
 }
@@ -62,60 +62,60 @@ function ok(name, cond, extra) {
      /ipcMain\.handle\('sdcard:volumeInfo'/.test(mainJs));
   ok('preload bridges it',
      /volumeInfo: \(p\) => ipcRenderer\.invoke\('sdcard:volumeInfo', p\)/.test(preload));
-  // ⚠️ RE-ANCHORED 2026-09-21 [B-420]. Still the same rule - go through the SD module, never
+  // RE-ANCHORED 2026-09-21 [B-420]. Still the same rule - go through the SD module, never
   // spawn a second PowerShell of our own - but the call is now `volumeForLetter`, which asks
   // about ONE drive instead of enumerating every volume on the system. That mattered: the
   // unfiltered enumeration walked mapped network drives, and one pointing at an unreachable
   // host blocked it for 60+ seconds against a documented ~3,100ms.
-  ok('⚠️ it reuses the SD module rather than shelling out again',
+  ok('it reuses the SD module rather than shelling out again',
      /sdCardDetect\.volumeForLetter\(/.test(mainJs));
-  ok('⚠️ and it asks about ONE letter, not every volume',
+  ok('and it asks about ONE letter, not every volume',
      !/sdCardDetect\.enumerateAllVolumes\(\)/.test(mainJs),
      'enumerating everything to find one drive is what let a dead network share hang card detection');
 }
 
 // ── the lookup is started EARLY, not at the summary ────────────────────────
-// ⚠️⚠️ THIS IS THE ONE THAT SHIPPED WRONG AND PASSED EVERY TEST. The query MEASURED 2666ms
+// THIS IS THE ONE THAT SHIPPED WRONG AND PASSED EVERY TEST. The query MEASURED 2666ms
 // on a real machine; the first attempt raced it against a 2500ms timeout at summary-build time
 // and lost by 166ms. Every unit assertion was green and the card still wore a bare "K:\".
 // Timing was the defect, so timing is what these assert.
 {
-  ok('⭐⭐ the volume lookup is primed when the destination is picked',
+  ok('the volume lookup is primed when the destination is picked',
      /const destDir = pick\.dirPath;\s*\n\s*_sfPrimeVolume\(destDir\);/.test(html));
 
-  // ⚠️ BOTH export flows pick a destination. One primed and one not is [B-357]'s
+  // BOTH export flows pick a destination. One primed and one not is [B-357]'s
   // "three per-kind strings, two wired" for the third time this week.
-  ok('⚠️ EVERY destination pick primes it, not just one',
+  ok('EVERY destination pick primes it, not just one',
      (html.match(/const destDir = pick\.dirPath;/g) || []).length
      === (html.match(/_sfPrimeVolume\(destDir\);/g) || []).length,
      'a pick site without a prime silently falls back to the bare drive letter');
 
-  // ⚠️ RE-ANCHORED 2026-09-24: this pinned `volumeInfo(raw)`, and the argument changed when the
+  // RE-ANCHORED 2026-09-24: this pinned `volumeInfo(raw)`, and the argument changed when the
   // prime learned to accept a subfolder - it now queries the drive ROOT while still keying the
   // answer to the full destination. The rule was never which variable is passed; it is that the
   // work is STARTED and not awaited.
-  ok('⚠️ priming starts the work without awaiting it',
+  ok('priming starts the work without awaiting it',
      /_sfVolPrime = \{[\s\S]*?p: Promise\.resolve\(\)[\s\S]*?\.then\(\(\) => window\.electronAPI\.volumeInfo\([\w.]+\)\)[\s\S]*?\.catch\(\(\) => null\),/.test(html),
      'awaiting here would move the stall to the picker instead of removing it');
 
-  // ⚠️⚠️ AND IT MUST ACCEPT A SUBFOLDER. [B-203 / B-420, 2026-09-24] This required the destination
+  // AND IT MUST ACCEPT A SUBFOLDER. [B-203 / B-420, 2026-09-24] This required the destination
   // to BE a drive root and bailed to `_sfVolPrime = null` otherwise, so exporting to
   // `H:\TEMP_TESTING` - or any folder on a card - silently dropped the free-space line from the
   // summary. Found in a console log was being read for an unrelated cancel bug, by the very
   // diagnostic that was added because this feature once vanished with nothing able to say why.
-  // ⭐ The consumer only needs the VOLUME, and a subfolder shares its root's volume.
-  ok('⭐ the prime accepts ANY absolute path, not only a drive root',
+  // The consumer only needs the VOLUME, and a subfolder shares its root's volume.
+  ok('the prime accepts ANY absolute path, not only a drive root',
      /function _sfPrimeVolume[\s\S]{0,400}?\/\^\(\[A-Za-z\]\):\/\.exec\(raw\)/.test(html)
      && !/function _sfPrimeVolume[\s\S]{0,400}?\^\[A-Za-z\]:\[\\\\\/\]\?\$/.test(html),
      'a root-only test means every subfolder destination loses its free-space line, and the '
      + 'omission is silent');
 
-  ok('⭐ the summary consumes the primed promise rather than starting a second query',
+  ok('the summary consumes the primed promise rather than starting a second query',
      /const primed = _sfVolPrime && _sfVolPrime\.dir === raw \? _sfVolPrime\.p : null;/.test(html));
 
-  // ⚠️⚠️ A swapped card must not inherit the previous card's name. The dir equality above
+  // A swapped card must not inherit the previous card's name. The dir equality above
   // is what enforces that, and there must be no session-wide cache behind it.
-  ok('⚠️⚠️ nothing is cached across operations',
+  ok('nothing is cached across operations',
      !/_sfVolCache|volumeCache|_volMemo/.test(html),
      'keyed by drive letter, a swapped card would wear the previous one\'s name');
 }
@@ -124,19 +124,19 @@ function ok(name, cond, extra) {
 {
   // [B-204]: a summary that fails to appear left the app with no way out, because the
   // scan overlay has no cancel. A PowerShell spawn in front of it is exactly that risk.
-  ok('⭐⭐ the lookup still races a timeout',
+  ok('the lookup still races a timeout',
      /Promise\.race\(\[\s*primed \|\| window\.electronAPI\.volumeInfo\(raw\),[\s\S]*?new Promise\(r => setTimeout\(\(\) => r\(null\), primed \? (\d+) : (\d+)\)\),\s*\]\)/.test(html),
      'a hung volume query must not be able to block the dialog');
 
   // The primed budget must clear the measured cost with real headroom; the unprimed one
   // must stay short, because nothing is overlapping it.
   const t = /setTimeout\(\(\) => r\(null\), primed \? (\d+) : (\d+)\)/.exec(html);
-  ok('⭐ the primed budget clears the 2666ms measurement with headroom',
+  ok('the primed budget clears the 2666ms measurement with headroom',
      !!t && Number(t[1]) >= 5000, t && `primed budget is ${t[1]}ms`);
-  ok('⚠️ the unprimed budget stays short enough not to stall the dialog',
+  ok('the unprimed budget stays short enough not to stall the dialog',
      !!t && Number(t[2]) <= 3000, t && `unprimed budget is ${t[2]}ms`);
 
-  ok('⚠️ and a throw falls through to the raw path',
+  ok('and a throw falls through to the raw path',
      /\} catch \{\}\s*if \(!v\) return raw;/.test(html));
 }
 
@@ -151,7 +151,7 @@ function ok(name, cond, extra) {
   if (m) {
     const ROOT_RE = eval(m[1]);   // eslint-disable-line no-eval
 
-    // ⭐⭐ THE SHARED BUILDER, ALSO LIFTED FROM SOURCE. Both surfaces run this one function,
+    // THE SHARED BUILDER, ALSO LIFTED FROM SOURCE. Both surfaces run this one function,
     // so a reword of the SD card's naming reaches the export summary by construction — and
     // if the summary ever stops calling it, these cases go red instead of quietly drifting.
     const dl = /function _sdDriveLabel\(c\) \{[\s\S]*?\n\}/.exec(html);
@@ -171,13 +171,13 @@ function ok(name, cond, extra) {
     const FIXED   = { drive: 'E:', label: '',        driveType: 3 };
 
     const CASES = [
-      // ⚠️⚠️ THIS IS THE ONE THAT SHIPPED BROKEN. Keep it first.
+      // THIS IS THE ONE THAT SHIPPED BROKEN. Keep it first.
       ['a card root with a backslash',   'K:\\',                   NAMED,   'PROFFIE (K:)'],
       ['a bare drive letter',            'K:',                     NAMED,   'PROFFIE (K:)'],
       ['a forward-slash root',           'K:/',                    NAMED,   'PROFFIE (K:)'],
       // A real K: card has no volume name — verified on screen 2026-09-17.
-      ['⭐ an UNNAMED removable root',   'K:\\',                   UNNAMED, 'Removable Disk (K:)'],
-      // ⚠️ "Removable Disk" would be a lie about a fixed drive.
+      ['an UNNAMED removable root',   'K:\\',                   UNNAMED, 'Removable Disk (K:)'],
+      // "Removable Disk" would be a lie about a fixed drive.
       ['a fixed drive root, unnamed',    'E:\\',                   FIXED,   'E:\\'],
       ['the lookup failing or timing out','K:\\',                  null,    'K:\\'],
       ['a deeper path on a card',        'K:\\fonts',              NAMED,   'K:\\fonts'],
@@ -197,20 +197,20 @@ function ok(name, cond, extra) {
 // "do they agree because written the same or because it's one shared builder?"
 // Matching spellings agree right up until one of them is reworded. Only the call is proof.
 {
-  ok('⭐⭐ the summary CALLS _sdDriveLabel rather than restating it',
+  ok('the summary CALLS _sdDriveLabel rather than restating it',
      /return _sdDriveLabel\(\{ drive: v\.drive, label: v\.label \}\);/.test(html));
 
-  // ⚠️ The literal must appear exactly ONCE in the renderer — inside the builder itself.
+  // The literal must appear exactly ONCE in the renderer — inside the builder itself.
   // This is the assertion the first draft of this file got backwards: it checked that both
   // copies were spelled the same, which passes hardest precisely when the duplication is
   // worst. Counting is what catches a second copy being added later.
-  ok('⚠️ "Removable Disk" is written down exactly once',
+  ok('"Removable Disk" is written down exactly once',
      (html.match(/Removable Disk \(\$\{/g) || []).length === 1,
      'a second copy is a second spelling waiting to drift apart');
 
-  // ⚠️ And the gate, which is the one thing the summary does NOT delegate: the builder's
+  // And the gate, which is the one thing the summary does NOT delegate: the builder's
   // fallback assumes a removable volume, which is a lie about a fixed drive.
-  ok('⚠️ the call is gated so a fixed unnamed drive keeps its path',
+  ok('the call is gated so a fixed unnamed drive keeps its path',
      /if \(named \|\| v\.driveType === 2\) return _sdDriveLabel/.test(html));
 }
 

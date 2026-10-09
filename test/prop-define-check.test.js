@@ -7,7 +7,7 @@
  * saber. IT COMPILES CLEANLY — there is no diagnostic anywhere, which is why it
  * has to be caught before the build.
  *
- * ⚠️ THE ABSTENTIONS ARE THE POINT OF THIS SUITE, not the detection. The rule's
+ * THE ABSTENTIONS ARE THE POINT OF THIS SUITE, not the detection. The rule's
  * first draft matched on prop header FILENAMES and scored 6 false positives on
  * the 8 known-good configs in this repo, all of which include `../props/jmt_fett_prop.h`
  * — a prop outside the stock directory. Any filename allowlist is a wolf-crier by

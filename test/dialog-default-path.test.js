@@ -1,6 +1,6 @@
 // Every file dialog must say WHERE to open. [2026-09-22]
 //
-// ⭐⭐ WHY THIS EXISTS, AND IT IS THE THIRD TIME THIS CLASS HAS APPEARED.
+// WHY THIS EXISTS, AND IT IS THE THIRD TIME THIS CLASS HAS APPEARED.
 //
 //   [B-291]     a remembered directory on an unplugged drive made WINDOWS demand the disk
 //               ("Please insert a disk into USB Drive (J:)") over the app. Fixed with
@@ -11,16 +11,16 @@
 //               Save hung the dialog. Twice. `liveDir` could not have helped - there was no
 //               stored path to validate, because the stale location lived in the shell's MRU.
 //
-// ⚠️⚠️ THE LESSON IS THE ONE THIS PROJECT KEEPS PAYING FOR: a rule written beside the caller
+// THE LESSON IS THE ONE THIS PROJECT KEEPS PAYING FOR: a rule written beside the caller
 // that taught it never reaches the other callers. B-291 fixed three dialogs and there were
 // seventeen. So this is a CHECK THAT FAILS, not a note asking the next person to remember.
 //
-// ⭐ A RATCHET, NOT A BLANKET RULE. Several dialogs are legitimately unguarded today and are
+// A RATCHET, NOT A BLANKET RULE. Several dialogs are legitimately unguarded today and are
 // not export paths; forcing all of them now would be a different change with its own risk. The
 // list below is what was unguarded on 2026-09-22 and it may only SHRINK. A new dialog, or a
 // newly-unguarded one, fails this test.
 //
-// ⚠️ "Guarded" means the options object names a real source for its starting directory -
+// "Guarded" means the options object names a real source for its starting directory -
 // `exportDefaultPath`, `liveDir`, a `lastDir` resolved from one of those, or an `app.getPath`.
 // A bare filename is NOT a starting directory, which is the exact defect this file was born of.
 'use strict';
@@ -38,7 +38,7 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const LINES = SRC.split('\n');
 
 // Pull each dialog call's options object by brace-matching from the opening paren, so a call
-// is never mis-measured by a fixed-width window. ⚠️ A fixed slice is what made an earlier audit
+// is never mis-measured by a fixed-width window. A fixed slice is what made an earlier audit
 // of this same file report two guarded dialogs as unguarded.
 function callSites() {
   const out = [];
@@ -60,7 +60,7 @@ function callSites() {
   return out;
 }
 
-// ⚠️ FIND THE ASSIGNMENT, DO NOT GUESS A SCOPE. The first cut of this walked back to the
+// FIND THE ASSIGNMENT, DO NOT GUESS A SCOPE. The first cut of this walked back to the
 // nearest `ipcMain.handle(` within 120 lines and called anything further "unguarded" - which
 // reported `Export file` as a defect when its handler opens at 3342 and its guard sits at 3602,
 // 307 lines from the call. A window that happens to fit today's layout is an instrument that
@@ -115,7 +115,7 @@ if (!unexpected.length) {
   ok('no newly-unguarded dialogs', true);
 }
 
-// ⭐ THE RATCHET'S OTHER HALF, AND THE HALF THAT USUALLY GETS LEFT OUT: if a known-unguarded
+// THE RATCHET'S OTHER HALF, AND THE HALF THAT USUALLY GETS LEFT OUT: if a known-unguarded
 // dialog gets fixed, this list has to shrink with it, or the next regression hides inside a
 // stale allowance.
 const stale = KNOWN_UNGUARDED.filter(

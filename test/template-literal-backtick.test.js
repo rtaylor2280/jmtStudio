@@ -1,6 +1,6 @@
 // No HTML comment inside a .js file may contain a backtick.
 //
-// ⭐⭐ WHY THIS EXISTS. 2026-09-29, [B-446]. A comment was added inside the version
+// WHY THIS EXISTS. 2026-09-29, [B-446]. A comment was added inside the version
 // card's HTML template literal in versionsPanel.js, explaining which CSS class the new
 // divider reused. The class name was written in backticks, the way it would be in any
 // other comment in this project:
@@ -17,14 +17,14 @@
 // `ReferenceError: divider is not defined` the moment a version was selected - the whole
 // right-hand pane blank, found by opening the app.
 //
-// ⚠️ THE REASON A TEST IS THE ANSWER RATHER THAN CARE: this is the second time in a
+// THE REASON A TEST IS THE ANSWER RATHER THAN CARE: this is the second time in a
 // fortnight that a runtime ReferenceError in a renderer function reached the user through a
 // green suite (see qa-1.8.0 §278 / TC-3890, `_sdFlash`). That case is genuinely hard to
 // catch statically. THIS one is not, and the difference is worth stating: an HTML comment
 // can only appear in a .js file INSIDE a template literal, so "HTML comment containing a
 // backtick, in a .js file" is a precise, zero-false-positive signature of the bug.
 //
-// ⚠️ .html files are deliberately NOT scanned. There, `<!-- -->` is real markup and a
+// .html files are deliberately NOT scanned. There, `<!-- -->` is real markup and a
 // backtick is just a character - index.html carries five such comments, all harmless.
 'use strict';
 
@@ -71,14 +71,14 @@ ok('no HTML comment in a .js file contains a backtick',
      ? `a backtick there closes the enclosing template literal and the rest parses as code: ${offenders.join(', ')}`
      : '');
 
-// ⚠️ THE CONTROL. A check that cannot fail is decoration, and this one is a single
+// THE CONTROL. A check that cannot fail is decoration, and this one is a single
 // regex over source text - exactly the shape that has passed while asserting nothing
 // before. Prove it catches the real defect by feeding it the real defect.
 {
   const mutant = 'const html = `<div>\n  <!-- reuses `.toolbar-divider` here -->\n</div>`;';
   HTML_COMMENT.lastIndex = 0;
   const hit = (mutant.match(HTML_COMMENT) || []).some(c => c.includes('`'));
-  ok('⚠️⚠️ the exact defect that shipped IS caught', hit,
+  ok('the exact defect that shipped IS caught', hit,
      'if this fails the check above is worthless, whatever it reports');
 }
 

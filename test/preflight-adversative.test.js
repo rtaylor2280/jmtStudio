@@ -1,13 +1,13 @@
 // [B-375] A finding title that states the expectation AND the violation is an adversative.
 //
-// ⭐ HIS CATCH 2026-09-16, and it was explicit that it is a rule and not a typo:
+// CAUGHT IN TESTING 2026-09-16, and it was explicit that it is a rule and not a typo:
 //   "Your config has 2 blades, and 1 preset has 1 of 2 blade styles."
 //   "'and 1 preset' is wrong - should be 'but' since it's describing an error/contradiction."
 //
 // "and" joins two compatible facts. These sentences exist precisely because the two halves CANNOT
 // both be right, so the conjunction was doing the opposite of the message's job.
 //
-// ⚠️ THE ENTRY ASKED FOR A SWEEP OF THE SHAPE, NOT THE PHRASE, and the sweep is why this test is
+// THE ENTRY ASKED FOR A SWEEP OF THE SHAPE, NOT THE PHRASE, and the sweep is why this test is
 // worth having: a third title (the voicepack one) carried the identical construction and would
 // have been missed by fixing the two strings that were reported. Meanwhile the "no prop is
 // included" title ALREADY said "but" — so the house style was right in one place and wrong in
@@ -46,7 +46,7 @@ function ok(label, cond, detail) {
 
 // ── the sweep stays clean ──────────────────────────────────────────────────
 {
-  // ⚠️ Anchored on the TITLE construction only. `, and ` is perfectly correct inside a `detail`
+  // Anchored on the TITLE construction only. `, and ` is perfectly correct inside a `detail`
   // body — "the saber will boot, and none of the controls you set up will work" is a genuine list
   // of two compatible facts. Flagging those would make this test a nag that gets disabled.
   const badTitles = (src.match(/title: `[^`]*`\s*\n?\s*\+? ?`?, and `/g) || [])

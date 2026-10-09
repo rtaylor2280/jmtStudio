@@ -1,6 +1,6 @@
 // The BVM Sabers row must match BOTH readme spellings this creator ships. [B-484]
 //
-// ⭐ WHY A TEST FOR ONE TABLE ROW. The row is two regexes, and a plausible-looking
+// WHY A TEST FOR ONE TABLE ROW. The row is two regexes, and a plausible-looking
 // tidy-up of either silently drops 3 of the 4 archives on disk back to "No creator
 // matched" — with nothing failing and nothing to notice. The two facts worth
 // pinning are exactly the two that are surprising:
@@ -14,7 +14,7 @@
 //      content pattern written against the paid readme's wording matches none of
 //      the 26 free fonts.
 //
-// ⭐ The row EARNS its place beside the learned-vendor layer rather than
+// The row EARNS its place beside the learned-vendor layer rather than
 // duplicating it: learned matching only fires after the user has labelled this
 // creator by hand, and is deliberately a suggestion. This row makes it a content
 // match on a first-ever import. See test/learned-vendor-match.test.js.

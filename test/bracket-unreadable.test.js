@@ -4,13 +4,13 @@
 // "this text is not a `using` declaration at all". Two callers coerce the result to a boolean, so
 // unparseable text read as clean and the control it gates went ahead.
 //
-// ⚠️⚠️ THE ASYMMETRY IS THE ARGUMENT, and it is why this is a bug rather than a tidy-up. A false
+// THE ASYMMETRY IS THE ARGUMENT, and it is why this is a bug rather than a tidy-up. A false
 // "there is an error" costs an annoyed user who can see their style is fine. A false "no error"
 // costs a compile — and it is the answer that LOOKS like the check ran. [B-378] proved that class
 // hides for months: the defect there was not that the check was wrong, it was that it was absent
 // and said nothing.
 //
-// ⭐ HIS RULE, 2026-09-18, simpler than the entry's framing: "shouldn't even be able to get rid of
+// THE RULE, 2026-09-18, simpler than the entry's framing: "shouldn't even be able to get rid of
 // the using and still save." The bracket state is beside the point. A style that is not a `using`
 // declaration is not a style.
 'use strict';
@@ -32,7 +32,7 @@ function ok(label, cond, detail) {
   const fn = html.slice(html.indexOf('function _findBracketError('),
                         html.indexOf('function _findBracketError(') + 3000);
 
-  // ⚠️ Anchored on the SHAPE of the return, not on the message text, so rewording the copy does
+  // Anchored on the SHAPE of the return, not on the message text, so rewording the copy does
   // not fail the test. The contract is what matters: a distinguishable third answer.
   ok('the unparseable branch returns a distinct answer, not null',
      /if\s*\(!m\)\s*\{[\s\S]{0,400}?unreadable:\s*true/.test(fn),
@@ -46,7 +46,7 @@ function ok(label, cond, detail) {
 {
   // These paths read err.offsetInCode. An `unreadable` answer has none, so rendering it would
   // place a marker at position NaN rather than fail loudly — silent wrongness, again.
-  // ⚠️ Anchor on the LOOP, not on _errorStyleNames.clear() — that string appears three times
+  // Anchor on the LOOP, not on _errorStyleNames.clear() — that string appears three times
   // and the first hit is a different function entirely. A test that slices the wrong window
   // reports correct code as broken, which is how this assertion failed on its first run.
   const decorAt = html.indexOf('const err = _findBracketError(e.usingCode);');
@@ -56,7 +56,7 @@ function ok(label, cond, detail) {
 
   const detailAt = html.indexOf("const banner  = document.getElementById('detail-error-banner');");
   const detail = html.slice(detailAt, detailAt + 2600);
-  // ⚠️⚠️ ORDER IS CHECKED AGAINST CODE, NOT PROSE. The first cut compared indexOf('offsetInCode'),
+  // ORDER IS CHECKED AGAINST CODE, NOT PROSE. The first cut compared indexOf('offsetInCode'),
   // which matched the WORD inside the explanatory comment sitting above the guard — so the test
   // failed on correct code because of a comment I had just written. Anchor on the call that
   // actually consumes the offset.
@@ -66,7 +66,7 @@ function ok(label, cond, detail) {
      guardAt > 0 && usesOffsetAt > 0 && guardAt < usesOffsetAt,
      `guard at ${guardAt}, offset use at ${usesOffsetAt}`);
 
-  // ⭐ The Add Style surface deliberately accepts a bare expression — it synthesises a
+  // The Add Style surface deliberately accepts a bare expression — it synthesises a
   // `using _check_ = ` prefix so brackets are still checked, and wraps the real declaration once
   // a name exists. It must NOT start rejecting that.
   const addPath = html.slice(html.indexOf("const PREFIX = 'using _check_ = ';"),

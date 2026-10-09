@@ -1,6 +1,6 @@
 // A door may not choose which surface the user sees.  [B-420]
 //
-// ⭐⭐ WHY THIS EXISTS, AND IT IS EVIDENCE RATHER THAN CAUTION. Backup was the first door
+// WHY THIS EXISTS, AND IT IS EVIDENCE RATHER THAN CAUTION. Backup was the first door
 // migrated onto the shared export runner, and the one written most carefully. In one evening it
 // handed the runner wrong data THREE times:
 //
@@ -8,12 +8,12 @@
 //   • a temp path in `leftovers`   -> a modal instead of a toast, saying nothing about why
 //   • `alreadyOpen` assumed true   -> a 7 GB export with no bar and no Cancel button
 //
-// ⚠️⚠️ NOT ONE OF THEM THREW, AND NOT ONE FAILED A TEST. Each merely changed WHICH SURFACE
+// NOT ONE OF THEM THREW, AND NOT ONE FAILED A TEST. Each merely changed WHICH SURFACE
 // appeared, and all three were found by clicking. That is the defect class this file guards: a
 // door is free to be wrong about what it did, and the runner must not pass that wrongness
 // through to the screen.
 //
-// ⭐ The rule for adding to this file: every assertion must trace to a SURFACE. If a normalised
+// The rule for adding to this file: every assertion must trace to a SURFACE. If a normalised
 // field cannot change what the user sees, it does not belong in the guard or in here.
 'use strict';
 
@@ -29,7 +29,7 @@ const ok = (name, cond, why) => {
 const FILE = path.join(__dirname, '..', 'renderer', 'index.html');
 const H = fs.readFileSync(FILE, 'utf8');
 
-// ⚠️ Anchored between two markers, never a character count. A fixed-width slice over this file
+// Anchored between two markers, never a character count. A fixed-width slice over this file
 // has silently stopped covering its target three times (most recently in
 // backup-refusal-impound, which sliced 14,000 chars and broke when a door was migrated).
 const runner = (() => {
@@ -57,7 +57,7 @@ const RULES = [
    'leftovers decides modal-vs-toast on a cancel, but the notice only renders ORIGINAL./DELETE. '
    + 'names — a temp path forced a modal that then explained nothing'],
 
-  ['⚠️⚠️ an unconfirmed teardown may not claim a clean finish',
+  ['an unconfirmed teardown may not claim a clean finish',
    /if \(res\.teardownIncomplete\) \{[\s\S]{0,200}?res\.partialRemoved = false;[\s\S]{0,120}?res\.restored = false;/,
    'his catch: "we said it was done but it wasn\'t which means that if they then wanted to safe '
    + 'eject the board they couldn\'t" — a false all-clear on a card someone may then pull'],
@@ -72,23 +72,23 @@ const RULES = [
 ];
 for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
 
-// ── ⚠️ ORDER: normalise BEFORE reading ──────────────────────────────
+// ── ORDER: normalise BEFORE reading ──────────────────────────────
 // Normalising after the reads would leave `out.ok` false on a cancel and still report a failure
 // — the guard would be present, correct, and useless.
 {
   const norm = runner.indexOf('if (res.canceled) res.ok = true;');
   const read = runner.indexOf('out.ok = !!(res && res.ok)');
-  ok('⚠️ the guard runs before the runner reads the result',
+  ok('the guard runs before the runner reads the result',
      norm > 0 && read > norm,
      'a guard that runs after the read changes nothing the user can see');
 }
 
-// ── ⚠️ AND THE GUARD MUST NOT BE THE ONLY COPY OF THE RULE ──────────
+// ── AND THE GUARD MUST NOT BE THE ONLY COPY OF THE RULE ──────────
 // `_sfExportStoppedNotice` is reachable from callers that never touched the runner, so it has to
 // recognise a named leftover on its own. Two independent checks of one rule is correct here — the
 // failure mode is a false all-clear, and belt-and-braces is cheap.
 //
-// ⚠️ RE-ANCHORED 2026-09-23. This asserted `_namedLeftovers`, a local that existed only to decide
+// RE-ANCHORED 2026-09-23. This asserted `_namedLeftovers`, a local that existed only to decide
 // modal-vs-toast — and that decision was DELETED when ruled the dialog should show every time
 // ("I prefer this dialog every time"). The rule the assertion exists for was never the toast; it
 // is that an ORIGINAL. or DELETE. leftover gets NAMED to the user, because a restored original
@@ -108,11 +108,11 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
 
 // ── A DOOR THAT DECLARES A SUMMARY MUST ACTUALLY DRAW ONE ────────────
 //
-// ⭐⭐ `ending: 'summary'` IS A DECLARATION, NOT A RENDERER. `_sfExportOutcome` does not draw a
+// `ending: 'summary'` IS A DECLARATION, NOT A RENDERER. `_sfExportOutcome` does not draw a
 // summary — it calls the door's `onCompleted` and lets the door draw its own ending. So a door
 // can resolve to 'summary' and then show a toast, and nothing anywhere objects.
 //
-// ⚠️⚠️ THIS HAS NOW HAPPENED TWICE, IN THE SAME POSITION, ON CONSECUTIVE DAYS:
+// THIS HAS NOW HAPPENED TWICE, IN THE SAME POSITION, ON CONSECUTIVE DAYS:
 //   2026-09-21  common-as-zip declared a summary and drew nothing. Reported: "there was also
 //               no summary on it..."
 //   2026-09-22  the font card declared a summary and drew a TOAST. Reported: "on first test of
@@ -122,7 +122,7 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
 // to a toast rather than to silence. That guard cannot see the second shape, because the
 // `onCompleted` exists; it just draws the wrong thing. This check closes that.
 //
-// ⭐ The rule, 2026-09-21, is what decides which doors are in scope: "2,5,7,9 toast and all
+// The rule, 2026-09-21, is what decides which doors are in scope: "2,5,7,9 toast and all
 // others summary. so the rule is file selection right click." The funnel doors carry
 // `kind: 'files'`, which `_sfExportEnding` maps to a toast. Everything else owes a summary.
 {
@@ -140,7 +140,7 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
     const body = H.slice(m.index, i);
     const kind = (body.match(/endState:\s*\{\s*kind:\s*'([^']+)'/) || [])[1] || 'tree';
     const override = (body.match(/\n\s*ending:\s*'([^']+)'/) || [])[1] || null;
-    // ⚠️ THE DOOR'S OWN TITLE IS THE FIRST ONE, WHICHEVER QUOTE IT USES. Trying single quotes
+    // THE DOOR'S OWN TITLE IS THE FIRST ONE, WHICHEVER QUOTE IT USES. Trying single quotes
     // across the whole body first picked up `title: 'Export complete'` from the
     // `_sfCompletionNotice` call NESTED INSIDE the door - so two different doors both reported
     // as "Export complete" and a failure would have named the wrong one. Order by position.
@@ -158,7 +158,7 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
   for (const d of doorCalls) {
     const ending = d.override || (d.kind === 'files' ? 'toast' : 'summary');
     if (ending !== 'summary') continue;
-    // ⚠️ TWO SUMMARY SURFACES ARE LEGITIMATE, and the first cut of this rule knew about only
+    // TWO SUMMARY SURFACES ARE LEGITIMATE, and the first cut of this rule knew about only
     // one. `_sfCompletionNotice` is the short one the archive and folder doors use;
     // `_sfShowExportSummary` is the full one with per-kind counts that tracks and the primary
     // export use. Both carry the eject row, which is what the rule actually cares about. A
@@ -168,7 +168,7 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
        'its ending resolves to `summary`, but `_sfExportOutcome` only calls onCompleted - the '
        + 'door has to draw it. Without _sfCompletionNotice this door shows a toast, or nothing, '
        + 'while reporting itself as a summary door (and suppressing the eject row with it)');
-    // ⚠️ AND THE EJECT ROW GOES WITH IT. A summary door that omits `summaryHasEject` gets a
+    // AND THE EJECT ROW GOES WITH IT. A summary door that omits `summaryHasEject` gets a
     // SECOND eject offer as a toast, which is the parallel surface ruled out: "the eject
     // shouldn't be its own modal. It should take place on the summary screen."
     ok(`  and declares summaryHasEject so the eject is not offered twice`,
@@ -178,7 +178,7 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
   }
 }
 
-// ── ⚠️⚠️ THE TEST PROVES ITSELF ─────────────────────────────────────
+// ── THE TEST PROVES ITSELF ─────────────────────────────────────
 //
 // A guard test that reports green is indistinguishable from a guard test that cannot see. Every
 // rule above is re-checked against a mutated copy with that rule deleted, and must fail.
@@ -191,7 +191,7 @@ for (const [name, re, why] of RULES) ok(name, re.test(runner), why);
     const mutated = runner.replace(m[0], '/* removed by mutation test */');
     if (re.test(mutated)) { misses.push(`${name} (survived removal)`); caughtAll = false; }
   }
-  ok(`⚠️⚠️ every rule's assertion fails when that rule is removed (${RULES.length} checked)`,
+  ok(`every rule's assertion fails when that rule is removed (${RULES.length} checked)`,
      caughtAll,
      misses.join('; ') || 'a rule whose assertion survives its own deletion asserts nothing');
 }

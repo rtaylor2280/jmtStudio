@@ -4,7 +4,7 @@
 // contradicts it. Merging alone can only add and overwrite, so deleting an extra from a card used
 // to leave its record behind for ever: 124 entries against 109 files, found on a real card.
 //
-// ⚠️⚠️ THIS IS THE ONLY DIRECTION THAT DELETES, so the interesting cases are the ones where it must
+// THIS IS THE ONLY DIRECTION THAT DELETES, so the interesting cases are the ones where it must
 // REFUSE. A comparison walks the LIBRARY's file list and therefore knows nothing about the rest of
 // a folder; it may only claim its observations are the whole folder when
 //   · every library file was FOUND, and
@@ -12,7 +12,7 @@
 // Counts alone are not enough, and the case that proves it is cheap to construct: one library file
 // absent and one stray present is N against N while the folders differ.
 //
-// ⚠️ The font compare is covered in entry-extra-files. This file covers COMMON and TRACKS, which
+// The font compare is covered in entry-extra-files. This file covers COMMON and TRACKS, which
 // are separate compares with their own walks - and separate compares are exactly where the misses
 // of 2026-09-25 lived.
 'use strict';
@@ -74,24 +74,24 @@ const TRACKS = { 'one.wav': 'AAA', 'two.wav': 'BBB', 'three.wav': 'CCC' };
     const { userData, dest } = commonSetup(PACK, PACK);
     sync.mergeItems(dest, { common: [['ghost.wav', [1, 2, 'G']]] });
     const r = await commonMatchesAt(userData, UUID, dest, 'common');
-    ok('⭐ a matching common folder reports its observations as complete',
+    ok('a matching common folder reports its observations as complete',
        r.identical === true && r.complete === true,
        `got identical=${r.identical} complete=${r.complete}`);
 
     sync.mergeItems(dest, { common: r.observed }, { complete: ['common'] });
     const swept = (sync.read(dest).items.common.files || []).map((f) => f[0]).sort();
-    ok(`⭐⭐ and the record for a file that is gone is removed (${swept.length})`,
+    ok(`and the record for a file that is gone is removed (${swept.length})`,
        !swept.includes('ghost.wav') && swept.length === 3,
        `got ${JSON.stringify(swept)}`);
   }
 
   {
-    // ⚠️ The guard, on the common compare's own walk.
+    // The guard, on the common compare's own walk.
     const card = { ...PACK, 'stray.wav': 'ZZZ' };
     delete card['mfont.wav'];
     const { userData, dest } = commonSetup(PACK, card);
     const r = await commonMatchesAt(userData, UUID, dest, 'common');
-    ok('⭐⭐ common refuses the claim when one file is absent and one is stray',
+    ok('common refuses the claim when one file is absent and one is stray',
        r.complete === false,
        'counts are 3 against 3 while the folders differ - claiming completeness here would '
        + 'delete the record for a file that was never examined');
@@ -101,7 +101,7 @@ const TRACKS = { 'one.wav': 'AAA', 'two.wav': 'BBB', 'three.wav': 'CCC' };
     // A common folder holding MORE than the library is a difference, and says nothing complete.
     const { userData, dest } = commonSetup(PACK, { ...PACK, 'extra.wav': 'EEE' });
     const r = await commonMatchesAt(userData, UUID, dest, 'common');
-    ok('⚠️ a common folder with an extra file differs, and claims nothing',
+    ok('a common folder with an extra file differs, and claims nothing',
        r.identical === false && r.complete !== true,
        `got identical=${r.identical} complete=${r.complete}`);
   }
@@ -111,24 +111,24 @@ const TRACKS = { 'one.wav': 'AAA', 'two.wav': 'BBB', 'three.wav': 'CCC' };
     const { userData, dest } = tracksSetup(TRACKS, TRACKS);
     sync.mergeItems(dest, { tracks: [['ghost.wav', [1, 2, 'G']]] });
     const p = await planExport(userData, dest);
-    ok('⭐ a matching tracks folder reports its observations as complete',
+    ok('a matching tracks folder reports its observations as complete',
        p.ok === true && p.toAdd.length === 0 && p.complete === true,
        `got toAdd=${(p.toAdd || []).length} complete=${p.complete}`);
 
     sync.mergeItems(dest, { tracks: p.observed }, { complete: ['tracks'] });
     const swept = (sync.read(dest).items.tracks.files || []).map((f) => f[0]).sort();
-    ok(`⭐⭐ and the record for a file that is gone is removed (${swept.length})`,
+    ok(`and the record for a file that is gone is removed (${swept.length})`,
        !swept.includes('ghost.wav') && swept.length === 3,
        `got ${JSON.stringify(swept)}`);
   }
 
   {
-    // ⚠️ One library track absent from the card, one stray present: 3 against 3.
+    // One library track absent from the card, one stray present: 3 against 3.
     const card = { ...TRACKS, 'stray.wav': 'ZZZ' };
     delete card['two.wav'];
     const { userData, dest } = tracksSetup(TRACKS, card);
     const p = await planExport(userData, dest);
-    ok('⭐⭐ tracks refuses the claim when one file is absent and one is stray',
+    ok('tracks refuses the claim when one file is absent and one is stray',
        p.complete === false,
        `a track in toAdd means the destination was not fully accounted for. toAdd=${JSON.stringify(p.toAdd)}`);
   }
@@ -138,7 +138,7 @@ const TRACKS = { 'one.wav': 'AAA', 'two.wav': 'BBB', 'three.wav': 'CCC' };
     // in `toAdd` - the count is what catches it, which is why both conditions exist.
     const { userData, dest } = tracksSetup(TRACKS, { ...TRACKS, 'extra.wav': 'EEE' });
     const p = await planExport(userData, dest);
-    ok('⭐⭐ tracks refuses the claim when the card holds MORE than the library',
+    ok('tracks refuses the claim when the card holds MORE than the library',
        p.toAdd.length === 0 && p.complete === false,
        'every library track is present, so only the file count can notice the extra - without it '
        + 'the sweep would delete that extra\'s record on the next pass');

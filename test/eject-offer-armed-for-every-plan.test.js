@@ -95,7 +95,7 @@ ok('the summary row is gated on the offer',
    /if \(!ejectOffer\.available \|\| !ejectOffer\.target\) return;/.test(src),
    'if this stops reading `available`, the arming is no longer what decides the row');
 
-// ── ⚠️ THE CONTROL: the check must be able to fail ───────────────────────────
+// ── THE CONTROL: the check must be able to fail ───────────────────────────
 // A source scan that reports clean is indistinguishable from one that cannot see its subject.
 // Reintroduce the original defect - the arming only inside the analyze, i.e. after the gate - in a
 // COPY of the source, and confirm the predicate rejects it.
@@ -105,7 +105,7 @@ ok('the summary row is gated on the offer',
     .replace(GATE, GATE + '\n      armEjectOffer(plan.rootDir || null);');
   ok('the mutation was applied', broken !== src,
      'anchor moved - the control below proves nothing without it');
-  ok('⚠️ arming only after the analyze gate IS rejected', !armedBeforeAnalyzeGate(broken).okay,
+  ok('arming only after the analyze gate IS rejected', !armedBeforeAnalyzeGate(broken).okay,
      'the predicate cannot see the original defect, so its clean verdict means nothing');
 }
 

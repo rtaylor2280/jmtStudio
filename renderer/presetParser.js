@@ -26,7 +26,7 @@
    * the original. That is the whole point: this parser hands back document coordinates,
    * and a stripper that shortens the text would move every slot in the file.
    *
-   * ⚠️ STRING-AWARE, AND THAT IS NOT OPTIONAL. A naive `//` rule eats the rest of the
+   * STRING-AWARE, AND THAT IS NOT OPTIONAL. A naive `//` rule eats the rest of the
    * line on a track path like "sounds//hum.wav" — and the cost of getting THAT wrong is
    * a live style silently vanishing from the parse, which is worse than the bug this
    * fixes. (Same trap as the 2026-09-12 scanner whose comment stripper ate a real
@@ -247,11 +247,11 @@
     return count > 0 ? count : null;
   }
 
-  // ⭐ THE ONE PLACE THAT KNOWS WHAT A STYLE WRAPPER IS CALLED. Preflight's blade-count
+  // THE ONE PLACE THAT KNOWS WHAT A STYLE WRAPPER IS CALLED. Preflight's blade-count
   // check reads the same text as a crude second opinion and used to carry its own copy of
   // this pattern; two hardcoded copies that must independently stay right is how they
   // drift. It imports this instead, so the two readings differ in METHOD, not vocabulary.
-  // ⚠️ A FACTORY, NOT A SHARED REGEX OBJECT: /g carries lastIndex, and handing the same
+  // A FACTORY, NOT A SHARED REGEX OBJECT: /g carries lastIndex, and handing the same
   // object to two consumers means one silently resumes where the other stopped.
   const STYLE_PTR_OPEN_SRC = '\\b\\w*Style\\w*Ptr\\w*\\s*<';
   const stylePtrOpenRe = () => new RegExp(STYLE_PTR_OPEN_SRC, 'g');
@@ -306,7 +306,7 @@
   function extractStyleSlots(text) {
     const results = [];
 
-    // ⭐ [B-372] SCAN THE TEXT THE COMPILER WOULD SEE. A commented-out style used to
+    // [B-372] SCAN THE TEXT THE COMPILER WOULD SEE. A commented-out style used to
     // parse as a real slot:
     //     StylePtr<Red>(),  //StylePtr<Blue>(),     -> 2 slots
     //     StylePtr<Red>(),  /*StylePtr<Blue>(),*/   -> 2 slots
@@ -316,7 +316,7 @@
     // ordinary thing to do in this editor, and the screen that exists to show blade
     // coverage was the screen getting it wrong.
     //
-    // ⚠️ MASKED, NOT STRIPPED. Every offset this function returns is a document
+    // MASKED, NOT STRIPPED. Every offset this function returns is a document
     // coordinate, so the scan text must stay the same LENGTH as the original. Content
     // is still sliced from `text`, so an inline comment inside a live expression
     // survives in `expr` exactly as before.

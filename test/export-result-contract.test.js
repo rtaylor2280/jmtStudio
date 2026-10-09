@@ -1,6 +1,6 @@
 // The seam between an export handler's result and the renderer that reads it.
 //
-// ⭐⭐ WHY THIS EXISTS. 2026-09-23 produced THREE defects of one shape in a single day, none of
+// WHY THIS EXISTS. 2026-09-23 produced THREE defects of one shape in a single day, none of
 // which could turn a suite red:
 //
 //   • a feature read `r.hash` while the producing module wrote `r.fileHash`, so it returned an
@@ -12,20 +12,20 @@
 //     describing a FOLDER export as "a Zip archive" because an undefined `format` failed the
 //     folder test. Wrong information, not merely missing.
 //
-// ⚠️⚠️ THE REASON THE SUITE COULD NOT SEE ANY OF THEM: every test builds its own input and hands
+// THE REASON THE SUITE COULD NOT SEE ANY OF THEM: every test builds its own input and hands
 // it straight to the consumer. Nothing crosses the seam, so the seam is the one place with no
 // coverage. "A fixture I authored tests my fixture" is the existing rule; this is its sibling -
 // a SHAPE ASSUMPTION about a neighbour, with no fixture involved at all.
 //
 // ── WHAT THIS CHECKS, AND WHAT IT HONESTLY DOES NOT ──
 //
-// ⭐ A DECLARED CONTRACT IN THE MIDDLE, the same pattern as test/export-door-map.test.js - which
+// A DECLARED CONTRACT IN THE MIDDLE, the same pattern as test/export-door-map.test.js - which
 // caught a brand-new handler the moment it existed, before anyone looked. Inferring a producer's
 // keys statically is not viable here: 11 export handlers return `{ ok: true, ...result }`, so the
 // fields come from a module the regex cannot follow. Declaring them makes the contract explicit
 // and makes ADDING a field a deliberate edit with a diff.
 //
-// ⚠️ IT CANNOT CATCH THE DELTA-CHANNEL CASE. There, NEITHER side had `name` - a field that should
+// IT CANNOT CATCH THE DELTA-CHANNEL CASE. There, NEITHER side had `name` - a field that should
 // have flowed and did not exist anywhere. A producer/consumer diff sees nothing wrong with two
 // sides that agree on being incomplete. That one needed comparing two channels serving the same
 // purpose against each other, and is not attempted here. Claiming otherwise would make this the
@@ -49,28 +49,28 @@ const ok = (name, cond, why) => {
 // What the renderer is allowed to rely on from each export result. Adding a field here is the
 // deliberate act; reading one that is not here is the defect this file exists for.
 //
-// ⚠️ `ok`, `error` and `canceled` are on every result by construction (the cancel-normalising
+// `ok`, `error` and `canceled` are on every result by construction (the cancel-normalising
 // rule), so they are implicit rather than repeated per entry.
 const UNIVERSAL = ['ok', 'error', 'canceled'];
-// ⚠️ WRITTEN FROM MEMORY THE FIRST TIME AND WRONG IN THREE PLACES - `kept`, `observed` and
+// WRITTEN FROM MEMORY THE FIRST TIME AND WRONG IN THREE PLACES - `kept`, `observed` and
 // `observedItem` are all genuinely returned and were missing here. That is not an embarrassment to
 // hide, it is the argument for the file: a contract recalled is a contract that drifts, and the
 // only way to find the gaps was to check it against the code rather than against my confidence.
-// ⚠️ `vars` is for the one door whose call is INDIRECTED - it wraps the bridge in a local helper
+// `vars` is for the one door whose call is INDIRECTED - it wraps the bridge in a local helper
 // and assigns the result elsewhere, so no `const x = await window.electronAPI.fn(` exists to find.
 // Naming the variable is honest; guessing at dataflow is how a static check starts lying.
 const CONTRACT = {
   // The multi-source door. Per-export facts live on the RECORDS, never on the root - that
   // distinction is the whole reason this file exists.
   exportManySourcesToDownloads: {
-    // ⚠️⚠️ A BARE VARIABLE NAME IS NOT AN ANCHOR. The first cut scanned for `res = await`
+    // A BARE VARIABLE NAME IS NOT AN ANCHOR. The first cut scanned for `res = await`
     // anywhere in the renderer and produced FORTY-SEVEN failures - `res` is used all over the
     // file, so it attributed every unrelated result's fields to this contract. A check with that
     // noise ratio gets ignored within a day, which is worse than not having it.
-    // ⭐ So the scan is scoped to the door's own body: the function is the anchor, the variable is
+    // So the scan is scoped to the door's own body: the function is the anchor, the variable is
     // only meaningful inside it.
     within: 'const _sfRunSourceExport = async',
-    // ⚠️⚠️ TWO MARKERS, NEVER A CHARACTER COUNT. The first cut sliced 6000 chars from the anchor
+    // TWO MARKERS, NEVER A CHARACTER COUNT. The first cut sliced 6000 chars from the anchor
     // and broke within the hour - comments added to the door pushed the call past the window and
     // the check reported "nobody calls this bridge". That is the SAME fixed-width-slice defect
     // test/export-runner-ratchet.test.js warns about in its own header ("a fixed-width slice over
@@ -80,16 +80,16 @@ const CONTRACT = {
     vars: ['res'],
     fields: [
       // [{ uuid, label, destDir, destPath, format, fileCount, totalBytes, curation, ... }]
-      // ⚠️ `destDir` (the chosen destination) is NOT `destPath` (what we created in it). The eject
+      // `destDir` (the chosen destination) is NOT `destPath` (what we created in it). The eject
       // offer resolves removable media from the DIRECTORY, and passing destPath worked only because
       // a folder export's destPath is a directory - an archive export's is a file. Added 2026-09-23
       // as a deliberate contract edit, which is the whole point of declaring these.
       'exported',
       'count', 'totalBytes', 'fileCount',
-      // ⚠️ THE THREE PREFLIGHT REFUSALS TRAVEL TOGETHER. main.js returns `{ ok:false, unhealthy }`,
+      // THE THREE PREFLIGHT REFUSALS TRAVEL TOGETHER. main.js returns `{ ok:false, unhealthy }`,
       // `{ ok:false, tooBig }` and `{ ok:false, slowWrite }` from three consecutive lines in this
       // handler, and only two of them were declared - so this check went red 2026-09-30 pointing at
-      // a consumer that was correct all along. ⭐ Verified the right way round before editing: the
+      // a consumer that was correct all along. Verified the right way round before editing: the
       // named handler (`sources:exportManyToDownloads`) genuinely returns `unhealthy`. A stale
       // contract and a real undeclared read look identical from here, and the difference is one
       // grep of the handler body - so always confirm which side moved. [B-441]
@@ -120,7 +120,7 @@ const CONTRACT = {
 
 // ── CONSUMER SIDE: does the renderer read anything undeclared? ────────
 //
-// ⚠️ THE WINDOW IS A HEURISTIC AND IT IS BOUNDED DELIBERATELY. A variable named `r` is reused all
+// THE WINDOW IS A HEURISTIC AND IT IS BOUNDED DELIBERATELY. A variable named `r` is reused all
 // over this file, so an unbounded scan would attribute someone else's `r.` to this call - which is
 // exactly how a regex over a block whose end was GUESSED clobbered an unrelated handler earlier
 // today. The scan stops at a re-assignment of the same name, and a false positive here costs one
@@ -182,12 +182,12 @@ for (const [fn, spec] of Object.entries(CONTRACT)) {
   }
 }
 
-// ── ⚠️⚠️ AND THE CHECK PROVES IT CAN FAIL ────────────────────────────
+// ── AND THE CHECK PROVES IT CAN FAIL ────────────────────────────
 // A contract check that reports clean is indistinguishable from one whose matcher stopped
 // matching - which is precisely how the 12-line window reported an already-fixed site as broken
 // earlier today, and only a control caught it.
 {
-  // ⚠️ Uses a DIRECTLY-called bridge on purpose: the control must exercise the same matcher the
+  // Uses a DIRECTLY-called bridge on purpose: the control must exercise the same matcher the
   // checks above rely on, and the indirected door has no `const x = await ...` to find.
   const fn = 'exportEntryToFolder';
   const calls = findCalls(H, fn);
@@ -201,7 +201,7 @@ for (const [fn, spec] of Object.entries(CONTRACT)) {
     const injected = mutated.slice(0, c.idx) +
       mutated.slice(c.idx).replace(/\n/, `\n            const _canary = ${c.varName}.notAContractField;\n`);
     const read = readsAfter(injected, c.idx, c.varName);
-    ok('⚠️⚠️ an undeclared field read IS caught', read.has('notAContractField'),
+    ok('an undeclared field read IS caught', read.has('notAContractField'),
        'the scanner cannot see a read it should flag, so its clean result means nothing');
   }
 }

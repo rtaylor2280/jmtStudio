@@ -8,10 +8,10 @@
  * together, which says "the current file is on the board". False twice over: the flash
  * predates the current build, and there was no board attached at all.
  *
- * ⭐ THE FLASH CHIP WAS A SESSION FLAG. It recorded that a flash had succeeded at some
+ * THE FLASH CHIP WAS A SESSION FLAG. It recorded that a flash had succeeded at some
  * point, never WHICH build it put there, so nothing could ever contradict it.
  *
- * ⚠️ AND THE MISLABEL HAD ITS OWN TRIGGER, pinned the same morning: clicking CLOSE on
+ * AND THE MISLABEL HAD ITS OWN TRIGGER, pinned the same morning: clicking CLOSE on
  * the still-open build modal re-runs the content-hash cache check, which HITS — that
  * compile just populated the cache — and relabelled this session's own build "restored
  * from cache". The check could not tell "this hit IS the build I just made" from
@@ -33,12 +33,12 @@ function ok(name, cond, extra) {
   else { failures++; console.log('FAIL ', name, extra === undefined ? '' : `\n      ${extra}`); }
 }
 
-// ⚠️ SLICE TO THE END OF THE THING, NEVER A FIXED CHARACTER COUNT.
+// SLICE TO THE END OF THE THING, NEVER A FIXED CHARACTER COUNT.
 // These blocks were cut at 1600 / 900 chars. On 2026-09-15 the provenance function grew and
 // four assertions started reading past their own subject - they did not report a gap, they
 // simply stopped covering the lines that moved out of the window. A stale slice fails in the
 // one direction a test must never fail in: quietly.
-// ⚠️⚠️ THESE MUST FAIL LOUDLY WHEN THEY CANNOT FIND THE END, AND THAT IS NOT PEDANTRY.
+// THESE MUST FAIL LOUDLY WHEN THEY CANNOT FIND THE END, AND THAT IS NOT PEDANTRY.
 // The first version looked for '\n}\n' and fell back to src.slice(start) when it found
 // nothing. renderer/buildPanel.js is CRLF, so '\n}\n' NEVER matched, and every single
 // assertion built on these was silently scanning the whole REST OF THE FILE rather than one
@@ -59,7 +59,7 @@ const fnBody     = name => sliceTo(`function ${name}`, '\n}\n',  2, 'function');
 const arrowBody  = decl => sliceTo(decl,               '\n};\n', 3, 'arrow');
 const objLiteral = decl => sliceTo(decl,               '};',     2, 'object literal');
 
-// ⚠️ NEGATIVE ASSERTIONS MUST NOT SEE COMMENTS, and this bit twice on 2026-09-15.
+// NEGATIVE ASSERTIONS MUST NOT SEE COMMENTS, and this bit twice on 2026-09-15.
 // Good comments quote the wording or the mechanism they REPLACED, to say why it went - so
 // "this string is gone" and "this guard is gone" both failed on the explanation rather than
 // on a regression. Positive assertions are fine either way; anything asserting ABSENCE runs
@@ -80,7 +80,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
 {
   const fn = fnBody('_refreshFlashProvenance');
   ok('the provenance check exists', fn.length > 200);
-  // ⭐ SPECIFICS BELONG IN THE TOOLTIP, NOT THE LABEL (2026-09-15). The label used
+  // SPECIFICS BELONG IN THE TOOLTIP, NOT THE LABEL (2026-09-15). The label used
   // to read "Board has an older build (Sep 15, 1:27 PM)", so the status bar got wider as the
   // state got worse and the scannable part sat behind a date. Asserted both ways round.
   ok('a superseded build says so', /'Board has an older build'/.test(fn), fn);
@@ -98,10 +98,10 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
   // went with it, because consequence and next-step are exactly what that rule cuts.
   ok('and the hover names which version went on', /from a different version of this config/.test(fn), fn);
 
-  // ⚠️ THREE WAYS THIS COULD BECOME THE SAME BUG POINTED THE OTHER WAY.
+  // THREE WAYS THIS COULD BECOME THE SAME BUG POINTED THE OTHER WAY.
   // No longer "says nothing": it states the session-scoped truth and lets the hover carry
   // the file's record. What it must still never do is invent a flash that never happened.
-  // ⚠️ "Not flashed this session" was an over-correction of an invented problem: the bare
+  // "Not flashed this session" was an over-correction of an invented problem: the bare
   // wording was argued to assert a negative about the board, and a qualifier shipped for it.
   // Reverted 2026-09-15. A qualifier earns its place only when there is something to contrast
   // against, and with nothing flashed there is nothing to contrast.
@@ -115,7 +115,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
      /if \(!_lastKnownConfigHash \|\| !_flashedBuildKey\.configHash\) return;/.test(fn),
      'calling the board stale because WE failed to identify a build is the same lie');
 
-  // ⭐ OWNERSHIP IS ASKED, NOT PATTERN-MATCHED. The old guard tested /^Flash/ against the
+  // OWNERSHIP IS ASKED, NOT PATTERN-MATCHED. The old guard tested /^Flash/ against the
   // label, and "Flash error" passes it - which is how a routine cache check wrote success
   // over a failed flash. Asserting the absence of that regex too, so it cannot come back.
   ok('it does not seize the chip while a flash is running',
@@ -132,7 +132,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
      !/\.test\(text\.textContent/.test(codeOnly(fn)) && !/\/\^Flash\//.test(codeOnly(fn)),
      '"Flash error" matches /^Flash/, so a label match could never protect an error state');
 
-  // ⭐ A TARGET CHANGE IS A MISMATCH EVEN WHEN THE CONFIG TEXT IS IDENTICAL.
+  // A TARGET CHANGE IS A MISMATCH EVEN WHEN THE CONFIG TEXT IS IDENTICAL.
   ok('the build TARGET is compared, not only the config text',
      /_lastKnownBuildPkgHash !== _flashedBuildKey\.buildPkgHash/.test(fn),
      'buildPkgHash was stamped at flash time and never compared: V2 -> V3 left "Flash successful" over a V2 binary');
@@ -152,7 +152,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
   ok('the flash stamp records WHICH BOARD',
      /sn:\s+isDfuMode \? null : \(_flashTargetSN \|\| selectedPortSN \|\| null\)/.test(stamp),
      'from the frozen target, because the touch-reset nulls selectedPortSN before the handler runs');
-  // ⚠️ AND IT STAMPS NOTHING ON A DFU FLASH. That path sets no _flashTargetSN, so
+  // AND IT STAMPS NOTHING ON A DFU FLASH. That path sets no _flashTargetSN, so
   // selectedPortSN still holds the board selected BEFORE entering the bootloader - a different
   // board entirely if one was swapped. Stamping it produced a confident "A different board was
   // flashed" about the very board just flashed (2026-09-15). Unknown beats wrong; the real
@@ -173,7 +173,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
   ok('the board question precedes the build question',
      fn.indexOf('!selectedPortSN') < fn.indexOf('_flashedBuildKey.buildPkgHash'),
      'a statement about the wrong board is wrong whatever its hashes say');
-  // ⚠️ REVERSED 2026-09-15. This asserted that entering DFU SETS "Board in bootloader mode",
+  // REVERSED 2026-09-15. This asserted that entering DFU SETS "Board in bootloader mode",
   // on the reasoning that a board in its bootloader is not running firmware so the old claim
   // would be a lie. The connection METHOD has no bearing on the firmware: DFU is a transport.
   // The board still holds what was flashed to it, so
@@ -203,7 +203,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
      'the board question does not depend on an FQBN; the cache check does');
 }
 
-// ── ⭐ THE EVIDENCE RULE: the LABEL is session-scoped, the HOVER may read the file ─
+// ── THE EVIDENCE RULE: the LABEL is session-scoped, the HOVER may read the file ─
 // Settled 2026-09-15: metadata is fair for a hover. A stored record is honest as
 // history and dishonest as a present claim - it says what we once did, never that nothing
 // has happened since. This asserts the split rather than trusting it to stay.
@@ -215,7 +215,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
      'metadata driving the LABEL would re-assert a certainty that ended when the board was unplugged');
   ok('and the hover does', /getMetaFlashed/.test(dec) && /getMetaBoardSN/.test(dec), dec);
 
-  // ⭐ THE HOVER'S SUBJECT IS THE FILE, NOT THE OPEN CONTENT. Found in dev testing
+  // THE HOVER'S SUBJECT IS THE FILE, NOT THE OPEN CONTENT. Found in dev testing
   // 2026-09-15: a draft read "This config records a flash on <date>", which reads as a claim
   // about what is on screen - and the file had been flashed at 9:26 and edited at 10:16. The
   // @jmt block carries no flashed config hash, so that question cannot be answered here at
@@ -231,7 +231,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
   ok('no record still says something the label does not',
      /no record of flashing this config/.test(dec), dec);
 
-  // ⭐⭐ AND THE RECORD MAY ONLY SPEAK IF IT COULD BE ABOUT WHAT IS OPEN. Dev testing
+  // AND THE RECORD MAY ONLY SPEAK IF IT COULD BE ABOUT WHAT IS OPEN. Dev testing
   // 2026-09-15: an edited config showed "Not flashed" hovering "Last flashed 2:00 PM" beside a
   // compile chip reading "Config changed". A config not even compiled cannot ever have been
   // flashed - you cannot flash what was never built, so content that is not a known build
@@ -242,7 +242,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
      dec.indexOf('!_openContentIsBuilt') < dec.indexOf('getMetaFlashed'),
      'reading it first and then discarding it would still be a claim assembled about the wrong version');
 
-  // ⚠️⚠️ AND THE GATE MUST NOT READ `compileSuccess` - the bug found minutes after the gate
+  // AND THE GATE MUST NOT READ `compileSuccess` - the bug found minutes after the gate
   // shipped. That flag is assigned INSIDE the `if (result.hit)` branch, and the provenance
   // call was hoisted ABOVE that branch so it fires on a miss too - so the gate saw a stale
   // false on every restart and silently suppressed a legitimate hover: after a flash and a
@@ -256,16 +256,16 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
      /_refreshFlashProvenance\(result\.configHash, result\.buildPkgHash,[\s\S]{0,80}?result\.hit \|\| result\.buildOutputMatches/.test(body2),
      body2.slice(body2.indexOf('_refreshFlashProvenance'), body2.indexOf('_refreshFlashProvenance') + 220));
 
-  // ⚠️ TOOLTIP LENGTH IS A CONVENTION, NOT TASTE - local/ui-conventions.md, "one line,
+  // TOOLTIP LENGTH IS A CONVENTION, NOT TASTE - local/ui-conventions.md, "one line,
   // roughly 12 words", and "fix the whole set when one is flagged". Every one of these ran
   // to two or three sentences on the first pass and was cut. Asserted so they cannot regrow.
-  // ⚠️ MEASURE EACH STRING, NOT THE STATEMENT. The first version of this matched
+  // MEASURE EACH STRING, NOT THE STATEMENT. The first version of this matched
   // `text.title = <up to the semicolon>`, which swallows both arms of a multi-line ternary -
   // so two one-sentence tooltips counted as a two-sentence one. It still found a real
   // two-sentence tooltip, but for the wrong reason, which is its own kind of false green.
   const stmts = (fnBody('_refreshFlashProvenance') + dec).match(/text\.title\s*=[^;]+;/g) || [];
   const tips  = stmts.join('\n').match(/(['`])(?:\\.|(?!\1)[\s\S])*\1/g) || [];
-  // ⚠️ THE CONVENTION IS LENGTH, NOT SENTENCE COUNT, and my first version of this asserted the
+  // THE CONVENTION IS LENGTH, NOT SENTENCE COUNT, and my first version of this asserted the
   // wrong one. local/ui-conventions.md says "one line, roughly 12 words" - two short sentences
   // on one line satisfy that, and a single rambling sentence does not. Measuring periods
   // flagged correct copy and would have let a 200-character one-liner through.
@@ -286,13 +286,13 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
   ok('a failure sets the sticky flag', /_flashFailed\s*=\s*!ok;/.test(src),
      'and a success clears it, which is the only thing that legitimately can');
 
-  // ⚠️⚠️ THE HANDLER MUST NOT REFERENCE A PARAMETER IT DOES NOT HAVE. 2026-09-15: the flash and
+  // THE HANDLER MUST NOT REFERENCE A PARAMETER IT DOES NOT HAVE. 2026-09-15: the flash and
   // compile branches were given `_firstSentence(error || message)` in the belief that they sat
   // in onBuildDone, which destructures `error`. They sit in onBuildStatus, which does not - so
   // every failed flash and every failed compile threw "error is not defined" and the handler
   // died BEFORE setStatus could write the terminal label. That is why an interrupted flash sat
   // on "Flashing on COM6..." indefinitely.
-  // ⚠️ Neither `node --check` nor this suite could see it: it is a runtime ReferenceError in a
+  // Neither `node --check` nor this suite could see it: it is a runtime ReferenceError in a
   // function nothing here executes - it surfaced in the DevTools console. This assertion is
   // the narrow backstop, not a substitute for a linter with no-undef.
   const statusFn = fnBody('onBuildStatus');
@@ -340,7 +340,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
 // and an edit is a MISS - that content has never been compiled - so it never fired.
 // The chip could recover but never degrade, because editing BACK to compiled content
 // IS a hit: it only ever moved toward the optimistic claim.
-// ⚠️ The old TC-3271 passed over this. It said "compile again", and after a recompile
+// The old TC-3271 passed over this. It said "compile again", and after a recompile
 // the new content hits, the re-read fires and the chip degrades correctly. The case
 // only ever sampled AFTER a recompile and never the window in between.
 {
@@ -385,7 +385,7 @@ const codeOnly = s => s.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\
   ok('which names when it happened', /Flashed \$\{when\}/.test(dec), dec);
   // Added 2026-09-15: the mismatch case names both serials, so a success naming none was the
   // odd one out. "Which board did this go to" is exactly what the hover is for.
-  // ⭐ Sharpened the same day: it must SAY which board, not print a serial to be compared
+  // Sharpened the same day: it must SAY which board, not print a serial to be compared
   // against the Detected field by eye. That comparison was already made to choose the label,
   // so leaving it to be repeated is the same failure as a hover that repeats its label.
   ok('and WHICH BOARD it went to, in words',

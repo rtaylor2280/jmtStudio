@@ -7,7 +7,7 @@
 // it was built from — is that gap, in the first person. Writing the config next to the fonts it
 // references, with a plain-text note saying what it is, closes it for any card this app touches.
 //
-// ⚠️⚠️ AND THE NOTE MUST SAY WHAT THE CONFIG IS *NOT*. The 2026-06-29 correction in
+// AND THE NOTE MUST SAY WHAT THE CONFIG IS *NOT*. The 2026-06-29 correction in
 // `local/specs/sd-card-management.md` is the whole reason this file is trustworthy rather than
 // marketing: a config sitting on an SD card proves nothing about what is flashed to the board.
 // A provenance file that implied otherwise would manufacture exactly the false confidence the
@@ -27,20 +27,20 @@ const fs = require('fs');
 const path = require('path');
 const { localDateString } = require('./localDate');
 
-// ⚠️ NOT `README.txt`, which is the obvious name and the wrong one. This file is REWRITTEN on
+// NOT `README.txt`, which is the obvious name and the wrong one. This file is REWRITTEN on
 // every export so it can never go stale, which is the right call — but "always replace"
 // aimed at a generic name would silently destroy a maker's own README.txt the first time one
 // existed. A name that says who owns it makes overwriting unambiguously safe, and it sorts
 // next to `jmt-studio-manifest.json`, which is the other file we already put at a destination.
 const README_NAME = 'JMT-STUDIO-README.txt';
 
-// ⚠️⚠️ ONE STRING, AND IT IS NOT THE ONLY PLACE IT BELONGS. As of 2026-10-01 this is the FIRST
+// ONE STRING, AND IT IS NOT THE ONLY PLACE IT BELONGS. As of 2026-10-01 this is the FIRST
 // author credit anywhere in the product: `build.copyright` in package.json is empty, so the
 // shipped Windows exe carries no copyright metadata at all, and LICENSE.txt asserts proprietary
 // rights in the first person ("allows me to...") without ever naming who holds them. Those two
 // matter more than this file does. Defined here as a constant so that when they are filled in,
 // it is this value being reused rather than a third wording invented at the time.
-// ⚠️ "Copyright", not "©", and that is an encoding decision rather than a style one. Everything
+// "Copyright", not "©", and that is an encoding decision rather than a style one. Everything
 // else in this document is plain ASCII; the symbol would be its only non-ASCII byte, written with
 // no BOM, onto FAT32, for an audience whose editor is whatever opens on a double-click. The same
 // reasoning that made this file CRLF applies — it is written for a reader, not a developer — and
@@ -56,7 +56,7 @@ function line(label, value) {
   return '  ' + String(label).padEnd(28) + value;
 }
 
-// ⚠️ EVERY FACT IN HERE IS PASSED IN. This module does not look at the editor, the store or the
+// EVERY FACT IN HERE IS PASSED IN. This module does not look at the editor, the store or the
 // filesystem to decide what is true — the renderer already knows all of it, and a second source
 // for the same fact is a second thing to keep in agreement forever.
 function buildReadme({
@@ -65,14 +65,14 @@ function buildReadme({
 } = {}) {
   const date = dateStr || localDateString();
 
-  // ⚠️ THE FONTS WERE NEVER THE WHOLE EXPORT, and the first version of this line said they were.
+  // THE FONTS WERE NEVER THE WHOLE EXPORT, and the first version of this line said they were.
   // A run that also writes a voice pack reported only "4 sound fonts", so the note undercounted
   // what it was describing — on a file whose entire job is to say what is on the card.
-  // ⚠️ NAMED FROM WHAT WAS WRITTEN, not from what was asked for. `commonOutcomes` has three
+  // NAMED FROM WHAT WAS WRITTEN, not from what was asked for. `commonOutcomes` has three
   // states and only `written` is this export putting a folder there; `current` means it was
   // already correct and `kept` means the user's own was preserved. Claiming either of those as
   // something "the export included" would be the same overstatement in the other direction.
-  // ⚠️ The folder is not always called `common` — a config can point at another slot — so the
+  // The folder is not always called `common` — a config can point at another slot — so the
   // real names are used rather than the convention.
   const bits = [`${fontCount} sound font${fontCount === 1 ? '' : 's'}`];
   const folders = (commonFolders || []).filter(Boolean);
@@ -84,7 +84,7 @@ function buildReadme({
 
   const inventory = [];
   if (configName) inventory.push(line(configName, 'the config this card was prepared for'));
-  // ⚠️ "the styles this config uses", NOT "the style library". What lands on the card is a NEW
+  // "the styles this config uses", NOT "the style library". What lands on the card is a NEW
   // file built from the entries this config references plus whatever those depend on — settled,
   // because a maker's whole library has no business riding along with one saber. Describing it
   // as the library would be a small lie that matters to the one person most likely to read it:
@@ -94,7 +94,7 @@ function buildReadme({
       ? `the ${stylesUsed} style${stylesUsed === 1 ? '' : 's'} this config uses`
       : 'the styles this config uses'));
   }
-  // ⚠️ SAYS WHAT IT IS, AND NOTHING ABOUT WHAT TO DO WITH IT. "a record of what was last written
+  // SAYS WHAT IT IS, AND NOTHING ABOUT WHAT TO DO WITH IT. "a record of what was last written
   // here" read like a log the user was meant to open. An earlier fix swung the other way and
   // instructed - "Leave it; nothing to read" - which is the app telling someone how to keep their
   // own card tidy. Naming it as the app's own file does the whole job: nobody deletes a tool's
@@ -115,7 +115,7 @@ function buildReadme({
   parts.push('');
 
   if (configName) {
-    // ⚠️ THE SECTION THE FEATURE EXISTS FOR. See the header.
+    // THE SECTION THE FEATURE EXISTS FOR. See the header.
     parts.push('WHAT THE CONFIG IS, AND IS NOT');
     parts.push('');
     parts.push('The config is the source that was exported alongside these fonts, so the');
@@ -135,24 +135,24 @@ function buildReadme({
   parts.push('');
   parts.push('  https://jmtfoundry.com/jmtstudio/');
   parts.push('');
-  // ⚠️ A SOFTWARE CREDIT, AND ITS PLACEMENT IS THE WHOLE REASON IT IS SAFE. It sits under the
+  // A SOFTWARE CREDIT, AND ITS PLACEMENT IS THE WHOLE REASON IT IS SAFE. It sits under the
   // app's own URL, in the section about the app, so it reads as "who wrote this tool" — which is
   // what it is. The one place it must never go is near the config or the fonts: this file is
   // written onto cards that OTHER makers prepare for THEIR customers, and a person's name beside
   // the saber's contents would read as authorship of the saber. That is the exact confusion the
   // "WHAT THE CONFIG IS, AND IS NOT" section exists to remove.
-  // ⚠️ No "powered by", no tagline. The tone rule at the top of this file applies hardest here,
+  // No "powered by", no tagline. The tone rule at the top of this file applies hardest here,
   // because a credit line is the easiest place in the document to start selling.
   parts.push(`  ${CREDIT}`);
   parts.push('');
-  // ⚠️⚠️ NOTHING HERE INVITES DELETING ANYTHING, AND THAT IS THE POINT. Two drafts got this
+  // NOTHING HERE INVITES DELETING ANYTHING, AND THAT IS THE POINT. Two drafts got this
   // wrong in opposite directions. The first said "any of these files can be deleted without
   // affecting the fonts or how the saber runs" - true about the saber, and an invitation to bin
   // the attribution on a file whose whole job is attribution. Nobody in this community writes
   // that: Fett263 asks explicitly that the attributions are not removed, so telling people to go
   // ahead and delete ours is a strange thing to ship. The second overcorrected into "leaving the
   // manifest is worth it", which argues a case at the reader instead of stating a fact.
-  // ⭐ State what each file IS and what keeping it buys, and let that be the whole argument. The
+  // State what each file IS and what keeping it buys, and let that be the whole argument. The
   // saber reassurance stays because someone receiving a saber genuinely wonders whether these
   // extra files matter.
   parts.push('This file is rewritten every time JMT Studio exports to this card, so the');
@@ -164,7 +164,7 @@ function buildReadme({
   return parts.join(NL);
 }
 
-// ⚠️ A FAILURE HERE MUST NOT FAIL THE EXPORT. The fonts are the job; this is a courtesy file
+// A FAILURE HERE MUST NOT FAIL THE EXPORT. The fonts are the job; this is a courtesy file
 // written after they all landed. So every write is individually guarded and the result reports
 // what happened rather than throwing — and it reports it per file, because "provenance failed"
 // with three possible causes is the silent-predicate shape that hid [B-203] for a week.
@@ -191,7 +191,7 @@ function writeProvenance({
   const haveConfig = !!(configName && typeof configContent === 'string');
   const haveStyles = !!(stylesName && typeof stylesContent === 'string');
 
-  // ⚠️ The readme is generated from what we ACTUALLY WROTE, not from what was asked for. If the
+  // The readme is generated from what we ACTUALLY WROTE, not from what was asked for. If the
   // config write is skipped or fails, the inventory must not list it — a note describing files
   // that are not there is worse than no note.
   if (haveConfig) writeOne(destDir, configName, configContent, wrote, failed);

@@ -12,11 +12,11 @@
 // half of the argument is the stronger one: the alternative to acting is not inaction,
 // it is sending the user into AppData to hand-edit a store the app manages.
 //
-// ⚠️ DELETION IS ALREADY POLICY, NOT A NEW RULE. importSource purges the extracted tree
+// DELETION IS ALREADY POLICY, NOT A NEW RULE. importSource purges the extracted tree
 // before storing it, so a program in a managed source cannot have arrived by importing.
 // Removing it enforces the rule we already have at the only other moment we look.
 //
-// ⚠️ AND THE FILE IS EVIDENCE, which is the whole reason for the second button. The user
+// AND THE FILE IS EVIDENCE, which is the whole reason for the second button. The user
 // may want to hash it, submit it to a vendor, or work out what put it there. Quarantine
 // preserves every byte; delete does not. Neither is silent and neither is automatic.
 const fs = require('fs');
@@ -36,7 +36,7 @@ function _managedRoot(userData, kind, id) {
 
 // Resolve (kind, id, relPath) to a real file inside the store.
 //
-// ⚠️ THE PATH ESCAPE CHECK IS NOT OPTIONAL. relPath arrives from the renderer, and this
+// THE PATH ESCAPE CHECK IS NOT OPTIONAL. relPath arrives from the renderer, and this
 // module's whole job is deleting files. Every byte reader in the app already refuses a
 // target that resolves outside its root ("Path escapes entry folder"); a writer that
 // skipped the same check would be strictly worse than the readers that have it.
@@ -53,7 +53,7 @@ function resolveManagedFile(userData, kind, id, relPath) {
   return { ok: true, absPath: target, root: base };
 }
 
-// ⚠️ A ZIP-FORMAT SOURCE CANNOT HAVE ONE FILE REMOVED FROM IT, and saying so is better
+// A ZIP-FORMAT SOURCE CANNOT HAVE ONE FILE REMOVED FROM IT, and saying so is better
 // than pretending. Measured 2026-09-11: all 162 sources on the dev machine are folder
 // format and there is no source.zip anywhere on disk, because the architecture no longer
 // archives ("we don't have any zips anymore... that architecture has been changed"). This
@@ -71,7 +71,7 @@ function _zipFormatRefusal(userData, kind, id) {
   return null;
 }
 
-// ⚠️ RE-VERIFY BEFORE DESTROYING, ALWAYS. The caller tells us which file to remove, but
+// RE-VERIFY BEFORE DESTROYING, ALWAYS. The caller tells us which file to remove, but
 // the caller is the renderer and the only justification for removing anything here is
 // that it IS a program. Trusting the instruction instead of the bytes means a bug
 // anywhere upstream deletes somebody's wav. Costs one 256-byte read at the moment it
@@ -102,7 +102,7 @@ function _markDirty(userData, kind, id) {
   } catch { /* a stale marker costs a recompute, never correctness */ }
 }
 
-// ⭐ A FONT FOLDER HAS NO FILES OF ITS OWN — THEY ARE ALL POINTERS (the note,
+// A FONT FOLDER HAS NO FILES OF ITS OWN — THEY ARE ALL POINTERS (the note,
 // 2026-09-11, and it changed this module). Measured on the real library the same
 // minute: 85 of 86 files in an entry have nlink 2 and share an inode with the source
 // file; the one exception is meta.json, the app artifact, which exports already skip.
@@ -111,18 +111,18 @@ function _markDirty(userData, kind, id) {
 //   1. A program sitting AT A POINTER can only mean the shared inode's bytes were
 //      modified in place. Nobody can "add a file to a font folder" — a new file
 //      written into a source is nlink 1 and the entry has no pointer to it at all.
-//   2. ⚠️ SO UNLINKING ONE NAME DOES NOT REMOVE THE FILE. Drop the entry's pointer and
+//   2. SO UNLINKING ONE NAME DOES NOT REMOVE THE FILE. Drop the entry's pointer and
 //      the source name still reaches the same bytes; drop the source name and the
 //      entry's pointer survives with its content untouched. Either way the program is
 //      still in the library and the app would have reported success.
 //
-// HIS SCOPE CALL, which is what this implements: removal is POLICY, not a preference.
+// THE SCOPE CALL, which is what this implements: removal is POLICY, not a preference.
 // "Those files are not allowed in Studio. That means that they must be removed and
 // either way they choose they're going to be removed. The quarantine is merely kindness
 // to let somebody like me who wants to evaluate where it came from to do so, but either
 // way it's coming out of Studio."
 //
-// ⭐ AND THE UI CONSEQUENCE: "we don't have to tell them every location that it came out
+// AND THE UI CONSEQUENCE: "we don't have to tell them every location that it came out
 // of, merely that it's been removed." There is no second store from the user's point of
 // view. There is Studio, and the file is out of it. Enumerating our internal locations
 // would be explaining our storage layout to someone who should never need it.
@@ -188,13 +188,13 @@ function _findAllNames(userData, absPath) {
   return found;
 }
 
-// ⚠️ ORDER MATTERS AND IT IS THE SAME ORDER deleteEntry USES ([B-316], 2026-09-05).
+// ORDER MATTERS AND IT IS THE SAME ORDER deleteEntry USES ([B-316], 2026-09-05).
 // Pooled content is kept exactly as long as something uses it, and the filesystem is
 // what answers that: the pool holds one name, so a file with any user has nlink >= 2.
 // The link count only falls once OUR name is actually gone, so sweeping first would
 // find the file still in use and free nothing.
 //
-// ⭐ AND THIS IS WHY UNLINKING ONE NAME IS SAFE EVEN WHEN THE FILE IS POOLED. Removing a
+// AND THIS IS WHY UNLINKING ONE NAME IS SAFE EVEN WHEN THE FILE IS POOLED. Removing a
 // name never touches another entry's name for the same bytes - that is what a hardlink
 // is. The pool copy survives until its last user is gone. So there is no cross-font
 // damage available here, which was the hazard worth checking before writing any of this.
@@ -233,7 +233,7 @@ function _markDirtyForPaths(userData, paths) {
 
 // ── THE HOLDING AREA ────────────────────────────────────────────────────────────
 //
-// ⭐ HIS DESIGN, 2026-09-11, and it inverts the order the first build used: "essentially
+// THE DESIGN, 2026-09-11, and it inverts the order the first build used: "essentially
 // the quarantine becomes a temp file. In the process, if the user closes the app in the
 // middle of it, it's already gone. It should always be deleted by the time we report it,
 // and the quarantine is whether they want to take it out of the temporary folder and put
@@ -252,7 +252,7 @@ function _markDirtyForPaths(userData, paths) {
 // reasoning applies exactly - an impounded file cannot be adopted by a later session, so
 // across sessions it is garbage, always.
 //
-// ⚠️ INERT IN THE HOLDING AREA TOO. It carries the .quarantine suffix from the moment it
+// INERT IN THE HOLDING AREA TOO. It carries the .quarantine suffix from the moment it
 // lands, not only when the user saves a copy. A folder inside the app's own data
 // directory is not a safe place to park a file that Windows would happily launch.
 //
@@ -262,7 +262,7 @@ function holdingRoot(userData) {
   return path.join(userData, 'soundFonts', '_impound');
 }
 
-// ⚠️⚠️ A SECOND NAME FOR A FILE WE ALREADY SWEPT IS NOT A FAILURE ([B-394], the export
+// A SECOND NAME FOR A FILE WE ALREADY SWEPT IS NOT A FAILURE ([B-394], the export
 // 2026-09-16). The content-addressed store HARDLINKS one file into several buckets, and
 // `_unlinkAndSweep` deliberately removes EVERY name `_findAllNames` can reach — leaving one
 // behind would leave the program in the library. So a batch that refused the same file once
@@ -270,7 +270,7 @@ function holdingRoot(userData) {
 // `resolveManagedFile` says "File not found", and the honest outcome gets reported as
 // "1 could not be removed".
 //
-// ⭐ THAT IS THE WORST POSSIBLE DIRECTION FOR THIS LIE. It tells the user a program survived
+// THAT IS THE WORST POSSIBLE DIRECTION FOR THIS LIE. It tells the user a program survived
 // in their library — the one outcome we can actually prove did not happen. The dialog said
 // exactly that about "8.21打印.rar" while BOTH of its names were already gone: one quarantine
 // file, two paths in its `Found in:`, and a clean store.
@@ -366,7 +366,7 @@ function impoundProgram(userData, { kind, id, relPath } = {}) {
 
 // The user chose to keep a copy. Copy out, then drop the holding entry immediately —
 // "and then we delete it immediately". Nothing waits for the sweep once they have it.
-// ⚠️ IT LANDS IN ITS OWN LABELLED FOLDER, NEVER LOOSE IN THE CHOSEN DIRECTORY (the
+// IT LANDS IN ITS OWN LABELLED FOLDER, NEVER LOOSE IN THE CHOSEN DIRECTORY (the
 // catch on the first dev pass, 2026-09-11: "one file but there are two here... and it
 // should have come in its own folder, properly labeled for what it is, as potentially it
 // can be dangerous").
@@ -378,7 +378,7 @@ function impoundProgram(userData, { kind, id, relPath } = {}) {
 //
 // The folder carries the warning, the README explains the rename, and a batch lands
 // together instead of scattering N pairs across the destination.
-// ⚠️ ONE TEXT FILE, NOT A JSON PER FINDING (the catch, 2026-09-11: "what's the json?
+// ONE TEXT FILE, NOT A JSON PER FINDING (the catch, 2026-09-11: "what's the json?
 // shouldn't we be handing a text file if there's going to be information?"). That is right
 // and it fixes the count problem at the same time: a .json is a developer artifact, and
 // pairing one with every quarantined file is what made a single finding look like two
@@ -432,7 +432,7 @@ function _readmeBlock(b) {
 }
 
 
-// ⚠️ THE FILES SIT ONE LEVEL DOWN, IN A FOLDER THAT NAMES ITSELF (the shape, 2026-09-11:
+// THE FILES SIT ONE LEVEL DOWN, IN A FOLDER THAT NAMES ITSELF (the shape, 2026-09-11:
 // "a folder with a text file saying something about it's safe to read, and then a folder
 // labeled quarantined files with the file in it"). Opening the quarantine folder should
 // put a readable explanation in front of you, not the programs themselves. Anyone who
@@ -488,7 +488,7 @@ function releaseImpounded(userData, { token, destDir, batchLabel } = {}) {
 
 // The user chose Delete. Drop the held bytes now rather than waiting for the sweep.
 //
-// ⚠️ FROM THE USER'S SIDE THIS IS THE WHOLE OF "DELETE" — they are not told the file was
+// FROM THE USER'S SIDE THIS IS THE WHOLE OF "DELETE" — they are not told the file was
 // parked anywhere, because the holding area is our bookkeeping and not their business
 // (, ruled 2026-09-11: "the underworks of it, the fact that we're putting it in a temp
 // file and all that stuff, is irrelevant to the user"). Dismissing the dialog reaches the
@@ -552,7 +552,7 @@ function deleteManagedFile(userData, { kind, id, relPath } = {}) {
 
 // QUARANTINE — keep every byte, somewhere the user picked, and make it inert.
 //
-// ⚠️ A PLAIN MOVE IS WORSE THAN DOING NOTHING. Moving foo.exe to their Desktop turns a
+// A PLAIN MOVE IS WORSE THAN DOING NOTHING. Moving foo.exe to their Desktop turns a
 // file nobody could reach into a runnable program somewhere they might double-click.
 // Windows picks its launcher from the EXTENSION (proved 2026-09-10), so writing it as
 // foo.exe.quarantine makes the double-click inert while preserving the file exactly.
@@ -584,7 +584,7 @@ function quarantineManagedFile(userData, { kind, id, relPath, destDir } = {}) {
     const buf = fs.readFileSync(r.absPath);
     const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
     fs.writeFileSync(outPath, buf);
-    // ⭐ EVERY LOCATION GOES IN THE SIDECAR, AND NOWHERE ELSE. Quarantine exists for the
+    // EVERY LOCATION GOES IN THE SIDECAR, AND NOWHERE ELSE. Quarantine exists for the
     // user who wants to work out where the file came from ("merely kindness to let
     // somebody like me who wants to evaluate where it came from do so"), so the evidence
     // has to be complete. The SCREEN still says only that it was removed.

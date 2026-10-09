@@ -1,6 +1,6 @@
 // Export a curated source, import it back, and check what landed where — for BOTH formats.
 //
-// ⭐⭐ WHY A ROUND TRIP AND NOT TWO UNIT TESTS. [B-420 / B-427, 2026-09-23]
+// WHY A ROUND TRIP AND NOT TWO UNIT TESTS. [B-420 / B-427, 2026-09-23]
 // The sidecar crosses a seam: one side writes it into an export, the other has to recognise it and
 // take it back out. Tonight both sides were rewritten, and the old failure was precisely that they
 // agreed on nothing while each looked correct alone:
@@ -12,7 +12,7 @@
 // the user's summary of the pair, which is the thing this test defends: "why would we have ever packed,
 // unpacked and packed again?"
 //
-// ⚠️⚠️ AND THE FOLDER CASE IS A LIVE DEFECT THIS CLOSES. [B-420] made folder exports carry a sidecar
+// AND THE FOLDER CASE IS A LIVE DEFECT THIS CLOSES. [B-420] made folder exports carry a sidecar
 // too - previously impossible, because injection needed an archive to rebuild - but the import peek
 // was still `if (isZip)`. So a folder re-imported in between stored `.jmt-curation.json` INSIDE the
 // tree as vendor content and restored nothing. It was accepted that knowingly for a few hours: "it's
@@ -128,7 +128,7 @@ const walk = (root) => {
        `re-import failed: ${back && back.error}`);
     if (!back || !back.ok) continue;
 
-    ok(`${format}: ⚠️⚠️ the curation is recognised on the way back in`,
+    ok(`${format}: the curation is recognised on the way back in`,
        !!(back.curation && Array.isArray(back.curation.tags)
           && back.curation.tags.includes('dueling')),
        'the sidecar was written on export and not read on import, so the tags, links and receipts '
@@ -143,7 +143,7 @@ const walk = (root) => {
     // ── 2. OUR FILES ARE NOT IN THE STORED SOURCE ───────────────────
     const storedTree = path.join(sources.sourcesRoot(ud2), back.uuid, 'source');
     const stored = walk(storedTree);
-    ok(`${format}: ⚠️⚠️ the sidecar is NOT stored as vendor content`,
+    ok(`${format}: the sidecar is NOT stored as vendor content`,
        !stored.includes(cur.SIDECAR_NAME),
        `${cur.SIDECAR_NAME} is inside the stored source. Our bookkeeping is now part of the user's `
        + `font, and every future export re-ships a stale copy of it. Stored: ${stored.join(', ')}`);
@@ -157,7 +157,7 @@ const walk = (root) => {
        `stripping our files must not cost a vendor file. Stored: ${stored.join(', ')}`);
 
     // ── 3. THE PAYLOAD REACHED DISK AND WAS CONSUMED ────────────────
-    // ⚠️ THE TEMP DIR IS DELIBERATELY NOT RETURNED HERE, and the first cut of this test asserted that
+    // THE TEMP DIR IS DELIBERATELY NOT RETURNED HERE, and the first cut of this test asserted that
     // it was. `curationTmp` survives the import ONLY when customized fonts are still pending a
     // decision from the user; attachments are applied during the import itself, while the dir still
     // exists, and it is then removed. Asserting it came back was asserting a leak.
@@ -173,13 +173,13 @@ const walk = (root) => {
       meta2 = JSON.parse(fs.readFileSync(
         path.join(sources.sourcesRoot(ud2), back.uuid, 'meta.json'), 'utf8'));
     } catch { /* asserted below */ }
-    ok(`${format}: ⚠️⚠️ the sidecar was consumed into the stored source's meta`,
+    ok(`${format}: the sidecar was consumed into the stored source's meta`,
        !!(meta2 && meta2.originArchiveHash === imp.hash),
        'originArchiveHash is written only from a sidecar that was read, and findByProvenance matches '
        + 'on it — so without it a later re-import cannot recognise a source it already has. '
        + `meta.originArchiveHash = ${meta2 && meta2.originArchiveHash}`);
 
-    // ⚠️ AND THE STORED HASH IS OF WHAT ARRIVED, not of a canonical repack. [B-427] The old import
+    // AND THE STORED HASH IS OF WHAT ARRIVED, not of a canonical repack. [B-427] The old import
     // re-zipped the stripped tree and hashed THAT, purely so two exports of one source hashed alike -
     // a property only the old archive-as-artifact storage needed. It must not quietly come back.
     ok(`${format}: identity is separate from provenance`,
@@ -188,7 +188,7 @@ const walk = (root) => {
        + 'collapsing the two is what made a repack look necessary');
   }
 
-  // ── ⚠️ peekDir matches peekZip's acceptance rules, or a zip and its extracted twin disagree ──
+  // ── peekDir matches peekZip's acceptance rules, or a zip and its extracted twin disagree ──
   console.log('\n── peekDir acceptance ──');
   const pd = fs.mkdtempSync(path.join(tmp, 'peek-'));
   ok('peekDir: no sidecar → null', cur.peekDir(pd) === null);
@@ -197,14 +197,14 @@ const walk = (root) => {
      'a sidecar we cannot parse must never block the font behind it');
   fs.writeFileSync(path.join(pd, cur.SIDECAR_NAME),
     JSON.stringify({ schemaVersion: cur.SCHEMA_VERSION + 5, tags: ['x'] }));
-  ok('peekDir: ⚠️ a NEWER schema is ignored, not half-applied',
+  ok('peekDir: a NEWER schema is ignored, not half-applied',
      cur.peekDir(pd) === null,
      'data from a future version is data we cannot promise to read correctly — the font imports '
      + 'and only the curation is lost, which is the same call peekZip makes');
   fs.writeFileSync(path.join(pd, cur.SIDECAR_NAME),
     JSON.stringify({ schemaVersion: cur.SCHEMA_VERSION, tags: ['ok'] }));
   const good = cur.peekDir(pd);
-  ok('peekDir: ⭐ and a valid sidecar IS read (the control)',
+  ok('peekDir: and a valid sidecar IS read (the control)',
      !!(good && good.tags && good.tags[0] === 'ok'),
      'every case above returns null, so without this the checks would pass on a function that '
      + 'always fails');

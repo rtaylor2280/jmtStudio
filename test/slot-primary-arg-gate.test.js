@@ -9,13 +9,13 @@
  * and showed the style's hardcoded colour, so the two views reported different colours
  * for one slot with nothing to say which to believe.
  *
- * ⭐ The diagnosis, and the reason the fix is a condition and not a feature: *"It was
+ * The diagnosis, and the reason the fix is a condition and not a feature: *"It was
  * args that had no right to the primary slot. Needed ladder. But instead something that
  * should have been in advanced took the lead."* The arg slot NUMBERS are fixed by
  * ProffieOS (`enum ArgumentName`, styles/edit_mode.h), so "no BASE_COLOR_ARG" is a fact
  * about the style rather than an inference.
  *
- * ⚠️⚠️ WHAT THIS FILE CANNOT CHECK, STATED SO A GREEN RUN IS NOT MISREAD. The logic
+ * WHAT THIS FILE CANNOT CHECK, STATED SO A GREEN RUN IS NOT MISREAD. The logic
  * lives inline in a ~250-line DOM builder; there is no function to lift and run, so
  * every assertion below is STRUCTURAL. It can prove the guard exists and that the
  * Advanced button is reachable without a primary row. It cannot prove the panel renders
@@ -48,7 +48,7 @@ const gateIdx = html.indexOf('const _hasBaseArg');
 ok('the base-arg gate exists', gateIdx > 0);
 
 const gateSrc = html.slice(gateIdx, gateIdx + 200);
-ok('⭐ the gate requires index 0 to BE BASE_COLOR_ARG',
+ok('the gate requires index 0 to BE BASE_COLOR_ARG',
    /registryArgs\[0\]\.name\s*===\s*'BASE_COLOR_ARG'/.test(gateSrc),
    gateSrc.split('\n').slice(0, 3).join('\n'));
 ok('and it requires there to be an arg at all',
@@ -59,23 +59,23 @@ ok('and it requires there to be an arg at all',
   const uses = [...html.matchAll(/makeArgRow\(registryArgs\[0\]/g)].map(m => m.index);
   ok('registryArgs[0] feeds exactly one primary row', uses.length === 1, `${uses.length} uses`);
   const before = html.slice(Math.max(0, uses[0] - 400), uses[0]);
-  ok('⭐ and that row is built inside `if (_hasBaseArg)`',
+  ok('and that row is built inside `if (_hasBaseArg)`',
      /if\s*\(_hasBaseArg\)\s*\{[^}]*$/.test(before),
      before.slice(-120));
 }
 
 // ── the Advanced rows start at 0 when there is no base arg ─────────────────
-ok('⭐ the Advanced loop starts at 0 when no base arg, 1 when there is',
+ok('the Advanced loop starts at 0 when no base arg, 1 when there is',
    /for\s*\(let i = _hasBaseArg \? 1 : 0;/.test(html),
    'otherwise index 0 is dropped from Advanced and becomes unreachable');
 
-// ── ⭐⭐ the button must be reachable with no primary row ───────────────────
+// ── the button must be reachable with no primary row ───────────────────
 {
   const btnIdx   = html.indexOf("advBtn.textContent = 'Advanced ▾'");
   const primIdx  = html.indexOf('makeArgRow(registryArgs[0]');
   const hcIdx    = html.indexOf('body.appendChild(_hcRow);');
   ok('the Advanced button is still built', btnIdx > 0);
-  ok('⭐⭐ it is built AFTER the hardcoded-colour branch, not inside the primary one',
+  ok('it is built AFTER the hardcoded-colour branch, not inside the primary one',
      btnIdx > hcIdx && hcIdx > primIdx,
      `primary@${primIdx} hardcoded@${hcIdx} button@${btnIdx} — inside the primary branch `
      + 'means a partially argified style can never open Advanced');
@@ -91,21 +91,21 @@ ok('⭐ the Advanced loop starts at 0 when no base arg, 1 when there is',
   const idx = html.indexOf('expand.appendChild(advContent)');
   ok('the advanced container is appended', idx > 0);
   const guard = html.slice(Math.max(0, idx - 200), idx);
-  ok('⭐ gated on _advRows.length, matching the button',
+  ok('gated on _advRows.length, matching the button',
      /_advRows\.length\s*>\s*0/.test(guard),
      guard.slice(-120));
-  ok('⚠️ and the old `registryArgs.length > 1` gate is gone from it',
+  ok('and the old `registryArgs.length > 1` gate is gone from it',
      !/registryArgs\.length\s*>\s*1\s*\)\s*expand\.appendChild/.test(html));
 }
 
 // ── the ladder itself must be untouched ────────────────────────────────────
 //
-// ⚠️ The whole point of this fix is that it is a CONDITION, not a reordering. Rungs 6-8
+// The whole point of this fix is that it is a CONDITION, not a reordering. Rungs 6-8
 // carry a comment recording that they used to sit at rung 4 and steal the answer, and
 // [B-060] already unified two surfaces onto this ladder. If a later change "fixes" the
 // disagreement by moving rungs instead, this is what should go red.
 {
-  // ⚠️ Bound the slice by the NEXT function, not by a guessed character count. The
+  // Bound the slice by the NEXT function, not by a guessed character count. The
   // first version used `+ 3000` and the function is 4259 chars, so rungs 4-8 fell
   // outside the window and the test reported them "missing" — a truncated search
   // producing a confident negative, which is the exact failure this suite exists for.
@@ -116,7 +116,7 @@ ok('⭐ the Advanced loop starts at 0 when no base arg, 1 when there is',
   const order = ['base-arg', 'colorarg-csv', 'base-registry', 'base-inline',
                  'helper-hardcoded', 'expr-hardcoded', 'first-arg', 'first-registry', 'first-inline'];
   const found = order.map(s => body.indexOf(`'${s}'`));
-  ok('⚠️ the ladder rungs are still in their recorded order',
+  ok('the ladder rungs are still in their recorded order',
      found.every(i => i > 0) && found.every((v, i, a) => i === 0 || a[i - 1] < v),
      JSON.stringify(order.filter((s, i) => found[i] < 0)) + ' missing, or out of order');
 }

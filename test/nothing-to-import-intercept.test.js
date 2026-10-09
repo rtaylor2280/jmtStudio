@@ -13,12 +13,12 @@
  * user would fill in vendor, website, link, acquisition date, notes and proof
  * of purchase, press Add to Library, and import nothing.
  *
- * ⭐ dev test 2026-09-14: "if there's nothing to import at all... then it
+ * dev test 2026-09-14: "if there's nothing to import at all... then it
  * shouldn't even get to the import screen." And on the door that stays open:
  * "don't block them. they want to they can. will potentially need a new name
  * but that's ok."
  *
- * ⚠️ THE DANGEROUS DIRECTION IS A FALSE POSITIVE. Intercepting when there IS
+ * THE DANGEROUS DIRECTION IS A FALSE POSITIVE. Intercepting when there IS
  * something to import takes a real import away from the user and leaves no way
  * to reach it. So the predicate must answer "carry on to the review" for every
  * uncertainty — a failed match, a short result set, one unmatched candidate —
@@ -75,28 +75,28 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
 {
   setImport({ candidates: cands('Maul') });
   const hit = nothingLeft({ ok: true, results: [owned('Maul', 'Maul Redux')] });
-  ok('⭐ one candidate, fully owned → intercept', !!hit && hit.length === 1);
+  ok('one candidate, fully owned → intercept', !!hit && hit.length === 1);
   ok('and it hands back the matched rows, so the dialog can name them',
      !!hit && hit[0].matchName === 'Maul Redux',
      'the names differ on purpose — that is the whole reason this dialog exists');
 
   setImport({ candidates: cands('Maul', 'Vader', 'Ahsoka') });
-  ok('⭐ a whole bundle, every font owned → intercept',
+  ok('a whole bundle, every font owned → intercept',
      !!nothingLeft({ ok: true, results: [owned('Maul', 'Maul'), owned('Vader', 'Vader'), owned('Ahsoka', 'A2')] }));
 }
 
 // ── every uncertainty carries on to the review ─────────────────────────────
 //
-// ⚠️ These are the assertions that keep a real import reachable. Each one is a
+// These are the assertions that keep a real import reachable. Each one is a
 // way the match can come back less than certain, and every one of them must
 // return null.
 {
   setImport({ candidates: cands('Maul', 'Vader') });
-  ok('⭐ one owned + one NOT owned → no intercept',
+  ok('one owned + one NOT owned → no intercept',
      nothingLeft({ ok: true, results: [owned('Maul', 'Maul'), variant('Vader')] }) === null,
      'this is the mixed case the first half of B-363 already handles correctly');
 
-  ok('⭐ fewer results than candidates → no intercept',
+  ok('fewer results than candidates → no intercept',
      nothingLeft({ ok: true, results: [owned('Maul', 'Maul')] }) === null,
      'the backend SKIPS a candidate it cannot match (continue, not a null row), so a '
      + 'short result set means an unmatched font — something to import');
@@ -119,7 +119,7 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
 
 // ── the fuller source of a font you already have ───────────────────────────
 //
-// ⭐ HIS QUESTION, 2026-09-14: "what would happen if they had Maul - just the
+// THE QUESTION, 2026-09-14: "what would happen if they had Maul - just the
 // Proffie version - and now trying to import a more complete source of it?
 // same font... but more files."
 //
@@ -159,33 +159,33 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
   };
 
   const a = run(40, 0, 60, 0, 40, 0);
-  ok('⭐ the Proffie cut in the library, a fuller source incoming → NOT intercepted',
+  ok('the Proffie cut in the library, a fuller source incoming → NOT intercepted',
      !a.intercepted, `verdict ${a.verdict}`);
 
-  // ⚠️ THE SHARPEST ONE. Character sounds identical, so containment is 1.00 and
+  // THE SHARPEST ONE. Character sounds identical, so containment is 1.00 and
   // the verdict is have_it — every "is this the same font" test says yes. Only
   // the customizable bucket disagrees, and it is right: 12 tracks would be lost.
   const b = run(40, 0, 40, 12, 40, 0);
-  ok('⭐⭐ identical sounds but 12 tracks/quotes the library lacks → NOT intercepted',
+  ok('identical sounds but 12 tracks/quotes the library lacks → NOT intercepted',
      !b.intercepted && b.verdict === 'have_it',
      `verdict ${b.verdict}, label: ${b.label}`);
   ok('and the row says what would be lost, in plain words',
      /12 quote or track files yours is missing/.test(b.label || ''), b.label);
 
   const d = run(40, 0, 42, 0, 40, 0);
-  ok('⭐ even 2 extra character sounds keep the import reachable', !d.intercepted,
+  ok('even 2 extra character sounds keep the import reachable', !d.intercepted,
      `verdict ${d.verdict}, label: ${d.label}`);
 
   // The interception still has to FIRE when the library genuinely holds it all,
   // or this whole block is just proving the feature is switched off.
   const c2 = run(40, 12, 40, 12, 40, 12);
-  ok('⭐ but a true full copy, both buckets, IS intercepted', c2.intercepted,
+  ok('but a true full copy, both buckets, IS intercepted', c2.intercepted,
      `verdict ${c2.verdict}, label: ${c2.label}`);
 }
 
 // ── the interception sits on the FRESH path, and only there ────────────────
 //
-// ⚠️ Add-more and duplicate mode reach _sfPopulateReview by their own routes
+// Add-more and duplicate mode reach _sfPopulateReview by their own routes
 // and BOTH expect to be looking at fonts the library already holds. Fire this
 // there and their whole purpose breaks. Anchoring on the call sites themselves
 // rather than a line range, because a range moves and a call site does not.
@@ -201,10 +201,10 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
      && html.indexOf('_sfShowDuplicateFont(_allOwned', showAt + 1) === -1);
 
   // It must precede the FIRST call site and follow no other.
-  ok('⭐ it runs BEFORE the fresh-import review renders',
+  ok('it runs BEFORE the fresh-import review renders',
      showAt > 0 && showAt < sites[0],
      'intercepting after _sfPopulateReview would mean the form was already built');
-  ok('⭐ and it is nowhere near the add-more / duplicate call sites',
+  ok('and it is nowhere near the add-more / duplicate call sites',
      showAt < sites[1] && showAt < sites[2],
      'those two modes EXPECT already-owned fonts — an interception there is a bug');
 
@@ -220,12 +220,12 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
   ok('the match is funnelled through a single helper',
      html.includes('async function _sfMatchCandidatesOnce()'));
   const direct = (html.match(/electronAPI\.matchSourceCandidates\(/g) || []).length;
-  ok('⭐ and nothing calls the IPC directly any more', direct === 1,
+  ok('and nothing calls the IPC directly any more', direct === 1,
      `${direct} direct calls — the only one allowed is inside _sfMatchCandidatesOnce`);
   ok('the review screen reads through the helper too',
      html.includes('_sfMatchCandidatesOnce().then('),
      'otherwise the fresh path pays for the same answer twice');
-  // ⚠️ Keyed by runId and stored on _sfImport, NOT a module-level Map: cancel an
+  // Keyed by runId and stored on _sfImport, NOT a module-level Map: cancel an
   // import and pick the same folder again and the second run must look afresh —
   // the first run may have put those very fonts in the library.
   const helper = lift('_sfMatchCandidatesOnce');
@@ -249,9 +249,9 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
   }
 
   const dlg = lift('_sfShowDuplicateFont');
-  // ⭐⭐ NOT A BLOCK. Rejected the disabled checkbox on 2026-09-13 for the
+  // NOT A BLOCK. Rejected the disabled checkbox on 2026-09-13 for the
   // same reason: the app may say "you already have this", never "you may not".
-  ok('⭐ import-anyway resolves TRUE, so the review still opens',
+  ok('import-anyway resolves TRUE, so the review still opens',
      /const onImport = \(\) => \{[^}]*resolve\(true\)/.test(dlg),
      dlg.slice(dlg.indexOf('const onImport'), dlg.indexOf('const onImport') + 120));
   ok('open-existing and cancel resolve FALSE',
@@ -262,13 +262,13 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
 
   // Both names, or the dialog cannot answer "no, mine is called something else".
   //
-  // ⚠️ THIS CHECK USED TO BE THREE SUBSTRING GREPS AND WAS VACUOUS: a mutant that
+  // THIS CHECK USED TO BE THREE SUBSTRING GREPS AND WAS VACUOUS: a mutant that
   // hard-wired the name comparison to false still contained every one of those
   // strings, so this passed while the behaviour it names was gone. Caught by
   // mutation-testing the suite on 2026-09-14 — the same "passes for the wrong
   // reason" shape that cost seven instruments that day. It now asserts the GATE,
   // which is the thing that can actually break.
-  ok('⭐ the copy names what arrived AND what it matched',
+  ok('the copy names what arrived AND what it matched',
      dlg.includes('m.matchName') && dlg.includes('m.name')
        && /you have it as/.test(dlg)
        && /n\.from\.toLowerCase\(\) !== n\.to\.toLowerCase\(\)/.test(dlg),
@@ -277,29 +277,29 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
      /const renamed = \(n\) => !!n\.to && n\.from\.toLowerCase\(\) !== n\.to\.toLowerCase\(\)/.test(dlg)
        && (dlg.match(/renamed\(n\)/g) || []).length === 2,
      'the gate must be live, and BOTH the one-font sentence and the list must consult it');
-  // ⭐ Ruled 2026-09-14: "do we need to tell them its a different download".
+  // Ruled 2026-09-14: "do we need to tell them its a different download".
   // No — that fact explains why the SOURCE-level duplicate prompt stayed quiet,
   // which is our plumbing, not their question.
-  ok('⭐ the copy does not explain our own plumbing',
+  ok('the copy does not explain our own plumbing',
      !/different download/i.test(dlg.replace(/\/\/[^\n]*/g, '')),
      'the user never asked why the source check missed it');
   // No em dash in anything the user reads (the ruling the same day). Comments keep
   // theirs — this checks the strings only.
   {
     const strings = (dlg.match(/`[^`]*`/g) || []).join(' ');
-    ok('⭐ no em dash in the displayed copy', !strings.includes('—'),
+    ok('no em dash in the displayed copy', !strings.includes('—'),
        strings.split(' ').filter(w => w.includes('—')).join(' '));
   }
-  // ⚠️ Font names come off a downloaded archive: they are untrusted text going
+  // Font names come off a downloaded archive: they are untrusted text going
   // into innerHTML.
-  // ⚠️ Anchored on "every name interpolation goes through esc()" rather than on
+  // Anchored on "every name interpolation goes through esc()" rather than on
   // two spellings of the variables — the spellings changed once already (the
   // 2026-09-14 copy rewrite) and took this assertion red with nothing wrong.
   {
     const hasEsc = /replace\(\/&\/g, '&amp;'\)/.test(dlg);
     const interps = dlg.match(/\$\{[^}]*\}/g) || [];
     const nameInterps = interps.filter(s => /\bn\.(from|to)\b|\bm\.(name|matchName)\b/.test(s));
-    ok('⭐ names are escaped before they reach innerHTML',
+    ok('names are escaped before they reach innerHTML',
        hasEsc && nameInterps.length > 0 && nameInterps.every(s => s.includes('esc(')),
        `unescaped: ${nameInterps.filter(s => !s.includes('esc(')).join(' ') || '(none)'}`);
   }

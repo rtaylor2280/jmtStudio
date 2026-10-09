@@ -2,11 +2,11 @@
  * A style factory name that does not exist — the [B-324] check, on the registry.
  *
  * `StyleRainBowPtr` with a capital B is a hard compile error that costs a full
- * build to find. ⭐ ProffieOS's own documentation contains that exact typo
+ * build to find. ProffieOS's own documentation contains that exact typo
  * (config/common_presets.h line 16), so someone copying from the most trustworthy
  * source they have gets a config that cannot compile.
  *
- * ⚠️ THE LIST IS DERIVED FROM THE SELECTED OS, NEVER HARDCODED. Validating against
+ * THE LIST IS DERIVED FROM THE SELECTED OS, NEVER HARDCODED. Validating against
  * a stale list calls working code broken, which is the false positive that teaches
  * people to ignore every check. Measured 2026-09-12 and it corrected the entry on
  * the first run: 7.x and 8.x carry eight factories, but 6.9 has SEVEN — no
@@ -81,7 +81,7 @@ async function run(ctx) {
        r.factory[0].fix && r.factory[0].fix.label);
   }
   {
-    // ⭐ THE FIX REWRITES THE NAME AND NOTHING ELSE. Template arguments, the call,
+    // THE FIX REWRITES THE NAME AND NOTHING ELSE. Template arguments, the call,
     // and every other slot in the preset are untouched, and it covers EVERY preset
     // using the bad name rather than only the first.
     const text = '#define NUM_BLADES 1\nPreset p[] = {\n'
@@ -138,7 +138,7 @@ async function run(ctx) {
     ok('a &reference is not a factory call and is left alone', r.factory.length === 0);
   }
   {
-    // ⚠️⚠️ THE OS IS THE ONLY SOURCE, AND THIS ASSERTION USED TO SAY THE OPPOSITE.
+    // THE OS IS THE ONLY SOURCE, AND THIS ASSERTION USED TO SAY THE OPPOSITE.
     // An earlier build also read factories out of the config and the Style Library
     // so we would not warn on a user's own helper. That was wrong on a ProffieOS
     // fact: A CONFIG CANNOT CARRY A FUNCTION DEFINITION AT ALL. ProffieOS.ino
@@ -148,7 +148,7 @@ async function run(ctx) {
     // factory. Measured: 0 of 173 real configs define one, and a 3,176-line real
     // Style Library has 141 aliases and none.
     //
-    // ⭐ AND THE OLD BEHAVIOUR WAS A SUPPRESSION PATH, not a safeguard: accepting a
+    // AND THE OLD BEHAVIOUR WAS A SUPPRESSION PATH, not a safeguard: accepting a
     // name defined by text that itself cannot build means going SILENT on a config
     // that is already broken. Defensive code for an impossible input defends
     // nothing and hides something.
@@ -192,7 +192,7 @@ async function run(ctx) {
        !!r.unsure && r.factory.length === 0);
   }
   {
-    // ⭐ THE PARTIAL READ, which is the way this check would turn into a liar. An
+    // THE PARTIAL READ, which is the way this check would turn into a liar. An
     // empty result is obviously broken; a result carrying SOME names is not, and
     // would have us flagging valid ones. StylePtr is the sentinel — every
     // ProffieOS that has ever existed defines it, verified across all seven
@@ -218,7 +218,7 @@ async function run(ctx) {
     // shape is invisible HERE: the slot is not seen at all, so the preset reads as
     // having no style and the BLADE COUNT check blocks it instead. Different
     // message, still stopped before the compile.
-    // ⭐ If presetParser ever widens what it accepts, this assertion flips and this
+    // If presetParser ever widens what it accepts, this assertion flips and this
     // test fails on purpose — at which point this check starts covering it.
     const r = await run(ctxFor(cfg('StlyePtr<1>()')));
     ok('KNOWN LIMIT: a typo breaking the Style…Ptr shape is caught by blade count, not here',
@@ -228,12 +228,12 @@ async function run(ctx) {
 
   // ── 5. the derivation is FRESH every compile ──────────────────────────
   {
-    // ⭐ NOT CACHED, ON PURPOSE. A per-session cache was written and removed the
+    // NOT CACHED, ON PURPOSE. A per-session cache was written and removed the
     // same hour: it saved 117 ms on an action whose next step takes minutes, and
     // bought a staleness window where adding a factory to an OS tree with the app
     // open would flag a brand-new valid name until restart — the exact false
     // positive this check exists to prevent, reintroduced by the optimisation.
-    // ⚠️ If someone reintroduces caching, this assertion is what fails.
+    // If someone reintroduces caching, this assertion is what fails.
     //
     // Run the check DIRECTLY, not the whole registry: a first draft counted every
     // readVersionFile across preflight.run(), and the voicepack check reads a prop

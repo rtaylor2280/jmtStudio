@@ -81,7 +81,7 @@ ok('the checkbox is seeded from the flag, not reset separately',
      'inspect and compare happen before any choice exists, so there is nothing to eject after yet');
 }
 
-// ── ⚠️ THE CONTROL ───────────────────────────────────────────────────────────
+// ── THE CONTROL ───────────────────────────────────────────────────────────
 // Remove the close-path clear in a COPY of the source and confirm the check rejects it. A scan
 // that reports clean is indistinguishable from one that cannot see its subject.
 {
@@ -90,7 +90,7 @@ ok('the checkbox is seeded from the flag, not reset separately',
      'anchor moved - the control below proves nothing without it');
   const i = broken.indexOf(CLOSE_TAIL);
   const tail = i >= 0 ? broken.slice(i, i + 1400) : '';
-  ok('⚠️ a close path that does not clear the choice IS rejected',
+  ok('a close path that does not clear the choice IS rejected',
      !/_bulkAutoContinue = false;/.test(tail),
      'the check cannot see the original defect, so its clean verdict means nothing');
 }

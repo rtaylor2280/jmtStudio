@@ -17,7 +17,7 @@ const { execFile } = require('child_process');
 const SIDECAR_NAME = '.jmt-sd-id';
 
 // ── Platform enumeration ────────────────────────────────
-// ⚠️⚠️ `onlyLetter` EXISTS BECAUSE ENUMERATING EVERYTHING TO FIND ONE LETTER CAN HANG. [B-420]
+// `onlyLetter` EXISTS BECAUSE ENUMERATING EVERYTHING TO FIND ONE LETTER CAN HANG. [B-420]
 //
 // Both callers of enumerateAllVolumes walked EVERY volume on the system and then `.find()`-ed
 // the single drive they actually cared about. Without a filter, Win32_LogicalDisk includes
@@ -28,12 +28,12 @@ const SIDECAR_NAME = '.jmt-sd-id';
 // over 60 SECONDS for an enumeration documented elsewhere at ~3,100-3,200 ms. To a user that is
 // "JMT Studio froze when I plugged in my card."
 //
-// ⚠️ NOT A DEV-ONLY CASE, which was the question. Mapped drives are ordinary - a NAS that
+// NOT A DEV-ONLY CASE, which was the question. Mapped drives are ordinary - a NAS that
 // sleeps, a work share on a laptop that left the house, a VPN that dropped, a machine that is
 // simply off. And a saber card is NEVER a network share, so there is no reason to have reached
 // across the network in the first place.
 //
-// ⭐ The correction on how to handle it, when I suggested disconnecting the drives so a test
+// The correction on how to handle it, when I suggested disconnecting the drives so a test
 // would run cleanly: "you can't just disconnect a drive to 'fix' an issue." Right - that hides
 // the defect and verifies nothing about the real case. The machine being in that state was the
 // opportunity, not the obstacle: a live repro we cannot normally produce on demand.
@@ -51,7 +51,7 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
   // below, which turns null into 0 and destroys the distinction. Empty slots cannot be
   // reached through partition associations, since a slot with no media has no partitions,
   // which is why the answer is taken here rather than derived downstream.
-  // ⚠️ FILTERED IN THE CIM QUERY, NOT IN JAVASCRIPT AFTERWARDS. That is the whole point: a row
+  // FILTERED IN THE CIM QUERY, NOT IN JAVASCRIPT AFTERWARDS. That is the whole point: a row
   // excluded here is never materialised, so its VolumeName is never read and no network round
   // trip happens. Filtering the returned array would be too late - the blocking has already
   // occurred by the time we could look at it.
@@ -66,10 +66,10 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
   const ps = [
     '$vols = Get-CimInstance Win32_LogicalDisk' + filter,
     '$out = foreach ($v in $vols) {',
-    // ⚠️⚠️ `Get-Volume` USED TO RUN HERE, ONCE PER VOLUME, AND IT IS GONE. [B-441] It supplied
+    // `Get-Volume` USED TO RUN HERE, ONCE PER VOLUME, AND IT IS GONE. [B-441] It supplied
     // HealthStatus, which is now computed in JS from the filesystem's own dirty flag - one
     // method, this surface and the export refusal both. See `_healthFromDirtyBit` below.
-    // ⭐ Removing it also takes a per-volume cost out of every enumeration: measured
+    // Removing it also takes a per-volume cost out of every enumeration: measured
     // 2026-09-27 at 124 ms warm and 1864 ms cold, inside a loop over every volume.
     '  $letter = $v.DeviceID.TrimEnd(":")',
     '  [pscustomobject]@{',
@@ -81,7 +81,7 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
     '    hasMedia     = ($null -ne $v.Size)',
     '    sizeBytes    = [int64]$v.Size',
     '    freeBytes    = [int64]$v.FreeSpace',
-    // ⚠️ `health` is NOT emitted here any more - it is stamped on in JS below, so that this
+    // `health` is NOT emitted here any more - it is stamped on in JS below, so that this
     // surface and the export refusal cannot end up answering from two different signals.
     '    driveType    = [int]$v.DriveType',
     '  }',
@@ -89,14 +89,14 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
     'ConvertTo-Json -InputObject @($out) -Depth 4',
   ].join('\n');
   return new Promise((resolve) => {
-    // 2026-09-21 [B-420] HIS RULE, AND IT IS THE GENERAL FORM OF THE FIX ABOVE: "anythign that
+    // 2026-09-21 [B-420] THE RULE, AND IT IS THE GENERAL FORM OF THE FIX ABOVE: "anythign that
     // could break based on changing drives on a system is fragile and the wrong architecture."
     // Filtering network drives fixes one INSTANCE. The CLASS is that any volume can be slow or
     // dead - a dying card, a stalled reader, a drive mid-format - and the app must not care what
     // happens to be attached.
-    // ⚠️ So no volume query may block indefinitely. 10s is far outside the ~3,100-3,200 ms this
+    // So no volume query may block indefinitely. 10s is far outside the ~3,100-3,200 ms this
     // is documented at, so a healthy-but-slow system still answers; a wedged one gives up.
-    // ⚠️ Degrades to [] = "we could not enumerate", which is the [B-028] rule: failing to
+    // Degrades to [] = "we could not enumerate", which is the [B-028] rule: failing to
     // identify something is never evidence about it, and must never be read as "no cards".
     execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
       { maxBuffer: 1024 * 1024, windowsHide: true, timeout: 10000 },
@@ -113,20 +113,20 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
 
 // ── One signal, two surfaces ────────────────────────────────────────────────── [B-441]
 //
-// ⭐⭐ THE SAME CHECK THE EXPORT REFUSAL USES. The rule, 2026-09-27: "one method, both places."
+// THE SAME CHECK THE EXPORT REFUSAL USES. The rule, 2026-09-27: "one method, both places."
 // The card browser used to get HealthStatus from `Get-Volume` while the export pre-flight read
 // the FAT32 dirty bit - two detectors answering the same question, which is how two surfaces
 // end up telling someone different things about one card.
-// ⚠️ I had claimed they could disagree and had NO evidence for it: on both cards tested they
+// I had claimed they could disagree and had NO evidence for it: on both cards tested they
 // agreed exactly, and Windows' "Full Repair Needed" is most likely reporting that same bit
 // through an API. The reason to unify is one method that can be verified and can travel off
 // Windows - not a defect anyone could demonstrate.
 //
-// ⚠️ THE VOCABULARY IS UNCHANGED ON PURPOSE: 'Healthy' / 'Warning' / null, exactly what
+// THE VOCABULARY IS UNCHANGED ON PURPOSE: 'Healthy' / 'Warning' / null, exactly what
 // `Get-Volume` produced, because three readers compare against those strings - the meta line
 // (`health: …`), the card verdict, and the `OS health:` warning. A drop-in keeps this to one
 // decision instead of a rename spreading across surfaces.
-// ⚠️ null means CANNOT TELL, and must stay distinct from 'Healthy': a folder, a non-FAT32
+// null means CANNOT TELL, and must stay distinct from 'Healthy': a folder, a non-FAT32
 // volume, or a volume that will not open is unknown, never confirmed-good.
 function _healthFromDirtyBit(v) {
   try {
@@ -158,10 +158,10 @@ async function enumerateAllVolumes() {
   return [];
 }
 
-// ⭐ ONE LETTER, ONE ROW. [B-420] Use this wherever the question is "tell me about THIS drive".
+// ONE LETTER, ONE ROW. [B-420] Use this wherever the question is "tell me about THIS drive".
 // Both former callers of enumerateAllVolumes were that question wearing an enumeration, and
 // that is what made an unrelated dead network share able to hang card detection.
-// ⚠️ If the user deliberately points at a network path, this still queries it - one row, and
+// If the user deliberately points at a network path, this still queries it - one row, and
 // their explicit choice. Same rule as driveKind() in exportDestination.js. What it no longer
 // does is touch a share nobody asked about.
 async function volumeForLetter(letter) {
@@ -207,7 +207,7 @@ const NON_FONT_DIRS = new Set([
 // CJK-bracketed and often called "attention please". They are NOT fonts, so they
 // are skipped by the font count and the import scan. That is the whole of it.
 //
-// ⚠️ IT USED TO BE CALLED VENDOR_NOTE_DIR_RX AND DROVE A "this card shows signs of
+// IT USED TO BE CALLED VENDOR_NOTE_DIR_RX AND DROVE A "this card shows signs of
 // being counterfeit" VERDICT. Removed 2026-08-31, the ruling: "not sure where we
 // decided to call this counterfeit. and we are not even testing." That was right on
 // both counts. The app performs NO capacity test anywhere, and a folder name is a
@@ -358,16 +358,16 @@ function buildVerdict(card) {
   const kind = cls.kind;
   const noun = card.isFolder ? 'folder' : 'card';
   if (kind === 'unreadable') return { level: 'bad', headline: `This ${noun} couldn't be read.`, detail: 'It may be damaged or not seated properly. Try re-inserting it, or a different reader.' };
-  // ⚠️⚠️ SAY THE OPINION, NEVER THE INSTRUCTION. [B-441, settled 2026-09-27] This used to
+  // SAY THE OPINION, NEVER THE INSTRUCTION. [B-441, settled 2026-09-27] This used to
   // end "...reformat the card and repopulate it with known-good data". That is irreversible,
   // and on a card holding the only copy of something it destroys it - which is not a call this
   // app gets to make for someone, and not one it can make correctly: a mount can report
   // fiction, and a card has already been called unrecoverable here that was perfectly fine.
-  // ⚠️ IT ALSO SAID "Inspect them before relying on it", WHICH WAS WORSE THAN USELESS - it
+  // IT ALSO SAID "Inspect them before relying on it", WHICH WAS WORSE THAN USELESS - it
   // prescribed a test that does not work. Files can look completely fine and be corrupt
   // inside, so an inspection that passes is not evidence of anything, and telling someone to
   // inspect implies the opposite.
-  // ⭐ Same sentence as the export refusal (`_sfRefuseUnhealthyDestination`), deliberately:
+  // Same sentence as the export refusal (`_sfRefuseUnhealthyDestination`), deliberately:
   // one condition, one wording, whichever surface the user meets first.
   if (card.health && card.health !== 'Healthy') return { level: 'bad', headline: 'This card reports a health warning.', detail: 'This card is flagged as needing repair, which usually means it is corrupted. Its contents may be incomplete, including files that appear normal.' };
   if (kind === 'empty') return { level: 'good', headline: `This ${noun} is empty.`, detail: 'There is nothing on it to import yet.' };
@@ -502,7 +502,7 @@ function listDir(dirPath) {
 // The list is what executes on a desktop OS if double-clicked.
 const _EXE_EXT_RX = /\.(exe|com|scr|pif|bat|cmd|msi|dll|lnk|vbs|vbe|jse|wsf|ps1|hta|cpl|jar|app)$/i;
 
-// ⚠️ NOBODY TESTS THE RAW REGEX. Windows discards trailing dots and spaces when it
+// NOBODY TESTS THE RAW REGEX. Windows discards trailing dots and spaces when it
 // resolves a path, so "Payload.exe " and "Payload.exe." both LAUNCH as Payload.exe
 // while failing a naive end-anchored match. That strip was written beside the first
 // caller that needed it (checkExecutableBuffer, 2026-09-09) and never reached the
@@ -538,7 +538,7 @@ function _looksExecutable(buf) {
 // gets a plain statement; a file whose bytes disagree with its name is the case the
 // user most needs to see, and it is stated as the mismatch it is.
 //
-// ⚠️ `disguised` IS THE ONE CONSUMERS SHOULD USE, AND IT EXISTS BECAUSE byContent
+// `disguised` IS THE ONE CONSUMERS SHOULD USE, AND IT EXISTS BECAUSE byContent
 // ALONE READ AS CONCEALMENT AND IS NOT. Every real program has executable bytes, so
 // byContent is true for an honestly named Installer.exe too - the UI called seven
 // plainly named .exe files "disguised as a sound file" when only two were disguised
@@ -566,7 +566,7 @@ function checkExecutableBuffer(buf, relPath) {
 // a stat, because a name test does not care about size. MEASURED 2026-09-09 on real
 // cards: 100 ms for 1,401 folders / 7,563 files, and 61 ms for 1,012 / 6,162.
 //
-// ⚠️ NAMES ONLY, AND THAT LIMIT MUST TRAVEL WITH THE RESULT. A program renamed to
+// NAMES ONLY, AND THAT LIMIT MUST TRAVEL WITH THE RESULT. A program renamed to
 // hum.wav is invisible here; catching that needs the leading bytes, which is what
 // the import does (checkExecutableBuffer, off the read it already performs). So a
 // clean result here means "nothing is ADMITTING to being a program", never "this
@@ -634,7 +634,7 @@ function classifyFileBuffer(buf, relPath) {
       reason: 'This document can contain macros, which are small programs. It was imported; open it with care.' };
   }
   if (_OPAQUE_ARCHIVE_RX.test(clean)) {
-    // ⚠️ `blocked` STAYS FALSE HERE ON PURPOSE ([B-368]). This function answers "what IS
+    // `blocked` STAYS FALSE HERE ON PURPOSE ([B-368]). This function answers "what IS
     // this file", and an unreadable archive is not a program - conflating them would put
     // a threat's wording on a file that is merely useless. The carry decision lives in
     // checkCarryable below, which is what the doors call.
@@ -670,7 +670,7 @@ function classifyFileBuffer(buf, relPath) {
 // The kinds stay separate all the way to the screen, because the copy for a threat and
 // the copy for dead weight are not interchangeable.
 //
-// ⚠️ THIS PARAGRAPH USED TO SAY MACROS WERE "DELIBERATELY ABSENT" HERE. That was true
+// THIS PARAGRAPH USED TO SAY MACROS WERE "DELIBERATELY ABSENT" HERE. That was true
 // until the policy landed on 2026-09-11 and the `macro` branch below was added, and the
 // stale sentence outlived it — long enough to send a reader (me, 2026-09-16, building
 // export fixtures) looking for a bug in a predicate that was behaving correctly. The list
@@ -682,14 +682,14 @@ function checkCarryable(buf, relPath) {
     return { blocked: true, kind: 'program', reason: v.reason,
       byContent: !!v.byContent, disguised: !!v.disguised };
   }
-  // ⚠️ MACRO DOCUMENTS ARE ALLOWED IN EXACTLY ONE PLACE: PROOF OF PURCHASE (the policy,
+  // MACRO DOCUMENTS ARE ALLOWED IN EXACTLY ONE PLACE: PROOF OF PURCHASE (the policy,
   // 2026-09-11). "There is nowhere you can import a macro-enabled file except there, so
   // that's the only place it can leave from. If it showed up anywhere else then it got
   // there not by us."
   // That is the SAME argument as a program, which is why this is blocked rather than
   // merely noted, and why its wording sits with the programs rather than with the
   // unreadable archives.
-  // ⭐ ATTACHMENTS ARE UNAFFECTED BY CONSTRUCTION: soundFontAttachments guards with
+  // ATTACHMENTS ARE UNAFFECTED BY CONSTRUCTION: soundFontAttachments guards with
   // checkExecutableFile (programs only) and never calls this, so a receipt keeps its
   // macro document on the way in and on the way back out.
   if (v.kind === 'macro') {

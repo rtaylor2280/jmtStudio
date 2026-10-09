@@ -22,19 +22,19 @@ const path = require('path');
 // smooth crawl on slow media.
 // ── Stopping INSIDE a file, not just between files ──────────────── [B-005 item 4]
 //
-// ⭐⭐ THE ORIGINAL COMPLAINT WAS LATENCY, AND THIS IS WHERE IT LIVED. Cancel used to stop
+// THE ORIGINAL COMPLAINT WAS LATENCY, AND THIS IS WHERE IT LIVED. Cancel used to stop
 // only between files, so pressing it bought "no more files after this one" and you still
 // waited out the current write. A 40 MB track to a board over mass storage is minutes of
 // that - the report was ~15 - with the button already pressed and the app looking hung.
 //
-// ⭐ IT COST ALMOST NOTHING TO FIX, which is the part worth remembering. This was already a
+// IT COST ALMOST NOTHING TO FIX, which is the part worth remembering. This was already a
 // 1 MB-chunked stream with backpressure - it already yielded between chunks and already had
 // a natural checkpoint on every one. The fix is a check in the handler that was always
 // there. It was parked overnight on a stated reason that turned out to be false: that these
 // writes are shared with the import path. They are not - there are two callers and both are
-// exports. ⚠️ Check the caller list before pricing a change out.
+// exports. Check the caller list before pricing a change out.
 //
-// ⚠️ THE PARTIAL MUST GO, AND IT MUST GO HERE. A stream torn down mid-write leaves a
+// THE PARTIAL MUST GO, AND IT MUST GO HERE. A stream torn down mid-write leaves a
 // truncated file at the destination - on a card, a half-written .wav that looks like a real
 // one. The unlink belongs in this function because this is the only scope that knows the
 // write never completed; a caller sees a rejected promise and cannot tell a cancel from a
@@ -46,19 +46,19 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
     const rs = fs.createReadStream(srcPath, { highWaterMark: 1 << 20 });
     const ws = fs.createWriteStream(destPath);
     let settled = false;
-    // ⚠️ UNLINK ONLY WHAT WE OPENED. destPath was just created by createWriteStream above,
+    // UNLINK ONLY WHAT WE OPENED. destPath was just created by createWriteStream above,
     // so removing it cannot touch a pre-existing file of the - the write had already
     // truncated it the moment the stream opened. Deleting on a path we did not open is the
     // shape that cost the user 708 MB on 2026-09-02.
     //
-    // ⚠️⚠️ WAIT FOR THE HANDLE TO CLOSE BEFORE UNLINKING. THIS IS A WINDOWS RACE AND IT
-    // REACHED HIM. `ws.destroy()` is ASYNCHRONOUS, and on Windows deleting a file whose
+    // WAIT FOR THE HANDLE TO CLOSE BEFORE UNLINKING. THIS IS A WINDOWS RACE AND IT
+    // REACHED THE USER. `ws.destroy()` is ASYNCHRONOUS, and on Windows deleting a file whose
     // handle is still open fails with EPERM/EBUSY - POSIX allows it, which is exactly why
     // the first cut looked correct. The user cancelled an export to a board card and the partial
     // folder was still there afterwards; the unlink had silently lost the race, and so had
     // the caller's recursive remove of the folder, for the same reason.
     //
-    // ⭐ MY OWN TEST PASSED THROUGH THIS. It copies to a local temp dir where the handle
+    // MY OWN TEST PASSED THROUGH THIS. It copies to a local temp dir where the handle
     // releases fast enough to win the race every time. A timing bug that resolves quickly on
     // fast storage and slowly on a card is invisible to a test that only ever uses the fast
     // one - the fixture was faithful to the API and not to the destination.
@@ -85,7 +85,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
       settled = true;
       rs.destroy();
       ws.destroy();
-      // ⚠️ The rejection waits for the cleanup. Rejecting first would let the caller's own
+      // The rejection waits for the cleanup. Rejecting first would let the caller's own
       // folder-removal start while this file's handle is still open - which is how a failed
       // unlink here turned into a failed rm of the whole folder there.
       dropPartial().then(() => reject(err), () => reject(err));
@@ -93,7 +93,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
     rs.on('error', fail);
     ws.on('error', fail);
     rs.on('data', (chunk) => {
-      // ⭐ CHECKED BEFORE THE WRITE, NOT AFTER. Checking after would push one more chunk at
+      // CHECKED BEFORE THE WRITE, NOT AFTER. Checking after would push one more chunk at
       // the destination - on the slow transport that is the expensive thing, and the whole
       // point is to stop paying for it.
       if (shouldStop && shouldStop()) { fail(new ExportCancelled()); return; }
@@ -103,7 +103,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
       // drains. This is what paces byte reporting to the card's write speed.
       if (!canContinue) {
         rs.pause();
-        // ⚠️ THE DRAIN WAIT IS THE LONGEST STALL ON A SLOW CARD, so it needs its own exit.
+        // THE DRAIN WAIT IS THE LONGEST STALL ON A SLOW CARD, so it needs its own exit.
         // Without this a cancel pressed while the card is draining sits until the write
         // completes - the original bug, surviving inside the fix for it.
         ws.once('drain', () => {
@@ -113,7 +113,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
       }
     });
     rs.on('end', () => ws.end());
-    // ⚠️⚠️ 'close', NOT 'finish' — AND THE REASON IS THE ONE ALREADY DOCUMENTED ABOVE, just
+    // 'close', NOT 'finish' — AND THE REASON IS THE ONE ALREADY DOCUMENTED ABOVE, just
     // reached from the success side instead of the cancel side. [2026-09-22]
     //
     // 'finish' means the last chunk has been handed to the OS. The file HANDLE is still open
@@ -121,7 +121,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
     // taught this the expensive way (see dropPartial) and waits for 'close'; the success path
     // never was, so a completed export resolved with its final file still held.
     //
-    // ⭐ WHY IT SURFACED AS AN EJECT BUG AND NOT A COPY BUG: nothing about the copy is wrong -
+    // WHY IT SURFACED AS AN EJECT BUG AND NOT A COPY BUG: nothing about the copy is wrong -
     // the bytes are all there. But Windows needs an EXCLUSIVE VOLUME LOCK to dismount, and one
     // open handle anywhere on the volume fails it. So the export finished, the eject fired
     // against a volume this process still had open, the Shell verb did nothing (it reports
@@ -129,7 +129,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
     // close files that named no file the user could close. Eject the same card by hand a moment
     // later and it works, because the handle has since closed on its own.
     //
-    // ⭐ THE CORROBORATION WAS ALREADY IN THE RECORD: every zip door waits for 'close'
+    // THE CORROBORATION WAS ALREADY IN THE RECORD: every zip door waits for 'close'
     // (soundFontBackup, soundFontCommon, soundFontSources), and Backup is the one door whose
     // eject checkbox tested clean end to end. The doors that failed are the ones routed here.
     ws.on('close', () => {
@@ -148,7 +148,7 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
 //   onBytes       called with the byte length of each chunk written
 // ── The one signal a cancelled export travels on ──────────────── [B-005 item 4]
 //
-// ⚠️ A DISTINCT TYPE, NOT A STRING MATCH. Every export handler already wraps its work in
+// A DISTINCT TYPE, NOT A STRING MATCH. Every export handler already wraps its work in
 // `catch (err) { return { ok: false, error: String(err.message) } }`, so without something
 // recognisable a user's own cancel would surface as a red failure dialog reading "Export
 // cancelled" - blaming the app for doing exactly what was asked. `isCancel` is what lets each
@@ -156,14 +156,14 @@ function copyFileWithProgress(srcPath, destPath, onBytes, shouldStop = null) {
 class ExportCancelled extends Error {
   constructor() { super('Export cancelled'); this.name = 'ExportCancelled'; this.cancelled = true; }
 }
-// ⚠️ DUCK-TYPED ON PURPOSE. An instanceof check fails across module instances - the same file
+// DUCK-TYPED ON PURPOSE. An instanceof check fails across module instances - the same file
 // loaded twice yields two different classes - and a cancel that reads as a crash is worse than
 // the small looseness here.
 const isCancel = (err) => !!(err && err.cancelled === true);
 
 // ── Writing bytes we already hold ─────────────────────────────── [B-005 item 4]
 //
-// ⚠️⚠️ THE LAST UNINTERRUPTIBLE WRITE IN THE EXPORT SURFACE. The single-file branches of
+// THE LAST UNINTERRUPTIBLE WRITE IN THE EXPORT SURFACE. The single-file branches of
 // `sfFile:export` used `fs.writeFileSync(outPath, buf)` - a synchronous whole-buffer write.
 // Two problems, and the second is worse: it cannot be stopped partway, and being synchronous
 // it BLOCKS THE EVENT LOOP, so the `export:cancel` IPC could not even be DELIVERED while it
@@ -171,7 +171,7 @@ const isCancel = (err) => !!(err && err.cancelled === true);
 // shape in this feature, after `copyFileSync` in a `readdirSync` loop and a whole-file
 // `copyFile` in reconstruction.
 //
-// ⭐ The bytes are already in memory here (the source was read to check it is not a program),
+// The bytes are already in memory here (the source was read to check it is not a program),
 // so this is not a stream copy - it is a chunked write with the same two guarantees the file
 // copy gives: it stops within about a second, and it leaves nothing truncated behind.
 async function writeBufferWithProgress(buf, destPath, onBytes = null, shouldStop = null) {
@@ -180,7 +180,7 @@ async function writeBufferWithProgress(buf, destPath, onBytes = null, shouldStop
   let wrote = 0;
   try {
     for (let off = 0; off < buf.length; off += CHUNK) {
-      // ⭐ Checked BEFORE each chunk: checking after would pay for one more write on the
+      // Checked BEFORE each chunk: checking after would pay for one more write on the
       // transport we are trying to stop using.
       if (shouldStop && shouldStop()) throw new ExportCancelled();
       const end = Math.min(off + CHUNK, buf.length);
@@ -189,7 +189,7 @@ async function writeBufferWithProgress(buf, destPath, onBytes = null, shouldStop
       if (onBytes) onBytes(end - off);
     }
   } catch (err) {
-    // ⚠️ CLOSE BEFORE UNLINKING. On Windows a file with an open handle cannot be deleted, and
+    // CLOSE BEFORE UNLINKING. On Windows a file with an open handle cannot be deleted, and
     // that race already reached the user once: the user cancelled to a board card and the partial was
     // still there afterwards. Closing first is what makes the removal actually happen.
     try { await fh.close(); } catch {}
@@ -205,32 +205,32 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
   // basename was enough while a refusal was only ever reported ([B-214]); it is not
   // enough now that the user can act on one ([B-364]), because removal has to resolve
   // the finding back to a real file and "hum2.wav" does not say which folder.
-  // ⭐ `wrote` IS A RUNNING TALLY THE CANCEL-CLEANUP RULE READS. [B-005 item 4] It decides
+  // `wrote` IS A RUNNING TALLY THE CANCEL-CLEANUP RULE READS. [B-005 item 4] It decides
   // whether removing what landed is slow enough to be worth OFFERING rather than just doing.
-  // ⚠️⚠️ THE FILE COUNT IS THE LIMB THAT MATTERS HERE, not the bytes. A delete across a
+  // THE FILE COUNT IS THE LIMB THAT MATTERS HERE, not the bytes. A delete across a
   // board's USB bridge costs a round trip PER FILE - measured ~773 ms - so 400 small wavs is
   // far slower to remove than one 60 MB track. Counting bytes only would have left the
   // expensive case looking cheap.
   const { skipRootMeta = false, fileFilter = null, recurse = true, onBytes = null,
           refused = null, relBase = '', shouldStop = null, wrote = null } = opts;
   for (const item of fs.readdirSync(srcDir, { withFileTypes: true })) {
-    // ⭐⭐ THE FIRST OF TWO CHECKS, and the pair is the whole safety argument. [B-005 item 4]
+    // THE FIRST OF TWO CHECKS, and the pair is the whole safety argument. [B-005 item 4]
     //
     // This one stops the walk between files; `copyFileWithProgress` stops INSIDE one and
     // deletes what it had written. Together they mean a cancel is honoured within about a
     // second at any point, and nothing truncated is ever left at the destination.
     //
-    // ⚠️ THIS COMMENT USED TO SAY "CHECKED HERE AND ONLY HERE" and argued that stopping
+    // THIS COMMENT USED TO SAY "CHECKED HERE AND ONLY HERE" and argued that stopping
     // between files was the safe choice because a mid-file stop leaves a truncated .wav on a
     // FAT32 card. The hazard was real; the conclusion was wrong. Deleting the partial gives
     // the same guarantee without the wait - which is what a 40 MB track over a board's USB
     // bridge turned into: minutes of it, with Cancel already pressed.
     //
-    // ⭐ ONE CHECK COVERS TWO DOORS. Font exports and common-folder exports both walk their tree
+    // ONE CHECK COVERS TWO DOORS. Font exports and common-folder exports both walk their tree
     // through this function, so neither has to implement stopping and neither can get it wrong
     // in its own way.
     //
-    // ⚠️ IT THROWS RATHER THAN RETURNING A FLAG. This walk is recursive; a flag would have to be
+    // IT THROWS RATHER THAN RETURNING A FLAG. This walk is recursive; a flag would have to be
     // threaded back up through every level and checked at each one, and one missed level is a
     // cancel that copies a whole subtree anyway. A throw cannot be half-honoured.
     if (shouldStop && shouldStop()) throw new ExportCancelled();
@@ -241,21 +241,21 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
       fs.mkdirSync(destPath, { recursive: true });
       // skipRootMeta is intentionally not propagated — it applies at the root
       // only, matching the legacy walk that skipped meta.json solely there.
-      // ⚠️ shouldStop IS propagated: a cancel that stopped at the top level but copied every
+      // shouldStop IS propagated: a cancel that stopped at the top level but copied every
       // nested folder to the end would be a cancel in name only.
       await copyTreeWithProgress(srcPath, destPath, { fileFilter, recurse, onBytes, refused, shouldStop, wrote,
         relBase: relBase ? `${relBase}/${item.name}` : item.name });
     } else if (item.isFile()) {
       if (skipRootMeta && item.name === 'meta.json') continue;
-      // ⚠️⚠️ THE FILTER GETS THE RELATIVE PATH, NOT ONLY THE BASENAME. [B-005 item 7b, 2026-09-26]
+      // THE FILTER GETS THE RELATIVE PATH, NOT ONLY THE BASENAME. [B-005 item 7b, 2026-09-26]
       // It used to receive `item.name` alone, which is enough for a SHAPE test - the tracks door
       // asks "is this a .wav" - and useless for an IDENTITY one. A font is folders of wavs and
       // the same basename recurs across them, so a differential write filtering on basename
       // would copy or skip `bgnmelt/hum.wav` and `hum.wav` together.
-      // ⚠️ Existing callers declare one parameter and are unaffected; extra arguments are ignored.
+      // Existing callers declare one parameter and are unaffected; extra arguments are ignored.
       const rel = relBase ? `${relBase}/${item.name}` : item.name;
       if (fileFilter && !fileFilter(item.name, rel)) continue;
-      // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214]). Entries imported
+      // THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214]). Entries imported
       // before this existed were never filtered, so the library can still hold a program
       // from a card read months ago. Without this, exporting would put it back onto a
       // card and pass it to the next person. Collected rather than silently dropped:
@@ -275,7 +275,7 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
           continue;
         }
       }
-      // ⭐⭐ THE CHUNK CARRIES THE FILE IT CAME FROM. [B-420, 2026-09-23 — the requirement:
+      // THE CHUNK CARRIES THE FILE IT CAME FROM. [B-420, 2026-09-23 — the requirement:
       // "we need to show which file we're working on"]
       //
       // `onBytes` was called with a bare chunk length, so a caller driving a progress bar knew
@@ -283,13 +283,13 @@ async function copyTreeWithProgress(srcDir, destDir, opts = {}) {
       // already holding it for the refusal list - and nowhere upstream can recover it, because
       // by the time the bytes arrive the loop has moved on.
       //
-      // ⚠️ SECOND ARGUMENT, NOT A NEW CALLBACK. Every existing caller takes `(n)` and ignores
+      // SECOND ARGUMENT, NOT A NEW CALLBACK. Every existing caller takes `(n)` and ignores
       // extra arguments, so this cannot break one; a parallel `onFile` channel would be a
       // second thing to keep in step with the first forever.
       const _rel = relBase ? `${relBase}/${item.name}` : item.name;
       await copyFileWithProgress(srcPath, destPath,
         onBytes ? ((n) => onBytes(n, _rel)) : null, shouldStop);
-      // ⚠️ COUNTED AFTER THE AWAIT, so a file interrupted mid-write is not counted as landed.
+      // COUNTED AFTER THE AWAIT, so a file interrupted mid-write is not counted as landed.
       // Its partial is deleted by the copy itself, so counting it would inflate the tally the
       // cleanup decision reads - by exactly the file that no longer exists.
       if (wrote) wrote.files = (wrote.files || 0) + 1;

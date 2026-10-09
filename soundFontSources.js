@@ -144,7 +144,7 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // because the scrambled file is never read through, it removes the very read that
 // can stall the pass on a failing card.
 //
-// ⚠️ THIS IS NO LONGER OPT-IN, AND THAT IS THE WHOLE OF [B-361]'s CORRECTION
+// THIS IS NO LONGER OPT-IN, AND THAT IS THE WHOLE OF [B-361]'s CORRECTION
 // (2026-09-09). It used to run only when the caller already knew the font was
 // corrupt — a fact that could only come from the card browser's recursive
 // pre-walk. So corruption was detected only for SD-card imports, and only by
@@ -161,7 +161,7 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // `strippedFiles` is therefore both the strip record AND the detection result:
 // non-empty means this source was damaged, and the reasons ride along for the
 // review row and the post-import summary.
-// ⚠️⚠️ ASYNC SINCE [B-398], AND IT IS THE THIRD PASS PER SOURCE, NOT THE FIRST.
+// ASYNC SINCE [B-398], AND IT IS THE THIRD PASS PER SOURCE, NOT THE FIRST.
 //
 // The first fix for B-398 caught the copy loop and the hash pass and I reported the bug closed.
 // A real probe log said otherwise: a 9347ms stall inside importSource on a build that already had
@@ -169,24 +169,24 @@ async function copyFileStreamed(srcPath, destPath, onProgress) {
 // of EVERY file (see the one-read comment below) before a single byte is copied, so a folder of
 // several hundred wavs is several hundred synchronous opens with nothing yielding between them.
 //
-// ⭐ THE LESSON, WORTH MORE THAN THE FIX: "I found A blocking pass" is not "I found THE blocking
+// THE LESSON, WORTH MORE THAN THE FIX: "I found A blocking pass" is not "I found THE blocking
 // passes". Counting them is cheap and the instrument was already running — I claimed the win off
 // the "Yes! now it's fixed" instead of reading the log that was sitting right there.
 //
-// ⚠️ The .filter() callback could not await, so this is an explicit loop. The predicate body below
+// The .filter() callback could not await, so this is an explicit loop. The predicate body below
 // is UNCHANGED - only `return false` became `continue` and `return true` became a push.
 //
-// ⚠️⚠️ AND IT TAKES `shouldStop` AS OF 2026-10-06, BECAUSE YIELDING IS NOT STOPPING. [B-462]
+// AND IT TAKES `shouldStop` AS OF 2026-10-06, BECAUSE YIELDING IS NOT STOPPING. [B-462]
 // The measurement, bulk-importing a board card: *"just finished... almost 6 min. cancelled only a
 // few seconds in."* Six minutes of work that could not be interrupted. [B-398] made this pass
 // `breathe()` so the WINDOW stays alive through it, and that fix was right - but a responsive
 // window that ignores Cancel for six minutes is the same wait with a nicer frame around it. The
 // copy loop below has had a checkpoint since 2026-10-04; this pass runs BEFORE it, so a cancel
 // during the inspection never reached one.
-// ⭐ The checkpoint goes where `breathe()` already is. The yield point and the cancel point are
+// The checkpoint goes where `breathe()` already is. The yield point and the cancel point are
 // the same place by nature - both are "we are between files, it is safe to not continue" - and
 // putting them together costs one comparison per file on a pass that is doing an open per file.
-// ⚠️ THE TRANSPORT IS WHY IT IS MINUTES AND NOT MILLISECONDS. Per-file open is the expensive
+// THE TRANSPORT IS WHY IT IS MINUTES AND NOT MILLISECONDS. Per-file open is the expensive
 // operation across a board's USB mass storage, and this reads the head of EVERY file before a
 // byte is copied, so a several-hundred-wav bundle is several hundred of them.
 async function _selectFolderFiles(srcDir, shouldStop = null) {
@@ -199,7 +199,7 @@ async function _selectFolderFiles(srcDir, shouldStop = null) {
   for (const f of walkFolderSorted(srcDir)) {
     if (_isNoisePath(f.relPath)) continue;
     await breathe();
-    // ⭐ Between files, beside the yield. Nothing has been written at this point on either caller's
+    // Between files, beside the yield. Nothing has been written at this point on either caller's
     // path - the zip has not been created and the copy has not started - so a throw here leaves
     // nothing behind to clean up.
     if (shouldStop && shouldStop()) throw _cancelErr();
@@ -221,7 +221,7 @@ async function _selectFolderFiles(srcDir, shouldStop = null) {
           reason: 'A document that can contain macros has no use on a saber card. It was left out.' });
         continue;
       }
-      // ⚠️ AN ARCHIVE WE CANNOT OPEN IS NOW REFUSED HERE TOO ([B-368], 2026-09-11). This
+      // AN ARCHIVE WE CANNOT OPEN IS NOW REFUSED HERE TOO ([B-368], 2026-09-11). This
       // was missed when opaque became a blocking verdict: the purge and the carry
       // predicate were both updated and THIS selector was not, so a source exported as a
       // zip still carried the rar out. Exactly the failure the standing rule names - a
@@ -250,19 +250,19 @@ async function _selectFolderFiles(srcDir, shouldStop = null) {
 // program hidden inside a nested zip does not exist yet while the outer archive
 // is being read. Sweeping the finished tree covers both depths with one pass.
 //
-// ⚠️ IDENTITY IS NOT AFFECTED, and this is the fact that unblocked the whole
+// IDENTITY IS NOT AFFECTED, and this is the fact that unblocked the whole
 // question. A picked archive is identified by the sha256 of THE FILE ON THE
 // USER'S DISK, taken before anything is written and never recomputed from what
 // we store. So dedup and provenance against the vendor's original still refer to
 // the archive they actually have; we are only declining to keep part of it, and
 // the meta records exactly which part.
-// ⚠️⚠️ ONE WALK, TWO DRAINS - the same split as soundFontFileHash._walkRecords, for the same
+// ONE WALK, TWO DRAINS - the same split as soundFontFileHash._walkRecords, for the same
 // reason. [B-398] needs the IMPORT path to yield between files, but three other callers
 // (_createZipSource, _createFolderSource, _virtualizeSource) are synchronous functions, and making
 // THEM async cascades outward for no benefit - they run once over a tree that is already in hand.
 // So the rules live here once and callers differ only in how they drain. A second copy of the
 // program/macro/opaque verdicts is a future disagreement about what is safe to keep.
-// ⚠️ It YIELDS BEFORE the read, so the breath lands between files rather than after the work.
+// It YIELDS BEFORE the read, so the breath lands between files rather than after the work.
 function* _purgeWalk(rootDir, blocked, noted) {
   const { classifyFileBuffer } = require('./sdCardDetect');
   const walk = function* (dir, rel) {
@@ -282,7 +282,7 @@ function* _purgeWalk(rootDir, blocked, noted) {
           reason: 'A document that can contain macros has no use on a saber card. It was left out.' });
         continue;
       }
-      // ⚠️ AN ARCHIVE WE CANNOT OPEN DOES NOT COME IN ([B-368], the ruling 2026-09-11).
+      // AN ARCHIVE WE CANNOT OPEN DOES NOT COME IN ([B-368], the ruling 2026-09-11).
       // Not a threat claim - we genuinely cannot say what is inside. The argument is
       // simpler than safety: "they have no business being on a card, because Proffie
       // can't read it and JMT Studio can't read it, so it doesn't do any good for them."
@@ -337,7 +337,7 @@ function _readHead(absPath) {
   finally { try { fs.closeSync(fd); } catch {} }
 }
 
-// ⚠️ One constructor for the cancel signal so the rejecting path and the returning path cannot
+// One constructor for the cancel signal so the rejecting path and the returning path cannot
 // drift into throwing two different things. [B-005 item 4]
 function _cancelErr() { return new (require('./sfExportCopy').ExportCancelled)(); }
 
@@ -345,20 +345,20 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   const archiver = require('archiver');
   const { Transform, Readable } = require('stream');
 
-  // ⭐ `opts.shouldStop` reaches the SELECTION pass too, not just the archive loop below. [B-462]
+  // `opts.shouldStop` reaches the SELECTION pass too, not just the archive loop below. [B-462]
   // The two checks at the archive stage were useless to anyone cancelling during the inspection,
   // which on a board card is the long half.
   const { files, strippedFiles, blockedFiles, notedFiles } =
     await _selectFolderFiles(srcDir, opts.shouldStop || null);
-  // ⚠️⚠️ THE EXTRA ENTRIES ARE IN THE ARCHIVE, SO THEY ARE IN THE TOTAL. [B-420, 2026-09-23]
+  // THE EXTRA ENTRIES ARE IN THE ARCHIVE, SO THEY ARE IN THE TOTAL. [B-420, 2026-09-23]
   // Reported, exporting a source whose customized font carried a pile of tracks there had been added for
   // earlier testing: *"you see the progress bars at 100% for a really long time because it was like
   // 1.4 gigabytes out of 300 MB."*
-  // ⭐ The denominator came from `_selectFolderFiles(srcDir)` alone - the VENDOR tree - while the
+  // The denominator came from `_selectFolderFiles(srcDir)` alone - the VENDOR tree - while the
   // sidecar payload rode in through `extraEntries` and was compressed without ever being counted. A
   // customized font is a whole font, so the shortfall is not a rounding error: the bar pinned at
   // 100% and stayed there for the rest of the job.
-  // ⚠️ I ASSERTED THIS UNDERCOUNT IN A TEST AND CALLED IT HONEST ("the reported fileCount counts the
+  // I ASSERTED THIS UNDERCOUNT IN A TEST AND CALLED IT HONEST ("the reported fileCount counts the
   // source tree, not the appended sidecar"). It is not honest - these numbers describe the ARCHIVE,
   // and the archive contains every byte we put in it. A test can write a defect down and make it
   // look decided; that is worse than leaving it undocumented.
@@ -402,7 +402,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   let lastEmit = Date.now();
   let lastProgressMs = Date.now(); // watchdog: last time the archive actually moved
 
-  // ⭐⭐ BYTES ARE COUNTED AS THEY ARE READ, NOT AS ENTRIES COMPLETE. [B-420, 2026-09-24]
+  // BYTES ARE COUNTED AS THEY ARE READ, NOT AS ENTRIES COMPLETE. [B-420, 2026-09-24]
   // Reported: `Compressing · 286.7 MB of 286.7 MB` sitting still for twenty seconds at the end
   // of an export. Two separate faults met there and this is the second one - the first was a
   // denominator that left the curation payload out. Even with the denominator right, NOTHING was
@@ -412,38 +412,38 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   // for its entire duration. A progress bar whose grain is one file cannot describe a job whose
   // files are that big.
   //
-  // ⚠️ SUPPLYING `stats` IS WHAT KEEPS THE ARCHIVE BYTE-IDENTICAL, AND IT IS NOT OPTIONAL HERE.
+  // SUPPLYING `stats` IS WHAT KEEPS THE ARCHIVE BYTE-IDENTICAL, AND IT IS NOT OPTIONAL HERE.
   // That hash is what dedup matches sources on, so re-hashing every export would silently stop it
   // matching anything already in the library. `test/zip-byte-identity.test.js` asserts the
   // relationship rather than a pinned digest, and it carries a control so it cannot pass blind.
-  // ⭐ It also makes the ordering stronger, not weaker: an entry carrying `stats` skips archiver's
+  // It also makes the ordering stronger, not weaker: an entry carrying `stats` skips archiver's
   // `_statQueue` entirely (core.js:111) and goes straight onto the ordered queue, so submission
   // order holds BY CONSTRUCTION instead of depending on `statConcurrency: 1` staying set.
   //
-  // ⚠️⚠️ THE STREAM MUST BE LAZY. `archive.file()` uses `lazyReadStream` internally for a reason:
+  // THE STREAM MUST BE LAZY. `archive.file()` uses `lazyReadStream` internally for a reason:
   // handing archiver a live `fs.createReadStream` per entry opens every file in the source at
   // submission time, which on a large font is thousands of descriptors at once. The async
   // generator below is not iterated until archiver pulls from it, so exactly one file is open.
   let bytesStreamed = 0;      // read off disk, live
   let bufferBytes = 0;        // buffer entries have nothing to read - counted when they land
   let currentName = null;     // the entry actually being read right now, not the last one finished
-  // ⚠️⚠️ `objectMode: false` IS LOAD-BEARING, AND THE TEST IS HOW I FOUND OUT. `Readable.from`
+  // `objectMode: false` IS LOAD-BEARING, AND THE TEST IS HOW I FOUND OUT. `Readable.from`
   // defaults to OBJECT MODE, which changes how the bytes are handed downstream and re-hashed every
   // archive - the identity test went red on the first run of this change, against a hand-probe
   // that had used `.pipe()` and said it was identical. **The probe and the production call were
   // not the same call**, which is exactly why the assertion lives in the suite rather than in a
   // scratch file I ran once and believed.
   //
-  // ⚠️⚠️ EVERY STREAM THIS OPENS IS TRACKED, AND THAT IS NOT BELT-AND-BRACES. [2026-09-24]
+  // EVERY STREAM THIS OPENS IS TRACKED, AND THAT IS NOT BELT-AND-BRACES. [2026-09-24]
   // Taking ownership of the read stream is what bought chunk-resolution progress, and it also took
   // on the lifecycle archiver used to handle. `archive.abort()` stops PULLING and drops the source
   // WITHOUT destroying it — so an abandoned generator sits suspended at its `yield` holding an open
   // descriptor, indefinitely.
-  // ⭐ MEASURED COST, ON A REAL LIBRARY, THE DAY IT SHIPPED: a few cancelled exports, then a delete of
+  // MEASURED COST, ON A REAL LIBRARY, THE DAY IT SHIPPED: a few cancelled exports, then a delete of
   // the entry and got `ENOTEMPTY: directory not empty`. Exactly one file was locked —
   // `Angelic_Plazma_stereo_track.wav`, the customized payload file ta cancel of export had been
   // reading. A leaked handle is not a slow leak here; it is a file that cannot be deleted.
-  // ⚠️ `archive.file()` never had this problem because archiver created the lazy stream and its own
+  // `archive.file()` never had this problem because archiver created the lazy stream and its own
   // teardown owned it. **Taking a resource off a library takes its cleanup with it.**
   const lazyCounted = (absPath, name) => Readable.from((async function* () {
     const rs = fs.createReadStream(absPath);
@@ -455,12 +455,12 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
         yield chunk;
       }
     } finally {
-      // ⚠️ THE `finally` IS THE WHOLE RELEASE, AND I NEARLY BUILT A SECOND ONE. [2026-09-24]
+      // THE `finally` IS THE WHOLE RELEASE, AND I NEARLY BUILT A SECOND ONE. [2026-09-24]
       // Taking ownership of the read stream took on the lifecycle `archive.file()` used to handle,
       // so this must run on the ordinary end AND when a consumer destroys us mid-read. It does:
       // both abort sites destroy the sink, that propagates back through the pipe, `for await`
       // exits, and this fires.
-      // ⚠️ I first reasoned that `archive.abort()` drops sources WITHOUT destroying them and added
+      // I first reasoned that `archive.abort()` drops sources WITHOUT destroying them and added
       // a tracked Set swept at every abort site. Then a mutation test removed that sweep and the
       // cancel test still passed — the teardown was already complete. **Defensive code for a case
       // I could not make happen is a second mechanism to keep in agreement forever**, so it went.
@@ -469,13 +469,13 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
       try { rs.destroy(); } catch {}
     }
   })(), { objectMode: false });
-  // ⭐ ONE EMITTER, TWO CALLERS: an entry landing, and the watchdog tick. The tick is what makes a
+  // ONE EMITTER, TWO CALLERS: an entry landing, and the watchdog tick. The tick is what makes a
   // long single entry legible; the entry event is what keeps the count and the name honest at a
   // boundary. Both go through here so they cannot report different things about the same moment.
-  // ⚠️ MONOTONIC BY CONSTRUCTION - `bytesStreamed` only ever grows and buffer entries only add - so
+  // MONOTONIC BY CONSTRUCTION - `bytesStreamed` only ever grows and buffer entries only add - so
   // nothing here can walk the bar backwards. The renderer keeps its own floor for the multi-PASS
   // case, which is a different problem: two passes over one source are two measurements.
-  // ⚠️ DECLARED BEFORE ITS CALLERS ON PURPOSE. A `const` referenced by a handler defined above it
+  // DECLARED BEFORE ITS CALLERS ON PURPOSE. A `const` referenced by a handler defined above it
   // works only because the handler cannot fire until finalize(); this project has already lost a
   // live flash to a renderer `ReferenceError` that no check it runs could see, so the ordering is
   // made true rather than merely safe.
@@ -488,14 +488,14 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
       bytesProcessed: Math.min(bytesStreamed + bufferBytes, totalBytes),
       totalBytes,
       // The entry being READ, which during a long compress is the one the user is waiting on.
-      // ⚠️ It used to name `files[filesProcessed]` and fall back to the entry that just finished,
+      // It used to name `files[filesProcessed]` and fall back to the entry that just finished,
       // so once the vendor list ran out - exactly when the curation payload starts - the display
       // froze on a stale vendor filename for the rest of the job.
       currentFile: currentName || (files[0] && files[0].relPath) || '',
     });
   };
 
-  // ⚠️⚠️ CANCEL ABORTS HERE; IT MUST NEVER THROW HERE. [B-005 item 4] This is an EventEmitter
+  // CANCEL ABORTS HERE; IT MUST NEVER THROW HERE. [B-005 item 4] This is an EventEmitter
   // handler, and a throw inside one is an uncaught exception in the main process - the [B-418]
   // crash shape, where the app simply vanishes. Every other stopping point in this feature
   // throws because it is on a normal call stack; this one aborts the archive and lets the
@@ -505,7 +505,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     if (!_canceled && opts.shouldStop && opts.shouldStop()) {
       _canceled = true;
       try { archive.abort(); } catch {}
-      // ⚠️⚠️ DESTROY THE SINK TOO, OR NOTHING SETTLES FOR NINETY SECONDS. abort() stops archiver
+      // DESTROY THE SINK TOO, OR NOTHING SETTLES FOR NINETY SECONDS. abort() stops archiver
       // feeding the stream but does not close it, so the promise below sat there until the
       // stall watchdog gave up - and that watchdog's whole job is to say the SOURCE is damaged.
       // Reported: the user cancelled during compress and eventually got "the source has a damaged
@@ -515,7 +515,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     }
     filesProcessed++;
     lastProgressMs = Date.now();
-    // ⚠️ A BUFFER ENTRY HAS NOTHING TO READ, so the stream tap never sees it. It is in the
+    // A BUFFER ENTRY HAS NOTHING TO READ, so the stream tap never sees it. It is in the
     // denominator, so it has to reach the numerator somewhere, and landing is the only moment it
     // can. A denominator and a numerator that disagree about what they include is the exact shape
     // of the defect this whole change exists to remove, just pointed the other way.
@@ -530,7 +530,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
   // and appends them one at a time IN this submission order, so the zip bytes are
   // deterministic (concurrent stat was reordering them and breaking dedup).
   for (const f of files) {
-    // ⚠️ `stats` here is the byte-identity guarantee AND the ordering guarantee - see the long
+    // `stats` here is the byte-identity guarantee AND the ordering guarantee - see the long
     // note above the tap. The extra statSync is a second stat per file (walkFolderSorted already
     // did one for size); against compressing the same file it does not register, and it buys a
     // submission order that no longer depends on a setting.
@@ -538,45 +538,45 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
                    { name: f.relPath, date: EPOCH, mode: MODE, stats: fs.statSync(f.absPath) });
   }
 
-  // ⭐⭐ THE CURATION SIDECAR GOES IN HERE, INSIDE THE ONE COMPRESSION PASS. [B-420]
+  // THE CURATION SIDECAR GOES IN HERE, INSIDE THE ONE COMPRESSION PASS. [B-420]
   // It used to be added by `injectIntoZip`: take the archive we had just finished, extract the
   // WHOLE thing to a temp tree, write the sidecar into it, and re-compress everything - a second
   // full extract and a second full compress of content we wrote moments earlier, to carry a few
   // small files. `writeIntoTree`'s own comment says "just before it is archived", which is this
   // point; the old call site ran it after.
-  // ⚠️ 2026-09-23: *"How can curation have after compression? It goes inside the zip…."*
+  // 2026-09-23: *"How can curation have after compression? It goes inside the zip…."*
   // The design predates the pooled store, when the archive itself was the stored artifact and had
   // to be rebuilt to stay byte-canonical. Nothing is stored as an archive now.
-  // ⚠️⚠️ THIS USED TO SAY "APPENDED LAST, AFTER the sorted files, so the archive stays
+  // THIS USED TO SAY "APPENDED LAST, AFTER the sorted files, so the archive stays
   // order-deterministic" AND THAT WAS TRUE OF THE SUBMISSION, NOT OF THE ARCHIVE. [2026-09-24]
   // The vendor tree went in with `archive.file()` and the sidecar with `archive.append()`, and
   // those use two different queues: an entry carrying stats goes straight onto the ordered queue,
   // while a bare `file()` waits in `_statQueue` to be stat-ed first. Measured: the sidecar came
   // out FIRST, ahead of every vendor file. Nothing caught it because the archive was valid, the
   // entry count was right, and the only thing it contradicted was this comment.
-  // ⭐ Every entry now goes in the same way - append, with stats supplied - so submission order
+  // Every entry now goes in the same way - append, with stats supplied - so submission order
   // IS archive order, and `test/zip-byte-identity.test.js` asserts the position rather than
   // trusting a sentence. Same EPOCH date and MODE as every other entry, or these few files would
   // be the only ones carrying real timestamps.
   //
-  // ⭐ AN ENTRY IS A NAME PLUS A SOURCE OF BYTES, and the source may be either a path on disk or a
+  // AN ENTRY IS A NAME PLUS A SOURCE OF BYTES, and the source may be either a path on disk or a
   // buffer in memory. That is the whole reason nothing needs staging: the sidecar is JSON we just
   // built, so it goes straight in as bytes and never becomes a file; attachments and customized
   // font folders are already real files, so archiver reads them where they sit.
-  // ⚠️ The first cut of this staged all of it into a temp dir so archiver could read it back - which
+  // The first cut of this staged all of it into a temp dir so archiver could read it back - which
   // meant COPYING a customized font (a whole font) to read it straight out again. Testing caught the
   // smell before it was measured: "does it get written in a temp file then either placed in the tree
   // or appended to the archive?" The answer should be no in both cases, and now is.
   for (const e of (opts.extraEntries || [])) {
     if (e.buffer) archive.append(e.buffer, { name: e.name, date: EPOCH, mode: MODE });
-    // ⭐ THE PAYLOAD GETS THE SAME TAP AS THE VENDOR TREE, which is the half the screenshots was
+    // THE PAYLOAD GETS THE SAME TAP AS THE VENDOR TREE, which is the half the screenshots was
     // about: a customized font is where the big files are, so a bar that only moves for vendor
     // content goes quiet for exactly the stretch the user is waiting on.
     else archive.append(lazyCounted(e.absPath, e.name),
                         { name: e.name, date: EPOCH, mode: MODE, stats: fs.statSync(e.absPath) });
   }
 
-  // ⚠️ A 'finalizing' phase was briefly emitted here and REMOVED, because nothing could
+  // A 'finalizing' phase was briefly emitted here and REMOVED, because nothing could
   // receive it: the common-zip door's progress travels on a delta-only channel that carries a
   // byte count and drops every other field. Adding it would have been one more producer with
   // no consumer - the exact thing `test/export-wiring.test.js` exists to catch, written a few
@@ -590,18 +590,18 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     // Abort rather than hang the whole import forever — the caller cleans up the
     // partial uuid dir and surfaces a real error instead of a frozen modal.
     const STALL_MS = 90000;
-    // ⭐⭐ 250 ms, AND THAT TICK RATE IS THE MID-ENTRY CANCEL. [B-005 item 4] This interval used
+    // 250 ms, AND THAT TICK RATE IS THE MID-ENTRY CANCEL. [B-005 item 4] This interval used
     // to run every 5 s purely as a stall watchdog, and the cancel check lived only in the
     // 'entry' handler - so a zip could only stop BETWEEN entries. One large entry (a 40 MB
     // track being compressed) meant the user waited out the whole thing with Cancel already
     // pressed, which is the original complaint arriving in a different unit.
     //
-    // ⭐ Polling here rather than reaching into archiver: the abort works the same whether we
+    // Polling here rather than reaching into archiver: the abort works the same whether we
     // are between entries or halfway through one, and a timer needs nothing from the library's
     // internals. The stall test still uses its own elapsed window, so lowering the tick does
     // not make it trigger sooner.
     const watchdog = setInterval(() => {
-      // ⚠️⚠️ A CANCEL IS NOT A STALL, AND THIS WATCHDOG ACCUSES THE SOURCE. Deliberately
+      // A CANCEL IS NOT A STALL, AND THIS WATCHDOG ACCUSES THE SOURCE. Deliberately
       // stopping the archive looks identical to a file that will not read: entries stop
       // completing. Without this the user's own Cancel came back as "the source has a damaged
       // or unreadable file" - a false accusation about the font, which is far worse than no
@@ -614,11 +614,11 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
         try { fileStream.destroy(); } catch {}
       }
       if (_canceled) { clearInterval(watchdog); return finish(reject, _cancelErr()); }
-      // ⭐⭐ THE TICK IS THE PROGRESS BEAT NOW, NOT JUST THE CANCEL AND STALL BEAT. [B-420]
+      // THE TICK IS THE PROGRESS BEAT NOW, NOT JUST THE CANCEL AND STALL BEAT. [B-420]
       // This is what makes a 300 MB entry legible: bytes read tick up four times a second while
       // one file compresses, instead of the whole display holding still until it lands.
       emit();
-      // ⭐ AND THE STALL WATCHDOG STOPPED LYING ABOUT BIG FILES AS A SIDE EFFECT. `lastProgressMs`
+      // AND THE STALL WATCHDOG STOPPED LYING ABOUT BIG FILES AS A SIDE EFFECT. `lastProgressMs`
       // used to advance only when an entry COMPLETED, so any single entry taking longer than the
       // 90 s window was accused of being "a damaged or unreadable file" - a false accusation about
       // a healthy font, which is the same wrong message a cancel used to produce. It now advances
@@ -630,7 +630,7 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
       }
     }, 250);
     const finish = (fn, arg) => { clearInterval(watchdog); fn(arg); };
-    // ⚠️ EVERY path below funnels through this. Tearing a stream down mid-write can surface as
+    // EVERY path below funnels through this. Tearing a stream down mid-write can surface as
     // 'error', 'warning' or a plain 'close', and which one arrives is not ours to predict - so
     // once _canceled is set, whatever turns up means the same thing.
     const settle = (fn, arg) => finish(_canceled ? reject : fn, _canceled ? _cancelErr() : arg);
@@ -646,20 +646,20 @@ async function zipFolderToFile(srcDir, destZipPath, onProgress, opts = {}) {
     archive.finalize();
   });
   } catch (err) {
-    // ⚠️ THE REJECTING PATH SKIPS THE CLEANUP BELOW, so it does its own. Without this a
+    // THE REJECTING PATH SKIPS THE CLEANUP BELOW, so it does its own. Without this a
     // cancelled zip export left the half-built archive sitting at the destination - the one
     // artefact most likely to be mistaken for a finished export. [B-005 item 4]
     if (require('./sfExportCopy').isCancel(err)) { try { fs.unlinkSync(destZipPath); } catch {} }
     throw err;
   }
 
-  // ⚠️ Belt and braces: if 'close' won the race before _canceled was read, the rejection above
+  // Belt and braces: if 'close' won the race before _canceled was read, the rejection above
   // never happened and we land here instead. Either way the half-written zip goes. [B-005 item 4]
   if (_canceled) {
     try { fs.unlinkSync(destZipPath); } catch {}
     throw _cancelErr();
   }
-  // ⚠️ THE SUCCESS PATH RELEASES THEM TOO. Every stream should already have ended on its own, and
+  // THE SUCCESS PATH RELEASES THEM TOO. Every stream should already have ended on its own, and
   // "should already" is exactly the assumption that left a 26.7 MB file locked on a real library. One
   // sweep costs nothing and makes the guarantee unconditional rather than probable.
   return { hash: hasher.digest('hex'), totalBytes, fileCount, strippedFiles, blockedFiles, notedFiles };
@@ -880,7 +880,7 @@ function cleanupOrphanSources(userData) {
     const isEntryLess = !referencedUuids.has(uuid);
     if (!isCorrupt && !isEntryLess) continue;
     try {
-      // ⚠️ THROUGH deleteSource, NOT A BARE rmSync. This is the SECOND door to
+      // THROUGH deleteSource, NOT A BARE rmSync. This is the SECOND door to
       // removing a source and it had drifted from the first: the plain rmSync
       // left the per-source file-hash manifest behind in .filehashes/sources/
       // AND never released the source's attachments, so a receipt nobody
@@ -919,7 +919,7 @@ function findByHash(userData, hash) {
   for (const s of listSources(userData)) {
     if (!s.meta) continue;
     if (s.meta.hash === hash) return s;
-    // ⚠️ THE RESTORED-SOURCE CASE, and it runs the OTHER WAY from
+    // THE RESTORED-SOURCE CASE, and it runs the OTHER WAY from
     // findByProvenance ([B-283], 2026-09-03: "if I were to then try to
     // re-import from the vendor's source... it'll tell me that it already
     // existed in my library").
@@ -937,7 +937,7 @@ function findByHash(userData, hash) {
 // Find a source by the identity a curated export CLAIMS to have come from.
 // ([B-283], 2026-09-03.)
 //
-// ⚠️ WHY A SECOND LOOKUP EXISTS AT ALL, because "just make the bytes match" is
+// WHY A SECOND LOOKUP EXISTS AT ALL, because "just make the bytes match" is
 // the obvious answer and it is not available: a JMT export can never be
 // byte-identical to the vendor's archive. Zip bytes encode the compression
 // level, per-entry timestamps, entry order, unix modes and the central
@@ -950,7 +950,7 @@ function findByHash(userData, hash) {
 // Matching either against a live source means "you already have this", which
 // is the case where the user exported, did NOT delete, and re-imported.
 //
-// ⚠️ A SIDECAR IS USER-EDITABLE, so this is a CLAIM, not proof. It is used only
+// A SIDECAR IS USER-EDITABLE, so this is a CLAIM, not proof. It is used only
 // to say "you already have this" — a recognition, never a permission and never
 // a licence to overwrite the source it points at.
 function findByProvenance(userData, provenance) {
@@ -998,7 +998,7 @@ function deleteSource(userData, uuid) {
   const dir = path.join(sourcesRoot(userData), uuid);
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
   try {
-    // ⚠️ RELEASE THE ATTACHMENTS FIRST, WHILE THE META STILL EXISTS TO NAME THEM.
+    // RELEASE THE ATTACHMENTS FIRST, WHILE THE META STILL EXISTS TO NAME THEM.
     // Deleting the source dir takes its meta.json with it, and the meta is the
     // ONLY record of which attachments this source linked - so after the rmSync
     // nothing knows, and a receipt nobody points at sits in the store forever.
@@ -1043,12 +1043,12 @@ function deleteSource(userData, uuid) {
 // filesystem already does exactly that accounting. A symlink or a reference table
 // would need both.
 //
-// ⚠️ FALLS BACK TO COPYING, never fails. Hardlinks need the same volume and a
+// FALLS BACK TO COPYING, never fails. Hardlinks need the same volume and a
 // filesystem that supports them; an export to a USB stick satisfies neither. A
 // copy is always correct, just larger, so the fallback costs space and never
 // correctness.
 //
-// ⚠️ AND IT IS ONLY SAFE BECAUSE NOTHING WRITES CONTENT INTO AN EXISTING ENTRY
+// AND IT IS ONLY SAFE BECAUSE NOTHING WRITES CONTENT INTO AN EXISTING ENTRY
 // FILE. Every entry operation is a rename, an unlink, or a create-with-a-free-name
 // (_proffieVariantName). Writing through a shared name would reach into the
 // vendor's copy — see the invariant test in test/entry-pointers.test.js, which
@@ -1084,7 +1084,7 @@ async function copyFolderRecursive(srcDir, destDir, onFile, opts) {
 // `records` is the per-file list collectFileRecords just produced for the totals,
 // so the hashes are free and nothing is read twice.
 //
-// ⚠️ THIS RUNS AFTER EXTRACTION, NOT DURING IT, AND THAT IS A REAL DIFFERENCE.
+// THIS RUNS AFTER EXTRACTION, NOT DURING IT, AND THAT IS A REAL DIFFERENCE.
 // The property we want is "identical content is never stored twice"; what this
 // gives is "…is never stored twice once the import finishes." Peak disk during
 // an import is still the whole bundle, and only then falls to the novel part.
@@ -1093,7 +1093,7 @@ async function copyFolderRecursive(srcDir, destDir, onFile, opts) {
 // Say the bound rather than calling the window harmless: on a 200 MB bundle that
 // is 80% recycled, peak is 200 MB and steady state is 40 MB.
 //
-// ⚠️ Sources are immutable, which is why cross-source sharing is safe: nothing
+// Sources are immutable, which is why cross-source sharing is safe: nothing
 // ever writes into one, so an inode shared between two vendors' bundles cannot
 // surprise either. Deleting one source drops its names; the other's names keep
 // the content alive.
@@ -1137,7 +1137,7 @@ async function _linkAgainstLibrary(userData, destDir, records, onProgress) {
     } catch {
       try { fs.rmSync(tmp, { force: true }); } catch {}
     }
-    // ⚠️ PERCENT IS REQUIRED, not decorative. The import bar reads `percent` off
+    // PERCENT IS REQUIRED, not decorative. The import bar reads `percent` off
     // every event and falls to 0 when it is absent, so a stage that omits it
     // makes the bar snap backwards mid-import. Same failure the `expanding`
     // stage was split out to fix, reached from the other direction.
@@ -1199,7 +1199,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // as a zip source for the rest of its lifetime. originalName still
   // preserves the folder basename so the user-facing label is honest
   // about what they imported.
-  // ⭐ ONE FORMAT ([B-309]). A source is stored as a tree whichever way it arrived.
+  // ONE FORMAT ([B-309]). A source is stored as a tree whichever way it arrived.
   // The old value was 'zip' even for a folder pick, because a folder was zipped on
   // the way in; that conversion is gone, so the label is simply true now.
   const format = 'folder';
@@ -1209,7 +1209,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     if (onProgress) onProgress({ stage, ...payload });
   };
 
-  // ⚠️ THE ARCHIVE'S OWN DATE, CAPTURED BEFORE ANYTHING CAN REPLACE THE FILE.
+  // THE ARCHIVE'S OWN DATE, CAPTURED BEFORE ANYTHING CAN REPLACE THE FILE.
   // The curation strip below repackages the zip into a temp file, and `stat` is
   // re-taken on that temp file because fileSize has to describe the repacked
   // archive. Its mtime is seconds old, so reading the date off it stamps every
@@ -1241,7 +1241,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   let curation = null;
   let curationTmp = null;
   let curationPayloadDir = null;
-  // ⚠️ THE PEEK RUNS FOR EVERY ZIP, INCLUDING THE knownHash HAND-OFF. This
+  // THE PEEK RUNS FOR EVERY ZIP, INCLUDING THE knownHash HAND-OFF. This
   // used to be `isZip && !knownHash`, and the duplicate prompt's "import again
   // as a new source" passes knownHash — so that door skipped the strip
   // entirely: the forced source stored .jmt-curation/ (sidecar, receipts, the
@@ -1252,13 +1252,13 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   // prompt lost the restore and the checked state. Proven by headless replay
   // of both doors against the real export.
   //
-  // ⭐ AND THE knownHash SHORTCUT GOT SIMPLER, NOT RISKIER. [B-427] It used to need a determinism
+  // AND THE knownHash SHORTCUT GOT SIMPLER, NOT RISKIER. [B-427] It used to need a determinism
   // argument: the scan hashed the STRIPPED REPACK, so the shortcut was only sound because
   // stripAndRepackage plus zipFolderToFile reproduced the exact same bytes on a second run. Now the
   // hash is taken from the arriving file itself, so scan and import hash literally the same bytes and
   // there is no reproducibility claim to be wrong about. A load-bearing assumption was deleted rather
   // than re-verified, which is the better outcome of the two.
-  // ⚠️⚠️ BOTH FORMATS PEEK NOW, and skipping the folder case is the live defect [B-427] closes.
+  // BOTH FORMATS PEEK NOW, and skipping the folder case is the live defect [B-427] closes.
   // [B-420] made folder exports carry a sidecar too, but this was still `if (isZip)` - so a folder
   // re-import stored our .jmt-curation.json and its payload INSIDE the tree as vendor content and
   // restored nothing. That is the exact failure recorded just above for the knownHash door, arriving
@@ -1269,22 +1269,22 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       const cur = require('./soundFontCuration');
       curation = isZip ? await cur.peekZip(sourcePath) : cur.peekDir(sourcePath);
       if (curation) {
-        // ⭐⭐ NOTHING IS UNPACKED HERE ANY MORE. [B-427] This used to call
+        // NOTHING IS UNPACKED HERE ANY MORE. [B-427] This used to call
         // `stripAndRepackage`: a full extract of the archive to a temp tree, a full re-compress of
         // it, and then `sourcePath` was pointed at the repack so the hash and the pool extraction
         // both read from it - meaning the same content was extracted twice with a re-zip between.
         //
-        // ⚠️ WHY THE REPACK WAS THERE, AND WHY IT NO LONGER IS. Its own comment said it outright:
+        // WHY THE REPACK WAS THERE, AND WHY IT NO LONGER IS. Its own comment said it outright:
         // "The repackaged archive is what gets hashed AND STORED, so the stored source is the font
         // as the vendor shipped it." That was the OLD storage model, where the archive itself was
         // the stored artifact and had to be byte-canonical so two exports of one source hashed
         // identically. The store is an unpacked content-addressed pool now - no archive is kept -
         // so there is nothing for canonical bytes to be canonical FOR.
         //
-        // ⭐ THE SPLIT HAPPENS DURING THE POOL EXTRACTION INSTEAD, which was always going to run:
+        // THE SPLIT HAPPENS DURING THE POOL EXTRACTION INSTEAD, which was always going to run:
         // `_extractZipSubtree` takes `curationPayloadDir` and sends our files there while the
         // vendor's go to the tree. One pass, one write per file.
-        // ⚠️ THE TEMP DIR SHAPE IS LOAD-BEARING. `_isCurationTmpDir` in main.js only accepts
+        // THE TEMP DIR SHAPE IS LOAD-BEARING. `_isCurationTmpDir` in main.js only accepts
         // os.tmpdir()/jmt-curation-*, and `sources:restoreCustomized` additionally requires the
         // payload dir to sit INSIDE it. Keep both or those IPCs refuse the restore.
         curationTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-curation-'));
@@ -1380,7 +1380,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // ── ONE STORAGE SHAPE: THE TREE ([B-309]) ────────────────────────────────
     // Both inputs land at uuid/source/. What changed is only WHERE THE BYTES GO;
     // identity, dedup, staging, curation and every consumer are untouched.
-    // ⚠️ IDENTITY IS DELIBERATELY NOT REDEFINED HERE. `hash` stays what it has
+    // IDENTITY IS DELIBERATELY NOT REDEFINED HERE. `hash` stays what it has
     // always been: the identity of what ARRIVED. A picked archive is still
     // identified by its own sha256 (already computed above, before anything was
     // written), which is also what dedup relies on when it rewrites what we hold
@@ -1390,11 +1390,11 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     if (isZip) {
       emit('copying', { percent: 0, totalBytes });
       // Percent comes from the extractor, which knows the real uncompressed total.
-      // ⭐ THE ONE EXTRACTION. [B-427] When the archive carried our sidecar, `curationPayloadDir` is
+      // THE ONE EXTRACTION. [B-427] When the archive carried our sidecar, `curationPayloadDir` is
       // set and this same pass routes our files there while the vendor's go into the pool - replacing
       // a separate strip-and-repack that extracted everything, re-zipped it, and left this call to
       // extract it all over again.
-      // ⭐ `shouldStop` IS WIRED AS OF 2026-10-04. It used to be a deliberate `null` with a note
+      // `shouldStop` IS WIRED AS OF 2026-10-04. It used to be a deliberate `null` with a note
       // saying an import staging pass was not yet cancellable - which is why the renderer greyed its
       // Cancel button rather than offering one that lied. The checkpoint inside `_extractZipSubtree`
       // was always there; only the caller's half was missing.
@@ -1410,7 +1410,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // reusing 'copying' gave the user two consecutive bars labelled identically
       // with the second appearing to restart for no reason. (Caught, 2026-09-04.)
       innerArchives = await _expandInnerArchives(destDir, (p) => emit('expanding', p));
-      // ⚠️ AFTER the inner expand, so a program inside a nested archive is caught too,
+      // AFTER the inner expand, so a program inside a nested archive is caught too,
       // and BEFORE the records below, so the stored totals describe what is kept.
       const _purge = await _purgeExecutablesAsync(destDir);
       blockedFiles = _purge.blocked;
@@ -1420,28 +1420,28 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       // answering Windows. The zip route's EXTRACT was already async — this hash pass was not,
       // which is why a zip source still stalled (899ms measured on 1.1-Energy.zip).
       const recz = (await fhz.collectFileRecordsAsync(destDir)) || [];
-      // ⭐⭐ THE CONTENT DIGEST, SEPARATE FROM `hash`. [B-415] `hash` for a zip is the sha256 of
+      // THE CONTENT DIGEST, SEPARATE FROM `hash`. [B-415] `hash` for a zip is the sha256 of
       // the ARCHIVE FILE on the user's disk, and it must stay that way: provenance and the
       // savings anchor are both written against what the creator actually shipped. But that
       // means a zip and its own extracted folder carry DIFFERENT hashes for identical fonts,
       // so the intra-batch twin check ([B-314]) could never see them as the same thing.
-      // ⚠️ Costs nothing: recz is already in hand. The folder branch below has always had this
+      // Costs nothing: recz is already in hand. The folder branch below has always had this
       // digest — it just happens to BE its `hash`, which is why the asymmetry went unnoticed.
       contentHash = fhz.hashRecords(recz);
-      // ⭐⭐ [B-415] THE PER-FILE HASHES, carried out so the batch can ask CONTAINMENT and not
+      // [B-415] THE PER-FILE HASHES, carried out so the batch can ask CONTAINMENT and not
       // just equality. Measured on a real pair 2026-09-19: the full "1.2-lightsaber of the bells"
       // package is 213 files across six board folders; the copy on the desktop is 32 files that
       // are the CONTENTS of its proffie folder - and every one of that copy's 29 distinct hashes
       // is present in the original, 100% contained, nothing unique to it. Their contentHashes
       // share nothing, so equality can never see the relationship.
-      // ⚠️ COSTS NO NEW I/O. These records are already in hand for contentHash - this is the cheap
+      // COSTS NO NEW I/O. These records are already in hand for contentHash - this is the cheap
       // path [B-415] said to look for before building the expensive one. A second hashing pass
       // over extracted content is exactly what [B-398] spent a day making yield; do not add one.
       fileHashes = fhz.uniqueFileHashes(recz);
       totalBytes = recz.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recz.length;
       fileSize = totalBytes;
-      // ⚠️ THE TOTALS ABOVE STAY LOGICAL, deliberately, and are read before this
+      // THE TOTALS ABOVE STAY LOGICAL, deliberately, and are read before this
       // runs. They describe the CONTENT of the bundle, which is what the user
       // imported and what every downstream consumer means by its size. Linking
       // changes what the bundle OCCUPIES, never what it holds.
@@ -1450,10 +1450,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     } else {
       // Folder input: copy the selected files straight in. The selection (noise
       // filtering, corrupt-wav stripping) is the same list zipFolderToFile uses.
-      // ⚠️ The hash can only be taken AFTER the copy, because there is no
+      // The hash can only be taken AFTER the copy, because there is no
       // container to hash on the way past — so the dedup check below stays where
       // it is, after the write, exactly as the zip-transform needed it.
-      // ⭐ `shouldStop` here as well as in the copy loop below. [B-462] This is the pass that reads
+      // `shouldStop` here as well as in the copy loop below. [B-462] This is the pass that reads
       // the card; the loop below is the one that writes our disk, and a cancel arrives during the
       // first far more often than the second.
       const sel = await _selectFolderFiles(sourcePath, shouldStop);
@@ -1461,10 +1461,10 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       blockedFiles = sel.blockedFiles;
       notedFiles = sel.notedFiles;
       fs.mkdirSync(destDir, { recursive: true });
-      // ⭐ OUR FILES ARE PARTITIONED OUT BEFORE THE COPY, not deleted afterwards. [B-427]
+      // OUR FILES ARE PARTITIONED OUT BEFORE THE COPY, not deleted afterwards. [B-427]
       // The zip route does this inside _extractZipSubtree; a folder input needs the same split here,
       // or the stored source keeps our sidecar as vendor content and the restore has nothing to read.
-      // ⚠️ THE SIDECAR ITSELF IS NOT COPIED ANYWHERE. Its contents are already in hand from the peek,
+      // THE SIDECAR ITSELF IS NOT COPIED ANYWHERE. Its contents are already in hand from the peek,
       // so writing it out would only put a file on disk that nothing reads - same reasoning as the
       // zip route's drop.
       const _curMod = curation ? require('./soundFontCuration') : null;
@@ -1473,19 +1473,19 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       const vendorFiles = sel.files.filter((f) => !_isOurs(f.relPath));
       const ourFiles = sel.files.filter((f) => _isOurs(f.relPath));
       let done = 0;
-      // ⚠️ THE DENOMINATOR COUNTS WHAT THE LOOP COPIES. The strip got this wrong in the opposite
+      // THE DENOMINATOR COUNTS WHAT THE LOOP COPIES. The strip got this wrong in the opposite
       // direction once - it totalled every entry while counting only content - so the bar parked short
       // by exactly the number of receipts riding along. Invisible on a big bundle, obvious on a
       // ten-file font with two proofs of purchase.
       const selTotal = vendorFiles.reduce((s, f) => s + f.size, 0);
-      // ⚠️⚠️ AWAITED COPY, NOT copyFileSync. [B-398] This loop was the single worst offender
+      // AWAITED COPY, NOT copyFileSync. [B-398] This loop was the single worst offender
       // measured on a real machine: 4955ms of unbroken main-thread work inside one folder source
       // (importSource:Techno), against the ~5s at which Windows greys the window and offers to
       // kill the app mid-write. A folder of several hundred wavs copied with no yield anywhere.
-      // ⭐ The ZIP route never had this problem because _extractZipSubtree already awaited —
+      // The ZIP route never had this problem because _extractZipSubtree already awaited —
       // which is why the bug looked intermittent: it depended on whether the source was a folder.
       for (const f of vendorFiles) {
-        // ⭐ CANCEL CHECKPOINT, between files. [2026-10-04] The same place the loop already yields,
+        // CANCEL CHECKPOINT, between files. [2026-10-04] The same place the loop already yields,
         // so it costs nothing - and a throw here lands in the catch that calls
         // `cleanupPartialSource`, which is what makes cancelling safe rather than merely possible.
         if (shouldStop && shouldStop()) throw _cancelErr();
@@ -1527,7 +1527,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
       totalBytes = recs.reduce((s, r) => s + (r.size || 0), 0);
       fileCount = recs.length;
       fileSize = totalBytes;
-      // ⚠️ AFTER the identity hash, and that ordering is load-bearing. `hash` is
+      // AFTER the identity hash, and that ordering is load-bearing. `hash` is
       // what this source IS, and it must describe the tree the user handed us —
       // linking is a storage decision taken afterwards. Computing it the other
       // way round would still produce the same digest today (a link does not
@@ -1597,7 +1597,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // tmp here exactly as before. (2026-09-08.)
     const _pendingKeepsTmp = !!(res.customizedPending && res.customizedPending.length && curationTmp);
     if (!_pendingKeepsTmp) _dropCurationTmp();
-    // ⚠️ THE PAYLOAD ITSELF GOES BACK TO THE CALLER, not just a count of what was
+    // THE PAYLOAD ITSELF GOES BACK TO THE CALLER, not just a count of what was
     // applied. The import review has to PRE-FILL from it, and until it did, the
     // review's empty fields were written straight over these values seconds after
     // they landed - so a curated re-import came back with almost nothing. Returning
@@ -1606,18 +1606,18 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     // sharing. The close-out needs it to say what the font costs on disk
     // (holds minus saved), and it cannot be recovered later without
     // re-walking the tree. ([B-317], 2026-09-06.)
-    // ⭐⭐ THE LAST CHECKPOINT, AND IT RUNS AFTER THE SOURCE IS ALREADY COMMITTED. [B-424]
+    // THE LAST CHECKPOINT, AND IT RUNS AFTER THE SOURCE IS ALREADY COMMITTED. [B-424]
     // Every earlier checkpoint protects work still in progress. This one protects work that
     // FINISHED: a cancel arriving during the commit itself was noticed by nobody. The source
     // was fully written - meta stamped, candidates computed - `importSource` returned ok, and
     // the renderer's rollback was left racing a main process that had been busy writing it.
     // Found 2026-10-07 by the dev pass: a cancelled 129 MB link import left a complete source
     // with nothing pointing at it, and the same shape had produced a 25 MB orphan an hour before.
-    // ⭐ IT DELETES WHAT IT JUST BUILT, which is the only honest reading of the rule:
+    // IT DELETES WHAT IT JUST BUILT, which is the only honest reading of the rule:
     // *"if I click it, it should just discard on an import."* An import writes nothing to the
     // user's card, so there is no point at which it is too late to throw OUR copy away - that
     // "too late" belongs to export, where the bytes are already on their media.
-    // ⚠️ THROUGH deleteSource, not cleanupPartialSource: this dir is committed, not partial, so
+    // THROUGH deleteSource, not cleanupPartialSource: this dir is committed, not partial, so
     // it owns a file-hash manifest and possibly attachments that a bare rmSync would strand.
     if (shouldStop && shouldStop()) {
       try { deleteSource(userData, uuid); } catch {}
@@ -1633,7 +1633,7 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
   } catch (err) {
     cleanupPartialSource(uuidDir);
     _dropCurationTmp();
-    // ⚠️⚠️ A CANCEL IS NOT A FAILURE, AND THIS CATCH CALLED EVERY ONE OF THEM ONE. [B-424]
+    // A CANCEL IS NOT A FAILURE, AND THIS CATCH CALLED EVERY ONE OF THEM ONE. [B-424]
     // The checkpoints throw `ExportCancelled`, which landed here and came back as
     // "Import failed: ..." - the user's own click reported to them as a red error. That is the
     // identical defect three export doors already inherited, and the reason `cancelled` is a
@@ -1668,7 +1668,7 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     readmePaths: [],
     // Provenance: damaged wavs that were removed on import (empty/absent when none).
     ...(strippedFiles && strippedFiles.length ? { strippedFiles } : {}),
-    // ⚠️ RECORDED ON THE ENTRY, not just announced in a dialog ([B-214]). The dialog
+    // RECORDED ON THE ENTRY, not just announced in a dialog ([B-214]). The dialog
     // closes; the question "what did this font arrive carrying" outlives it, and it is
     // the one a person asks long after the import. Same shape as strippedFiles above.
     ...(blockedFiles && blockedFiles.length ? { blockedFiles } : {}),
@@ -1693,7 +1693,7 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
   //    source look brand new.
   //
   // 2. THE ORIGINAL IDENTITY is recorded as originArchiveHash /
-  //    originContentHash. ⚠️ IT DOES NOT OVERWRITE `hash`. `hash` is the
+  //    originContentHash. IT DOES NOT OVERWRITE `hash`. `hash` is the
   //    sha256 of the source.zip we actually hold, and a great deal downstream
   //    verifies against it — a meta that lies about its own file is worse than
   //    one that cannot recognise a re-import. These are separate fields
@@ -1714,7 +1714,7 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     if (_prov.vendorAutoDetected) meta.vendorAutoDetected = true;
     if (_prov.archiveHash) meta.originArchiveHash = _prov.archiveHash;
     if (_prov.contentHash) meta.originContentHash = _prov.contentHash;
-    // ⚠️ originalName IS PROVENANCE, and not carrying it made an artefact COMPOUND.
+    // originalName IS PROVENANCE, and not carrying it made an artefact COMPOUND.
     // It is normally taken from the FILENAME OF THE FILE PICKED (:653). An export
     // written beside an existing one gets auto-numbered, so importing
     // "Outcast_Knight (1).zip" bakes that suffix into the library permanently -
@@ -1744,7 +1744,7 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
   // alive: the direct door drops it right after this returns, the prepared
   // door in finalizePreparedSource's finally.
   //
-  // ⚠️ EXCEPT when the caller defers ([B-311] rescope, 2026-09-08): the
+  // EXCEPT when the caller defers ([B-311] rescope, 2026-09-08): the
   // single-import doors show a review AFTER the source commits, and an eager
   // restore put entries in the library before the user said import — the
   // review's own matcher then found the copy it had just created and told the
@@ -2053,7 +2053,7 @@ async function _resolveCompositeReadBytes(readable, subPath) {
 
 // Extract a subtree of a zip onto disk. `subPath` of '' means the whole archive.
 //
-// ⭐ ONE IMPLEMENTATION, TWO CALLERS ([B-309]). This is the body that used to live
+// ONE IMPLEMENTATION, TWO CALLERS ([B-309]). This is the body that used to live
 // inside _createZipSource.extractTo, lifted out unchanged so IMPORT can store a
 // picked archive as a tree using the very same code a stored source uses to pull a
 // candidate out of itself. The alternative — a second extractor written beside this
@@ -2061,7 +2061,7 @@ async function _resolveCompositeReadBytes(readable, subPath) {
 // parallel path drifts from the pipeline around it, and the drift is silent.
 // Everything the original did is load-bearing and stays: noise filtering, the
 // zip-slip guard, per-file progress, and the { fileCount, totalBytes } contract.
-// ⭐⭐ `opts.curationPayloadDir` MAKES THIS THE ONLY EXTRACTION AN IMPORT NEEDS. [B-427]
+// `opts.curationPayloadDir` MAKES THIS THE ONLY EXTRACTION AN IMPORT NEEDS. [B-427]
 // A zip carrying our sidecar used to be unpacked TWICE: `stripAndRepackage` extracted the whole
 // archive to a temp tree, re-zipped it, and then THIS function extracted that repack into the pool -
 // two complete extractions of identical content with a re-compress wedged between them. Reported: 
@@ -2070,7 +2070,7 @@ async function _resolveCompositeReadBytes(readable, subPath) {
 // byte-canonical. The store is an unpacked pool now, so the split can happen during the one
 // extraction that was always going to run: our files go to the payload dir, the vendor's go to the
 // tree, and neither is written twice.
-// ⚠️ ONLY WHEN EXTRACTING THE WHOLE ARCHIVE (no subPath). A subtree extraction is a different job -
+// ONLY WHEN EXTRACTING THE WHOLE ARCHIVE (no subPath). A subtree extraction is a different job -
 // reading one folder out of a source - and must not start second-guessing what it finds.
 async function _extractZipSubtree(zipPath, subPath, destDir, onProgress, shouldStop = null, opts = {}) {
   const norm = _normalizeSubPath(subPath);
@@ -2097,7 +2097,7 @@ async function _extractZipSubtree(zipPath, subPath, destDir, onProgress, shouldS
     const destDirResolved = path.resolve(destDir);
     let fileCount = 0;
     let totalBytes = 0;
-    // ⚠️ THE DENOMINATOR IS THE UNCOMPRESSED TOTAL, taken from the central directory
+    // THE DENOMINATOR IS THE UNCOMPRESSED TOTAL, taken from the central directory
     // before a byte is written. Callers were computing a fraction against the
     // ARCHIVE'S file size while counting extracted bytes out, which reads over 100%
     // on anything that compresses at all - measured at 194% on a real bundle. The
@@ -2105,15 +2105,15 @@ async function _extractZipSubtree(zipPath, subPath, destDir, onProgress, shouldS
     // and every caller stops having to invent one.
     const expectedBytes = matching.reduce((s, e) => s + (e.isDir ? 0 : (e.size || 0)), 0);
     for (const entry of matching) {
-      // ⚠️ Between entries: the file just written is complete, the next never starts. The
+      // Between entries: the file just written is complete, the next never starts. The
       // `finally` below still closes the zip handle on the way out. [B-005 item 4]
       if (shouldStop && shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
       const rel = norm ? entry.fileName.slice(prefix.length) : entry.fileName;
       if (!rel) continue;
-      // ⭐ OUR FILES BRANCH OFF HERE, inside the same loop, so they cost one write like everything
+      // OUR FILES BRANCH OFF HERE, inside the same loop, so they cost one write like everything
       // else. [B-427] They keep their FULL relative path under the payload dir (so it holds
       // .jmt-curation/...), which is the layout restoreCustomizedEntries already reads.
-      // ⚠️ AND THEY ARE NOT COUNTED. fileCount and totalBytes describe the STORED SOURCE - the
+      // AND THEY ARE NOT COUNTED. fileCount and totalBytes describe the STORED SOURCE - the
       // vendor's font - and a receipt riding along is not part of it. The strip made this mistake in
       // the other direction once: its denominator counted payload files its counter ignored, so the
       // bar parked short by exactly the number of receipts.
@@ -2160,7 +2160,7 @@ const INNER_ARCHIVE_MAX_DEPTH = 4;
 // Replace every .zip inside a freshly stored tree with a folder of the same name,
 // repeating until none are left. [B-309]
 //
-// ⭐⭐ THIS IS WHAT RETIRES `nested`, AND IT RETIRES IT WITHOUT TOUCHING THE
+// THIS IS WHAT RETIRES `nested`, AND IT RETIRES IT WITHOUT TOUCHING THE
 // DETECTOR. detectCandidates emits a deferred, un-openable candidate whenever it
 // meets an archive it cannot look inside; run this first and it never meets one.
 // Everything downstream then applies for free: the manifest sees real files
@@ -2170,12 +2170,12 @@ const INNER_ARCHIVE_MAX_DEPTH = 4;
 // archives totalling 2.18 GB as ELEVEN files, so its nine fonts got no dedup, no
 // pointers and a permanently unknowable customization state.
 //
-// ⚠️ A FLAT LOOP, NOT MUTUAL RECURSION. An earlier version had this function and the
+// A FLAT LOOP, NOT MUTUAL RECURSION. An earlier version had this function and the
 // extractor call each other, each holding its own cap — which reset at every level
 // and therefore bounded nothing. Depth is a counter here and archives revealed by
 // one pass are handled by the next.
 //
-// ⚠️ A NAME ALREADY TAKEN IS LEFT ALONE, never merged. A vendor shipping both
+// A NAME ALREADY TAKEN IS LEFT ALONE, never merged. A vendor shipping both
 // Proffie/ and Proffie.zip is telling us something we cannot read, and merging one
 // over the other silently picks a winner between two things that may differ. The
 // cost of leaving it is only that this source keeps the old deferred-candidate
@@ -2183,7 +2183,7 @@ const INNER_ARCHIVE_MAX_DEPTH = 4;
 // being hypothetical if it ever occurs.
 async function _expandInnerArchives(rootDir, onProgress) {
   const expanded = [], left = [];
-  // ⚠️ THE BAR HAS TO MOVE, and it needs a denominator to move against. Forwarding
+  // THE BAR HAS TO MOVE, and it needs a denominator to move against. Forwarding
   // the inner extractor's payload untouched sent no `percent` at all — and this is
   // the LONGEST phase of importing a bundle-of-archives, so a motionless bar there
   // reads as hung at exactly the wrong moment. (Seen on a real import, 2m31s in.)
@@ -2225,7 +2225,7 @@ async function _expandInnerArchives(rootDir, onProgress) {
         continue;
       }
       fs.rmSync(z.absPath, { force: true });
-      // ⭐ AN ARCHIVE THAT WRAPS ITS CONTENT IN A FOLDER OF ITS OWN NAME IS UNWRAPPED.
+      // AN ARCHIVE THAT WRAPS ITS CONTENT IN A FOLDER OF ITS OWN NAME IS UNWRAPPED.
       // Sol.zip containing Sol/ expanded to Sol/Sol/..., doubling a segment on every
       // path beneath it — noise in every candidate path, and real pressure on the
       // Windows path limit for deep track folders. Only collapsed when the single
@@ -2335,7 +2335,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     // than a second copy of them. Export leaves it off: a folder the user carries
     // away has to be independent files. ([B-309])
     async extractTo(subPath, destDir, onProgress, opts) {
-      // ⚠️⚠️ THIS CHECK USED TO BE THE WHOLE STORY AND IT WAS WORTHLESS - it ran ONCE, on the
+      // THIS CHECK USED TO BE THE WHOLE STORY AND IT WAS WORTHLESS - it ran ONCE, on the
       // way in, so pressing Cancel a second later did nothing until the entire tree had copied.
       // The real check is inside copyFolderRecursive's per-file callback below. Kept here only
       // as the cheap early-out for a cancel that beat us to the door. [B-005 item 4]
@@ -2358,7 +2358,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         return { fileCount, totalBytes };
       }
       await copyFolderRecursive(srcDir, destDir, (srcFile) => {
-        // ⚠️ THE PER-FILE CHECK LIVES HERE, not at the function entry where it started - see the
+        // THE PER-FILE CHECK LIVES HERE, not at the function entry where it started - see the
         // note up top. This callback fires once per file, which is exactly the granularity the
         // promise on the button ("finishing current file") claims. [B-005 item 4]
         if (opts && opts.shouldStop && opts.shouldStop()) throw new (require('./sfExportCopy').ExportCancelled)();
@@ -2375,12 +2375,12 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
     async exportToDownloads(destDir, { format = 'zip', onProgress, shouldStop = null, curationPayload = null } = {}) {
       if (!destDir) throw new Error('exportToDownloads requires destDir');
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-      // ⚠️ THE EXPORT IS NAMED FROM originalName, AND THAT IS DELIBERATE.
+      // THE EXPORT IS NAMED FROM originalName, AND THAT IS DELIBERATE.
       // (2026-09-03: "I don't want the file name to be overritable by user.
       // just the name.") The Source Name (bundleName) is the label it can edit;
       // the FILE keeps the name it arrived under. A rename must not silently
       // change what a subsequent export is called.
-      // ⚠️ I briefly changed this to prefer bundleName and backed it out - it made
+      // I briefly changed this to prefer bundleName and backed it out - it made
       // the filename user-overridable by the back door, which is the one thing he
       // ruled out. The suffix-compounding it was meant to solve is already fixed
       // upstream: a restore now takes originalName from the sidecar, so the
@@ -2395,7 +2395,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
           phase: 'reconstruct', fileCount: p.fileCount, totalFiles: files.length,
           bytesDone: p.totalBytes, totalBytes, currentFile: p.currentFile,
         }), { shouldStop });
-        // ⚠️ THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214], 2026-09-10).
+        // THE WAY OUT NEEDS THE SAME GUARD AS THE WAY IN ([B-214], 2026-09-10).
         // The ZIP branch below is already safe for free: it goes through
         // zipFolderToFile, which runs _selectFolderFiles and drops programs. This
         // branch is a RAW extractTo, so without this it wrote the source verbatim -
@@ -2406,10 +2406,10 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         // into it WITHOUT going through import, and this is the path that would then
         // copy it onto a saber card and hand it to the next person.
         const _purged = _purgeExecutables(destPath);
-        // ⭐ THE SIDECAR GOES INTO THE TREE WE JUST WROTE. [B-420] Free here, and the reason this
+        // THE SIDECAR GOES INTO THE TREE WE JUST WROTE. [B-420] Free here, and the reason this
         // branch never needed the unpack-and-repack the zip branch was doing: `writeIntoTree`'s own
         // comment says "just before it is archived", and a folder export has no archive step at all.
-        // ⚠️ AFTER the purge, deliberately. The purge judges VENDOR content for planted programs;
+        // AFTER the purge, deliberately. The purge judges VENDOR content for planted programs;
         // the payload is store-internal - receipts we wrote ourselves and entry folders that already
         // passed the inbound blocklist on import - so it needs no second screening, and running it
         // through one would only risk the purge deleting our own sidecar.
@@ -2420,7 +2420,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
               return cur.summarize(curationPayload, w.attachmentsWritten, w.customizedWritten);
             })()
           : null;
-        // ⚠️ REPORT WHAT LANDED, NOT WHAT WE SET OUT TO WRITE. extractTo counts
+        // REPORT WHAT LANDED, NOT WHAT WE SET OUT TO WRITE. extractTo counts
         // before the purge runs, so the summary claimed 91 files when 86 were on
         // disk (the catch, 2026-09-10: the numbers ARE the test here - before minus
         // removed equals after, and it did not).
@@ -2433,17 +2433,17 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
           folders, curation: _carried, blocked: _purged.blocked, noted: _purged.noted };
       }
       const destPath = _uniqueDestPath(destDir, `${baseName}.zip`);
-      // ⭐⭐ THE SIDECAR IS STAGED AND APPENDED, NOT WRITTEN INTO THE SOURCE. [B-420]
+      // THE SIDECAR IS STAGED AND APPENDED, NOT WRITTEN INTO THE SOURCE. [B-420]
       // `folderRoot` below is the POOLED STORE'S OWN FOLDER, so `writeIntoTree` must NOT run against
       // it the way the folder branch does - that would put our sidecar inside the user's stored
       // source, permanently, and every future export would carry a stale copy of it. Staging the
       // payload's few small files and handing them to zipFolderToFile as `extraEntries` keeps the
       // store untouched and still costs exactly ONE compression pass.
-      // ⭐ NOTHING IS STAGED. `planForArchive` returns the sidecar as a JSON STRING and the payload
+      // NOTHING IS STAGED. `planForArchive` returns the sidecar as a JSON STRING and the payload
       // files as { name, absPath } pointing at where they already live, so there is no temp dir, no
       // copy, and no cleanup that a cancel could skip. The sidecar never becomes a file on disk at
       // all - archiver takes it as bytes.
-      // ⚠️ THE FIRST CUT DID STAGE IT, and the cost was not theoretical: it copied a customized font
+      // THE FIRST CUT DID STAGE IT, and the cost was not theoretical: it copied a customized font
       // into a temp dir purely so archiver could read it straight back out, which is the same
       // write-then-read-it-again waste this change removed from the rest of the path.
       let _extra = [], _carried = null;
@@ -2451,7 +2451,7 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
         const cur = require('./soundFontCuration');
         const plan = cur.planForArchive(curationPayload);
         if (plan) {
-          // ⚠️ THE SIDECAR BYPASSES _selectFolderFiles, WHICH IS WHY IT IS SAFE FROM THE NOISE FILTER.
+          // THE SIDECAR BYPASSES _selectFolderFiles, WHICH IS WHY IT IS SAFE FROM THE NOISE FILTER.
           // Staging it meant the filter got a vote: _isNoisePath drops __MACOSX, .DS_Store, Thumbs.db,
           // desktop.ini and `._`-prefixed names, and '.jmt-curation.json' survived by starting '.j'
           // rather than '._' - one character. Appending it directly removes that dependency entirely.
@@ -2640,7 +2640,7 @@ async function extractSourceFileTo(userData, uuid, subPath, destDir, finalName) 
 async function exportSourceFileTo(userData, uuid, subPath, destDir) {
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const buf = await readSourceFileBytes(userData, uuid, subPath);
-  // ⚠️ THE PER-FILE DOOR IS A DOOR ([B-214], the catch 2026-09-10). The whole-source
+  // THE PER-FILE DOOR IS A DOOR ([B-214], the catch 2026-09-10). The whole-source
   // export refuses programs, so this one-file-at-a-time route out of the SAME store
   // has to as well - otherwise right-click > Export on the one file that matters
   // walks past every guard we built. Free here: the bytes are already in hand.
@@ -2662,19 +2662,19 @@ function openSource(userData, uuid) {
   const uuidDir = path.join(sourcesRoot(userData), uuid);
   const meta = readSourceMeta(uuidDir);
   if (!meta) return null;
-  // ⚠️⚠️ ONE FORMAT, AND THAT IS THE WHOLE POINT OF [B-428]. This used to branch three ways -
+  // ONE FORMAT, AND THAT IS THE WHOLE POINT OF [B-428]. This used to branch three ways -
   // `zip` to `_createZipSource`, `folder` to `_createFolderSource`, then optionally wrap the
   // result in `_virtualizeSource` for a deduped archive. Two of those three were unreachable:
   // the store is an unpacked pool, so no source has ever had `format: 'zip'`, and the virtual
   // view required `format !== 'folder'` as well as `meta.deduped`.
   //
-  // ⭐ THEY WERE DELETED RATHER THAN COMMENTED, because reading them was actively misleading.
+  // THEY WERE DELETED RATHER THAN COMMENTED, because reading them was actively misleading.
   // Reported, after correcting me on it repeatedly in one week: *"No, Cody, that's also wrong,
   // and I've had to correct you on this a lot over the last week."* Dead code that reads as live
   // is not neutral - it is a source of confident wrong answers, and it made editing the live
   // `exportToDownloads` unsafe because the signature matched three identical copies.
   //
-  // ⚠️ NO MIGRATION OBLIGATION: *"there's also not even any legacy zip at all. Because we don't
+  // NO MIGRATION OBLIGATION: *"there's also not even any legacy zip at all. Because we don't
   // have a legacy library, we only have a test library, so it's irrelevant."*
   if (meta.format === 'folder') return _createFolderSource({ uuid, uuidDir, meta });
   throw new Error(`Unknown source format: ${meta.format}`);
@@ -3090,14 +3090,14 @@ function _pickCanonical(paths) {
 // canonical copy per unique file, Proffie preferred, verify before commit — realised in the
 // filesystem instead of in a manifest.
 //
-// ⭐ THE DUPLICATES BECOME HARDLINKS, AND THAT IS WHY THIS IS SMALLER THAN THE ZIP PATH.
+// THE DUPLICATES BECOME HARDLINKS, AND THAT IS WHY THIS IS SMALLER THAN THE ZIP PATH.
 // A trimmed archive has to record what it removed and reconstruct those paths on every read,
 // which is what the breadcrumb and _virtualizeSource exist for. A hardlinked tree removes
 // nothing: every original path is still a real file that opens, reads and copies normally, and
 // an export still zips the complete bundle. The sharing is a filesystem fact, so nothing
 // downstream has to know it happened.
 //
-// ⚠️ SAFE BECAUSE SOURCES ARE IMMUTABLE. Writing through one link would change every path that
+// SAFE BECAUSE SOURCES ARE IMMUTABLE. Writing through one link would change every path that
 // shares the file. Nothing writes into a stored source — entries are extracted copies — so the
 // aliasing has no way to surprise anyone. That invariant is the precondition for this whole
 // approach, not a footnote to it.
@@ -3154,7 +3154,7 @@ async function _dedupeFolderSource(userData, uuid, uuidDir, meta, onProgress) {
       if (onProgress) onProgress({ phase: 'dedupe', fileCount: done, totalFiles: total, currentFile: rel });
       let st;
       try { st = fs.statSync(abs); } catch { skipped++; continue; }
-      // ⚠️ IDEMPOTENCE IS "DOES THIS ALREADY POINT AT ITS CANONICAL", NOT "IS THIS
+      // IDEMPOTENCE IS "DOES THIS ALREADY POINT AT ITS CANONICAL", NOT "IS THIS
       // SHARED WITH ANYTHING". The first version skipped any file with nlink > 1,
       // which is wrong the moment anything else can hold a name: library entries are
       // created BEFORE optimize runs, so a source file a font points at already has
@@ -3187,7 +3187,7 @@ async function _dedupeFolderSource(userData, uuid, uuidDir, meta, onProgress) {
   if (!linked) return { deduped: false, reason: skipped ? 'not-linkable' : 'no-duplicates' };
 
   // Post-check across THE PATHS THIS PASS TOUCHED, and only those.
-  // ⚠️ It verified the whole tree at first, and a test tampering with one duplicate behind
+  // It verified the whole tree at first, and a test tampering with one duplicate behind
   // the manifest's back exposed why that is wrong: dedup correctly REFUSED to link over the
   // altered file, and was then reported as verify-failed for damage it had declined to touch.
   // A pre-existing mismatch is a real finding, but it belongs to the source, not to this pass
@@ -3227,11 +3227,11 @@ async function dedupeSource(userData, uuid, onProgress) {
   if (meta.format === 'folder') {
     return await _dedupeFolderSource(userData, uuid, uuidDir, meta, onProgress);
   }
-  // ⚠️ EVERYTHING BELOW THIS LINE USED TO BE THE ZIP DEDUPE - 105 lines of it, plus
+  // EVERYTHING BELOW THIS LINE USED TO BE THE ZIP DEDUPE - 105 lines of it, plus
   // `_dedupeInnerZipSource`, `_createZipSource`, `_virtualizeSource` and
   // `_extractCanonicalsToDisk`. All of it sat behind `meta.format === 'zip'`, and no source has
   // ever had that format. Removed by [B-428], 2026-09-24.
-  // ⭐ The reason `not-zip` survives as a REASON STRING rather than being renamed: callers read
+  // The reason `not-zip` survives as a REASON STRING rather than being renamed: callers read
   // it, and a folder source that is already deduped returns `already` above, so this is the
   // honest answer for anything else - there is nothing here to dedupe.
   return { deduped: false, reason: 'not-zip' };

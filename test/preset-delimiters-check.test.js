@@ -6,11 +6,11 @@
  * different preset. A 1,249-view Crucible thread has the same family diagnosed by
  * eye: "Your first preset is missing a closing brace }".
  *
- * ⭐ THE FIRST COMPILER ERROR IS THE HONEST ONE. Everything after it is the parser
+ * THE FIRST COMPILER ERROR IS THE HONEST ONE. Everything after it is the parser
  * guessing once it has lost its place, which is why those threads are full of
  * people reading the LAST error and chasing the wrong thing.
  *
- * ⚠️ THIS WAS BUILT ONCE AND LOST. `scratchpad/balance-check.js` was written into a
+ * THIS WAS BUILT ONCE AND LOST. `scratchpad/balance-check.js` was written into a
  * session temp directory and swept; four documents went on citing it as done. The
  * spec survived in crucible/error-corpus.md. It is in the repo now.
  *
@@ -57,7 +57,7 @@ const run = (text) => {
        /further down, often in a different preset/.test(r.findings[0].detail),
        r.findings[0] && r.findings[0].detail);
     ok('it blocks — this cannot compile', check.severity === 'block');
-    // ⭐ THE SAFEST FIX IN THE WHOLE SET: nothing is being guessed. The separator
+    // THE SAFEST FIX IN THE WHOLE SET: nothing is being guessed. The separator
     // goes directly after the track string, that position is known exactly, and a
     // comma is the only thing that can legally sit there.
     ok('it offers to add the comma', !!r.findings[0].fix
@@ -82,7 +82,7 @@ const run = (text) => {
     ok('the repaired preset is clean on a re-run', !run(out).fired);
   }
   {
-    // ⚠️ THE OTHER DELIMITER FAULTS GET NO FIX, deliberately: an unbalanced brace
+    // THE OTHER DELIMITER FAULTS GET NO FIX, deliberately: an unbalanced brace
     // could be repaired in several places and only the author knows which was meant.
     const r = run(wrap('  { "f", "t.wav", StylePtr<Red>(, "A" },'));
     ok('an unbalanced pair offers no fix', r.findings[0].fix === null);
@@ -98,7 +98,7 @@ const run = (text) => {
     ok('it names the LINE the list starts on',
        /The preset list starting on line 2 never closes/.test(r.findings[0].title),
        r.findings[0] && r.findings[0].title);
-    // ⚠️ With the array unreadable there is nothing trustworthy to say about the
+    // With the array unreadable there is nothing trustworthy to say about the
     // presets inside it. One honest finding beats a pile of guesses.
     ok('it stops there rather than reporting the presets inside', r.findings.length === 1,
        r.findings.map(f => f.title).join(' | '));
@@ -135,7 +135,7 @@ const run = (text) => {
        !run(wrap('  { "f", "t.wav", StylePtr<Red>(), "A" }, // }}} note')).fired);
   }
   {
-    // ⚠️ ANGLE BRACKETS ARE NOT STRUCTURAL and are deliberately not counted:
+    // ANGLE BRACKETS ARE NOT STRUCTURAL and are deliberately not counted:
     // Int<-1> and comparisons put stray < and > in perfectly valid code.
     ok('Int<-1> and friends do not trip the angle-bracket trap',
        !run(wrap('  { "f", "t.wav", StylePtr<Mix<Int<-1>,Red,Blue>>(), "A" },')).fired);
@@ -164,7 +164,7 @@ const run = (text) => {
       ok(`none of the ${known.length} known-good configs fire`, bad.length === 0, bad.join(', '));
     }
     if (wild.length) {
-      // ⚠️ THESE ARE REAL FINDINGS, NOT A FALSE-POSITIVE BUDGET. Each names a line
+      // THESE ARE REAL FINDINGS, NOT A FALSE-POSITIVE BUDGET. Each names a line
       // where the brace walk SAW the group fail to close — an observation, not an
       // inference. A first build inferred it from a count mismatch instead and told
       // the wrong story about 7230_1.h, which is a forum paste with a bare

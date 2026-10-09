@@ -8,11 +8,11 @@
  * that compiles. `_findBracketError` was innocent — it strips comments correctly and
  * was reporting a real imbalance in text that had already been cut wrong upstream.
  *
- * ⭐ The corpus is why this is a bug and not a curiosity: 43,993 style pastes across
+ * The corpus is why this is a bug and not a curiosity: 43,993 style pastes across
  * 196 files produced 30 failures, ALL 30 comment-caused and none malformed. Against
  * vendor style files — the things people paste FROM — 24 of 103 (23%), of which
  * Greyscale Free alone is 18, because the catalogue shares one file template.
- * ⭐ And the common trigger is COMMENTED-OUT CODE (`//LockupTrL<Layers<`), not prose,
+ * And the common trigger is COMMENTED-OUT CODE (`//LockupTrL<Layers<`), not prose,
  * which is why `//` matters as much as block comments.
  *
  * [B-458] `_parseClipboardStyle` tested bare `source:` / `url:` labels while
@@ -22,7 +22,7 @@
  * metadata body ran all the way to the FOOTER's closing marker, dragging the `using`
  * statement in with it.
  *
- * ⚠️ Both fixes must leave the FOREIGN formats alone — Fett263 pastes use bare labels,
+ * Both fixes must leave the FOREIGN formats alone — Fett263 pastes use bare labels,
  * naked URLs, `copyright …` and `OS8.10 …` lines, and those paths were never broken.
  *
  * Run: node test/style-paste-comment-safety.test.js
@@ -90,22 +90,22 @@ function balanced(expr) {
 }
 
 {
-  // ⚠️ CONTROL FIRST. If the plain case does not come out balanced, nothing below
+  // CONTROL FIRST. If the plain case does not come out balanced, nothing below
   // means anything — the harness would be measuring its own breakage.
   ok('CONTROL: a comment-free style extracts balanced',
      balanced(_extractStylePtrInner('StylePtr<Layers<Red,Blue>>()')));
   ok('CONTROL: a genuinely unterminated style still returns null',
      _extractStylePtrInner('StylePtr<Layers<Red,Blue') === null);
 
-  // ⭐ THE MINIMAL REPRO. One stray `>` in prose was enough.
-  ok('⭐ a block comment with a stray ">" does not truncate',
+  // THE MINIMAL REPRO. One stray `>` in prose was enough.
+  ok('a block comment with a stray ">" does not truncate',
      balanced(_extractStylePtrInner('StylePtr<Layers</* a -> b */Red,Blue>>()')),
      'the `tip->emitter` shape that first surfaced this');
   ok('a block comment with a stray "<" does not truncate',
      balanced(_extractStylePtrInner('StylePtr<Layers</* a < b */Red,Blue>>()')));
 
-  // ⭐⭐ THE SHAPE THAT ACTUALLY DOMINATES THE CORPUS: commented-out code.
-  ok('⭐⭐ a // line of commented-out code does not truncate',
+  // THE SHAPE THAT ACTUALLY DOMINATES THE CORPUS: commented-out code.
+  ok('a // line of commented-out code does not truncate',
      balanced(_extractStylePtrInner('StylePtr<Layers<\n//LockupTrL<Layers<\nRed,Blue>>()')),
      '`//LockupTrL<Layers<` is two `<` and no `>` — 18 Greyscale files carry this shape');
   ok('a // comment at end of line does not truncate',
@@ -120,7 +120,7 @@ function balanced(expr) {
     + 'Red,Blue>>()';
   ok('his actual Melt header comment does not truncate', balanced(_extractStylePtrInner(MELT)));
 
-  // ⚠️ The content must still be RIGHT, not merely balanced — a scanner that returned
+  // The content must still be RIGHT, not merely balanced — a scanner that returned
   // the empty string would pass the balance check on its own. The inner of
   // `StylePtr<Layers<…>>` is `Layers<…>`: one `>` closes Layers, one closes StylePtr.
   ok('the extracted expression is the whole inner expression',
@@ -134,21 +134,21 @@ function balanced(expr) {
      _extractStylePtrInner('//StylePtr<Layers<Old>>()\nStylePtr<Layers<New>>()') === 'Layers<New>',
      JSON.stringify(_extractStylePtrInner('//StylePtr<Layers<Old>>()\nStylePtr<Layers<New>>()')));
 
-  // ⭐ End to end: the paste path must now report a clean style as clean.
+  // End to end: the paste path must now report a clean style as clean.
   const verdict = (text) => {
     const parsed = _parseClipboardStyle(text);
     if (!parsed.expr) return 'noexpr';
     const err = _findBracketError(`using _check_ = ${parsed.expr};`);
     return err ? (err.unreadable ? 'unreadable' : err.message) : 'ok';
   };
-  ok('⭐ end to end: the minimal repro now passes the bracket check',
+  ok('end to end: the minimal repro now passes the bracket check',
      verdict('StylePtr<Layers</* a -> b */Red,Blue>>()') === 'ok',
      verdict('StylePtr<Layers</* a -> b */Red,Blue>>()'));
   ok('end to end: the commented-out-code shape passes too',
      verdict('StylePtr<Layers<\n//LockupTrL<Layers<\nRed,Blue>>()') === 'ok');
-  // ⚠️ AND A GENUINELY BROKEN STYLE MUST STILL BE CAUGHT. A fix that silences the
+  // AND A GENUINELY BROKEN STYLE MUST STILL BE CAUGHT. A fix that silences the
   // checker would pass every test above and be worse than the bug.
-  ok('⚠️ a genuinely unbalanced style is STILL reported',
+  ok('a genuinely unbalanced style is STILL reported',
      verdict('StylePtr<Layers<Red,Blue>>()'.replace('Blue>>', 'Blue>')) !== 'ok');
 }
 
@@ -164,21 +164,21 @@ function balanced(expr) {
   ok('CONTROL: the writer still emits `// source:`', /^\/\/ source: /m.test(block), block);
 
   const p = _parseClipboardStyle(block);
-  ok('⭐ round trip: name',   p.name === 'ArrowStyle', p.name);
-  ok('⭐ round trip: source', p.source === 'Teirfon Orbital', JSON.stringify(p.source));
-  ok('⭐ round trip: url',    p.url === 'https://example.com', JSON.stringify(p.url));
-  ok('⭐ round trip: tags',   p.tags === 'OS8.10, accent', JSON.stringify(p.tags));
-  ok('⭐ round trip: expr',   p.expr === 'Layers<Red,Blue>', JSON.stringify(p.expr));
+  ok('round trip: name',   p.name === 'ArrowStyle', p.name);
+  ok('round trip: source', p.source === 'Teirfon Orbital', JSON.stringify(p.source));
+  ok('round trip: url',    p.url === 'https://example.com', JSON.stringify(p.url));
+  ok('round trip: tags',   p.tags === 'OS8.10, accent', JSON.stringify(p.tags));
+  ok('round trip: expr',   p.expr === 'Layers<Red,Blue>', JSON.stringify(p.expr));
 
-  // ⚠️ The notes field is where everything used to end up, so assert what is ABSENT
+  // The notes field is where everything used to end up, so assert what is ABSENT
   // as well as what is present — that is the half the original bug failed.
   ok('round trip: notes keep their text', /first note line/.test(p.notes), JSON.stringify(p.notes));
-  ok('⭐ notes do NOT contain the source line',  !/source:/i.test(p.notes), JSON.stringify(p.notes));
-  ok('⭐ notes do NOT contain the url line',     !/url:/i.test(p.notes),    JSON.stringify(p.notes));
-  ok('⭐ notes do NOT contain the tags line',    !/tags:/i.test(p.notes),   JSON.stringify(p.notes));
-  ok('⭐ notes do NOT keep the `notes:` label',  !/notes:/i.test(p.notes),  JSON.stringify(p.notes));
-  ok('⭐⭐ notes do NOT swallow the `using` line', !/using\s/.test(p.notes), JSON.stringify(p.notes));
-  ok('⭐⭐ notes do NOT swallow the footer',       !/Add to preset/.test(p.notes), JSON.stringify(p.notes));
+  ok('notes do NOT contain the source line',  !/source:/i.test(p.notes), JSON.stringify(p.notes));
+  ok('notes do NOT contain the url line',     !/url:/i.test(p.notes),    JSON.stringify(p.notes));
+  ok('notes do NOT contain the tags line',    !/tags:/i.test(p.notes),   JSON.stringify(p.notes));
+  ok('notes do NOT keep the `notes:` label',  !/notes:/i.test(p.notes),  JSON.stringify(p.notes));
+  ok('notes do NOT swallow the `using` line', !/using\s/.test(p.notes), JSON.stringify(p.notes));
+  ok('notes do NOT swallow the footer',       !/Add to preset/.test(p.notes), JSON.stringify(p.notes));
 }
 
 // ── the foreign formats must be untouched ──────────────────────────────────
@@ -213,7 +213,7 @@ function balanced(expr) {
 // scanner took the FIRST block comment anywhere in the text, and in a config slot
 // that is `/* Base blade */` sitting INSIDE the expression — so the harvest began
 // mid-code and ran to the next comment's close.
-// ⚠️ The paste itself was already correct by then. A fix can be right and still leave
+// The paste itself was already correct by then. A fix can be right and still leave
 // a wrong-looking result on screen, which is why the eyes are the test that counts.
 // ───────────────────────────────────────────────────────────────────────────
 {
@@ -225,9 +225,9 @@ function balanced(expr) {
     + '  Blue>>()';
   const p = _parseClipboardStyle(SLOT);
 
-  ok('⭐⭐ an inline comment does not become metadata: notes stay empty',
+  ok('an inline comment does not become metadata: notes stay empty',
      p.notes === '', JSON.stringify(p.notes));
-  ok('⭐ and no style CODE leaks into notes',
+  ok('and no style CODE leaks into notes',
      !/StripesX|AlphaL/.test(p.notes), JSON.stringify(p.notes));
   ok('no comment wrappers leak into notes',
      !/\/\*|\*\//.test(p.notes), JSON.stringify(p.notes));
@@ -236,11 +236,11 @@ function balanced(expr) {
   ok('and it still passes the bracket check',
      _findBracketError(`using _check_ = ${p.expr};`) === null);
 
-  // ⚠️ THE REGRESSION RISK: the config slot's "Add to Library" button relies on a
+  // THE REGRESSION RISK: the config slot's "Add to Library" button relies on a
   // LEADING comment to supply the style name. A header before the code must still work.
   const HEADED = '/*--- MyAccent ---*/\n' + SLOT;
   const h = _parseClipboardStyle(HEADED);
-  ok('⚠️ a LEADING header still supplies the name', h.name === 'MyAccent', h.name);
+  ok('a LEADING header still supplies the name', h.name === 'MyAccent', h.name);
   ok('and a leading header with no body adds no notes', h.notes === '', JSON.stringify(h.notes));
 
   // _styleCodeStart is the whole rule, so assert it directly too.
@@ -249,7 +249,7 @@ function balanced(expr) {
   ok('code start finds a bare StylePtr at 0', _styleCodeStart('StylePtr<Red>()') === 0);
   ok('code start returns -1 when there is no code',
      _styleCodeStart('/* just a comment */') === -1);
-  ok('⚠️ a commented-out `using` does not count as the code start',
+  ok('a commented-out `using` does not count as the code start',
      _styleCodeStart('// using Old = Red;\nusing New = Blue;')
        === '// using Old = Red;\n'.length,
      String(_styleCodeStart('// using Old = Red;\nusing New = Blue;')));

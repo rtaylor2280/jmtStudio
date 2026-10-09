@@ -1,6 +1,6 @@
 // The in-app download browser must not navigate itself to a blank popup. [2026-10-07]
 //
-// ⭐⭐ WHY THIS EXISTS. The link-import browser could not capture a single font from
+// WHY THIS EXISTS. The link-import browser could not capture a single font from
 // bvm-sabers.co.uk, and the cause was one truthiness check in our own window-open
 // handler, not anything the vendor does wrong.
 //
@@ -16,13 +16,13 @@
 // No download started, and nothing raised an error - the window simply sat on a blank
 // page looking like the click had not registered.
 //
-// ⚠️ WHY THIS IS NOT A SOURCE-TEXT ASSERTION. Grepping main.js for the string
+// WHY THIS IS NOT A SOURCE-TEXT ASSERTION. Grepping main.js for the string
 // "about:blank" would pass for a comment, a log line, or a guard that was written and
 // then inverted. So this file EXTRACTS the real handler body and RUNS it against a fake
 // window, and asserts on what it did. Delete the guard and the fake records a navigation
 // and this fails.
 //
-// ⚠️ A real URL must still navigate. That is the whole reason the handler exists - vendors
+// A real URL must still navigate. That is the whole reason the handler exists - vendors
 // whose Download is a `target=_blank` link need the popup loaded into our window so the
 // download fires on the session we are listening to. A fix that simply stopped navigating
 // would trade one broken set of vendors for another, so both directions are asserted.
@@ -57,7 +57,7 @@ function extractHandler() {
 
 const body = extractHandler();
 
-// ⚠️ The fixture's own precondition, asserted before anything is built on it. An extraction
+// The fixture's own precondition, asserted before anything is built on it. An extraction
 // that silently returned nothing would make every assertion below vacuously true.
 ok('handler body extracted from main.js', !!body && body.length > 20,
    `got ${body === null ? 'null' : JSON.stringify(String(body).slice(0, 60))}`);

@@ -84,16 +84,16 @@ const BUNDLE = {
     check('7 files, 3 unique', r.originalFiles === 7 && r.uniqueFiles === 3, JSON.stringify(r));
     check('4 duplicates linked', r.linkedFiles === 4, String(r.linkedFiles));
 
-    // ⭐ The tree is still WHOLE — this is the assertion that matters most.
+    // The tree is still WHOLE — this is the assertion that matters most.
     const after = Object.keys(BUNDLE).map(r2 => sha(path.join(src, r2)));
-    check('⭐ every original path still reads its original bytes',
+    check('every original path still reads its original bytes',
       JSON.stringify(before) === JSON.stringify(after));
     check('every path still exists as a real file',
       Object.keys(BUNDLE).every(r2 => fs.statSync(path.join(src, r2)).isFile()));
 
-    // ⭐ And it actually shares storage rather than just claiming to.
+    // And it actually shares storage rather than just claiming to.
     const st = (r2) => fs.statSync(path.join(src, r2));
-    check('⭐ duplicates share one inode', st('Xenopixel/Ahsoka/hum.wav').ino === st('Proffie/Ahsoka/hum.wav').ino,
+    check('duplicates share one inode', st('Xenopixel/Ahsoka/hum.wav').ino === st('Proffie/Ahsoka/hum.wav').ino,
       `${st('Xenopixel/Ahsoka/hum.wav').ino} vs ${st('Proffie/Ahsoka/hum.wav').ino}`);
     check('link count reflects the sharing', st('Proffie/Ahsoka/hum.wav').nlink === 3,
       String(st('Proffie/Ahsoka/hum.wav').nlink));
@@ -109,10 +109,10 @@ const BUNDLE = {
     const { userData, uuid, uuidDir } = makeFolderSource(BUNDLE);
     await S.dedupeSource(userData, uuid);
     const m = JSON.parse(fs.readFileSync(path.join(uuidDir, 'meta.json'), 'utf8'));
-    // ⚠️ `hash` is the identity of what ARRIVED, not a digest of what we hold. The zip
+    // `hash` is the identity of what ARRIVED, not a digest of what we hold. The zip
     // path already relies on this — it rewrites source.zip and leaves hash alone — so a
     // dedup that changed it would break re-import recognition.
-    check('⚠️ the source hash is NOT rewritten', m.hash === 'original-archive-hash-preserved', m.hash);
+    check('the source hash is NOT rewritten', m.hash === 'original-archive-hash-preserved', m.hash);
     check('it is flagged deduped', m.deduped === true);
     check('stats are recorded', m.dedupStats && m.dedupStats.uniqueFiles === 3,
       JSON.stringify(m.dedupStats));
@@ -124,7 +124,7 @@ const BUNDLE = {
 
   {
     console.log('a file an ENTRY already points at is still deduped');
-    // ⚠️ The regression this exists for: library entries are created BEFORE optimize
+    // The regression this exists for: library entries are created BEFORE optimize
     // runs, so a source file a font points at already has nlink 2. An idempotence
     // guard written as "nlink > 1 means done" walks straight past those — measured on
     // a real bundle as 3,132 duplicates found and only 2,329 linked, with the other
@@ -140,7 +140,7 @@ const BUNDLE = {
 
     const r = await S.dedupeSource(userData, uuid);
     check('it is still linked to the canonical', r.linkedFiles === 4, JSON.stringify(r));
-    check('⭐ and it now shares with Proffie, not just with the outsider',
+    check('and it now shares with Proffie, not just with the outsider',
       fs.statSync(path.join(src, 'Xenopixel/Ahsoka/hum.wav')).ino
         === fs.statSync(path.join(src, 'Proffie/Ahsoka/hum.wav')).ino);
     check('the outside holder still reads its bytes',

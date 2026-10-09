@@ -7,11 +7,11 @@
  * arduino-cli's raw "No such file or directory", pointing at a path the user
  * never typed.
  *
- * ⭐ THE REAL CASE IS ONE DROPDOWN AWAY, which is why this is worth a check rather
+ * THE REAL CASE IS ONE DROPDOWN AWAY, which is why this is worth a check rather
  * than a translation: `jmt_fett263_wrapper.h` exists only in the `+JMT` trees, and
  * "ProffieOS 8.10" sits directly beside "ProffieOS 8.10 +JMT" in the picker.
  *
- * ⚠️ THE SHAPE GATE IS WHAT KEEPS IT HONEST. A prop can legitimately live outside
+ * THE SHAPE GATE IS WHAT KEEPS IT HONEST. A prop can legitimately live outside
  * props/, and a hand-edited include is not ours to judge — so this only speaks when
  * the include matches our own props/ shape AND the file is absent from that exact
  * folder. Most of what follows asserts the silence.
@@ -109,7 +109,7 @@ const run = async (text, extra) => {
     ok('no version selected -> unsure, never a claim', !!r.unsure && !r.blocked, r.unsure);
   }
   {
-    // ⚠️ A FAILED LISTING IS NOT AN ABSENT FILE. Saying "your prop is missing"
+    // A FAILED LISTING IS NOT AN ABSENT FILE. Saying "your prop is missing"
     // because our own lookup broke is the worst answer available.
     const r = await run(cfg('../props/saber_sa22c_buttons.h'), { listVersionDir: async () => ({ ok: false }) });
     ok('an unreadable props folder is unsure, not a missing prop', !!r.unsure && !r.blocked, r.unsure);

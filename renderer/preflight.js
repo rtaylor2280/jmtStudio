@@ -22,7 +22,7 @@
  *   severity   'block' — the compile cannot succeed.
  *              'warn'  — it compiles, and something is wrong afterwards.
  *
- *   ⚠️ SEVERITY NAMES THE CONSEQUENCE OF IGNORING, NOT THE IMPORTANCE, and the
+ *   SEVERITY NAMES THE CONSEQUENCE OF IGNORING, NOT THE IMPORTANCE, and the
  *   entry is emphatic that this ranks them BACKWARDS if you let it. A build
  *   failure costs minutes at the desk with an error pointing at it. A config that
  *   compiles and misbehaves is found after flashing, with the saber closed up,
@@ -35,7 +35,7 @@
  *     { findings: [...] }      these things are wrong.
  *     { unsure: 'reason' }     I cannot tell, so say nothing.
  *
- *   ⭐ "I CANNOT TELL" IS A FIRST-CLASS ANSWER (settled 2026-09-12: "I really
+ *   "I CANNOT TELL" IS A FIRST-CLASS ANSWER (settled 2026-09-12: "I really
  *   don't ever want to be wrong"). A check that is only mostly right is worse than
  *   no check: one false positive costs the user time AND teaches them the gate is
  *   noise, after which it stops working even when it is right. Measured precedent,
@@ -53,7 +53,7 @@
  *   apart WITHOUT matching on their wording, which [B-375] is about to rewrite
  *   wholesale. A test that greps the copy is a test that breaks on a copy pass.
  *
- *   ⭐ THE ROW IS THE FINDING, NOT THE ITEM. One finding may cover 58 presets; it
+ *   THE ROW IS THE FINDING, NOT THE ITEM. One finding may cover 58 presets; it
  *   is still one row with one fix. Splitting it per item turns a real 58-preset
  *   voicepack case into 58 clicks.
  *
@@ -61,7 +61,7 @@
  *   finding, in the row — never as a button at the bottom of the dialog. Two
  *   checks that both offer a fix would otherwise both want the same button.
  *
- * ⚠️ EVERY FIX THE USER ACCEPTS IS APPLIED AS ONE ATOMIC BATCH, by the caller, and
+ * EVERY FIX THE USER ACCEPTS IS APPLIED AS ONE ATOMIC BATCH, by the caller, and
  * that is a property of the mechanism rather than a courtesy. Edits are computed
  * against the document as it is NOW; apply one fix and the coordinates the next
  * fix computed are stale. That exact failure corrupted a config on 2026-09-12
@@ -112,7 +112,7 @@
       // Comment-stripped once, for every check that reasons about what the
       // PREPROCESSOR sees rather than what the file says. Doing this per check
       // is the cost the shared context exists to avoid.
-      // ⚠️ Fine on config text, which has no JS regex literals — the one shape
+      // Fine on config text, which has no JS regex literals — the one shape
       // this stripper mis-reads. Do not point it at our own source; see
       // test/reference-integrity.test.js for what that costs.
       cleanText: stripComments(text),
@@ -126,7 +126,7 @@
       // [B-170] The selected USB type, e.g. 'cdc_webusb' or 'cdc_msc'. A BUILD
       // setting, not the SD card — this does not breach the config-only rule, which
       // exists because the card cannot be seen at compile time. The USB type can.
-      // ⚠️ Empty is normal (nothing selected yet, or a caller that does not know) and
+      // Empty is normal (nothing selected yet, or a caller that does not know) and
       // must read as "cannot tell", never as a default. Guessing 'cdc_webusb' here
       // would make a check fire on a config nobody has chosen a USB type for.
       usbType:     o.usbType || '',
@@ -215,7 +215,7 @@
   // exist, and swapping a font silently DROPPED the shared segment. One model,
   // consumed everywhere. [B-326]
   //
-  // ⚠️ Empties are preserved at index 0 on purpose: ";common" means "no font yet,
+  // Empties are preserved at index 0 on purpose: ";common" means "no font yet,
   // plus the shared folder", which is a different state from having no shared
   // folder at all. Callers wanting a real name use the filtered accessors.
   function fontPathParts(fontValue) {
@@ -253,7 +253,7 @@
   // until they have clicked through all of it" — which is the same failure as a
   // chain of modals, one layer down.
   //
-  // ⚠️ A CHECK THAT THROWS IS A CHECK THAT SAYS NOTHING. It must never take the
+  // A CHECK THAT THROWS IS A CHECK THAT SAYS NOTHING. It must never take the
   // compile with it: the user asked to build, and our inability to inspect their
   // config is our problem, not a reason to stop them. Recorded in `errors` so it
   // is debuggable rather than silent.

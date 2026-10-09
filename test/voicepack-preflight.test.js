@@ -1,7 +1,7 @@
 /**
  * Voicepack check — unit tests for the pure logic.
  *
- * ⚠️ THIS SUITE USED TO EXTRACT ITS SUBJECT OUT OF renderer/index.html BY MARKER.
+ * THIS SUITE USED TO EXTRACT ITS SUBJECT OUT OF renderer/index.html BY MARKER.
  * As of 2026-09-12 the check is a registered entry in preflight-checks.js [B-224],
  * so it is simply required — which is the whole point of the registry: a check is
  * data, reads a context, and never touches the DOM. Every assertion below is

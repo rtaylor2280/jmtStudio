@@ -3,20 +3,20 @@
 // The requirement: an export to removable media should be able to end with the card safely
 // released, rather than the user guessing when it is finished writing.
 //
-// ⭐⭐ THE VERIFICATION IS ALREADY CROSS-PLATFORM; ONLY THE INVOKE IS NOT. That is the whole
+// THE VERIFICATION IS ALREADY CROSS-PLATFORM; ONLY THE INVOKE IS NOT. That is the whole
 // shape of this module and the reason extending it is cheap. Everything expensive that was
 // learned on 2026-09-20 - verify by observation rather than by the eject command's return
 // value, debounce a second, and watch the FILESYSTEM rather than the volume table - is
 // platform-neutral. `/Volumes/NAME` disappearing on a Mac is the identical signal to `E:\`
 // going absent on Windows. So each platform supplies two things and inherits the rest.
 //
-// ⭐ MEASURED ON HIS BENCH, WINDOWS, 2026-09-20 - the rules below are not reasoned:
+// MEASURED ON THE BENCH, WINDOWS, 2026-09-20 - the rules below are not reasoned:
 //
 //     E:  proffieboard (Tlera DOSFS)   gone at 20.18s, never returned   letter LINGERS
 //     I:  card-reader (USB, 2 slots)   gone 31.67 -> BACK 31.93 -> gone letter LINGERS
 //     F:  card-slot (laptop side port) gone at 67.50s, clean            letter VANISHES
 //
-// ⚠️⚠️ TWO OS BEHAVIOURS, ONE CHECK. With the reader still attached, Windows keeps the drive
+// TWO OS BEHAVIOURS, ONE CHECK. With the reader still attached, Windows keeps the drive
 // letter listed as an empty removable drive (`Size=<null>`) - a reader with no card in it.
 // Only the built-in slot makes it vanish. **`fs.existsSync` is false for all three**, which is
 // why the mount path is what gets watched and not the volume table: enumeration still reports
@@ -24,9 +24,9 @@
 // card that was already safe. Device status is worse - after E: ejected, the Tlera disk, the
 // mass-storage interface and COM6 all still reported OK. Same trap as 2026-09-15.
 //
-// ⭐ THE BOARD SURVIVES AN EJECT COMPLETELY - COM6 stays alive and the board stays flashable.
+// THE BOARD SURVIVES AN EJECT COMPLETELY - COM6 stays alive and the board stays flashable.
 //
-// ⚠️ HOST-SIDE ONLY, HIS RULING. ProffieOS has `sd 1` / `sd 0` to hand the card between the
+// HOST-SIDE ONLY, THE RULING. ProffieOS has `sd 1` / `sd 0` to hand the card between the
 // saber and the computer, and this module sends neither: "it's no different really than
 // physically pulling and then putting back in. just a manual command to do it on purpose.
 // shouldn't change anything for eject." If a remount is ever built, read
@@ -34,7 +34,7 @@
 //
 // ── PORTING STATUS ──────────────────────────────────────────────────────────────────────
 //
-// ⚠️⚠️ WINDOWS IS MEASURED. macOS AND LINUX ARE WIREFRAMED AND UNVALIDATED. Every non-Windows
+// WINDOWS IS MEASURED. macOS AND LINUX ARE WIREFRAMED AND UNVALIDATED. Every non-Windows
 // branch below is written to the best available knowledge and marked `UNVERIFIED` where a
 // specific claim needs a real box to settle. **Do not report those platforms as working on the
 // strength of this file.** The 09-20 lesson is the reason for that caution: every single rule
@@ -51,7 +51,7 @@ const { execFile } = require('child_process');
 // `invoke`       ask the OS to release it (fire-and-forget; never trusted)
 // `vocab`        the user-facing words, because the DIFFERENCE IS NOT ONLY WORDING
 //
-// ⭐⭐ `vocab.lingersAfterEject` IS A BEHAVIOUR FLAG, NOT A STRING. On Windows the drive letter
+// `vocab.lingersAfterEject` IS A BEHAVIOUR FLAG, NOT A STRING. On Windows the drive letter
 // stays listed as an empty drive and the success message MUST say so - without it the app
 // contradicts what the user can see, which is exactly how the user read a successful eject as a
 // failure ("didn't work. I see it's still connected... (E)"). On macOS and Linux the mount
@@ -68,10 +68,10 @@ const PLATFORMS = {
   // ── Windows: measured 2026-09-20 ──
   win32: {
     osName: 'Windows',
-    // ⚠️ The ROOT of the drive, not the export folder. `E:\fonts\Ahsoka` still exists as a
+    // The ROOT of the drive, not the export folder. `E:\fonts\Ahsoka` still exists as a
     // path string after an eject; `E:\` is what stops existing when the media goes.
     //
-    // ⚠️⚠️ THE WHOLE `X:` PREFIX MUST BE PRESENT - TAKING THE FIRST CHARACTER IS DANGEROUS.
+    // THE WHOLE `X:` PREFIX MUST BE PRESENT - TAKING THE FIRST CHARACTER IS DANGEROUS.
     // The first cut did `slice(0,1).toUpperCase()` and accepted anything, so the string
     // "not-a-path" resolved to `N:\` - a real drive on some machines, and one with nothing to
     // do with the export. An eject aimed by a typo at an unrelated volume is the worst thing
@@ -81,28 +81,28 @@ const PLATFORMS = {
       return m ? `${m[1].toUpperCase()}:\\` : null;
     },
     label: (mountPath) => String(mountPath || '').slice(0, 2),   // "E:"
-    // ⚠️ PER-VOLUME, NOT PER-DEVICE. The USB reader has two slots on ONE device holding H: and
+    // PER-VOLUME, NOT PER-DEVICE. The USB reader has two slots on ONE device holding H: and
     // I:, so a device-level eject would dismount a sibling card it is still using.
-    // ⚠️ No admin required, which is why this and not `mountvol /p`.
-    // ⚠️⚠️ FIND THE VERB, DO NOT NAME IT. This called `InvokeVerb("Eject")`, which is a match
+    // No admin required, which is why this and not `mountvol /p`.
+    // FIND THE VERB, DO NOT NAME IT. This called `InvokeVerb("Eject")`, which is a match
     // against the verb's DISPLAY name - and the display name on this machine is `E&ject`, with
     // the menu accelerator in it. `InvokeVerb` returns nothing whether it matched or missed, so
     // a miss is indistinguishable from a success that the media ignored.
     //
-    // ⭐ AND THE DISPLAY NAME IS LOCALISED. On a German Windows the verb is `Aus&werfen`; on a
+    // AND THE DISPLAY NAME IS LOCALISED. On a German Windows the verb is `Aus&werfen`; on a
     // French one `&Éjecter`. The literal string "Eject" cannot match either, so every eject on a
     // non-English Windows would have silently done nothing while the app waited 15 seconds and
     // then told the user their card was in use. Nobody would have reported it as a bug - it
     // looks exactly like a busy volume. Measured 2026-09-21 by enumerating `Verbs()`.
     //
-    // ⚠️ SO STRIP THE `&` AND COMPARE, and report WHICH branch happened, because `raw` is the
+    // SO STRIP THE `&` AND COMPARE, and report WHICH branch happened, because `raw` is the
     // only evidence the caller gets about whether the verb ever fired:
     //     "ejected"      the verb was found and called
     //     "no-verb"      the volume offers no Eject - a real answer, not a timeout
     //     "no-item"      the shell has no such volume
-    // ⚠️ `raw` IS NOT COSMETIC. It always said "invoked", which is what made the app's "in use"
+    // `raw` IS NOT COSMETIC. It always said "invoked", which is what made the app's "in use"
     // report unreadable: it could not say whether the verb was refused or the wait ran out.
-    // ⭐⭐ THE LAUNCHER IS THE FIX, NOT THE API. [2026-09-22]
+    // THE LAUNCHER IS THE FIX, NOT THE API. [2026-09-22]
     //
     // The same shell verb worked from a standalone PowerShell and did nothing useful from a
     // PowerShell that Electron spawned: the card ejected either way, but Windows' own
@@ -110,7 +110,7 @@ const PLATFORMS = {
     // Launching through `cmd /c start` - so the shell starts it and this process is not its
     // parent - makes the notification appear from inside the app.
     //
-    // ⚠️⚠️ THE MECHANISM IS NOT KNOWN AND THIS COMMENT WILL NOT PRETEND OTHERWISE. Five
+    // THE MECHANISM IS NOT KNOWN AND THIS COMMENT WILL NOT PRETEND OTHERWISE. Five
     // candidates were killed BY MEASUREMENT, not by argument: `-NonInteractive` (the standalone
     // host passes it too), the console window (`GetConsoleWindow()` returned 0 on both),
     // ApartmentState (STA on both), session id (1 on both), and job-object limits - both hosts
@@ -118,18 +118,18 @@ const PLATFORMS = {
     // identical; only the parent process differed. So the fix was tested rather than reasoned,
     // and anyone extending this should treat "why" as open.
     //
-    // ⚠️ THE SCRIPT GOES TO A FILE, NOT THROUGH `start`'s ARGUMENT PARSER. Quoting a multi-line
+    // THE SCRIPT GOES TO A FILE, NOT THROUGH `start`'s ARGUMENT PARSER. Quoting a multi-line
     // PowerShell script through cmd.exe, then `start`, then powershell is three levels of
     // escaping whose failure mode is silently running something else.
     //
-    // ⚠️⚠️ AND THE COST IS REAL: `start` RETURNS AS SOON AS IT LAUNCHES, SO THERE IS NO STDOUT.
+    // AND THE COST IS REAL: `start` RETURNS AS SOON AS IT LAUNCHES, SO THERE IS NO STDOUT.
     // `raw` can no longer say whether the verb fired, was refused, or found no volume - the
     // three honest outcomes this module exists to report. It now says `launched` and nothing
     // more. **The verdict therefore rests ENTIRELY on `waitForMediaGone` observing the media
     // leave.** That is a narrower promise than this file used to make and it is not yet the
     // ruling; see the two-witnesses question in the notes.
     //
-    // ⭐⭐ ASK READABLY, ACT DETACHED — AND THAT SPLIT IS WHY THE HONEST OUTCOMES SURVIVED.
+    // ASK READABLY, ACT DETACHED — AND THAT SPLIT IS WHY THE HONEST OUTCOMES SURVIVED.
     //
     // The detached launcher is what makes Windows draw its own notification, and the price is
     // that `start` returns immediately and hands back no stdout. Moving the whole operation
@@ -139,7 +139,7 @@ const PLATFORMS = {
     // That is the localisation defect from 2026-09-21 coming straight back, and the suite
     // caught it - `test/safe-eject.test.js`, "no-verb is NOT reported as busy".
     //
-    // ⭐ The resolution is that only the ACTION needs the detached host. The QUESTION - does
+    // The resolution is that only the ACTION needs the detached host. The QUESTION - does
     // this volume even offer an Eject verb - is a plain read, so it runs in a normal child we
     // can hear back from. Two spawns instead of one, and the verdict keeps its detail.
     invoke: async (mountPath) => {
@@ -162,7 +162,7 @@ const PLATFORMS = {
         '} catch { "error: " + $_.Exception.Message }',
       ].join('\n');
       const q = await _exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query]);
-      // ⚠️ Both are real answers, not timeouts, and both must reach the caller unchanged - they
+      // Both are real answers, not timeouts, and both must reach the caller unchanged - they
       // are the difference between "nothing was ever asked to release this" and "it refused".
       if (q.out === 'no-item' || q.out === 'no-verb') return { ok: true, raw: q.out };
       if (q.out && q.out.startsWith('error:')) return { ok: false, raw: q.out };
@@ -203,7 +203,7 @@ const PLATFORMS = {
   // ── macOS: WIREFRAMED, UNVALIDATED ──
   darwin: {
     osName: 'macOS',
-    // ⚠️ UNVERIFIED: derived by walking up to the /Volumes child. A card at
+    // UNVERIFIED: derived by walking up to the /Volumes child. A card at
     // `/Volumes/MYCARD/fonts/Ahsoka` has the mount point `/Volumes/MYCARD`. This holds for the
     // normal case; a nested or non-/Volumes mount is NOT handled and should be checked against
     // `diskutil info -plist <path>` before this is trusted.
@@ -213,17 +213,17 @@ const PLATFORMS = {
       return m ? m[1] : null;
     },
     label: (mountPath) => path.basename(String(mountPath || '')),
-    // ⚠️ UNVERIFIED: `diskutil eject` is the documented, non-sudo path and is what Finder's
+    // UNVERIFIED: `diskutil eject` is the documented, non-sudo path and is what Finder's
     // eject uses underneath. Open to two unknowns on a real box: whether it returns non-zero
     // when something holds the volume (it should), and whether a Proffieboard-backed volume
     // needs `diskutil unmountDisk` instead because it presents as a whole disk.
-    // ⚠️ The return value is NOT the verdict either way - same rule as Windows.
+    // The return value is NOT the verdict either way - same rule as Windows.
     invoke: async (mountPath) => {
       const r = await _exec('diskutil', ['eject', String(mountPath || '')]);
       return { ok: r.ok, raw: r.out || r.err };
     },
     vocab: {
-      // ⚠️ UNVERIFIED but expected: macOS removes the /Volumes entry on eject, so there is no
+      // UNVERIFIED but expected: macOS removes the /Volumes entry on eject, so there is no
       // lingering empty slot and the Windows explanation must NOT appear here.
       lingersAfterEject: false,
       volumeNoun: 'volume',
@@ -236,7 +236,7 @@ const PLATFORMS = {
   // ── Linux: WIREFRAMED, UNVALIDATED ──
   linux: {
     osName: 'Linux',
-    // ⚠️ UNVERIFIED: removable media typically mounts under /media/<user>/<label> or
+    // UNVERIFIED: removable media typically mounts under /media/<user>/<label> or
     // /run/media/<user>/<label> depending on the distribution's udisks configuration. This
     // matches both shapes and should be checked against `findmnt -no TARGET --target <path>`,
     // which is the correct general answer and needs util-linux present.
@@ -246,7 +246,7 @@ const PLATFORMS = {
       return m ? m[1] : null;
     },
     label: (mountPath) => path.basename(String(mountPath || '')),
-    // ⚠️ UNVERIFIED: `udisksctl unmount` is the non-root path on any udisks2 desktop, which
+    // UNVERIFIED: `udisksctl unmount` is the non-root path on any udisks2 desktop, which
     // covers the distributions this app is likely to meet. `eject` is the older fallback and
     // behaves differently (it targets the DEVICE, not the mount, so it has the sibling-volume
     // hazard the Windows notes describe). Settle which one on the VM before trusting this.
@@ -255,7 +255,7 @@ const PLATFORMS = {
       return { ok: r.ok, raw: r.out || r.err };
     },
     vocab: {
-      // ⚠️ UNVERIFIED but expected: the mount point is removed on unmount.
+      // UNVERIFIED but expected: the mount point is removed on unmount.
       lingersAfterEject: false,
       volumeNoun: 'volume',
       busyNote: (label) =>
@@ -269,7 +269,7 @@ const PLATFORMS = {
 const plat = () => PLATFORMS[process.platform] || null;
 
 // The renderer asks for this ONCE and composes its own messages, so no user-facing string in
-// this app has to branch on an OS name. ⭐ That is what stops a Mac build saying "Windows".
+// this app has to branch on an OS name. That is what stops a Mac build saying "Windows".
 function vocabulary() {
   const p = plat();
   if (!p) return { supported: false, osName: process.platform, volumeNoun: 'volume',
@@ -278,7 +278,7 @@ function vocabulary() {
            lingersAfterEject: p.vocab.lingersAfterEject };
 }
 
-// ⭐ FREE, SO IT CAN BE POLLED. Unlike the device classification, this is a stat - it can run
+// FREE, SO IT CAN BE POLLED. Unlike the device classification, this is a stat - it can run
 // four times a second without anyone noticing. Identical on every platform, which is the whole
 // reason the port is cheap.
 function mediaPresent(mountPath) {
@@ -287,14 +287,14 @@ function mediaPresent(mountPath) {
   try { return fs.existsSync(p); } catch { return false; }
 }
 
-// ⚠️⚠️ DEBOUNCED, BECAUSE ONE SAMPLE LIED. The I: volume went gone -> back -> gone across three
+// DEBOUNCED, BECAUSE ONE SAMPLE LIED. The I: volume went gone -> back -> gone across three
 // consecutive 250 ms polls. Whether the reader briefly re-presented or the poll caught an
 // intermediate teardown state does not matter: on a single sample, suspect the instrument.
-// ⭐ Built from reasoning alone this would have been a single poll and a flaky message.
+// Built from reasoning alone this would have been a single poll and a flaky message.
 const POLL_MS = 250;
 const STABLE_MS = 1000;
 
-// ⚠️⚠️ 60s, AND 15s WAS BELOW A NUMBER WE HAD ALREADY MEASURED. [2026-09-21]
+// 60s, AND 15s WAS BELOW A NUMBER WE HAD ALREADY MEASURED. [2026-09-21]
 //
 // The 09-20 bench run recorded the proffieboard volume dismounting at **20.18 s** - and the
 // ceiling was then set to 15 s. So the one transport this feature exists for was guaranteed to
@@ -303,17 +303,17 @@ const STABLE_MS = 1000;
 // already gone by the time we looked. Earlier the same evening the F: went away roughly ninety
 // seconds after the app had given up on it.
 //
-// ⭐ THE MEASUREMENT WAS IN OUR OWN FILE BEFORE THE CEILING WAS CHOSEN. Nothing new had to be
+// THE MEASUREMENT WAS IN OUR OWN FILE BEFORE THE CEILING WAS CHOSEN. Nothing new had to be
 // learned to get this right; the number was written down in local/export-doors.md and the ceiling
 // was picked without consulting it.
 //
-// ⚠️ WAITING LONGER IS THE CHEAP MISTAKE; A FALSE `busy` IS THE EXPENSIVE ONE. The poll is an
+// WAITING LONGER IS THE CHEAP MISTAKE; A FALSE `busy` IS THE EXPENSIVE ONE. The poll is an
 // `existsSync` - free - and the surface shows an animated "Ejecting" the whole time, so the cost
 // of a generous ceiling is a longer honest wait. The cost of a short one is telling someone their
 // card is in use when it is not, which is advice that cannot be acted on.
 const DEFAULT_EJECT_TIMEOUT_MS = 60000;
 
-// ⭐⭐ `everGone` IS THE WHOLE POINT, AND IT WAS THE ONE THING NOT RECORDED. [2026-10-06]
+// `everGone` IS THE WHOLE POINT, AND IT WAS THE ONE THING NOT RECORDED. [2026-10-06]
 // This function watched for a STABLE absence and threw away the fact that it had seen the media
 // leave at all - so the caller, which has to choose between "never left" and "left and came
 // back", had no way to tell them apart and guessed from whether the card was present at that
@@ -324,7 +324,7 @@ async function waitForMediaGone(mountPath, timeoutMs = DEFAULT_EJECT_TIMEOUT_MS)
   let everGone = false;
   for (;;) {
     if (!mediaPresent(mountPath)) {
-      everGone = true;    // ⭐ latched: a bounce is still a release
+      everGone = true;    // latched: a bounce is still a release
       if (goneSince === null) goneSince = Date.now();
       if (Date.now() - goneSince >= STABLE_MS) {
         return { gone: true, ms: Date.now() - t0, everGone: true };
@@ -355,7 +355,7 @@ function resolveTarget(destDir) {
 //   { status: 'returned' }  media came back; say so rather than claiming success
 //   { status: 'busy'     }  media never went - something still has it open
 //
-// ⭐ 'busy' IS THE CASE THE FEATURE EXISTS FOR. It is the one where pulling the card WOULD have
+// 'busy' IS THE CASE THE FEATURE EXISTS FOR. It is the one where pulling the card WOULD have
 // been unsafe, and it is precisely what a reassuring "safe to remove" message hides.
 async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_MS } = {}) {
   const p = plat();
@@ -375,14 +375,14 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
 
   const inv = await p.invoke(t.mountPath);
 
-  // ⭐⭐ THE POLL IS BACK, AND IT IS NOW THE ONLY WITNESS WE HAVE. [2026-09-22]
+  // THE POLL IS BACK, AND IT IS NOW THE ONLY WITNESS WE HAVE. [2026-09-22]
   //
   // `cmd /c start` returns the moment it launches, so `raw` can no longer report whether the
   // verb fired, was refused, or found no volume. Everything this module promises - the three
   // honest outcomes, never a success dressed up - now rests entirely on watching the media
   // leave. The poll went from a check on the return value to the whole verdict.
   //
-  // ⚠️ AND HIS ORIGINAL QUESTION IS FINALLY TESTABLE HERE. It was proposed that this poll, opening
+  // AND THE ORIGINAL QUESTION IS FINALLY TESTABLE HERE. It was proposed that this poll, opening
   // the volume ROOT every 250 ms, denies the exclusive lock a dismount needs and so prevents
   // the very thing it watches for. That was tested while the eject was broken for an unrelated
   // reason, so it never got a clean answer. With the eject working, a `busy` from this line
@@ -390,12 +390,12 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
   const res = await waitForMediaGone(t.mountPath, timeoutMs);
   if (res.gone) return { status: 'ejected', ...t, ms: res.ms, raw: inv.raw };
 
-  // ⚠️ "WE COULD NOT ASK" IS NOT "SOMETHING HAS IT OPEN". When the volume offered no Eject verb
+  // "WE COULD NOT ASK" IS NOT "SOMETHING HAS IT OPEN". When the volume offered no Eject verb
   // and the media is still there, `busy` would tell the user to close their files - advice that
   // cannot possibly help, because nothing was ever asked to release the card. `unsupported` is
   // the honest branch and the renderer already draws it.
   //
-  // ⭐ THIS BRANCH IS REACHABLE AGAIN BECAUSE THE QUESTION IS ASKED SEPARATELY FROM THE ACTION.
+  // THIS BRANCH IS REACHABLE AGAIN BECAUSE THE QUESTION IS ASKED SEPARATELY FROM THE ACTION.
   // While the whole operation ran behind `cmd /c start`, `raw` could only say 'launched' and
   // this condition could never be true - a branch that reads as handling something while
   // handling nothing. Splitting ask from act is what restored it.
@@ -410,19 +410,19 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
   // Distinguish "never left" from "left and came back" - they mean different things to the
   // person holding the card, so they must not collapse into one message.
   //
-  // ⚠️⚠️ THIS USED TO ASK `mediaPresent(...)`, WHICH IS THE WRONG QUESTION AND MADE THE COMMENT
+  // THIS USED TO ASK `mediaPresent(...)`, WHICH IS THE WRONG QUESTION AND MADE THE COMMENT
   // ABOVE A LIE. [2026-10-06] "Is it here NOW" cannot separate the two cases, because a card that
   // released and was re-mounted is here now - exactly like one that never moved. So every bounce
   // was reported as `busy`, and `returned` was very nearly unreachable: it needed the media to be
   // absent at that instant while never having been stably absent for a whole second.
   //
-  // ⭐ MEASURED, NOT ARGUED (2026-10-06). An export to a card with eject ticked reported
+  // MEASURED, NOT ARGUED (2026-10-06). An export to a card with eject ticked reported
   // "Something is still using L:, so it could not be released." An independent eject of the same
   // volume at the same moment reported that it ejected and the reader re-mounted it straight
   // away. Nothing had it open.
-  // ⚠️ AND THAT IS THE WORST DIRECTION FOR THIS PARTICULAR LIE: `busy` is advice - close your
+  // AND THAT IS THE WORST DIRECTION FOR THIS PARTICULAR LIE: `busy` is advice - close your
   // files and try again - and it cannot be acted on when there is nothing to close.
-  // ⚠️ The re-mount is NOT a quirk of one dock; any disk can do it. Ordinary behaviour the
+  // The re-mount is NOT a quirk of one dock; any disk can do it. Ordinary behaviour the
   // classifier has to handle, not hardware to be chased.
   return { status: res.everGone ? 'returned' : 'busy', ...t,
            ms: res.ms, raw: inv.raw, everGone: !!res.everGone };

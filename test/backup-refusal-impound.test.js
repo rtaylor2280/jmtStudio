@@ -1,7 +1,7 @@
 /**
  * A backup acts on what it refuses, and records a hash of what it carried  [B-394]
  *
- * ⭐ WHAT HE SAW, 2026-09-16, testing backup export/import: after a full REPLACE - which
+ * WHAT IT WAS SAW, 2026-09-16, testing backup export/import: after a full REPLACE - which
  * wipes the library and restores the backup exactly - the import dialog STILL read
  * "335 items match, 2 differ". Reported: "shouldn't have been possible to be different
  * unless backup is not backing up everything."
@@ -10,24 +10,24 @@
  * nothing missing, all nine compared meta fields equal across 151 entries. What lied was
  * the hash the backup recorded ABOUT ITSELF.
  *
- * ⚠️⚠️ TWO PASSES OVER ONE TREE, DISAGREEING:
+ * TWO PASSES OVER ONE TREE, DISAGREEING:
  *     count/archive  (soundFontBackup)   checkCarryableFile DECLINES blocked files
  *     hash/signals   (soundFontEntries)  no carry test at all - counts everything
  * So any item holding a refused file recorded a hash describing a SUPERSET of the
  * archive, permanently, and every later import reported a phantom conflict on files that
  * are identical.
  *
- * ⭐⭐ AND THE SECOND HALF IS HIS, AND IT IS UPSTREAM OF THE FIRST: "if we refuse to send
+ * AND THE SECOND HALF IS THE, AND IT IS UPSTREAM OF THE FIRST: "if we refuse to send
  * a file to a backup... because it's potentially harmful and bad... then it should have
  * told me, and deleted not just failed to export. and then it would not mismatch."
  * Remove the file and there is nothing left to reconcile.
  *
- * ⚠️ NOT A NEW DESIGN - A MISSED DOOR. [B-364] already built impound/Delete/Quarantine and
+ * NOT A NEW DESIGN - A MISSED DOOR. [B-364] already built impound/Delete/Quarantine and
  * its close-out names the doors it was dev-tested across: "right-click export, whole-font
  * export, common, shared tracks and the source close-out". Backup is not in that list.
  * "We already covered this, but missed this use case and hadn't ever tested."
  *
- * ⭐ AND BACKUP IS THE ONLY PATH THAT WALKS THE WHOLE MANAGED STORE, so it is also the
+ * AND BACKUP IS THE ONLY PATH THAT WALKS THE WHOLE MANAGED STORE, so it is also the
  * only full sweep - the one thing that can find a finding in a library that predates the
  * guards, which no per-operation door ever tested.
  *
@@ -55,7 +55,7 @@ function ok(name, cond, extra) {
 {
   ok('the export hashes the carried set when anything was refused',
      /_refusedUnder\(abs\)\) return _carriedHash\(abs\)/.test(backup));
-  ok('⭐ and only then - a clean item keeps the cached fast path',
+  ok('and only then - a clean item keeps the cached fast path',
      /if \(bucket !== 'attachments' && _refusedUnder\(abs\)\)/.test(backup),
      'recomputing every item would undo the persistent-hash work in B-315');
   ok('the carried hash uses the same canonical serialization',
@@ -80,13 +80,13 @@ function ok(name, cond, extra) {
 
   ok('the whole-tree hash does NOT match the archive (this was the bug)', whole !== archived,
      'if these ever match, the fixture stopped containing a declinable file');
-  ok('⭐⭐ the carried hash DOES match what the archive holds', carried === archived);
+  ok('the carried hash DOES match what the archive holds', carried === archived);
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 // ── 2. a refusal is addressable by the removal module ──────────────────────
 //
-// ⚠️ THE ROOTS DIFFER PER KIND AND THAT IS THE WHOLE RISK. soundFontRemoval addresses
+// THE ROOTS DIFFER PER KIND AND THAT IS THE WHOLE RISK. soundFontRemoval addresses
 // (kind, id, relPath) against its own root, and two of them carry a subdirectory the
 // bucket-relative path does not know about:
 //     entry  -> library/<id>          common -> common/<id>/files
@@ -95,13 +95,13 @@ function ok(name, cond, extra) {
 {
   ok('the export records the managed kind per refusal',
      /_kind = bucket === 'library' \? 'entry'/.test(backup));
-  ok('⭐ and strips the store subdirectory for source and common',
+  ok('and strips the store subdirectory for source and common',
      /bucket === 'sources' && _segs\[0\] === 'source'/.test(backup)
      && /bucket === 'common' && _segs\[0\] === 'files'/.test(backup),
      'without this the relPath escapes the item root and the removal is refused');
   ok('shared tracks carry no id',
      /_kind: 'sharedTracks', _id: '',/.test(backup));
-  ok('⭐ the renderer addresses the store, not the bucket',
+  ok('the renderer addresses the store, not the bucket',
      /const relPath = String\(x\._itemRel \|\| x\.relPath/.test(html),
      'relPath stays bucket-relative so the REPORT can say where it came from');
 
@@ -127,7 +127,7 @@ function ok(name, cond, extra) {
     ok(`${kind} — impound resolves and removes it`,
        existed && r && r.ok && !fs.existsSync(abs), JSON.stringify(r).slice(0, 110));
   }
-  ok('⭐⭐ the audio beside it survives in all four stores',
+  ok('the audio beside it survives in all four stores',
      cases.every(([, , , , goodRel]) => fs.existsSync(path.join(SF, ...goodRel))),
      'a wrong relPath would take the neighbour instead');
   fs.rmSync(ud, { recursive: true, force: true });
@@ -135,38 +135,38 @@ function ok(name, cond, extra) {
 
 // ── 3. the export REPORTS it, which is what it never did ───────────────────
 {
-  // ⚠️ MATCHES THE FIELD, NOT THE WHOLE RETURN SHAPE. The first cut of this pinned the
+  // MATCHES THE FIELD, NOT THE WHOLE RETURN SHAPE. The first cut of this pinned the
   // literal `return { destPath, manifest, refused }` and broke the day [B-399] added a
   // fourth field beside it — a red suite over a change that could not possibly have
   // dropped the refusals. An assertion should fail for the reason it is named after.
   ok('exportBackup still returns its refusals',
      /return \{ destPath, manifest, refused[,\s}]/.test(backup));
-  // ⚠️ RE-ANCHORED 2026-09-21 [B-420], NOT WEAKENED. The backup door moved onto the shared
+  // RE-ANCHORED 2026-09-21 [B-420], NOT WEAKENED. The backup door moved onto the shared
   // export runner, so the refusal handling now lives in its `onCompleted` callback and the
   // locals were renamed (`_bkRefused` -> `refused`, `completionMessage` -> `message`). The
   // RULE is unchanged and is the whole point of this file: the refused list must be read off
   // the result and acted on, and the completion must fold into that one dialog.
-  ok('⭐⭐ and the export path now consumes them',
+  ok('and the export path now consumes them',
      /const refused = r\.refused \|\| \[\];/.test(html)
      && /_sfShowProgramRefusal\(\{\s*\n?\s*refused,/.test(html),
      'it read only ok/error/cancelled/residualPath and dropped the list on the floor');
-  ok('⭐ the completion folds INTO that dialog rather than showing two',
+  ok('the completion folds INTO that dialog rather than showing two',
      /prefixHtml: `<div>\$\{_sfEscape\(message\)/.test(html),
      'B-370: "done and continue are to be replaced, combine into one message"');
 
   // The dialog it routes into is the one that removes first and cannot be declined.
   const dlg = html.slice(html.indexOf('const _sfShowProgramRefusal'),
                          html.indexOf('const _sfShowProgramRefusal') + 9000);
-  ok('⚠️ that dialog impounds BEFORE it reports',
+  ok('that dialog impounds BEFORE it reports',
      /const impounded = state \|\| await _sfImpoundRefusals/.test(dlg),
      'removal behind a dialog leaves dismissing it as a way to keep a program');
-  ok('⚠️ and offers no way to decline', /hideCancel: true/.test(dlg)
+  ok('and offers no way to decline', /hideCancel: true/.test(dlg)
      && /confirmText: 'Delete'/.test(dlg) && /altText: 'Quarantine…'/.test(dlg),
      'the choice is how it ends, never whether');
 }
 
 
-// ── ⚠️ THE THROW THAT HID ALL OF IT  [B-395] ──────────────────────────────
+// ── THE THROW THAT HID ALL OF IT  [B-395] ──────────────────────────────
 //
 // The first run of this work produced NO dialog at all. Not a wiring failure - a
 // pre-existing ReferenceError one line above it:
@@ -178,10 +178,10 @@ function ok(name, cond, extra) {
 // after a full backup completed, and everything after it (including the refusal dialog)
 // never ran. Present in HEAD, not introduced by this work.
 //
-// ⭐ IT ALSO EXPLAINS A SILENT ONE EARLIER THE SAME DAY: the 15GB export "finished" and
+// IT ALSO EXPLAINS A SILENT ONE EARLIER THE SAME DAY: the 15GB export "finished" and
 // it never saw Export complete. The zip was written; the dialog threw.
 {
-  // ⚠️ ANCHORED ON TWO MARKERS, NOT A CHARACTER COUNT. [B-420, 2026-09-21] This sliced 14,000
+  // ANCHORED ON TWO MARKERS, NOT A CHARACTER COUNT. [B-420, 2026-09-21] This sliced 14,000
   // characters from the function's start, which happened to contain it - until the door was
   // migrated onto the shared runner and the content shifted. A window measured in characters
   // is a window that silently stops covering what it was written to cover.
@@ -190,13 +190,13 @@ function ok(name, cond, extra) {
   const fn = (_fnStart > 0 && _fnEnd > _fnStart) ? html.slice(_fnStart, _fnEnd) : '';
   ok('the backup door was located', fn.length > 0,
      're-anchor this if the function or the comment after it is renamed');
-  // ⚠️⚠️ THE `state.startMs` ASSERTION THAT USED TO SIT HERE IS GONE, DELIBERATELY. It required
+  // THE `state.startMs` ASSERTION THAT USED TO SIT HERE IS GONE, DELIBERATELY. It required
   // the clock to be read off a shared `state` object, which was true of the hand-rolled door.
   // On the shared runner the door declares its own `startMs`, so that form no longer exists -
   // and the assertion directly contradicted its own sibling below, which had already been
   // re-anchored. Two rules about one line, pointing opposite ways. The surviving one states
   // what [B-395] actually violated: if you read it, you must declare it.
-  // ⚠️⚠️ RE-ANCHORED 2026-09-21 [B-420] — AND THE INVERSION IS DELIBERATE, READ THIS BEFORE
+  // RE-ANCHORED 2026-09-21 [B-420] — AND THE INVERSION IS DELIBERATE, READ THIS BEFORE
   // "FIXING" IT. [B-395] was a ReferenceError: the function read a BARE `startMs` when the clock
   // actually lived on the shared `state` object, and it threw on the SUCCESS path only, so the
   // completion dialog never rendered and nothing after it ran.
@@ -205,32 +205,32 @@ function ok(name, cond, extra) {
   // no such variable existed. On the shared runner the door declares `let startMs` itself, so the
   // same expression is now CORRECT. Banning it would forbid the fixed code.
   //
-  // ⭐ So the rule is stated properly instead of by proxy: if the function reads `startMs`, it
+  // So the rule is stated properly instead of by proxy: if the function reads `startMs`, it
   // must also DECLARE it. That is what [B-395] actually violated, and it holds in any structure.
   {
     const readsIt   = /Date\.now\(\) - startMs/.test(fn);
     const declaresIt = /let startMs|const startMs/.test(fn);
-    ok('⭐ startMs is declared in the same function that reads it',
+    ok('startMs is declared in the same function that reads it',
        !readsIt || declaresIt,
        'B-395: a bare read threw on the success path, so nothing ever caught it');
   }
 }
 
-// ── ⚠️⚠️ THE SECOND NAME IS NOT A FAILURE  [B-394] ────────────────────────
+// ── THE SECOND NAME IS NOT A FAILURE  [B-394] ────────────────────────
 //
-// ⭐ WHAT HE SAW, 2026-09-16, on the first full export after the fix above: the dialog
+// WHAT IT WAS SAW, 2026-09-16, on the first full export after the fix above: the dialog
 // reported three findings removed and then, in red, "1 could not be removed:
 // 8.21打印.rar". The question was the right one - "is the .rar really still in my
 // library?" It was not. Swept: no .rar, .exe or trk99.wav anywhere in the store.
 //
-// ⚠️ THE STORE HARDLINKS ONE FILE INTO SEVERAL BUCKETS ([B-315]), so that .rar wore two
+// THE STORE HARDLINKS ONE FILE INTO SEVERAL BUCKETS ([B-315]), so that .rar wore two
 // names - library/Ahsoka_2/ and sources/<uuid>/source/. The backup correctly refused it
 // once PER BUCKET, and `_unlinkAndSweep` deliberately removes EVERY name `_findAllNames`
 // reaches, because leaving one behind would leave the program in the library. So record
 // two arrived at a path record one had already removed, `resolveManagedFile` said "File
 // not found", and a complete success was reported as a failure.
 //
-// ⭐⭐ THE DIRECTION OF THE LIE IS THE WHOLE POINT. It told the user a program had survived in
+// THE DIRECTION OF THE LIE IS THE WHOLE POINT. It told the user a program had survived in
 // the library - the one outcome we can actually PROVE did not happen. The quarantine
 // README proved it at the time: one quarantine file, both paths listed under `Found in:`.
 {
@@ -252,31 +252,31 @@ function ok(name, cond, extra) {
   if (linked) {
     const first = removal.impoundProgram(ud, { kind: 'entry', id: 'Ahsoka_2', relPath: 'vendor.rar' });
     ok('the first refusal impounds it', first && first.ok, JSON.stringify(first).slice(0, 140));
-    ok('⚠️ and the sweep takes BOTH names, which is what creates the second record',
+    ok('and the sweep takes BOTH names, which is what creates the second record',
        !fs.existsSync(entryAbs) && !fs.existsSync(srcAbs),
        'if only one name went, a program is still in the library and the rest is moot');
 
     // The batch's second record for the same file, addressed through the other bucket.
     const second = removal.impoundProgram(ud, { kind: 'source', id: 'uuid-1', relPath: 'vendor.rar' });
-    ok('⭐⭐ the second refusal reports SUCCESS, not "could not be removed"',
+    ok('the second refusal reports SUCCESS, not "could not be removed"',
        second && second.ok === true,
        'this is the exact line his dialog got wrong: ' + JSON.stringify(second).slice(0, 140));
-    ok('⭐ and says so honestly - already impounded, nothing removed by this call',
+    ok('and says so honestly - already impounded, nothing removed by this call',
        second && second.alreadyImpounded === true && second.nameCount === 0);
-    ok('⭐⭐ and resolves to the SAME token, so it is one finding and not two',
+    ok('and resolves to the SAME token, so it is one finding and not two',
        second && first && second.token === first.token,
        'a second token would copy one file into the quarantine folder twice');
     ok('it carries the original finding forward', second && second.sha256 === first.sha256);
-    ok('⭐ the audio beside it is untouched',
+    ok('the audio beside it is untouched',
        fs.existsSync(path.join(path.dirname(entryAbs), 'hum.wav')));
 
     // A genuine error must still surface as one.
     const bogus = removal.impoundProgram(ud, { kind: 'entry', id: 'Ahsoka_2', relPath: 'never-existed.exe' });
-    ok('⚠️ a path we never impounded still fails',
+    ok('a path we never impounded still fails',
        bogus && bogus.ok === false,
        'the holding-area lookup must not turn every missing file into a success');
     const esc = removal.impoundProgram(ud, { kind: 'entry', id: 'Ahsoka_2', relPath: '../../escape.exe' });
-    ok('⚠️ and an escaping path is still refused outright', esc && esc.ok === false);
+    ok('and an escaping path is still refused outright', esc && esc.ok === false);
   }
   fs.rmSync(ud, { recursive: true, force: true });
 }
@@ -285,7 +285,7 @@ function ok(name, cond, extra) {
 {
   const fn = html.slice(html.indexOf('const _sfImpoundRefusals = async'),
                         html.indexOf('const _sfImpoundRefusals = async') + 3000);
-  ok('⭐ the batch de-duplicates held findings by token',
+  ok('the batch de-duplicates held findings by token',
      /if \(!held\.some\(h => h\.token === r\.token\)\)/.test(fn),
      'two records sharing a token would count one program as two');
 }

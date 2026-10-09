@@ -12,11 +12,11 @@
 // appeared. "+ Add → Browse…" goes through addFilesAt, which marks, which is why the two doors
 // disagreed about the same font.
 //
-// ⚠️ THE ASSERTIONS READ meta.json, NOT THE SOURCE TEXT. A regex over the module would pass on a
+// THE ASSERTIONS READ meta.json, NOT THE SOURCE TEXT. A regex over the module would pass on a
 // line that exists and never runs; the only question that matters is whether the flag is on disk
 // after the call, and that is answerable from the filesystem.
 //
-// ⚠️⚠️ AND THE SOURCE BRANCH IS THE ONE THAT WAS BROKEN, so a suite that only exercised the
+// AND THE SOURCE BRANCH IS THE ONE THAT WAS BROKEN, so a suite that only exercised the
 // on-disk branch would have been green through the whole defect. Both are asserted here, and the
 // mutation control at the end proves these cases can actually fail.
 'use strict';
@@ -145,13 +145,13 @@ async function setup() {
   }
 
   {
-    // ⚠️⚠️ THE MUTATION CONTROL. Everything above passes against the FIXED module, and a case that
+    // THE MUTATION CONTROL. Everything above passes against the FIXED module, and a case that
     // cannot fail is worth less than no case at all - it is what stops anyone looking. So run the
     // source branch against a copy of the module with the shared exit's marking removed and
     // require that it goes RED. If this block reports the flag still set, these assertions are
     // not reaching the behaviour they claim to test.
     //
-    // ⚠️ The mutation is applied to a COPY ON DISK in a temp dir, never to the tracked file. A
+    // The mutation is applied to a COPY ON DISK in a temp dir, never to the tracked file. A
     // tracked file edited to test something has a cleanup step, and that cleanup is what discarded
     // ~1,400 lines of uncommitted work on 2026-10-06.
     console.log('MUTATION CONTROL: removing the marking makes the source-branch case fail');
@@ -174,7 +174,7 @@ async function setup() {
       mutant.filename = mutantPath;
       // Resolve the mutant's requires against the REPO, so it loads the real siblings.
       mutant.paths = Module._nodeModulePaths(repoRoot).concat([repoRoot]);
-      // ⚠️ THE HOOK HAS TO STAY UP ACROSS THE CALL, NOT JUST THE COMPILE. copyAcrossLocations
+      // THE HOOK HAS TO STAY UP ACROSS THE CALL, NOT JUST THE COMPILE. copyAcrossLocations
       // does `require('./soundFontSources')` LAZILY, inside the source branch - so restoring the
       // resolver after _compile left the mutant unable to resolve its own siblings the moment it
       // ran. The first cut did exactly that and threw MODULE_NOT_FOUND, which reads like a broken

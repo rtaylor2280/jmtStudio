@@ -1,7 +1,7 @@
 // The board-card warning on the bulk import door has to come before the ANALYZE pass, which is
 // the half that hashes every source and takes tens of minutes across a board's USB bridge.
 //
-// ⚠️⚠️ WHY THIS IS A PHASE TEST AND NOT A PRESENCE TEST. The check was present in the bulk flow
+// WHY THIS IS A PHASE TEST AND NOT A PRESENCE TEST. The check was present in the bulk flow
 // the whole time it was broken - it sat in `runImport`, under a comment that described the hashing
 // as part of the import run. It is not: `_runAnalyze` is called from `showReview`, several screens
 // earlier, and the run is only reached once someone answers the review. So "the bulk door calls
@@ -30,9 +30,9 @@ const showReviewAt = code.indexOf('const showReview = async (plan) => {');
 const analyzeCallAt = code.indexOf('await _runAnalyze(plan)');
 const warnInReviewAt = code.indexOf('_sfWarnSlowImport(plan.rootDir');
 
-ok('⚠️ the slicer can find showReview', showReviewAt > 0,
+ok('the slicer can find showReview', showReviewAt > 0,
    'showReview was renamed or restructured - re-anchor this test before trusting it');
-ok('⚠️ the slicer can find the analyze call', analyzeCallAt > 0,
+ok('the slicer can find the analyze call', analyzeCallAt > 0,
    '_runAnalyze is gone or called differently - re-anchor before reading the ordering below');
 
 // ── 1. The warning is inside showReview at all. ──
@@ -50,7 +50,7 @@ ok('the check comes BEFORE the analyze pass, not after it',
 // ── 3. Before the analyze GATE, not inside it. ──
 // A plan holding only common folders skips the analyze entirely and is still an import off the
 // same slow card, so a check tucked inside `if (total > 0 || _hasTracks)` would miss it.
-// ⚠️ `warnInReviewAt > 0` IS LOAD-BEARING, NOT BELT-AND-BRACES. Mutation-tested 2026-10-06: with
+// `warnInReviewAt > 0` IS LOAD-BEARING, NOT BELT-AND-BRACES. Mutation-tested 2026-10-06: with
 // the call removed, `indexOf` returns -1 and `-1 < gateAt` is trivially true, so this check passed
 // while the thing it describes did not exist. A missing call must never read as a well-placed one.
 const gateAt = code.indexOf('const _hasTracks = !!(plan.tracksFolders', showReviewAt);
@@ -73,7 +73,7 @@ ok('backing out of the check closes the bulk modal',
 // showReview; in the normal flow the flag is already set and it stays silent.
 const runImportAt = code.indexOf('const runImport = async (planOverride)');
 const runWarnAt = code.indexOf('_sfWarnSlowImport(runPlan.rootDir', runImportAt);
-ok('⚠️ the slicer can find runImport', runImportAt > 0, 're-anchor before reading below');
+ok('the slicer can find runImport', runImportAt > 0, 're-anchor before reading below');
 ok('the runImport check is guarded so the same card is not queried twice',
    runWarnAt > 0 && /if\s*\(\s*!bulkSlowWarned\s*\)\s*\{/.test(
      code.slice(runImportAt, runWarnAt)),
@@ -107,7 +107,7 @@ ok('the merged multi-folder plan carries a real root',
 // as trivial argues against the warning printing it.
 const bulkWarnCalls = (code.match(
   /_sfWarnSlowImport\((?:plan|runPlan)\.rootDir,\s*\{[\s\S]{0,200}?\}\)/g) || []);
-ok('⚠️ the scanner can see both bulk call sites', bulkWarnCalls.length === 2,
+ok('the scanner can see both bulk call sites', bulkWarnCalls.length === 2,
    `found ${bulkWarnCalls.length}, expected 2 - re-anchor before reading the check below`);
 ok('both bulk call sites name the count as sound fonts',
    bulkWarnCalls.length === 2 && bulkWarnCalls.every(c => /unit:\s*'sound font'/.test(c)),
@@ -119,7 +119,7 @@ ok('both bulk call sites name the count as sound fonts',
 // measure branch would label a file count as fonts. The door cannot see which branch ran, so the
 // override belongs at the measure site.
 const measureAt = code.indexOf('_files = res.files || 0;');
-ok('⚠️ the slicer can find the measure site', measureAt > 0, 're-anchor before reading below');
+ok('the slicer can find the measure site', measureAt > 0, 're-anchor before reading below');
 ok("a measured count is forced back to 'file' regardless of what the caller said",
    measureAt > 0 && /_unit\s*=\s*'file'/.test(code.slice(measureAt, measureAt + 600)),
    'the measure branch overwrites the count but not the noun - a walked tree would be reported '

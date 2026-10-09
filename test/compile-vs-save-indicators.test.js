@@ -5,7 +5,7 @@
  * Serial + Mass Storage + WebUSB, got the red field, saved, and the red vanished.
  *     "that's a lie because it says last compiled. that would still be true even when saved."
  *
- * ⭐⭐ THE SPEC, and it is the whole entry: "it's job is to show if the current selection
+ * THE SPEC, and it is the whole entry: "it's job is to show if the current selection
  * matches the last compiled version. that's it."
  *
  * WHAT WAS WRONG. The field OR'd two tests: `baselineX` (resets on Save — "differs from the
@@ -13,7 +13,7 @@
  * BEFORE FLASHING, and saving builds nothing, so a save could never legitimately clear it.
  * The dirty marker already answers the file question.
  *
- * ⚠️ AND THE FIRST ATTEMPT AT THIS FIX ONLY REWORDED THE SAVE BRANCH, which left the wrong
+ * AND THE FIRST ATTEMPT AT THIS FIX ONLY REWORDED THE SAVE BRANCH, which left the wrong
  * comparison in place with better words on it. The correction: "looking at the wrong field...
  * it's supposed to compare compiled not saved." The save comparison is GONE from both fields;
  * these tests exist to keep it gone.
@@ -75,17 +75,17 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
      /Last built with Serial \+ WebUSB/.test(moved) && /recompile before flashing/.test(moved), moved);
 
   const unknown = title(false, null, USB_LABELS, true, 'Aug 7 5:32 PM');
-  ok('⭐ cannot-tell: compiled, but the build recorded no USB mode',
+  ok('cannot-tell: compiled, but the build recorded no USB mode',
      /did not record its USB mode/.test(unknown) && /Aug 7 5:32 PM/.test(unknown), unknown);
   ok('and it says what to do about it', /recompile to start checking it/.test(unknown), unknown);
 
   ok('a matching build is silent', title(false, 'cdc_webusb', USB_LABELS, false, 'Aug 7') === '');
   ok('a never-compiled config is silent', title(false, null, USB_LABELS, false, null) === '');
 
-  // ⭐⭐ THE REGRESSION THIS FILE EXISTS FOR.
+  // THE REGRESSION THIS FILE EXISTS FOR.
   const fn = bp.slice(bp.indexOf('function updateUsbChangedIndicator'),
                       bp.indexOf('function updateUsbChangedIndicator') + 1800);
-  ok('⭐⭐ the USB field does not consult the saved file at all',
+  ok('the USB field does not consult the saved file at all',
      !/getBaselineUsb|baseline/.test(fn),
      'the red means "recompile before flashing"; a save must never be able to clear it');
   ok('and the red is driven by the build comparison alone',
@@ -120,7 +120,7 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
 
   const fn = html.slice(html.indexOf('function updateChangedIndicators'),
                         html.indexOf('function updateChangedIndicators') + 2600);
-  ok('⭐⭐ the Board field does not consult the saved file either',
+  ok('the Board field does not consult the saved file either',
      !/boardChanged/.test(fn),
      'same reason as USB — saving builds nothing, so it cannot resolve a build mismatch');
   ok('Board red comes from noBoard or the build comparison only',
@@ -134,7 +134,7 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
      && /window\.getCompiledAtLabel = \(\) =>/.test(html));
   ok('the timestamp is formatted by the one formatter, not re-implemented',
      /getCompiledAtLabel = \(\) => \(metaCompiled \? fmtTimestamp\(metaCompiled\) : null\)/.test(html));
-  ok('⭐⭐ OS Version dropped the save comparison too — all three now match',
+  ok('OS Version dropped the save comparison too — all three now match',
      /versionEl\.classList\.toggle\('field-changed', _buildTargetMoved\(\)\);/.test(html)
      && !/const versionChanged = baselineVersion !== null/.test(html),
      'it was the last of the three still clearing a build warning on save');
@@ -149,7 +149,7 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
   ok('the backfill exists', at > 0);
   const blk = html.slice(at, at + 2200);
 
-  ok('⭐ it is gated on a compile having happened',
+  ok('it is gated on a compile having happened',
      /if \(metaCompiled\) \{/.test(blk),
      'a config that was never built has no build to describe and must stay silent');
   ok('it fills USB from the saved value',      /if \(!metaCompiledUsb\s+&& usb\)/.test(blk), blk.slice(0, 200));
@@ -159,15 +159,15 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
   ok('it converts the board NAME to an FQBN rather than copying it',
      /metaCompiledFqbn = _fqbnForBoardName\(board\)/.test(blk),
      '@jmt:board is a display name; @jmt:compiled_board is an FQBN');
-  ok('⚠️ core is NOT backfilled', !/metaCore\s*=/.test(blk),
+  ok('core is NOT backfilled', !/metaCore\s*=/.test(blk),
      'no saved field corresponds to a plugin version, so the plugin half must stay quiet');
 
-  // ⚠️ THE TIMING IS THE WHOLE SAFETY ARGUMENT. At load the saved values are
+  // THE TIMING IS THE WHOLE SAFETY ARGUMENT. At load the saved values are
   // untouched; inside a save they are whatever the user just changed the field TO,
   // which would record a build that never happened.
   const inject = html.slice(html.indexOf('function injectMetadata'),
                             html.indexOf('function injectMetadata') + 3000);
-  ok('⭐⭐ and it does NOT happen on save',
+  ok('and it does NOT happen on save',
      !/metaCompiledUsb\s*=|metaCompiledFqbn\s*=|metaCompiledOs\s*=/.test(inject),
      'backfilling during a save captures the change the user just made');
 
@@ -187,7 +187,7 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
   // silently could not see the line it was written to guard.
   const uci = html.slice(html.indexOf('function updateChangedIndicators'),
                          html.indexOf('function updateChangedIndicators') + 5600);
-  ok('⭐⭐ updateChangedIndicators repaints the USB field too',
+  ok('updateChangedIndicators repaints the USB field too',
      /window\.updateUsbChangedIndicator\?\.\(\);/.test(uci),
      'one repaint entry point, so the three fields cannot drift apart again');
 
@@ -195,7 +195,7 @@ const USB_LABELS = { cdc_msc: 'Serial + Mass Storage', cdc_webusb: 'Serial + Web
   // paints early in the load and cannot be the only painter.
   const metaAt   = html.indexOf('metaCompiledUsb     = compiledUsb');
   const repaintAt = html.indexOf('updateChangedIndicators();', metaAt);
-  ok('⭐⭐ the load path assigns the build record BEFORE it repaints',
+  ok('the load path assigns the build record BEFORE it repaints',
      metaAt > 0 && repaintAt > metaAt && (repaintAt - metaAt) < 3000,
      `metaCompiledUsb at ${metaAt}, next updateChangedIndicators() at ${repaintAt}`);
 

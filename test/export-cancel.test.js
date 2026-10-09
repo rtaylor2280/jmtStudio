@@ -1,6 +1,6 @@
 // Every export can be stopped, and stopping is always safe.            [B-005 item 4]
 //
-// ⭐⭐ WHY THIS EXISTS. The only way out of a running export was force-quitting the app, and
+// WHY THIS EXISTS. The only way out of a running export was force-quitting the app, and
 // force-quitting mid-write to a FAT32 card over USB mass storage is the precise corruption the
 // whole SD guard was built to prevent. the report on a 109 MB export stuck at 32.3 MB: "no
 // cancel... the only way out is potentially damaging." Nine doors had to gain one.
@@ -37,18 +37,18 @@ function ok(name, cond, detail) {
 // ── 1. Every writing export handler takes a cancel token ──
 // The nine doors resolve to six handlers. A door added later that skips the wrapper is a door
 // with no way out, which is exactly how this became a release blocker.
-// ⚠️⚠️ SLICED TO THE NEXT HANDLER, NOT A CHARACTER COUNT. This used to take 700 chars from
+// SLICED TO THE NEXT HANDLER, NOT A CHARACTER COUNT. This used to take 700 chars from
 // the handler's opening line, and a comment growing above the wrapper pushed the call out of
 // the window - a false failure about code that was correct. Fixed-width slices have produced
 // six false results in this suite in two days. Anchor on something that must exist.
 for (const h of ['entries:exportToFolder', 'common:exportAsZip', 'common:exportToFolder',
                  'sharedTracks:exportToFolder', 'sfFile:export', 'sources:exportToDownloads',
-                 // ⚠️ `sources:extractTo` WAS HERE from 2026-09-20 and was REMOVED 2026-09-26
+                 // `sources:extractTo` WAS HERE from 2026-09-20 and was REMOVED 2026-09-26
                  // [B-434]: it had zero callers and could never be opened, so the cancel added
                  // for it guarded nothing. Kept as a note because the reason it was missed for
                  // so long - a name that says nothing about exporting - still applies to the
                  // rest of this list.
-                 // ⚠️⚠️ AN IMPORT, LISTED HERE ON PURPOSE. This section is titled for export doors
+                 // AN IMPORT, LISTED HERE ON PURPOSE. This section is titled for export doors
                  // and the gate is named for them, but the property being asserted is "a long copy
                  // can be stopped", and the direction of the copy does not change that. Found
                  // 2026-09-25 at 927 MB of 2.14 GB into an add with nothing to press - and
@@ -74,7 +74,7 @@ ok('a run retires only its own token',
    /end\(token\) \{[\s\S]{0,120}?tokens\.delete\(token\)/.test(gate)
    && !/tokens\.clear\(\)/.test(gate),
    'clearing the set disarms every other run in flight');
-// ⚠️ The signature gained `opts` when the token started carrying the destination verdict
+// The signature gained `opts` when the token started carrying the destination verdict
 // ([B-005] item 4), so this used to be anchored on `_withExportCancel(run)` exactly and went
 // stale the moment a parameter was added. Matched loosely on the name now - the assertion is
 // about the finally, not about the arity.
@@ -85,16 +85,16 @@ ok('the token carries the board-card verdict so cancel never re-measures',
    /token\.boardCard = !!opts\.boardCard/.test(main),
    'classifying at cancel time would cost ~1.9s at the exact moment the user wants it to stop');
 
-// ── 3. ⚠️⚠️ THE SAFETY INVARIANT: nothing truncated is ever left behind ──
+// ── 3. THE SAFETY INVARIANT: nothing truncated is ever left behind ──
 //
-// ⚠️ THIS SECTION USED TO ASSERT "between files, never inside one" AND THAT RULE IS GONE.
+// THIS SECTION USED TO ASSERT "between files, never inside one" AND THAT RULE IS GONE.
 // It was the right hazard with the wrong remedy: stopping only between files does keep a
 // truncated .wav off the card, but it makes the user wait out the current write, which on a
 // board's USB bridge is minutes. Interrupting mid-file and DELETING the partial gives the
 // identical guarantee in about a second. The old assertion is kept in this comment on
 // purpose - a reversed decision that leaves no trace reads later as an oversight.
 //
-// ⚠️⚠️ AND STRIP THE COMMENTS BEFORE CHECKING ORDER. The first version of this compared
+// AND STRIP THE COMMENTS BEFORE CHECKING ORDER. The first version of this compared
 // indexOf('shouldStop()') against indexOf('copyFileWithProgress') over the raw source, so
 // the moment a comment above the loop MENTIONED copyFileWithProgress the test failed on
 // prose while the code was correct. A positional check over text that includes commentary
@@ -105,7 +105,7 @@ ok('the token carries the board-card verdict so cancel never re-measures',
   const body = decomment(copy.slice(i, copy.indexOf('} else if (item.isFile())', i)));
   const stopAt = body.indexOf('shouldStop()');
   const copyAt = body.indexOf('copyFileWithProgress');
-  ok('⚠️ the walk still checks cancel before descending',
+  ok('the walk still checks cancel before descending',
      stopAt > -1 && (copyAt === -1 || stopAt < copyAt),
      'the between-files check is still the first line of defence, just no longer the only one');
   ok('cancel propagates into nested folders',
@@ -113,24 +113,24 @@ ok('the token carries the board-card verdict so cancel never re-measures',
      'stopping at the top level while subtrees run on is a cancel in name only');
 
   // ── The new half: the file copy itself stops and cleans up ──
-  // ⚠️ RE-ANCHORED 2026-09-23. This pinned the exact argument list, and the third argument
+  // RE-ANCHORED 2026-09-23. This pinned the exact argument list, and the third argument
   // changed when the chunk sink began carrying the file's name - so it failed on a change that
   // left its own subject untouched. The rule is that shouldStop REACHES the copy, whatever is
   // handed in beside it; this file already carries the lesson that a test pinned to an
   // identifier fails on a rename and passes on a deletion elsewhere.
-  ok('⚠️⚠️ the tree walk hands shouldStop DOWN to the file copy',
+  ok('the tree walk hands shouldStop DOWN to the file copy',
      /await copyFileWithProgress\(srcPath, destPath,[\s\S]{0,140}?,\s*shouldStop\)/.test(copy),
      'without this the walk stops between files and the current write runs to completion');
 
   const fn = decomment(copy.slice(copy.indexOf('function copyFileWithProgress'),
                                  copy.indexOf('async function copyTreeWithProgress')));
-  ok('⚠️⚠️ the chunk handler checks cancel BEFORE writing the chunk',
+  ok('the chunk handler checks cancel BEFORE writing the chunk',
      /rs\.on\('data'[\s\S]{0,200}?shouldStop\(\)[\s\S]{0,120}?ws\.write/.test(fn),
      'checking after the write pays for one more chunk on the transport we are trying to stop using');
-  ok('⚠️⚠️ the drain wait has its own exit',
+  ok('the drain wait has its own exit',
      /once\('drain'[\s\S]{0,160}?shouldStop\(\)/.test(fn),
      'a cancel pressed while a slow card drains would otherwise wait out the whole write');
-  ok('⚠️⚠️ a torn-down write deletes its partial',
+  ok('a torn-down write deletes its partial',
      /unlinkSync\(destPath\)/.test(fn) && /dropPartial\(\)/.test(fn),
      'a truncated .wav left on a card is the exact state the old between-files rule existed to prevent');
   ok('the partial is removed on the shared failure path, not only on cancel',
@@ -140,7 +140,7 @@ ok('the token carries the board-card verdict so cancel never re-measures',
 
 // ── 3b. The throw has to be readable as a cancel everywhere it can now land ──
 //
-// ⚠️⚠️ ADDING A THROW TO A PATH THAT ALREADY HAD A CATCH-ALL IS HOW "Export failed: Export
+// ADDING A THROW TO A PATH THAT ALREADY HAD A CATCH-ALL IS HOW "Export failed: Export
 // cancelled" GETS REINTRODUCED. copyFileWithProgress can now throw where it previously only
 // returned, so every catch between it and the user has to tell a cancel from a fault.
 {
@@ -150,16 +150,16 @@ ok('the token carries the board-card verdict so cancel never re-measures',
      'this catch stringifies whatever it gets into a red failure dialog');
 }
 
-// ── 4. ⚠️⚠️ THE CRASH INVARIANT: the zip writer aborts, never throws ──
+// ── 4. THE CRASH INVARIANT: the zip writer aborts, never throws ──
 {
   const i = sources.indexOf("archive.on('entry'");
   const handler = sources.slice(i, sources.indexOf('});', i));
-  ok('⚠️⚠️ the zip writer ABORTS from its event handler',
+  ok('the zip writer ABORTS from its event handler',
      /archive\.abort\(\)/.test(handler));
-  ok('⚠️⚠️ and never throws from inside it',
+  ok('and never throws from inside it',
      !/throw /.test(handler),
      'a throw in an EventEmitter handler is an uncaught exception in main - the B-418 crash');
-  // ⚠️ BOTH SETTLE PATHS, because a cancelled zip can leave by either. If the rejection wins the
+  // BOTH SETTLE PATHS, because a cancelled zip can leave by either. If the rejection wins the
   // race the code after the await never runs; if 'close' wins, it does. Only one of the two had
   // cleanup at first, and the missing one left a part-built .zip at the destination wearing the
   // real filename - the artefact most likely to be mistaken for a finished export.
@@ -168,16 +168,16 @@ ok('the token carries the board-card verdict so cancel never re-measures',
   ok('and on the rejecting path',
      /catch \(err\) \{[\s\S]{0,400}?isCancel\(err\)\) \{ try \{ fs\.unlinkSync\(destZipPath\)/.test(sources));
 
-  // ⚠️⚠️ A CANCEL MUST NEVER BE REPORTED AS A DAMAGED SOURCE. Aborting the archive looks exactly
+  // A CANCEL MUST NEVER BE REPORTED AS A DAMAGED SOURCE. Aborting the archive looks exactly
   // like a file that will not read - entries stop completing - so the stall watchdog fired and
   // told the user the font was corrupt. It is not, and that message is far worse than none.
-  ok('⚠️⚠️ the stall watchdog stands down when the stop was deliberate',
+  ok('the stall watchdog stands down when the stop was deliberate',
      /if \(_canceled\) \{ clearInterval\(watchdog\); return finish\(reject, _cancelErr\(\)\); \}/.test(sources),
      'his report: cancelled during compress, got "the source has a damaged or unreadable file"');
   ok('every settle path reports a cancel as a cancel',
      /const settle = \(fn, arg\) => finish\(_canceled \? reject : fn, _canceled \? _cancelErr\(\) : arg\);/.test(sources),
      'tearing a stream down surfaces as close, error or warning - which one is not ours to predict');
-  // ⚠️ SCOPED TO THE BLOCK, NOT A CHARACTER BUDGET. Written first as a {0,420} window between
+  // SCOPED TO THE BLOCK, NOT A CHARACTER BUDGET. Written first as a {0,420} window between
   // abort and destroy, which the explanatory comment between them promptly overran - the same
   // stale-by-construction shape corrected in export-conflict-one-dialog.test.js an hour earlier.
   ok('aborting also closes the sink so nothing waits on the watchdog',
@@ -197,13 +197,13 @@ ok('a distinct cancel type, not a string match',
 ok('the multi-file loop does not file a cancel as a failed file',
    /isCancel\(err\)\) \{ _canceled = true; break; \}[\s\S]{0,120}?failed\.push/.test(main),
    'it would end in "some files failed to export" naming the user click as the fault');
-// ⚠️ THIS USED TO CHECK THE FUNNEL'S OWN INLINE ORDERING - that `res.canceled` appeared
+// THIS USED TO CHECK THE FUNNEL'S OWN INLINE ORDERING - that `res.canceled` appeared
 // before `_sfExportFailed` within 1,200 characters of the tooBig branch. The funnel now
 // delegates to `_sfExportOutcome`, so that ordering lives in ONE place and is asserted in
 // export-outcome-shared.test.js. Demanding the old inline shape here would push the code back
 // toward the per-door copies this work removed.
 {
-  // ⚠️⚠️ ANCHORED ON THE FUNCTION, NOT ON THE LINE THIS TEST WAS ABOUT.
+  // ANCHORED ON THE FUNCTION, NOT ON THE LINE THIS TEST WAS ABOUT.
   // It used to slice from `if (res.tooBig) {` - the very code the migration DELETED - so the
   // segment silently became an empty string and every assertion over it passed or failed for
   // reasons unrelated to the door. An anchor that is itself the subject of the change cannot
@@ -211,7 +211,7 @@ ok('the multi-file loop does not file a cancel as a failed file',
   const i = html.indexOf('const _sfExportFiles = async');
   const j = html.indexOf('// Unified dispatcher', i);
   const seg = (i > 0 && j > i) ? html.slice(i, j) : '';
-  // ⚠️⚠️ RE-ANCHORED 2026-09-22. Both assertions described the funnel owning its own
+  // RE-ANCHORED 2026-09-22. Both assertions described the funnel owning its own
   // refusal and its own ending. Both branches now run through the shared runner, which owns the
   // refusal and the ending for every door - so the old checks would pass only on an UNMIGRATED
   // door. The rules they protect are unchanged and now hold for fourteen doors instead of four.
@@ -221,7 +221,7 @@ ok('the multi-file loop does not file a cancel as a failed file',
      && !/_sfExportOutcome\(/.test(seg),
      'a door keeping either one back also keeps the bug they were built for: a tooBig recovery '
      + 'that writes first, and a cancel reported as a success');
-  ok('⭐ and both of its branches go through it',
+  ok('and both of its branches go through it',
      (seg.match(/await _sfRunExport\(\{/g) || []).length >= 2,
      'multi-path is doors 2/5/7/9 and single-path is the right-click items; one migrated and '
      + 'one left behind is how this function had two personalities in the first place');
@@ -230,7 +230,7 @@ ok('the multi-file loop does not file a cancel as a failed file',
 // ── 6. Partial cleanup follows what the thing IS ──
 // A font is a unit and half of one mounts, lists, then fails when a sound is called for. Tracks
 // are independent files and every one that finished is complete. Different answers on purpose.
-// ⚠️ THIS USED TO BE ONE REGEX WITH A 320-CHARACTER WINDOW and went stale the moment the
+// THIS USED TO BE ONE REGEX WITH A 320-CHARACTER WINDOW and went stale the moment the
 // replace path gained its restore branch, which now sits between the two anchors. Fixed-width
 // slices have produced three false failures in this suite in two days; assert the BEHAVIOURS
 // instead, each on its own.
@@ -245,22 +245,22 @@ ok('a cancelled font export with no original removes its partial',
 ok('a cancelled font export with an original RESTORES it instead',
    /rename\(asideDir, targetDir\)/.test(entries) && /out\.restored = true/.test(entries),
    'removing the partial without restoring would leave the user with neither font');
-// ⚠️ Another fixed-width window (320 chars), stale the moment this door gained the same
+// Another fixed-width window (320 chars), stale the moment this door gained the same
 // board-card offer the font door had. Assert the two behaviours instead.
 ok('a cancelled voice-pack export removes its partial when removal is cheap',
    /out\.partialRemoved = removed/.test(common) && /fs\.promises\.rm\(targetDir/.test(common),
    'a half voice pack on a card mounts and then fails when a sound is called for');
-ok('⭐ and OFFERS instead when removal would be slow, exactly as the font door does',
+ok('and OFFERS instead when removal would be slow, exactly as the font door does',
    /opts\.boardCard && _ed\.isSlowCleanupJob/.test(common) && /out\.offerCleanup = junk/.test(common),
    'same shape of job, same destination, same thresholds - it must get the same treatment');
-// ⚠️⚠️ THIS ASSERTED ONE RULE ACROSS TWO FUNCTIONS, AND THEY DO NOT SHARE IT. [B-420,
+// THIS ASSERTED ONE RULE ACROSS TWO FUNCTIONS, AND THEY DO NOT SHARE IT. [B-420,
 // 2026-09-24] `soundFontSharedTracks` exports BOTH `exportToFolderAdditive` - the one every
 // normal tracks export uses, which adds to what is there - and `exportToFolder`, the
 // replace-mode sibling reached from the right-click door. The old anchor matched a literal
 // return shape anywhere in the file, so it was really testing whichever function happened to
 // match first, and it went red when the replace path gained a restore.
 //
-// ⭐ THE RULE IS REAL AND IT BELONGS TO THE ADDITIVE PATH: nothing at the destination was
+// THE RULE IS REAL AND IT BELONGS TO THE ADDITIVE PATH: nothing at the destination was
 // displaced, so a half-finished run leaves complete playable files and deleting them tidies
 // nothing. On a REPLACE the user's previous folder was parked aside, and the partial cannot be
 // kept because it occupies the path the original has to come back to - so it follows the font
@@ -284,21 +284,21 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
 
 // ── 6b. A cancel OFFER must not outlive the phase that made it ──────
 //
-// ⚠️⚠️ REPORTED 2026-09-24: *"a cancel here skips straight to export"*. The primary export's
+// REPORTED 2026-09-24: *"a cancel here skips straight to export"*. The primary export's
 // conflict scan offers a cancel, and `show()` deliberately does NOT clear the cancel affordance
 // when the modal is already open - correct, because a running export retitles itself and must
 // keep its Cancel. The consequence was that the SCAN's button survived into the phases after it,
 // still wired to a flag nothing reads, so clicking it hid the modal while the export ran on
 // underneath.
 //
-// ⚠️⚠️ AND A SECOND REPORT THE SAME HOUR KILLED THE INSTANT-CLOSE VARIANT ENTIRELY: *"I clicked
+// AND A SECOND REPORT THE SAME HOUR KILLED THE INSTANT-CLOSE VARIANT ENTIRELY: *"I clicked
 // cancel... looked like it did... then I started again to same location and it was still in
 // progress."* The scan is a LOOP - the flag is only read at an item boundary, and each item is a
 // whole font-folder hash - so closing the surface on the click made a still-running scan look
 // finished. `offerCancelNow` was deleted; the scan acknowledges and stays up like every other
 // phase that cannot stop instantly.
 //
-// ⭐ THE RULE IS PAIRING, AND IT IS THE SAME ONE `_btnBusy`/`_btnIdle` taught the same day: an
+// THE RULE IS PAIRING, AND IT IS THE SAME ONE `_btnBusy`/`_btnIdle` taught the same day: an
 // offer has an owner and a lifetime. Assert the ORDER - offered, cleared, and only then handed to
 // the runner, which makes its own offer for the copy.
 {
@@ -312,19 +312,19 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
   const handoff = body.indexOf('await _sfRunExport({');
   ok('the scan offers a cancel', offered > 0,
      'the conflict scan is the longest read in this door and must be stoppable');
-  // ⭐ AND IT MUST NOT BE THE CLOSE-ON-CLICK KIND. A surface that disappears while the loop keeps
+  // AND IT MUST NOT BE THE CLOSE-ON-CLICK KIND. A surface that disappears while the loop keeps
   // reading is how a cancelled export got a second export started on top of it.
-  ok('⭐ and it is the acknowledging kind, not the instant-close kind',
+  ok('and it is the acknowledging kind, not the instant-close kind',
      !/offerCancelNow\(/.test(html),
      'the scan cannot stop instantly - the flag is read at an item boundary - so a cancel that '
      + 'hides the surface immediately reports a stop that has not happened');
-  // ⭐ And the exit that flag reaches must take the surface down itself, since nothing else will.
-  // ⚠️⚠️ ANCHORED TO THE BLOCK, NOT TO A CHARACTER COUNT. [B-173, 2026-09-25] This read
+  // And the exit that flag reaches must take the surface down itself, since nothing else will.
+  // ANCHORED TO THE BLOCK, NOT TO A CHARACTER COUNT. [B-173, 2026-09-25] This read
   // `if (_scanCanceled) {[\s\S]{0,200}?hide()` and went RED when the cancel path grew a manifest
   // commit - the hide was still there, still inside the branch, just past an arbitrary window.
   // A fixed-width slice measures how much CODE sits between two things, which is not what this
   // assertion is about; it is about the exit taking its own surface down before returning.
-  // ⚠️ Widened deliberately and recorded as such, so nobody later reads this as an assertion
+  // Widened deliberately and recorded as such, so nobody later reads this as an assertion
   // loosened to get green. Slice the actual block and assert the slice is non-empty first, or a
   // missing anchor makes every claim about it vacuously true.
   {
@@ -333,18 +333,18 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
     const block = s >= 0 && e > s ? body.slice(s, e) : '';
     ok('the cancelled-scan exit was located', block.length > 0,
        're-anchor if the flag or the early return is renamed - an empty slice passes everything');
-    ok('⭐ and the cancelled scan hides its own modal on the way out',
+    ok('and the cancelled scan hides its own modal on the way out',
        block.includes('_sfDeleteProgress.hide()'),
        'this returned with the modal still on screen; it was invisible only because the '
        + 'instant-close cancel had already hidden it');
-    // ⭐ AND IT KEEPS WHAT IT HASHED. [B-173, 2026-09-25] Hashing a board card is minutes;
+    // AND IT KEEPS WHAT IT HASHED. [B-173, 2026-09-25] Hashing a board card is minutes;
     // discarding it on a cancel means the next attempt pays it again.
-    ok('⭐⭐ and it commits what the abandoned scan already learned',
+    ok('and it commits what the abandoned scan already learned',
        block.includes('syncManifestCommit'),
        'a cancelled scan that throws away its hashes never converges - the same failure the '
        + 'already-up-to-date path had, reached a different way');
   }
-  ok('⭐ and RETIRES it before handing off to the runner',
+  ok('and RETIRES it before handing off to the runner',
      cleared > offered && handoff > cleared,
      'an offer that outlives its phase is a button that cannot stop anything - it hid the modal '
      + 'and let the export run on invisibly. Order must be: offer, clear, hand off');
@@ -352,7 +352,7 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
 
 // ── 6c. A multi-call door must stop ITSELF, not wait to be told ─────
 //
-// ⚠️⚠️ MEASURED 2026-09-24, and it is the sharpest instance of this defect class in the app.
+// MEASURED 2026-09-24, and it is the sharpest instance of this defect class in the app.
 // `export:cancel` flags the tokens LIVE at that instant, and `_withExportCancel` mints one per
 // IPC call. The primary export's produce is a LOOP of many calls, so a cancel reached only the
 // font in flight - which finished anyway - and every font after it began with a fresh, unflagged
@@ -361,11 +361,11 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
 //     [cancel] font Energy returned canceled = false        (and 25 more)
 // The export ran to completion and reported "26 written" after the user asked it to stop.
 //
-// ⭐ THE COMMENT ABOVE THAT LOOP HAD SAID SO SINCE THE CANCEL WAS BUILT - "the loop is in the
+// THE COMMENT ABOVE THAT LOOP HAD SAID SO SINCE THE CANCEL WAS BUILT - "the loop is in the
 // renderer, so main stopping the CURRENT font is only half of it" - and only the main half was
 // ever implemented. A rule written beside the code it describes is not a check.
 //
-// ⚠️ BOTH HALVES ARE REQUIRED. The IPC cancel stops the copy that is RUNNING; the renderer flag
+// BOTH HALVES ARE REQUIRED. The IPC cancel stops the copy that is RUNNING; the renderer flag
 // stops the NEXT one from starting. Asserting only one would let the other rot.
 {
   const a = html.indexOf('const _sfBulkSave = async () => {');
@@ -376,7 +376,7 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
   const produce = pStart > 0 && pEnd > pStart ? body.slice(pStart, pEnd) : '';
   ok('the produce step was located', produce.length > 0, 're-anchor if the callback is renamed');
 
-  ok('⭐ the door sets its OWN cancel flag, not just the IPC one',
+  ok('the door sets its OWN cancel flag, not just the IPC one',
      /onCancel: async \(\) => \{[\s\S]{0,200}?_exportCanceled = true;[\s\S]{0,200}?_sfExportCancelOpt\.onCancel\(\)/.test(body),
      'without this the loop keeps issuing calls, each getting a fresh token that was never '
      + 'flagged - which is how 26 fonts wrote after the click');
@@ -389,27 +389,27 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
     const after = produce.slice(m.index, m.index + 400);
     return !/if \(_exportCanceled\) break;/.test(after);
   });
-  ok('⭐ and every per-item loop breaks on it BEFORE issuing the next call',
+  ok('and every per-item loop breaks on it BEFORE issuing the next call',
      unguarded.length === 0,
      'a loop that only checks the RETURN value cannot stop until a call happens to come back '
      + 'cancelled, and a fresh token never does');
-  ok('⚠️ and the tracks step is gated on it too',
+  ok('and the tracks step is gated on it too',
      /if \(includeTracks && willWriteTracks && !_exportCanceled\)/.test(produce),
      'it is one call rather than a loop, but it must not start after a cancel either');
 }
 
 // ── 6d. Every long READ in the scan can be stopped ──────────────────
 //
-// ⚠️⚠️ HIS REPORT 2026-09-24: *"it goes through about 10-20 more files before it cancels... it says
+// THE REPORT 2026-09-24: *"it goes through about 10-20 more files before it cancels... it says
 // stopping and files are still flying by."* The conflict scan's cancel is a renderer flag read
 // BETWEEN items, and each item is ONE IPC call that hashes a whole font, a whole common folder, or
 // the entire tracks set. So a cancel waited for that call to finish - up to a hundred tracks.
 //
-// ⭐ HIS ARGUMENT IS THE RULE: *"why would it need to do anything if all it was doing was
+// THE ARGUMENT IS THE RULE: *"why would it need to do anything if all it was doing was
 // analyzing? there's not a copy being made... so it should just stop."* Nothing is written by any
 // of these, so there is nothing to protect and nothing to finish.
 //
-// ⚠️ TWO HALVES PER READ, and a check on either alone would pass while the bug survived: the
+// TWO HALVES PER READ, and a check on either alone would pass while the bug survived: the
 // HANDLER must take a cancel token, and the MODULE must test it PER FILE.
 {
   const mainSrc = main.replace(/\/\/.*$/gm, '');
@@ -422,7 +422,7 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
       src: common, fn: 'async function commonMatchesAt' },
   ];
   for (const r of reads) {
-    // ⚠️⚠️ BOUNDED BY THE NEXT HANDLER, NEVER BY A CHARACTER COUNT. A 900-char window here read
+    // BOUNDED BY THE NEXT HANDLER, NEVER BY A CHARACTER COUNT. A 900-char window here read
     // straight into the FOLLOWING `ipcMain.handle`, which has its own `_withExportCancel` - so
     // removing the gate from this one left the test green. Proved by mutation. `export-runner-
     // ratchet.test.js` states the rule in its own header ("two markers, never a character count")
@@ -445,16 +445,16 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
 
 // ── 6e. EVERY step of the scan declines to start after a cancel ─────
 //
-// ⚠️⚠️ THE GUARDS WENT ON THE LOOPS AND THE THING THAT KEPT RUNNING WAS NOT ONE. [B-420,
+// THE GUARDS WENT ON THE LOOPS AND THE THING THAT KEPT RUNNING WAS NOT ONE. [B-420,
 // 2026-09-24] The conflict scan is three steps: fonts (a loop), common slots (a loop), and shared
 // tracks (ONE call). Both loops broke on the flag; the tracks step had no check at all, so a cancel
 // during the FONTS fell through to it and started a BRAND NEW cancel token - one `cancelAll()` had
 // already run past - and hashed all hundred tracks with `shouldStop` false throughout.
 //
-// ⭐ The screenshots are the record: cancelled at *"Comparing with your library · 11 of 31"* on a
+// The screenshots are the record: cancelled at *"Comparing with your library · 11 of 31"* on a
 // font, and eight seconds later *"Stopping…"* over a track filename.
 //
-// ⚠️ GATING THE READS WAS NECESSARY AND NOT SUFFICIENT. A per-call token means every new call
+// GATING THE READS WAS NECESSARY AND NOT SUFFICIENT. A per-call token means every new call
 // begins unflagged, so the CALLER has to decline to make it. Both halves, or neither works.
 {
   const a = html.indexOf('const _sfBulkSave = async () => {');
@@ -466,23 +466,23 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
   ok('the scan region was located', scan.length > 0,
      're-anchor if the cancel offer or the post-scan exit moves');
 
-  ok('⭐ the font loop breaks on the flag',
+  ok('the font loop breaks on the flag',
      /for \(const name of names\) \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*if \(_scanCanceled\) break;/.test(scan));
-  ok('⭐ the common loop breaks on the flag',
+  ok('the common loop breaks on the flag',
      /for \(const cs of commonSlots\) \{\s*\n\s*if \(_scanCanceled\) break;/.test(scan));
-  ok('⭐⭐ and the tracks step declines to START',
+  ok('and the tracks step declines to START',
      /if \(includeTracks && !_scanCanceled\) \{/.test(scan),
      'it is a single call, not a loop - without this a cancel during the fonts still hashes '
      + 'every track, on a token that was minted after the cancel and so was never flagged');
 
-  // ⚠️ AND THE GENERAL FORM, so a FOURTH step added later cannot slip through: every IPC call in
+  // AND THE GENERAL FORM, so a FOURTH step added later cannot slip through: every IPC call in
   // this region must have a `_scanCanceled` test somewhere above it in the same region.
   const calls = [...scan.matchAll(/await window\.electronAPI\.(\w+)\(/g)]
     .filter((m) => m[1] !== 'exportCancel');
   ok(`every scan read was located (${calls.length})`, calls.length >= 4,
      're-check the matcher if this dropped');
   const unguarded = calls.filter((m) => !/_scanCanceled/.test(scan.slice(0, m.index)));
-  ok('⭐ every read in the scan has a cancel test before it',
+  ok('every read in the scan has a cancel test before it',
      unguarded.length === 0,
      'a step with no guard starts a fresh token after the cancel and runs to completion: '
      + unguarded.map((m) => m[1]).join(', '));
@@ -495,7 +495,7 @@ ok('the shared progress modal owns the cancel affordance',
 ok('it is hidden until an operation opts in',
    /id="sf-bulk-progress-actions" style="display:none/.test(html),
    'a button that cannot stop anything is worse than no button');
-// ⚠️ ASSERTS THE INTENT, NOT LINE ADJACENCY. This used to require `clearCancel()` on the line
+// ASSERTS THE INTENT, NOT LINE ADJACENCY. This used to require `clearCancel()` on the line
 // immediately before `classList.add('active')`, and adding the eject-checkbox reset between
 // them broke it - a false failure about correct code. Adjacency is not the property that
 // matters; being inside the opening block is.
@@ -506,16 +506,16 @@ ok('it is hidden until an operation opts in',
   ok('the handler is cleared when the modal opens',
      /this\.clearCancel\(\);/.test(openBlock),
      'a stale handler is a button reporting it stopped something already finished');
-  ok('⭐ and so is the eject checkbox',
+  ok('and so is the eject checkbox',
      /this\.clearEject\(\);/.test(openBlock),
      'a box left ticked from a previous export would eject a card this run never asked about');
-  // ⚠️⚠️ THIS PINNED ADJACENCY AND BROKE ON CORRECT CODE - TEN LINES UNDER THE COMMENT SAYING
+  // THIS PINNED ADJACENCY AND BROKE ON CORRECT CODE - TEN LINES UNDER THE COMMENT SAYING
   // ADJACENCY IS NOT THE PROPERTY THAT MATTERS. [2026-09-25] It required `clearCancel()` to be
   // the line immediately before `remove('active')`; adding `_retireActions()` between them went
   // red while the contract it names was untouched. Now each close path is sliced to its own body
   // and asked the actual question: does closing this modal retire the handler.
   //
-  // ⚠️ EACH SLICE ENDS AT THE `remove('active')` IT IS ABOUT. `hide()` holds TWO `clearCancel()`
+  // EACH SLICE ENDS AT THE `remove('active')` IT IS ABOUT. `hide()` holds TWO `clearCancel()`
   // calls - one on the early return for a modal that never opened, one on the path that actually
   // closes - so slicing the whole method let a mutation that deleted the real one pass on the
   // other. Caught by mutation testing, not by reading it.
@@ -533,15 +533,15 @@ ok('it is hidden until an operation opts in',
        'a stale handler is a button reporting it stopped something already finished');
   }
 }
-// ⚠️ THIS USED TO PIN THE LITERAL STRING "Cancelling… (finishing current file)" ON THE BUTTON.
+// THIS USED TO PIN THE LITERAL STRING "Cancelling… (finishing current file)" ON THE BUTTON.
 // 2026-09-24 the acknowledgement moved to the house convention — `_btnBusy(b, 'Cancelling')`, which
 // supplies ANIMATED dots via `.busy-dots`, with the promise on the detail line — because a static
 // ellipsis is indistinguishable from the frozen app the user already suspects. The assertion was
 // pinning the typography; what matters is that the promise is made somewhere the user reads.
-ok('⚠️ it says what is still happening rather than vanishing',
+ok('it says what is still happening rather than vanishing',
    /finishing the current file/.test(html),
    'main stops BETWEEN files, so the modal must not disappear while a copy is still running');
-ok('⭐ and the acknowledgement animates rather than sitting still',
+ok('and the acknowledgement animates rather than sitting still',
    /_btnBusy\(b, 'Cancelling'\)/.test(html),
    'a static "Cancelling…" is exactly what got reported as "no visible response"');
 
@@ -557,13 +557,13 @@ ok('a stopped bulk export still gets its full summary, headed by the fact it sto
    /if \(canceled\) \{[\s\S]{0,260}?Export stopped/.test(html),
    'swapping in a short dialog throws away the counts and free space exactly when they matter');
 
-// ── 9. ⚠️⚠️ THE LOOP MUST YIELD, OR THE CANCEL CANNOT BE DELIVERED ──
+// ── 9. THE LOOP MUST YIELD, OR THE CANCEL CANNOT BE DELIVERED ──
 // A flag is worthless if nothing can set it. The right-click multi-file export walked folders
 // with copyFileSync inside a readdirSync loop - not one await in it - so main's event loop never
 // yielded, the export:cancel IPC was never delivered, the window went "Not Responding", and the
 // export finished anyway. Third appearance of this defect class here (see [B-398], and
 // soundFontSharedTracks.js:89 "a synchronous loop cannot report on itself").
-ok('⚠️⚠️ the multi-file export walks folders with the ASYNC shared copier',
+ok('the multi-file export walks folders with the ASYNC shared copier',
    /await copyTreeWithProgress\(srcAbs, outRoot, \{[\s\S]{0,300}?shouldStop: _shouldStop/.test(main),
    'a synchronous walk blocks the event loop and cannot receive the cancel at all');
 ok('and the hand-rolled synchronous walk is gone',

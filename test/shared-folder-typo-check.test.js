@@ -6,14 +6,14 @@
  * ProffieOS looks for every folder a preset names. That error is the single
  * most-searched pain on the Crucible — 51 threads.
  *
- * ⚠️⚠️ THIS CLOSES A LIVE REGRESSION. [B-326] shipped 2026-09-06 and made a shared
+ * THIS CLOSES A LIVE REGRESSION. [B-326] shipped 2026-09-06 and made a shared
  * folder recognised by POSITION rather than by being spelled "common" — correct,
  * and the point of it. But an unrecognised name used to paint the preset red, which
  * was the wrong reason and a real signal, and B-012 was never built. So a
  * misspelled shared folder has been silent since. The entry said "ship them
  * together" in writing.
  *
- * ⭐ WHAT THIS SUITE IS REALLY FOR: not the detection, which is easy, but the three
+ * WHAT THIS SUITE IS REALLY FOR: not the detection, which is easy, but the three
  * legitimate shapes it must stay quiet on. A check that cries wolf on someone's
  * deliberate two-folder layout is worse than no check.
  *
@@ -62,7 +62,7 @@ const run = (text) => {
        /font directory not found/.test(r.findings[0].detail), r.findings[0].detail);
   }
   {
-    // ⭐ THE CASE NO WORD LIST COULD EVER CATCH, and the reason the distance is
+    // THE CASE NO WORD LIST COULD EVER CATCH, and the reason the distance is
     // measured against the config's own names. A dictionary of
     // misspellings-of-"common" is blind to an MC config.
     const r = run(cfg(...many(5, 'MC'), 'Oddball;M C'));
@@ -98,7 +98,7 @@ const run = (text) => {
        r.findings.map(f => f.title).join(' '));
   }
   {
-    // ⭐ A NUMBERED VARIANT IS DELIBERATE HOWEVER FEW PRESETS USE IT, and this is
+    // A NUMBERED VARIANT IS DELIBERATE HOWEVER FEW PRESETS USE IT, and this is
     // the case frequency cannot see. `common2` is ONE edit from `common`, so
     // without this exception a lone one fires — and a lone one is the ORDINARY
     // way a second shared folder starts: you make it, then move one preset onto
@@ -118,7 +118,7 @@ const run = (text) => {
        r.findings.map(f => f.title).join(' '));
   }
   {
-    // ⚠️ THE EXCEPTION MUST STAY NARROW. A suppression rule that is too broad hides
+    // THE EXCEPTION MUST STAY NARROW. A suppression rule that is too broad hides
     // real typos, so it is TRAILING digits only and nothing else about the name.
     const r = run(cfg(...many(5, 'MC'), 'Oddball;M C'));
     ok('the exception does not swallow a real typo in a short name', r.fired,
@@ -188,7 +188,7 @@ const run = (text) => {
     if (!files.length) console.log('SKIP  no config corpus on this machine');
     else {
       const fired = files.filter(f => run(fs.readFileSync(f, 'utf8')).fired).map(f => path.basename(f));
-      // ⚠️ Unlike a typo'd style factory, THIS FAULT SURVIVES IN A FINISHED CONFIG —
+      // Unlike a typo'd style factory, THIS FAULT SURVIVES IN A FINISHED CONFIG —
       // it compiles and flashes, and only fails at runtime. So zero here is a real
       // frequency reading rather than survivorship, and any fire is a false positive
       // until proven otherwise.

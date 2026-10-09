@@ -136,7 +136,7 @@ function incoming(userData, name, body) {
   }
 
   {
-    console.log('⚠️ a stale index row does NOT authorise a link');
+    console.log('a stale index row does NOT authorise a link');
     // The dangerous case, and the only one that can lose the audio. Build the
     // index, then change the file it points at behind its back. A hit on hash H
     // now names a file that no longer contains H. Linking on the strength of
@@ -151,7 +151,7 @@ function incoming(userData, name, body) {
     const r = CI.ingestFile({ index, srcAbs: inbox, destAbs: dest });
 
     check('it refuses the link and copies instead', r.ok && r.linked === false, JSON.stringify(r));
-    check('⭐ the destination has the CONTENT THAT WAS ASKED FOR', sha(dest) === sha(inbox));
+    check('the destination has the CONTENT THAT WAS ASKED FOR', sha(dest) === sha(inbox));
     check('and not the bytes the stale row pointed at',
       sha(dest) !== sha(path.join(src, 'Proffie/hum.wav')));
     check('the stale row is counted, not swallowed', index.stats.staleCandidates === 1,
@@ -159,7 +159,7 @@ function incoming(userData, name, body) {
   }
 
   {
-    console.log('⚠️ the destination is the file we were HANDED, never the one we were told about');
+    console.log('the destination is the file we were HANDED, never the one we were told about');
     // ingestFile once accepted a caller-supplied hash. Pass one that does not
     // describe srcAbs and, if the library holds THAT content, the destination
     // gets those bytes — the wrong sound, reported as a success. The argument is
@@ -176,7 +176,7 @@ function incoming(userData, name, body) {
     const inbox = incoming(userData, 'other.wav', wav('COMPLETELY-DIFFERENT'));
     const dest = path.join(userData, 'soundFonts', 'library', 'Ahsoka', 'other.wav');
     const r = CI.ingestFile({ index, srcAbs: inbox, destAbs: dest, hash: sha(humAbs) });
-    check('⭐ the destination holds the incoming bytes', sha(dest) === sha(inbox));
+    check('the destination holds the incoming bytes', sha(dest) === sha(inbox));
     check('and NOT the sound the bogus hash named', sha(dest) !== sha(humAbs));
     check('it is a copy, because this content is genuinely new', r.linked === false, JSON.stringify(r));
   }
@@ -278,7 +278,7 @@ function incoming(userData, name, body) {
     check('and the font still reads its sound', sha(fontFile) === sha(usedIn));
     check('the release is counted', r.removed === 1, JSON.stringify(r));
 
-    // ⭐ And it is the LAST user that frees it, not the first deletion.
+    // And it is the LAST user that frees it, not the first deletion.
     fs.rmSync(fontFile);
     const r2 = CI.releasePoolOrphans(userData);
     check('once the last font is gone the file follows', !fs.existsSync(used.absPath) && r2.removed === 1,

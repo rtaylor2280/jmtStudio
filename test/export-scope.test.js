@@ -1,25 +1,25 @@
 // A top-level function may not reach for a helper that lives inside a block.  [B-005 item 4]
 //
-// ⭐⭐ THE DEFECT THIS EXISTS TO KILL, and it had already been caught ONCE before it bit again.
+// THE DEFECT THIS EXISTS TO KILL, and it had already been caught ONCE before it bit again.
 // `_sfDeleteProgress` is declared inside `if (isElectron) { … }` in renderer/index.html, so it
 // is block-scoped. `_sfPreflightDestination` is a top-level `async function`. On 2026-09-21 the
 // shared preflight called it three times - to borrow the door's bar, to retitle it, and to take
 // it down before a dialog - and every one of those was a ReferenceError.
 //
-// ⚠️⚠️ IT WAS SILENT, WHICH IS THE WHOLE PROBLEM. All three sat inside `try {} catch {}` written
+// IT WAS SILENT, WHICH IS THE WHOLE PROBLEM. All three sat inside `try {} catch {}` written
 // for a different reason ("a preflight that throws must not prevent an export"), so nothing
 // logged and nothing broke loudly. What showed up instead were two unrelated-looking UI glitches:
 // a progress bar that never animated, and an extra window appearing for a check that was already
 // explained. Neither symptom pointed anywhere near scope.
 //
-// ⚠️⚠️ AND THE GUARD THAT EXISTED DID NOT COVER IT. test/export-outcome-shared.test.js already
+// AND THE GUARD THAT EXISTED DID NOT COVER IT. test/export-outcome-shared.test.js already
 // tests this exact class - by comparing INDENT LEVELS of `_sfExportOutcome`, the eject helpers,
 // and the two helpers they call. It passed the whole time, because it checks A LIST OF NAMES
 // that were the functions with the bug LAST time. A guard built around the previous instance is
 // not a guard around the class. So this one checks the RELATIONSHIP instead: every reference,
 // whoever makes it, including functions nobody has written yet.
 //
-// ⭐ The ruling is what widened it: "means we probably got this wrong on the other doors too."
+// The ruling is what widened it: "means we probably got this wrong on the other doors too."
 'use strict';
 
 const fs = require('fs');
@@ -39,7 +39,7 @@ const FILE = path.join(__dirname, '..', 'renderer', 'index.html');
 // declared there. Anything declared at an indent - inside `if (isElectron)`, inside a DOM-ready
 // callback - is invisible to it no matter how far up the file it appears.
 //
-// ⚠️ Only `_sf*` / `_sd*` helpers are checked. A general identifier sweep was the first cut and
+// Only `_sf*` / `_sd*` helpers are checked. A general identifier sweep was the first cut and
 // it reported 27,416 "violations": names like `depth`, `locked` and `tabBtn` are declared and
 // re-declared all over a 46,000-line file, so the results were pure noise and would have been
 // read as "this check does not work" rather than "this check is wrong". The prefixed helpers are
@@ -73,7 +73,7 @@ function outOfScopeRefs(src) {
       if (!hits) continue;
       for (const n of new Set(hits)) {
         if (topDecl.has(n)) continue;
-        // ⭐ THE TWO LEGITIMATE WAYS TO CROSS THE BOUNDARY, and both are deliberate at the call
+        // THE TWO LEGITIMATE WAYS TO CROSS THE BOUNDARY, and both are deliberate at the call
         // site rather than accidental: publish it on `window`, or guard with `typeof`. The
         // second is how the handful of pre-existing cross-boundary calls in this file are
         // written, and they are correct - a `typeof` guard cannot throw.
@@ -95,20 +95,20 @@ function outOfScopeRefs(src) {
 
 const H = fs.readFileSync(FILE, 'utf8');
 
-// ── ⚠️⚠️ THE CHECKER PROVES ITSELF FIRST ──────────────────────────────
+// ── THE CHECKER PROVES ITSELF FIRST ──────────────────────────────
 //
 // A scope checker that reports zero is indistinguishable from a scope checker that is broken,
 // and this file would be the second one to look green while the bug was live. So before its
 // clean run means anything, it has to catch the ACTUAL defect: put the bare reference back into
 // `_sfPreflightDestination` exactly as it was written this morning and confirm it is reported.
 {
-  // ⚠️⚠️ THE MUTATION IS ANCHORED INSIDE THE NAMED FUNCTION, NOT ON THE FIRST MATCH IN THE FILE.
+  // THE MUTATION IS ANCHORED INSIDE THE NAMED FUNCTION, NOT ON THE FIRST MATCH IN THE FILE.
   // It used to be a bare `H.replace('window._sfDeleteProgress.barEl();', …)`, which takes the
   // FIRST occurrence. On 2026-10-04 `_sfWarnSlowImport` was given the identical borrow block and
   // placed EARLIER in the file, so the mutation landed in that function instead - and the assert
   // below, which names `_sfPreflightDestination`, reported that the checker could not catch its
   // own defect. The checker was fine; the anchor had moved under it.
-  // ⭐ Same failure as the door-table anchor in export-door-map.test.js, and the lesson is the
+  // Same failure as the door-table anchor in export-door-map.test.js, and the lesson is the
   // same: a mutation that does not say WHERE it applies is not a control, it is a coincidence.
   const TARGET = 'async function _sfPreflightDestination';
   const at = H.indexOf(TARGET);
@@ -124,7 +124,7 @@ const H = fs.readFileSync(FILE, 'utf8');
      'the line was renamed - re-anchor this, do not delete the self-check');
   const caught = outOfScopeRefs(mutated)
     .some((v) => v.name === '_sfDeleteProgress' && v.fn === '_sfPreflightDestination');
-  ok('⚠️⚠️ it catches the real defect when reintroduced',
+  ok('it catches the real defect when reintroduced',
      caught,
      'a green run below would mean nothing - this is the case it was written for');
 }
@@ -139,7 +139,7 @@ const H = fs.readFileSync(FILE, 'utf8');
 
 // ── The specific crossing that caused it, pinned ─────────────────────
 //
-// ⚠️ The general check above would go quiet if someone deleted the `window.` publication AND
+// The general check above would go quiet if someone deleted the `window.` publication AND
 // every use in one go. This names the arrangement so the intent survives.
 ok('_sfDeleteProgress is published on window for the shared preflight',
    /window\._sfDeleteProgress = _sfDeleteProgress;/.test(H),

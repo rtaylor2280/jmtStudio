@@ -12,7 +12,7 @@
 // order, so the spawn ran twice on every warned import. Found 2026-10-07 when The ask was "just
 // make sure you don't call to find out again since we already know."
 //
-// ⚠️ THIS IS A BEHAVIOURAL TEST, NOT A SOURCE SCAN, and it has to be. The broken and the fixed
+// THIS IS A BEHAVIOURAL TEST, NOT A SOURCE SCAN, and it has to be. The broken and the fixed
 // code both read as a reasonable cache; the difference is only visible by counting calls. It
 // evaluates the real object literal out of the page with the two lookups stubbed.
 
@@ -60,14 +60,14 @@ function build() {
        `ran ${classifyCalls} times - the memo is not holding`);
   }
 
-  // ── ⚠️⚠️ THE REGRESSION ITSELF ────────────────────────────────────────────
+  // ── THE REGRESSION ITSELF ────────────────────────────────────────────
   // The exact order `_sfWarnSlowImport` uses: removable, then isBoardCard.
   {
     const id = build();
     await id.isBoardCard('F:\\Fonts');          // the card report's question
     await id.removable('F:\\Fonts');            // the warning's first question
     await id.isBoardCard('F:\\Fonts');          // the warning's second question
-    ok('⚠️ a removable() check between two board questions costs no second spawn',
+    ok('a removable() check between two board questions costs no second spawn',
        classifyCalls === 1,
        `ran ${classifyCalls} times - this is the defect: identity() dropped the cached verdict for `
        + 'the same drive, so every warned import paid ~1,900 ms twice');

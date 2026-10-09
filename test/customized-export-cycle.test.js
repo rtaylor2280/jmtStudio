@@ -82,7 +82,7 @@ const VENDOR_FILES = {
 
   // Customize Ahsoka: change one file's bytes (different length, so the
   // stat-walk freshness check trips) and add one file.
-  // ⚠️ REMOVE BEFORE REWRITING. The entry's files are HARDLINKS into the
+  // REMOVE BEFORE REWRITING. The entry's files are HARDLINKS into the
   // folder source ([B-309] pointers), so an in-place write would edit the
   // vendor's copy too and every later extraction would inherit the "edit" —
   // the first run of this test did exactly that, and the stock copy below

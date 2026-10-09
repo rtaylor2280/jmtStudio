@@ -4,7 +4,7 @@
  * Said immediately after bulk-importing 191 fonts: "no way to clear the new tag... in
  * bulk..."
  *
- * ⭐ THE FEATURE WAS CORRECT AND ITS EXIT WAS MISSING. NEW means "never seen", stamped
+ * THE FEATURE WAS CORRECT AND ITS EXIT WAS MISSING. NEW means "never seen", stamped
  * by exactly four writers — opening the detail, assigning to a preset, exporting to a
  * card, and a successful flash. Every one is per-font and deliberate, which is right
  * for a library that grows a few fonts at a time. It does not survive a bulk import:
@@ -14,7 +14,7 @@
  *   * the chip beside the New count — "I just imported everything, clear it"
  *   * the selection button          — "clear these twelve"
  *
- * ⚠️ ONE WRITE PATH. Both walk `markEntrySeen`, the same call the single-font helper
+ * ONE WRITE PATH. Both walk `markEntrySeen`, the same call the single-font helper
  * uses, rather than touching meta directly — so the write-once rule lives in one place.
  *
  * Run: node test/mark-seen-bulk.test.js
@@ -37,12 +37,12 @@ function ok(name, cond, extra) {
 {
   ok('the chip-side control exists', /id="btn-sf-mark-all-seen"/.test(html));
   ok('the selection-side control exists', /id="btn-sf-bulk-mark-seen"/.test(html));
-  // ⚠️⚠️ THIS ASSERTION WAS INVERTED ON 2026-09-18 AND THE INVERSION IS THE POINT. [B-297]
+  // THIS ASSERTION WAS INVERTED ON 2026-09-18 AND THE INVERSION IS THE POINT. [B-297]
   // It used to require the control to sit BESIDE THE NEW FILTER, in the chip row. The user looked at
   // that live and would not pass it: it "looks like a filter". A row of filters is where you go
   // to change the VIEW, not your data, so an action there reads as a view toggle no matter how it
   // is styled. Placement was the whole fix; the old test had encoded the rejected design.
-  // ⚠️ Anchor on the MARKUP spelling. `btn-sf-select-in-use` appears in the stylesheet thousands
+  // Anchor on the MARKUP spelling. `btn-sf-select-in-use` appears in the stylesheet thousands
   // of lines earlier, so a bare indexOf measures the distance from a CSS rule to a button and
   // reports a correct layout as wrong.
   const selectInUseAt = html.indexOf('<button id="btn-sf-select-in-use"');
@@ -64,7 +64,7 @@ function ok(name, cond, extra) {
                           html.indexOf("const markAllBtn = document.getElementById('btn-sf-mark-all-seen')") + 600);
   ok('the chip control hides when nothing is New',
      /markAllBtn\.style\.display = newCount > 0 \? '' : 'none';/.test(chip), chip);
-  // ⚠️ The label references the BADGE, not the mechanism. "seen" is not a clear opposite of
+  // The label references the BADGE, not the mechanism. "seen" is not a clear opposite of
   // "NEW" and quietly claims the user looked at something. A real words for the gap:
   // "no way to clear the new tag". seenAt stays the field name in code. [B-297]
   ok('and it names the count, referencing the badge', /Clear all New \(\$\{newCount\}\)/.test(chip), chip);
@@ -94,7 +94,7 @@ function ok(name, cond, extra) {
   ok('it repaints ONCE at the end, not per font',
      (bulk.match(/_sfRenderGrid\(\)/g) || []).length === 1, bulk);
 
-  // ⚠️ A run where everything was already seen must not claim success.
+  // A run where everything was already seen must not claim success.
   ok('it distinguishes "nothing to do" from "done"',
      /already marked as seen/.test(bulk), bulk);
   ok('and reports failures rather than swallowing them',

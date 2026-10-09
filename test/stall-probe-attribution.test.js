@@ -26,7 +26,7 @@ fs.writeFileSync(path.join(ud, '.stall-probe'), '');   // arm it
 
 const probe = require('../stallProbe');
 
-// ⚠️⚠️ WRAP BEFORE init(), DELIBERATELY — this is the real load order and it is where the first
+// WRAP BEFORE init(), DELIBERATELY — this is the real load order and it is where the first
 // cut failed. mark()/markAsync() are applied while a module builds its module.exports, which runs
 // when main.js REQUIRES it, and that is BEFORE app.whenReady() calls init(). The first version
 // checked `enabled` at wrap time, so every wrapper handed back the unwrapped original and six
@@ -68,7 +68,7 @@ function waitForHeartbeat() {                 // let the timer fire and notice t
     text.includes('longRunningImport'),
     'the phase name is missing from the report entirely');
 
-  // ⚠️ The regression itself: the bug did not lose the stall, it MISLABELLED it. A test that only
+  // The regression itself: the bug did not lose the stall, it MISLABELLED it. A test that only
   // checked "a stall was recorded" passes against the broken build.
   check('it is NOT reported as idle',
     !/\(idle - nothing marked\)/.test(text),
@@ -76,7 +76,7 @@ function waitForHeartbeat() {                 // let the timer fire and notice t
 
   // A phase that genuinely ended before the stall must not be BLAMED for it.
   //
-  // ⚠️ SCOPED TO THE ATTRIBUTION SECTION ON PURPOSE. The first cut of this asserted the name was
+  // SCOPED TO THE ATTRIBUTION SECTION ON PURPOSE. The first cut of this asserted the name was
   // absent from the whole report and failed against correct code: a finished phase legitimately
   // appears under "PHASE DURATIONS", which is wall-clock bookkeeping and says nothing about who
   // held the loop. Asserting on the whole text conflated the two sections and would have sent me
@@ -92,7 +92,7 @@ function waitForHeartbeat() {                 // let the timer fire and notice t
     blameOnly.length > 0 && !blameOnly.includes('alreadyFinished'),
     'a phase that had already ended was named as the culprit:\n' + blameOnly.trim());
 
-  // ⭐ THE REGRESSION: a function wrapped BEFORE init() must still be attributed.
+  // THE REGRESSION: a function wrapped BEFORE init() must still be attributed.
   const ret = wrappedEarly();
   await waitForHeartbeat();
   const t3 = probe.flush('fourth flush');

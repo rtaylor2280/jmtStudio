@@ -291,7 +291,7 @@ function copyDirSync(src, dest) {
 
 // The same copy, but the event loop stays alive and a cancel can land. [B-488]
 //
-// ⭐⭐ WHY THIS EXISTS BESIDE copyDirSync RATHER THAN REPLACING IT. This hit the
+// WHY THIS EXISTS BESIDE copyDirSync RATHER THAN REPLACING IT. This hit the
 // version import with the window reading "JMT Studio (Not Responding)" and the
 // dialog's Cancel unavailable. `copyDirSync` is a synchronous recursive walk, and
 // Electron routes frame presentation AND input dispatch through the main process,
@@ -299,16 +299,16 @@ function copyDirSync(src, dest) {
 // — the button is not ignoring the click, nothing is listening. Exactly the shape
 // written up in [B-462] for the bulk scan.
 //
-// ⚠️ MEASURED on a real source (346 files, 2.6 MB, read from a Drive-backed
+// MEASURED on a real source (346 files, 2.6 MB, read from a Drive-backed
 // folder): 2,092 ms cold, 1,638 ms warm, 893 ms local-to-local. Short, and that
 // is the point — the blocking time scales with whatever the user points at, and
 // nothing bounds what that is.
 //
-// ⚠️ THE OTHER TWO copyDirSync CALLERS ARE LEFT ALONE ON PURPOSE (`initWorkspace`
+// THE OTHER TWO copyDirSync CALLERS ARE LEFT ALONE ON PURPOSE (`initWorkspace`
 // and the prop copy). They are different doors with their own sizes and their own
 // walk entries; converting them is not this fix.
 //
-// ⚠️⚠️ YIELDS ON A TIME BUDGET, NOT A FILE COUNT, AND THAT CORRECTION CAME FROM
+// YIELDS ON A TIME BUDGET, NOT A FILE COUNT, AND THAT CORRECTION CAME FROM
 // TESTING IT. The first cut yielded every 24 files and it was reported "still
 // went briefly unresponsive because I tried to click again and it wasn't showing
 // canceling". A COUNT CANNOT BOUND THE BLOCK: a ProffieOS tree holds both 2 KB
@@ -592,7 +592,7 @@ async function importVersion(sourcePath, versionName, proffieVersion, coreVersio
     return { ok: false, error: `A version named "${name}" already exists.` };
   }
   try {
-    // ⚠️ A CANCEL MUST NOT LEAVE A HALF-COPIED VERSION ON THE LIST. The version
+    // A CANCEL MUST NOT LEAVE A HALF-COPIED VERSION ON THE LIST. The version
     // directory is created here, so if we created it and the copy did not finish,
     // it is ours to remove — and `versionDir` is the whole of what we made, which
     // is why the removal targets it rather than `dest`. The existsSync guard
@@ -629,12 +629,12 @@ async function importVersion(sourcePath, versionName, proffieVersion, coreVersio
 // selected and nowhere else. Duplicating a version copies its whole tree, so an
 // imported prop follows a duplicate for free without this having to fan out.
 //
-// ⚠️ THIS IS A DOOR THAT WRITES A CHOSEN FILE INTO THE TREE WE THEN COMPILE, so it
+// THIS IS A DOOR THAT WRITES A CHOSEN FILE INTO THE TREE WE THEN COMPILE, so it
 // refuses two things and neither check is invented here:
 //   · A program. `checkExecutableFile` is the programs-only predicate, by content AND
 //     by name, with the trailing-dot/space strip that stops `evil.exe.` sneaking past.
 //     soundFontAttachments guards with the same one for the same reason.
-//     ⚠️ NOT `checkCarryableFile` - its refusal wording is card-scoped ("no use on a
+//     NOT `checkCarryableFile` - its refusal wording is card-scoped ("no use on a
 //     saber card", "left out") and reads as nonsense in a props folder.
 //   · Anything that is not `.h`. The include the Prop dropdown writes is
 //     `../props/<file>`, so a non-header cannot be compiled by the only path that
@@ -700,7 +700,7 @@ function importProp(versionName, sourcePath, opts) {
 // the answer is recorded at the one point we know it rather than reconstructed
 // later from a folder listing that cannot tell a stock prop from a brought one.
 //
-// ⚠️ THE LIMIT IS PART OF THE DESIGN, not a shortfall: versions installed before
+// THE LIMIT IS PART OF THE DESIGN, not a shortfall: versions installed before
 // this existed have no record, so nothing in them is removable until it is
 // imported through the app. That is correct. We genuinely do not know what was in
 // those folders when they arrived, and an app that offers to delete a file it
@@ -730,7 +730,7 @@ function addedProps(versionName) {
 
 // Remove a prop this app put there. [B-446] requirement 3.
 //
-// ⚠️ REFUSES ANYTHING NOT IN addedProps, and that refusal is the feature. A prop
+// REFUSES ANYTHING NOT IN addedProps, and that refusal is the feature. A prop
 // that shipped with ProffieOS is not ours to delete, and one we have no record of
 // is one we cannot vouch for - which reads the same way from here.
 function removeProp(versionName, file) {
@@ -781,7 +781,7 @@ function planPropCopy(fromVersion, file, toVersions) {
 function copyPropToVersions(fromVersion, file, toVersions) {
   const src = path.join(getUserVersionsPath(), fromVersion, 'ProffieOS', 'props', file);
   if (!fs.existsSync(src)) return { ok: false, error: `${file} is not in ${fromVersion}.` };
-  // ⚠️ SAME RESTRICTION AS removeProp, AND FOR A HARDER REASON THAN SYMMETRY.
+  // SAME RESTRICTION AS removeProp, AND FOR A HARDER REASON THAN SYMMETRY.
   // A prop that shipped with ProffieOS already exists in every version that ships
   // it, so copying one across does not ADD anything - it overwrites the
   // destination's own correct copy with a file written against a different OS
@@ -1028,7 +1028,7 @@ function renameVersion(oldName, newName) {
   }
 }
 
-// ⚠️ CANCELLABLE FOR THE SAME REASON AS importVersion, AND IT IS NOT OPTIONAL
+// CANCELLABLE FOR THE SAME REASON AS importVersion, AND IT IS NOT OPTIONAL
 // SCOPE: Duplicate shares the import modal AND its single Cancel button. [B-488]
 // Leaving this one synchronous would ship a button that works on the Import path
 // and is drawn-but-dead on the Duplicate path — which is the precise defect

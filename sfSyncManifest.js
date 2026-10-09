@@ -59,7 +59,7 @@ const MANIFEST_VERSION = 1;
 // read back up to 2s from what we observed.
 const MTIME_TOLERANCE_MS = 2000;
 
-// ⭐⭐ THE ONE DEFINITION OF "THIS RECORD STILL DESCRIBES THIS FILE". [B-005 item 7b, 2026-09-26]
+// THE ONE DEFINITION OF "THIS RECORD STILL DESCRIBES THIS FILE". [B-005 item 7b, 2026-09-26]
 //
 // Four byte-identical copies of this existed - the font compare, the common compare, the tracks
 // compare and recordFolderAt - and the differential write was about to make a fifth. It is the
@@ -67,16 +67,16 @@ const MTIME_TOLERANCE_MS = 2000;
 // drifted would make one surface trust a stale hash while the others re-read, and nothing would
 // look wrong from outside.
 //
-// ⚠️ mtime IS COMPARED WITH A TOLERANCE, NOT FOR EQUALITY. FAT32 stores modified times to two
+// mtime IS COMPARED WITH A TOLERANCE, NOT FOR EQUALITY. FAT32 stores modified times to two
 // seconds, so exact comparison would invalidate every record on every card the moment it landed.
-// ⚠️⚠️ IT CHECKS THE RECORD IS WELL FORMED ITSELF RATHER THAN TRUSTING ITS CALLER. `cacheFor`
+// IT CHECKS THE RECORD IS WELL FORMED ITSELF RATHER THAN TRUSTING ITS CALLER. `cacheFor`
 // drops anything shorter than four fields, so a malformed record cannot arrive by that route
 // today - but the whole reason this function exists is that the rule had no single home, and
 // "safe because of a filter in another function" is the same weakness wearing a different hat.
-// ⭐ The specific trap, found by testing it: `entry[1] || 0` turns a missing mtime into 0, and 0
+// The specific trap, found by testing it: `entry[1] || 0` turns a missing mtime into 0, and 0
 // is within tolerance of 0 - so a truncated record would VALIDATE against any size-matched file
 // near the epoch, and then hand the caller `undefined` as its hash.
-// ⚠️ The hash is required too, because that is what `valid` is used FOR at every call site:
+// The hash is required too, because that is what `valid` is used FOR at every call site:
 // `valid ? entry[2] : hash(file)`. A record that cannot answer that question is not valid.
 function entryValid(entry, size, mtimeMs) {
   if (!Array.isArray(entry) || entry.length < 3) return false;
@@ -113,24 +113,24 @@ function manifestPath(destDir) {
 // there", and only one of those two justifies a write.
 // ── The manifest is BORROWED, not re-fetched per item ──────────── [B-173 point 1, 2026-09-24]
 //
-// ⭐⭐ MEASURED BEFORE BUILDING, as the entry demands: a 25-font compare parsed the destination
+// MEASURED BEFORE BUILDING, as the entry demands: a 25-font compare parsed the destination
 // manifest TWENTY-FIVE TIMES - `cacheFor` is called once per font and each call read and parsed
 // the whole file. On a real card that is a 505 KB file re-read over USB per font, ~12.3 MB for one
 // scan, to answer questions about a document that cannot have changed.
 //
-// ⭐⭐ WHY A MEMO IS SAFE HERE, AND WHY IT IS VALIDATED RATHER THAN TIMED. [B-402] already made the
+// WHY A MEMO IS SAFE HERE, AND WHY IT IS VALIDATED RATHER THAN TIMED. [B-402] already made the
 // write a SINGLE commit at the end of an operation, so the manifest on disk does not change while
 // a compare runs. That makes borrowing correct - but "correct because of something another entry
 // did" is exactly the kind of reasoning that rots when the other thing changes.
 //
-// ⚠️ SO THE MEMO IS NOT TRUSTED ON A LIFETIME. It carries the file's size and mtime and re-stats
+// SO THE MEMO IS NOT TRUSTED ON A LIFETIME. It carries the file's size and mtime and re-stats
 // before every use: one stat instead of a full read and parse, and it self-invalidates the moment
 // anything writes the file - including another process, which no borrow/release protocol of ours
 // could have noticed. A stale manifest would make a compare report "unchanged" for a file that
 // changed, and silently skip it on the export. That is a wrong answer about the user's card, not
 // a slow one, so it is not a risk worth taking to save a stat.
 //
-// ⚠️ Keyed by the manifest PATH, so two destinations in one session cannot read each other's.
+// Keyed by the manifest PATH, so two destinations in one session cannot read each other's.
 let _memo = null;   // { path, size, mtimeMs, result }
 
 function _statQuiet(p) {
@@ -147,11 +147,11 @@ function _statQuiet(p) {
 // The per-item compare is one IPC call each (the loop is in the renderer), so there is no
 // operation boundary here to summarise at - hence running totals rather than a final line.
 //
-// ⚠️ No flag to arm, unlike the stall probe: an instrument you have to switch on is one you
+// No flag to arm, unlike the stall probe: an instrument you have to switch on is one you
 // find switched off on the day it matters. Cost is one line per compare.
-// ⚠️ ASCII only in the output. An em dash reaches a Windows terminal as mojibake.
+// ASCII only in the output. An em dash reaches a Windows terminal as mojibake.
 //
-// ⚠️ `state` is on the line because a fresh card otherwise looks identical to a broken borrow:
+// `state` is on the line because a fresh card otherwise looks identical to a broken borrow:
 // `absent` is never memoised (no stat to validate against), so every item re-attempts the read
 // and every line reads `parses=1 reuses=0` - the same shape as a memo that has stopped working.
 let _counts = { path: null, state: 'none', parses: 0, reuses: 0, stats: 0, hashes: 0 };
@@ -159,7 +159,7 @@ let _counts = { path: null, state: 'none', parses: 0, reuses: 0, stats: 0, hashe
 // A fresh parse starts a new borrow, so the totals reset with it: `parses=1` then means "picked
 // up once and held", and anything above 1 means the borrow broke.
 //
-// ⚠️ Monotonic, and separate from the totals on purpose. Deciding whether a compare consulted
+// Monotonic, and separate from the totals on purpose. Deciding whether a compare consulted
 // the manifest by asking whether the totals CHANGED is wrong in the case that matters: on a card
 // with no manifest every read lands on the same values, so identical numbers mean the opposite
 // of nothing happening. This only ever goes up.
@@ -179,14 +179,14 @@ function countStat(n) { _counts.stats += (n || 1); }
 // believed. Without it, two runs of identical measured work can differ by a factor of ten with
 // nothing on the line to explain it.
 //
-// ⚠️ Read it as a discriminator, not as more data. `hashes=0` means every recorded hash was
+// Read it as a discriminator, not as more data. `hashes=0` means every recorded hash was
 // trusted, so any time spent went somewhere outside the compare. `hashes>0` on a card that was
 // just exported to means entries are being REJECTED and the card re-read, which is a validation
 // defect rather than a slow disk. The two call for opposite work.
 function countHash(n) { _counts.hashes += (n || 1); }
 function counts() { return Object.assign({}, _counts); }
 
-// ⚠️ A plain-words tail rather than a bare state word. `absent` next to `parses=1 reuses=0` still
+// A plain-words tail rather than a bare state word. `absent` next to `parses=1 reuses=0` still
 // leaves the reader to connect the two; the whole reason the state is here is that the numbers
 // alone read as a failure on a card that has simply never been written to.
 const _STATE_NOTE = {
@@ -195,7 +195,7 @@ const _STATE_NOTE = {
   incompatible:'  (manifest from another version - it will be rebuilt)',
 };
 
-// ⚠️⚠️ A LINE THAT PRINTS WHEN NOTHING HAPPENED IS THE INSTRUMENT LYING. Found 2026-09-25 while
+// A LINE THAT PRINTS WHEN NOTHING HAPPENED IS THE INSTRUMENT LYING. Found 2026-09-25 while
 // mid-export to a freshly formatted card, `entryMatchesAt` returns `missing` the moment
 // the destination folder does not exist, BEFORE `cacheFor` is reached - so on a fresh card no
 // manifest is consulted at all. The report still fired once per font and would have shown the
@@ -215,7 +215,7 @@ function report(label) {
           + (_STATE_NOTE[c.state] || '')));
 }
 
-// ⚠️⚠️ THE MEMO HANDS OUT A COPY, NEVER ITS OWN OBJECT. [B-173, 2026-09-24]
+// THE MEMO HANDS OUT A COPY, NEVER ITS OWN OBJECT. [B-173, 2026-09-24]
 //
 // `mergeItems` and `mergeItem` both do `readState()` and then MUTATE the manifest in place
 // (`m.items[name] = { files }`) before writing it. Handing them the cached object made the memo
@@ -225,10 +225,10 @@ function report(label) {
 // would believe files are recorded on the card that are not there. That is a wrong answer about
 // the user's card, which is the one failure this cache is not allowed to introduce.
 //
-// ⭐ Found by mutation-testing the guard, not by reading: removing the explicit invalidation left
+// Found by mutation-testing the guard, not by reading: removing the explicit invalidation left
 // every test green because the in-place mutation was keeping the cache accidentally fresh.
 //
-// ⚠️ A clone per call is memory work. The thing it replaces is a 505 KB read and parse off a card
+// A clone per call is memory work. The thing it replaces is a 505 KB read and parse off a card
 // over USB, so this is cheap by several orders of magnitude and not worth optimising until
 // measured. Points 2-4 of [B-173] are where the remaining cost actually is.
 function _copyOut(result) {
@@ -245,7 +245,7 @@ function readState(destDir) {
     _countReuse();
     return _copyOut(_memo.result);
   }
-  // ⚠️ ONE EXIT, so every outcome is memoised on the same terms. A `return` added later that
+  // ONE EXIT, so every outcome is memoised on the same terms. A `return` added later that
   // skips the memo would quietly reintroduce the per-item read this exists to remove, and
   // nothing would go red - it would just get slow again.
   const keep = (result) => {
@@ -253,7 +253,7 @@ function readState(destDir) {
     // borrow is counted on the same terms as the one exit above. See the note on `_countParse`.
     _countParse(mPath, result && result.state);
     if (st) _memo = { path: mPath, size: st.size, mtimeMs: st.mtimeMs, result };
-    // ⚠️ The CALLER gets a copy too, not the object we just memoised - otherwise the very first
+    // The CALLER gets a copy too, not the object we just memoised - otherwise the very first
     // read after a parse hands out the live cache and the mutation problem returns.
     return _copyOut(result);
   };
@@ -263,9 +263,9 @@ function readState(destDir) {
   } catch (err) {
     // ENOENT is a real answer: there is no manifest. Every other errno means
     // one may well be sitting there that we simply could not get at.
-    // ⚠️ NOT MEMOISED WHEN ABSENT - there is no stat to validate against, so a later write
+    // NOT MEMOISED WHEN ABSENT - there is no stat to validate against, so a later write
     // would have nothing to invalidate.
-    // ⭐ STILL COUNTED AS A PARSE. The card was touched, and because nothing is memoised this
+    // STILL COUNTED AS A PARSE. The card was touched, and because nothing is memoised this
     // path repeats per item - so a destination with no manifest reads `parses=1 reuses=0` on
     // every line, which is the honest picture rather than a borrow that looks like it held.
     const state = (err && err.code === 'ENOENT') ? 'absent' : 'unreadable';
@@ -283,7 +283,7 @@ function readState(destDir) {
   return keep({ manifest: m, state: 'ok' });
 }
 
-// ⚠️ Cleared by OUR writes as well as detected by the stat. The stat alone would catch it, but a
+// Cleared by OUR writes as well as detected by the stat. The stat alone would catch it, but a
 // filesystem with coarse mtime granularity can land a write inside the same millisecond as the
 // read that preceded it - and on FAT32 the granularity is 2 SECONDS. Belt and braces, and the
 // braces are the cheap half.
@@ -320,7 +320,7 @@ function write(destDir, manifest) {
     const withNote = Object.assign({ _note: MANIFEST_NOTE }, manifest);
     fs.writeFileSync(tmpPath, JSON.stringify(withNote));
     fs.renameSync(tmpPath, finalPath);
-    // ⚠️⚠️ THE MEMO MUST GO HERE, NOT BE LEFT TO THE STAT. [B-173, 2026-09-24] FAT32 records
+    // THE MEMO MUST GO HERE, NOT BE LEFT TO THE STAT. [B-173, 2026-09-24] FAT32 records
     // mtime with TWO-SECOND granularity, so a write landing close behind the read that preceded
     // it can leave size and mtime both unchanged - and a memo validated only by those would then
     // serve the pre-write manifest. Since this process is the only writer, clearing here is what
@@ -354,7 +354,7 @@ function cacheFor(destDir, itemName) {
 // did not look at this time survive untouched: a comparison only ever consults
 // the files the library is writing, so it has no business discarding knowledge
 // about anything else. `observed` is a Map of relPath -> [size, mtimeMs, hash].
-// [B-402] ⭐⭐ COMMIT EVERYTHING THE OPERATION LEARNED, IN ONE WRITE.
+// [B-402] COMMIT EVERYTHING THE OPERATION LEARNED, IN ONE WRITE.
 //
 // The design: "we gather all the information and at the very end we drop a SINGLE manifest
 // update based on what we learned along the way." The first cut wrote per exported item, which
@@ -367,18 +367,18 @@ function cacheFor(destDir, itemName) {
 // what is already recorded, then ONE write. Items the operation never touched keep their
 // records untouched.
 //
-// ⚠️ ALL-OR-NOTHING ON PURPOSE. The per-item write existed so an interrupted export left the
+// ALL-OR-NOTHING ON PURPOSE. The per-item write existed so an interrupted export left the
 // card's manifest matching what was on it. A single terminal write means an interrupted export
 // records nothing — which is CORRECT rather than merely simpler: the entries it would have
 // written describe files that may not have finished copying, and a missing record self-heals
 // into a re-read while a wrong one does not.
-// ⚠️⚠️ `opts.complete` NAMES ITEMS WHOSE OBSERVATION IS THE WHOLE FOLDER, and it is the only way
+// `opts.complete` NAMES ITEMS WHOSE OBSERVATION IS THE WHOLE FOLDER, and it is the only way
 // a record is ever REMOVED. Merging alone can only add and overwrite, so a file deleted from the
 // card left its record behind for ever - and an entry describing a file that is not there
 // contradicts the claim that we maintain this - the record is described as maintained, so it
 // cannot keep an entry for something that is gone.
 //
-// ⚠️ IT IS OPT-IN BECAUSE MOST OBSERVATIONS ARE PARTIAL. A compare walks the LIBRARY's file list,
+// IT IS OPT-IN BECAUSE MOST OBSERVATIONS ARE PARTIAL. A compare walks the LIBRARY's file list,
 // so its findings say nothing about anything else in that folder; treating them as complete would
 // delete knowledge about files the operation never looked at. Only `recordFolderAt` walks the
 // whole folder, so only its result may claim this.
@@ -395,7 +395,7 @@ function mergeItems(destDir, items, opts = {}) {
   for (const itemName of names) {
     const observed = items[itemName] instanceof Map ? items[itemName] : new Map(items[itemName] || []);
     const isComplete = complete.has(itemName);
-    // ⚠️ An empty observation is normally nothing to say - but from a COMPLETE walk it means the
+    // An empty observation is normally nothing to say - but from a COMPLETE walk it means the
     // folder is empty, which is a fact worth recording rather than one to skip.
     if (!observed.size && !isComplete) continue;
     const existing = new Map();
@@ -439,16 +439,16 @@ function mergeItem(destDir, itemName, observed) {
   for (const [rel, [size, mtime, hash]] of existing) files.push([rel, size, mtime, hash]);
   files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   m.items[itemName] = { files };
-  // [B-402] ⭐ A WRITE THAT CHANGES NOTHING IS STILL A WRITE. Every caller merged its
+  // [B-402] A WRITE THAT CHANGES NOTHING IS STILL A WRITE. Every caller merged its
   // observations over what was already recorded and then wrote unconditionally, so a run
   // where every file was a cache hit spent a temp file and a rename recording what was
   // already there. On a destination reached through the board's mass storage that is a write
   // cycle bought with no information.
   //
-  // ⚠ The comparison is on the SERIALISED form because that is exactly what write() would
+  // The comparison is on the SERIALISED form because that is exactly what write() would
   // put on disk. `files` is rebuilt sorted on every merge, so an unchanged item serialises
   // identically - key order cannot drift and produce a false difference.
-  // ⚠ Returns TRUE when it skips: the caller asked for the manifest to say this, and it does.
+  // Returns TRUE when it skips: the caller asked for the manifest to say this, and it does.
   // Reporting false would read as a failure to record.
   if (manifest) {
     try {

@@ -1,11 +1,11 @@
 // Does the curation sidecar ACTUALLY end up inside the exported archive?
 //
-// ⭐⭐ WHY THIS IS AN INTEGRATION TEST AND NOT A WIRING CHECK. [B-420, 2026-09-23]
+// WHY THIS IS AN INTEGRATION TEST AND NOT A WIRING CHECK. [B-420, 2026-09-23]
 // The sidecar used to be added by rebuilding the finished zip (`injectIntoZip`): unpack the whole
 // archive, write the sidecar into the tree, re-compress everything. It now rides through the single
 // compression pass as an `extraEntries` append, which is one pass instead of three.
 //
-// ⚠️⚠️ THE FAILURE SHAPE IS SILENT, WHICH IS THE ENTIRE ARGUMENT FOR OPENING THE ZIP. An export that
+// THE FAILURE SHAPE IS SILENT, WHICH IS THE ENTIRE ARGUMENT FOR OPENING THE ZIP. An export that
 // completes with NO sidecar in it looks exactly like a successful export: the progress bar fills,
 // the byte count is right, the summary says what it always says, and the file opens fine. Nothing
 // is red. You only discover it when a font is deleted and re-imported months later and the tags,
@@ -21,7 +21,7 @@
 //   • the root meta.json of a customized entry starts shipping. It is an app artifact, not font
 //     content, and a restore that finds one would treat our bookkeeping as the vendor's.
 //
-// ⚠️ A FILTER USED TO BE ABLE TO EAT IT, AND DELIBERATELY NO LONGER CAN. While the payload was
+// A FILTER USED TO BE ABLE TO EAT IT, AND DELIBERATELY NO LONGER CAN. While the payload was
 // staged, it went through `_selectFolderFiles` like ordinary source content - and `_isNoisePath`
 // rejects __MACOSX, .DS_Store, Thumbs.db, desktop.ini and `._`-prefixed names, so
 // '.jmt-curation.json' survived only by starting '.j' rather than '._'. One character, and widening
@@ -73,7 +73,7 @@ const entriesOf = async (zipPath) => {
   // the source tree, because the source tree is the user's stored data and must not be written to.
   const srcDir = path.join(tmp, 'source');
   fs.mkdirSync(path.join(srcDir, 'Proffie', 'font'), { recursive: true });
-  // ⚠️ REAL RIFF HEADERS, BECAUSE THE EXPORT STRIPS DAMAGED WAVS. The first cut of this test wrote
+  // REAL RIFF HEADERS, BECAUSE THE EXPORT STRIPS DAMAGED WAVS. The first cut of this test wrote
   // Buffer.alloc(2048) and both "wavs" were correctly thrown away as corrupt, leaving one file in
   // the archive - so the test failed on its own fixture, not on the code. That is the fixture-I-
   // authored trap: the walk under test has opinions about its input, and a stand-in that ignores
@@ -101,18 +101,18 @@ const entriesOf = async (zipPath) => {
     customized: [{ dir: '.jmt-curation/customized/MyFont', _absDir: customDir, candidatePath: 'MyFont' }],
   };
 
-  // ⭐ planForArchive decides names and byte-sources; it writes nothing.
+  // planForArchive decides names and byte-sources; it writes nothing.
   const plan = cur.planForArchive(payload);
   ok('the plan produces the sidecar as bytes, not a file',
      !!(plan && typeof plan.sidecarJson === 'string' && plan.sidecarJson.length > 0),
      'the sidecar has to reach archiver as a buffer — staging it to disk only to read it back is '
      + 'the waste this path exists to avoid');
 
-  // ⚠️⚠️ THE ASSERTION THAT PROVES NOTHING IS COPIED. Every payload entry must point INTO THE STORE,
+  // THE ASSERTION THAT PROVES NOTHING IS COPIED. Every payload entry must point INTO THE STORE,
   // where the file already lives. If any absPath sits under a staging directory instead, the plan
   // copied data in order to read it straight back out - which for a customized font means copying a
   // whole font. That regression would pass every other check in this file.
-  ok('⚠️⚠️ every payload entry is read where it already lives',
+  ok('every payload entry is read where it already lives',
      plan.entries.length > 0 && plan.entries.every((e) => e.absPath.startsWith(storeDir)),
      'a payload entry points outside the store, so something staged a copy: '
      + plan.entries.map((e) => e.absPath).join(', '));
@@ -137,7 +137,7 @@ const entriesOf = async (zipPath) => {
   const rWith = await sources.zipFolderToFile(srcDir, withPath, null, { extraEntries });
   const namesWith = await entriesOf(withPath);
 
-  ok('⚠️⚠️ the sidecar is really inside the exported archive', namesWith.includes(SIDECAR),
+  ok('the sidecar is really inside the exported archive', namesWith.includes(SIDECAR),
      `the export completed and reported success, but ${SIDECAR} is not in the zip. This is the `
      + 'silent failure: a delete gated on this export would destroy the source and the curation '
      + `with it. Entries seen: ${namesWith.join(', ')}`);
@@ -158,23 +158,23 @@ const entriesOf = async (zipPath) => {
   const namesNo = await entriesOf(noPath);
   ok('an uncurated export carries no sidecar at all', !namesNo.includes(SIDECAR),
      'an export with nothing of the owner in it must be a clean copy of the vendor bundle');
-  ok('⚠️ and the control proves the assertion above can fail',
+  ok('and the control proves the assertion above can fail',
      namesWith.includes(SIDECAR) !== namesNo.includes(SIDECAR),
      'both archives agree on the sidecar, so the test is not distinguishing the two cases and its '
      + 'pass means nothing');
 
-  // ── ⚠️⚠️ THE COUNTS DESCRIBE THE ARCHIVE, APPENDED ENTRIES INCLUDED ──
+  // ── THE COUNTS DESCRIBE THE ARCHIVE, APPENDED ENTRIES INCLUDED ──
   //
-  // ⭐ THIS ASSERTION USED TO SAY THE OPPOSITE, AND IT WAS WRONG. It required fileCount === 3 (the
+  // THIS ASSERTION USED TO SAY THE OPPOSITE, AND IT WAS WRONG. It required fileCount === 3 (the
   // vendor files only) and justified it as "the honest reading of files". It is not honest: these
   // numbers are the export's denominator, and the appended entries are compressed like everything
   // else. Testing found it on a real export whose customized font carried a pile of tracks there had been added
   // for earlier testing: "you see the progress bars at 100% for a really long time because it was
   // like 1.4 gigabytes out of 300 MB."
-  // ⚠️⚠️ THE TEST MADE THE DEFECT LOOK DECIDED. A wrong assertion with a confident comment is worse
+  // THE TEST MADE THE DEFECT LOOK DECIDED. A wrong assertion with a confident comment is worse
   // than no test at all - it converts "nobody has looked at this" into "someone looked and chose
   // this", and the next reader stops. Bugs are supposed to look like bugs.
-  ok('⚠️⚠️ the reported fileCount includes the appended entries',
+  ok('the reported fileCount includes the appended entries',
      rWith && rWith.fileCount === 3 + extraEntries.length,
      `expected ${3 + extraEntries.length} (3 vendor + ${extraEntries.length} appended), got `
      + `${rWith && rWith.fileCount}. A count that omits what it compressed is a denominator that `
@@ -190,12 +190,12 @@ const entriesOf = async (zipPath) => {
     ].reduce((n, f) => n + fs.statSync(f).size, 0);
     const payloadBytes = plan.entries.reduce((n, e) => n + fs.statSync(e.absPath).size, 0)
                        + Buffer.byteLength(plan.sidecarJson, 'utf8');
-    ok('⚠️⚠️ totalBytes covers the payload, not just the vendor tree',
+    ok('totalBytes covers the payload, not just the vendor tree',
        rWith && rWith.totalBytes >= vendorOnly + payloadBytes - 8,
        `reported ${rWith && rWith.totalBytes} but the archive carries ${vendorOnly} of vendor `
        + `content plus ${payloadBytes} of payload. Under-reporting here is what made a 1.05 GB job `
        + `measure itself against 336 MB. (zip on disk: ${onDisk})`);
-    ok('⭐ and the control proves the payload is big enough to matter',
+    ok('and the control proves the payload is big enough to matter',
        payloadBytes > 0 && vendorOnly > 0);
   }
 

@@ -1,14 +1,14 @@
 /**
  * The filter bar states the logic the app implements  [B-305], display half
  *
- * ⭐⭐ HIS CATCH, AND IT IS THE HEADLINE: "this implies filtered to all of these...
+ * CAUGHT IN TESTING, AND IT IS THE HEADLINE: "this implies filtered to all of these...
  * that's the issue." The chip row rendered eight flat chips —
  *     Filtering by: [JMT Sabers][BKSaberSounds][Kyberphonic][bgndrag][bgnlb][blst]...
  * — which reads as ONE conjunction. The real logic is
  *     (JMT Sabers or BKSaberSounds or Kyberphonic) and (bgndrag and bgnlb and blst)
  * Flatten any grouping into one row and it reads as AND no matter what is underneath.
  *
- * ⏭ UPDATED 2026-09-16: [B-382] LANDED WITH THIS, so the file now covers both halves.
+ * UPDATED 2026-09-16: [B-382] LANDED WITH THIS, so the file now covers both halves.
  * The split was made on 09-13 and it leaked — GROUPING is independent of the semantics,
  * but the JOINER TEXT is not. "and" printed between two tag chips is a statement about
  * the predicate, so shipping the display half alone left the row truthfully describing
@@ -23,7 +23,7 @@
  *   effects absent  — AND-NOT, and it is the one asymmetry: exclusions are conjunctive.
  *                     Confirmed in testing 2026-09-16; it was already the built behaviour.
  *
- * ⚠️ THE ENTRY'S "COUPLED REVERT" WAS BACKWARDS AND IS NOT DONE HERE. It said the tag
+ * THE ENTRY'S "COUPLED REVERT" WAS BACKWARDS AND IS NOT DONE HERE. It said the tag
  * self-apply had to be reverted for OR. Commit 66c8876 had already made every dropdown
  * compute its options with all filters EXCEPT its own dimension, precisely so multi-
  * select works. There was nothing to revert; there is now an assertion that it stays.
@@ -84,7 +84,7 @@ const render = (counts) => {
   ok('the groups are joined by AND',
      (out.match(/class="sf-filter-join">and</g) || []).length === 2, out);
 
-  // ⭐ THE ASSERTION THAT MATTERS: each group's joiner is the one its predicate uses.
+  // THE ASSERTION THAT MATTERS: each group's joiner is the one its predicate uses.
   ok('creators say OR', /data-facet="creator"[\s\S]*?data-join="or"/.test(out), out);
   // [B-382] Tags and present effects moved AND -> OR here in the same commit as the
   // predicates. A row stating a joiner its predicate does not use is the bug [B-305]
@@ -99,7 +99,7 @@ const render = (counts) => {
   const out = render({ effects: 2, effectsMissing: 2 });
   ok('a mixed effect filter renders TWO groups',
      /data-facet="effect"/.test(out) && /data-facet="without"/.test(out), out);
-  ok('⭐ present says OR and absent says AND, in one row',
+  ok('present says OR and absent says AND, in one row',
      /data-facet="effect"[\s\S]*?data-join="or"/.test(out)
      && /data-facet="without"[\s\S]*?data-join="and"/.test(out), out);
   ok('and they are joined to each other by AND',
@@ -130,21 +130,21 @@ const render = (counts) => {
 
 // ── the joiners agree with the predicates ──────────────────────────────────
 {
-  // ⭐ [B-382] EVERY FACET ORs INTERNALLY; FACETS AND TOGETHER. The model, 2026-09-03:
+  // [B-382] EVERY FACET ORs INTERNALLY; FACETS AND TOGETHER. The model, 2026-09-03:
   //     TAGS(a or b) and CREATORS(a or b) and EFFECTS(a or b) and NEW
   // One rule, nothing to learn per control. The single exception is the ABSENT effects
   // set, which is AND-NOT — exclusions are conjunctive, OR is for things you want.
-  // ⏭ RETARGETED 2026-09-16. These used to read the grid's own inline predicate bodies.
+  // RETARGETED 2026-09-16. These used to read the grid's own inline predicate bodies.
   // Those bodies are gone: each facet now has exactly ONE definition, and the grid holds
   // an alias. Asserting the old shape would have quietly stopped testing anything.
   const one = (name) => (html.match(new RegExp('const ' + name + ' = ', 'g')) || []).length;
 
-  // ⭐⭐ THE ASSERTION THAT PREVENTS THE RECURRENCE. Tags and present-effects were changed
+  // THE ASSERTION THAT PREVENTS THE RECURRENCE. Tags and present-effects were changed
   // from AND to OR in the grid while the tag / creator / effects dropdowns each kept their
   // own inlined copy, so with three tags ORed the grid showed 7 fonts and every dropdown
   // intersected to ZERO - "why no creators?" and a wall of effects reading 0. Five copies,
   // one changed. A count is the only check that fails when a sixth copy appears.
-  ok('⭐⭐ each facet has exactly ONE definition',
+  ok('each facet has exactly ONE definition',
      one('_sfInTagScope') === 1 && one('_sfInCreatorScope') === 1
      && one('_sfInEffectScope') === 1 && one('_sfInNameScope') === 1,
      `tag:${one('_sfInTagScope')} creator:${one('_sfInCreatorScope')} ` +
@@ -168,7 +168,7 @@ const render = (counts) => {
   const fxPred = html.slice(html.indexOf('const _sfInEffectScope'), html.indexOf('const _sfInEffectScope') + 800);
   ok('present effects are OR',
      /let anyPresent = false;[\s\S]{0,200}if \(!anyPresent\) return false;/.test(fxPred), fxPred);
-  ok('⭐ absent effects are still AND-NOT',
+  ok('absent effects are still AND-NOT',
      /for \(const e of _sfActiveFilterEffectsMissing\) if \(eff\.has\(String\(e\)\.toLowerCase\(\)\)\) return false;/.test(fxPred), fxPred);
 }
 
@@ -180,7 +180,7 @@ const render = (counts) => {
      /const effectChips = /.test(html) && /const effectMissingChips = /.test(html));
   ok('present effects render as an OR group',
      /_group\('effect',\s+effectChips,\s+_sfActiveFilterEffects\.size,\s+'or'\)/.test(html));
-  ok('⭐ absent effects render as their own AND group',
+  ok('absent effects render as their own AND group',
      /_group\('without', effectMissingChips, _sfActiveFilterEffectsMissing\.size, 'and'\)/.test(html));
   ok('tags now render as an OR group',
      /_group\('tag',\s+tagChips,\s+_sfActiveFilterTags\.size,\s+'or'\)/.test(html));
@@ -189,7 +189,7 @@ const render = (counts) => {
 }
 
 // ── the tag dropdown must NOT narrow its own option list  [B-382] ──────────
-// ⚠️ THE ENTRY SAID THIS NEEDED REVERTING AND THAT WAS BACKWARDS. Commit 66c8876
+// THE ENTRY SAID THIS NEEDED REVERTING AND THAT WAS BACKWARDS. Commit 66c8876
 // ("filter dropdowns no longer self-collapse on selection") deliberately made each
 // dropdown compute its options with every active filter EXCEPT its own dimension,
 // so multi-select is possible at all. A widening OR filter depends on that, so this
@@ -197,7 +197,7 @@ const render = (counts) => {
 {
   const tagDd = html.slice(html.indexOf('const _sfRenderTagDropdown'),
                            html.indexOf('const _sfRenderTagDropdown') + 2000);
-  ok('⭐ the tag dropdown does not apply the tag filter to its own options',
+  ok('the tag dropdown does not apply the tag filter to its own options',
      !/filterTagsLower/.test(tagDd),
      'if tags narrow their own list, picking one hides the others and OR is unreachable');
 }

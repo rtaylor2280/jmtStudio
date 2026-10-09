@@ -331,7 +331,7 @@ function writeCommonReadme(userData, uuid, destDir) {
 // source." The working copy's files are hardlinks into the source tree, so a
 // fresh common costs only what the library does not already hold.
 //
-// ⚠️ ORDER IS LOAD-BEARING ([B-334]): the source is deduped BEFORE the working
+// ORDER IS LOAD-BEARING ([B-334]): the source is deduped BEFORE the working
 // copy links to it, so the links land on canonical names nothing rewrites.
 //
 // The shared body behind both routes. `sourcePath` is the picked folder OR the
@@ -351,7 +351,7 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
   // onProgress rides straight into importSource ([B-352]): the source
   // pipeline has emitted per-byte hashing/copying stages all along — this
   // caller just never asked, so a bulk common import ran with a dead bar.
-  // ⭐ THE PIPELINE WAS ALWAYS CANCELLABLE - `importSource` has taken `shouldStop`
+  // THE PIPELINE WAS ALWAYS CANCELLABLE - `importSource` has taken `shouldStop`
   // since [B-462]. This caller simply never passed one, which is why the Common
   // Folders door had no way out of a long copy. [B-424] Not a limitation, an
   // omission. A stop surfaces as a thrown ExportCancelled; the partial is
@@ -416,7 +416,7 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
     };
     fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
     try { recomputeCommonContentHash(userData, uuid); } catch {}
-    // ⭐ THE SPACE IS ALWAYS KNOWABLE, EVEN WHEN importSource REPORTS NO BYTES.
+    // THE SPACE IS ALWAYS KNOWABLE, EVEN WHEN importSource REPORTS NO BYTES.
     // A reused source short-circuits early and returns only
     // { ok, isDuplicate, uuid, hash, format } - no contentBytes - so savings came
     // back all zeros and the summary's space sentence was gated off entirely. The
@@ -425,7 +425,7 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
     const _sig = _walkCommonContentSignals(filesDir);
     return {
       ok: true, uuid, name: cleanName, sourceUuid,
-      // ⚠️ CARRY WHAT WAS REFUSED ([B-214], 2026-09-10). importSource already strips
+      // CARRY WHAT WAS REFUSED ([B-214], 2026-09-10). importSource already strips
       // programs and macro documents out of a common folder - that half always
       // worked - but this return read four fields off `imp` and not this one, so the
       // commons door removed files and said nothing. It was the last of the five
@@ -437,7 +437,7 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
         contentBytes: imp.contentBytes || _sig.totalBytes || 0,
         crossLinked: imp.crossLinked || null,
         dedupSaved,
-        // ⭐ A REUSED SOURCE IS THE LARGEST SAVING THIS DOOR EVER HAS TO REPORT,
+        // A REUSED SOURCE IS THE LARGEST SAVING THIS DOOR EVER HAS TO REPORT,
         // and it was the one case that reported nothing at all. The working copy
         // hardlinks into a source tree that was already on disk, so not one
         // content byte gets written. Carried separately from dedupSaved because
@@ -447,12 +447,12 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
       },
     };
   } catch (err) {
-    // ⭐ THE PARTIAL GOES EITHER WAY. A cancelled import keeps nothing - the rule,
+    // THE PARTIAL GOES EITHER WAY. A cancelled import keeps nothing - the rule,
     // 2026-10-07: *"A cancelled import just throws away."* The cleanup that was
     // already here for failures is exactly what a cancel needs, which is part of
     // why wiring this was small. [B-424]
     _cleanupPartial(uuidDir);
-    // ⚠️ A CANCEL IS NOT A FAILURE. The pipeline throws ExportCancelled when
+    // A CANCEL IS NOT A FAILURE. The pipeline throws ExportCancelled when
     // `shouldStop` fires; reporting the user's own click as "Import failed" is the
     // red-error-for-your-own-action defect the export doors already paid for.
     // `cancelled` is the spelling the newer modules use - see
@@ -470,7 +470,7 @@ function sourcesRoot_(userData) {
 }
 
 // Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
-// ⚠️ `shouldStop` is OPTIONAL and last, so the bulk import runner - which shares
+// `shouldStop` is OPTIONAL and last, so the bulk import runner - which shares
 // this function and is already dev-tested - calls it unchanged and keeps its own
 // cancel. [B-424]
 async function importCommonFromFolder(userData, folderPath, name, onProgress, shouldStop) {
@@ -504,7 +504,7 @@ async function importCommonFromZip(userData, zipPath, name, onProgress, shouldSt
 // So this answers the question the dialog needs BEFORE the copy happens. The strip
 // inside importSource is unchanged and still authoritative; this only decides what
 // to say up front. Reads 256 bytes per file, same as every other check.
-// ⭐ `files` and `bytes` ride along because this walk already has them. [B-424] The import side
+// `files` and `bytes` ride along because this walk already has them. [B-424] The import side
 // needs a payload size to decide whether a board card is worth warning about, and the alternative
 // was a SECOND walk of the same tree to count what this one was already touching. Both are
 // best-effort: a file whose size cannot be read still counts toward `files`.
@@ -882,10 +882,10 @@ function listCommonFiles(userData, uuid) {
 // [B-400] Async, byte-weighted per file — the same treatment as addFilesAt and for the same
 // reason: a common folder is many small files, so crediting each as it lands is smooth, while
 // streaming inside a file would mean changing the shared content index four other callers use.
-// ⚠️ The `await` per iteration is load-bearing: ingest resolves to a hardlink and never touches
+// The `await` per iteration is load-bearing: ingest resolves to a hardlink and never touches
 // fsp, so without an explicit yield the loop runs to completion synchronously and every tick
 // flushes after the work is already done.
-// ⚠️⚠️ `shouldStop` ARRIVED LATE AND THE GAP WAS REAL. [B-424, 2026-10-08] Found on the font
+// `shouldStop` ARRIVED LATE AND THE GAP WAS REAL. [B-424, 2026-10-08] Found on the font
 // detail's "+ Add → Browse…" by pressing it - eject checkbox present, eject toast present, no
 // Cancel at all - and an audit of the shared byte-progress runner found this door carrying the
 // identical hole. One cause, two faces, same as door 9. The shape is copied from
@@ -927,7 +927,7 @@ async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onByte
     try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
   };
   _emit('');
-  // ⚠️⚠️ CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
+  // CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
   // Stopping here leaves every file already added in place and complete; files not yet reached are
   // simply not added, so there is nothing half-written to clean up.
   let _stopped = false;
@@ -941,14 +941,14 @@ async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onByte
         failed.push({ source: src, error: 'Not a file' });
         continue;
       }
-      // ⚠️ THIS IS AN IMPORT DOOR ([B-214]). Common folders come off the same cards
+      // THIS IS AN IMPORT DOOR ([B-214]). Common folders come off the same cards
       // the fonts do. Refused rather than stripped: the caller named this exact file,
       // so there is nothing left to add if it is dropped, and `failed` already reaches
       // the user with a per-file reason.
       // checkCarryableFile, not the executable test ([B-370]): programs were stopped
       // here but a .rar or a macro document walked straight in.
       const _v = require('./sdCardDetect').checkCarryableFile(src, path.basename(src));
-      // ⚠️ `refused` IS NOT `failed` ([B-370], the catch 2026-09-11: correctly blocked,
+      // `refused` IS NOT `failed` ([B-370], the catch 2026-09-11: correctly blocked,
       // but it surfaced in the generic failure dialog with a raw G:\ path). A policy
       // refusal and a copy that broke are different facts — one is the app working, the
       // other is the app failing — and they read completely differently to the user.
@@ -971,15 +971,15 @@ async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onByte
     _bytesDone += (_sizes.get(src) || 0);
     _emit(path.basename(String(src || '')));
   }
-  // ⭐ Land on 100% whatever route the files took — added, not-a-file, refused, or a thrown
+  // Land on 100% whatever route the files took — added, not-a-file, refused, or a thrown
   // copy. Crediting at each exit is a guard the next exit will forget. [B-389].
   _bytesDone = _bytesTotal;
   _emit('');
   if (added.length) {
     try { markCommonContentDirty(userData, uuid); } catch {}
   }
-  // ⚠️ A stop the user asked for is an OUTCOME, not an error - see the twin in soundFontFileOps.
-  // ⚠️⚠️ So `ok: true` no longer means "it wrote everything": test `canceled` BEFORE `!ok`.
+  // A stop the user asked for is an OUTCOME, not an error - see the twin in soundFontFileOps.
+  // So `ok: true` no longer means "it wrote everything": test `canceled` BEFORE `!ok`.
   return { ok: true, cancelled: _stopped, added, failed, refused: refusedIn };
 }
 
@@ -1261,29 +1261,29 @@ const _dirSignals = (root, excludeFn) => require('./soundFontFileHash').dirSigna
 // The cheap signal is only sound as a NEGATIVE: differing counts or byte
 // totals PROVE a difference (prompt, nothing read). Matching ones prove
 // nothing, since a same-size swap defeats them, so they gate INTO the hash
-// ⭐⭐ THE LIBRARY SIDE OF A COMMON COMPARE IS ALREADY WRITTEN DOWN. [B-433, 2026-09-26]
+// THE LIBRARY SIDE OF A COMMON COMPARE IS ALREADY WRITTEN DOWN. [B-433, 2026-09-26]
 //
 // This used to call `collectFileRecords(libDir, ...)` on every comparison, which READS AND HASHES
 // the whole library common folder each time. A voicepack common is 214-225 files and ~20 MB, and
 // it was re-read on every export that touched a common folder, to re-learn something recorded when
 // the folder was hashed.
 //
-// ⭐ Fonts already avoid this (`_libRecordsFor` in soundFontEntries reads the central per-file
+// Fonts already avoid this (`_libRecordsFor` in soundFontEntries reads the central per-file
 // manifest) and tracks avoid it via the tracks hash index. Commons had the manifest WRITTEN all
 // along - `.filehashes/commons/<uuid>.json`, refreshed at creation and whenever a dirty flag
 // resolves, the same lifecycle the tree hash rides - and simply never read it back.
 //
-// ⚠️⚠️ VALIDATED ON SIGNALS, NOT ON THE AGGREGATE HASH, and the difference matters. The entries
+// VALIDATED ON SIGNALS, NOT ON THE AGGREGATE HASH, and the difference matters. The entries
 // side compares `mf.contentHash === meta.contentHash`. That cannot be reused here: this manifest is
 // written WITHOUT an aggregate, so `writeFileHashManifest` defaults it to a hash OF THE RECORDS -
 // a different quantity from the folder's `meta.contentHash`. Comparing them would fail for every
 // one of the manifests already on disk, so the fix would have shipped green and saved nothing.
 //
-// ⚠️ THE RECORDS ARE FILTERED THROUGH THE SAME PREDICATE THE SIGNALS WERE. The manifest is
+// THE RECORDS ARE FILTERED THROUGH THE SAME PREDICATE THE SIGNALS WERE. The manifest is
 // written unfiltered, while the compare excludes our own readme markers - so an unfiltered count
 // would disagree with `signals` for any common carrying one, and fall back every time.
 //
-// ⚠️ WHAT THIS TRADES: a library folder edited WITHOUT the dirty flag being set would now be
+// WHAT THIS TRADES: a library folder edited WITHOUT the dirty flag being set would now be
 // compared against stale hashes instead of being re-read. That is the same bargain the entries
 // side already makes, and the flag is set by every mutating path in this module.
 function _commonLibRecords(userData, uuid, libDir, libFilter, signals) {
@@ -1301,20 +1301,20 @@ function _commonLibRecords(userData, uuid, libDir, libFilter, signals) {
     if (!mf || !Array.isArray(mf.records)) return full();
 
     const recs = mf.records.filter((r) => r && r.relPath && libFilter(r.relPath));
-    // ⚠️ The manifest has to describe the folder as it is NOW. Count and bytes are what
+    // The manifest has to describe the folder as it is NOW. Count and bytes are what
     // `signals` already measured a few lines above, so this check costs nothing beyond the sum.
     if (!signals || recs.length !== signals.fileCount) return full();
     let bytes = 0;
     for (const r of recs) bytes += (r.size || 0);
     if (bytes !== signals.totalBytes) return full();
-    // ⚠️ A record with no hash cannot answer the question this is here to answer.
+    // A record with no hash cannot answer the question this is here to answer.
     if (recs.some((r) => !r.fileHash)) return full();
     return recs;
   } catch { return full(); }
 }
 
 // and never past it.
-// ⚠️⚠️ `shouldStop` HONOURED 2026-09-24 [B-420], for the same reason as its twin in
+// `shouldStop` HONOURED 2026-09-24 [B-420], for the same reason as its twin in
 // soundFontEntries: this is a pure READ that hashes 200+ files off a card, and a cancel during the
 // conflict scan used to wait for all of them.
 async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', shouldStop = null) {
@@ -1354,11 +1354,11 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
   // [B-398] door 2. This loop hashes every file of a common folder AND READS THE CARD, so it was
   // the same main-thread block as the import - on slower storage. The ProffieOS voicepack commons
   // are 214-225 files each. Yield between files so the window keeps answering Windows.
-  // ⚠️ The breath is shared from soundFontFileHash on purpose: it must be setImmediate, never a
+  // The breath is shared from soundFontFileHash on purpose: it must be setImmediate, never a
   // microtask, or it yields to nothing while looking fixed.
   const { breathe, hashFileAsync } = require('./soundFontFileHash');
   for (const rec of libRecords) {
-    // ⚠️ PER FILE - a voicepack common is 214-225 files.
+    // PER FILE - a voicepack common is 214-225 files.
     if (shouldStop && shouldStop()) return { ok: true, canceled: true };
     if (!rec || rec.fileHash === '<empty>') continue;
     const abs = path.join(cardDir, rec.relPath);
@@ -1366,13 +1366,13 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
     // [B-173] point 2 - see the twin in soundFontEntries.
     sync.countStat();
     try { st = fs.statSync(abs); } catch { st = null; }
-    // ⚠️ A library file the card does not have means what we examined is NOT the whole
+    // A library file the card does not have means what we examined is NOT the whole
     // folder, which disqualifies the completeness claim on the return.
     if (!st) { identical = false; _anyMissing = true; continue; }
     const mtime = Math.round(st.mtimeMs);
     const ent = cache.get(rec.relPath);
     const valid = sync.entryValid(ent, st.size, mtime);
-    // ⚠️ AWAITED STREAM HASH — see the twin in soundFontEntries. [B-398]
+    // AWAITED STREAM HASH — see the twin in soundFontEntries. [B-398]
     // [B-173] - see the twin in soundFontEntries.
     const destHash = valid ? ent[2] : (sync.countHash(), await hashFileAsync(abs));
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
@@ -1381,11 +1381,11 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
   }
   // [B-402] Returned, not written — see the twin in soundFontEntries.entryMatchesAt. A compare
   // is a question, and the answer is handed back for the export to record once.
-  // ⚠️⚠️ `complete` LICENSES THE CALLER TO DELETE RECORDS THIS LIST DOES NOT MENTION, so it is
+  // `complete` LICENSES THE CALLER TO DELETE RECORDS THIS LIST DOES NOT MENTION, so it is
   // only claimed when the observations really are the whole folder: every library file was
   // FOUND, and the two sides carry the same file count (measured above, markers subtracted
   // from both). Counts alone can coincide - one absent, one stray - which is why both.
-  // ⚠️ A cancel returns from inside the loop with no observations, so a partial pass can
+  // A cancel returns from inside the loop with no observations, so a partial pass can
   // never reach this and can never license a deletion.
   return { ok: true, exists: true, identical, reason: identical ? null : 'hash',
            complete: !_anyMissing && mine.fileCount === theirs.fileCount,
@@ -1448,7 +1448,7 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
       try { fs.unlinkSync(partialPath); } catch {}
       done({ ok: false, error: `Export failed: ${err.message}` });
     });
-    // ⚠️⚠️ THE WRITE STREAM NEEDS ITS OWN ERROR LISTENER, AND HAD NONE. archive.on('error')
+    // THE WRITE STREAM NEEDS ITS OWN ERROR LISTENER, AND HAD NONE. archive.on('error')
     // covers failures on the ARCHIVER side; ENOSPC happens on the DESTINATION side, which is
     // this stream. With no listener, an 'error' event on an EventEmitter is an uncaught
     // exception in the main process - the same shape as [B-418] - and from the renderer it
@@ -1456,7 +1456,7 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
     // "Compressing · 0 B of 16.3 MB", then vanished with no result and no message.
     // (Reported, 2026-09-19: "does this but then disappears like nothing happened".)
     //
-    // ⚠️ Clean up the same way the archiver path does, so a failed export never leaves a
+    // Clean up the same way the archiver path does, so a failed export never leaves a
     // .partial behind - it is the one artefact that would consume the space that just ran
     // out. The backup writer already had `ws.on('error', reject)`; this writer was copied
     // from it and lost that line. [B-203]
@@ -1472,12 +1472,12 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
     // caller already knows the total of.
     if (onBytes) {
       let seen = 0;
-      // ⚠️⚠️ ARCHIVER SPLITS THE TWO FACTS ACROSS TWO EVENTS. [B-420, 2026-09-23:
+      // ARCHIVER SPLITS THE TWO FACTS ACROSS TWO EVENTS. [B-420, 2026-09-23:
       // "same thing on the common folder export as common and export as archive"]
       // `progress` carries byte counts and no name; `entry` carries the name and no bytes. So a
       // bar fed only from `progress` can say how much has moved and never what is moving, which
       // is exactly how this door looked beside the funnel doors that name every file.
-      // ⭐ Last entry wins, which is honest here for the same reason it is on the delta channel:
+      // Last entry wins, which is honest here for the same reason it is on the delta channel:
       // the bytes are a sum over a window and the only truthful label is the most recent file
       // that window touched.
       let entryName = '';
@@ -1489,23 +1489,23 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
     }
     // ── Cancelling a zip ──────────────────────────────────────────── [B-005 item 4]
     //
-    // ⭐⭐ THE .partial PATTERN MAKES THIS THE CLEANEST CANCEL IN THE APP. Everything streams to a
+    // THE .partial PATTERN MAKES THIS THE CLEANEST CANCEL IN THE APP. Everything streams to a
     // sibling file and only becomes the user's chosen path on a successful rename, so stopping
     // here leaves the destination exactly as it was - not a truncated archive, not an empty file,
     // nothing. A zip cannot be "partially written but fine", which is why the folder export had
     // to clean up after itself and this one simply does not.
     //
-    // ⚠️ A SEPARATE LISTENER FROM THE PROGRESS ONE ABOVE, because that one only exists when the
+    // A SEPARATE LISTENER FROM THE PROGRESS ONE ABOVE, because that one only exists when the
     // caller asked for progress. Cancelling must not depend on whether anybody is watching.
     //
-    // ⚠️ done() FIRST, THEN abort(). `settled` is what stops ws.on('close') from racing in behind
+    // done() FIRST, THEN abort(). `settled` is what stops ws.on('close') from racing in behind
     // the abort and reporting a successful export of a file we just deleted.
     if (opts.shouldStop) {
       archive.on('progress', () => {
         if (settled || !opts.shouldStop()) return;
         done({ ok: true, canceled: true });
         try { archive.abort(); } catch {}
-        // ⚠️⚠️ UNLINK AFTER THE STREAM CLOSES, NOT BESIDE destroy(). Windows refuses to delete a
+        // UNLINK AFTER THE STREAM CLOSES, NOT BESIDE destroy(). Windows refuses to delete a
         // file that is still open, so deleting here left the .partial behind on exactly the
         // path whose comment promises it never does - and a stray .partial is what eats the
         // space a cancelled export was trying to stop consuming. [B-005 item 4]
@@ -1523,7 +1523,7 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
       done({ ok: true, path: destPath, name: packName, refused });
     });
     archive.pipe(ws);
-    // ⚠️ THE ZIP IS A WAY OUT TOO ([B-364]/[B-368]). Export-to-folder refuses a program;
+    // THE ZIP IS A WAY OUT TOO ([B-364]/[B-368]). Export-to-folder refuses a program;
     // this writer used a bare archive.directory() and carried everything. Filtering via
     // archiver's data function is safe HERE specifically because this writer has no
     // entry-count gating - progress comes from archiver's own fs.processedBytes, which
@@ -1531,7 +1531,7 @@ async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts 
     // it awaits an expected entry count per item and a filtered file deadlocks it. See
     // [B-369].)
     const { checkCarryableFile } = require('./sdCardDetect');
-    // ⚠️ THE ENTRY CARRIES `name` (RELATIVE) AND `stats` — THERE IS NO sourcePath.
+    // THE ENTRY CARRIES `name` (RELATIVE) AND `stats` — THERE IS NO sourcePath.
     // Guarding on a field that does not exist made the filter a no-op that still looked
     // right: every file was included and nothing was reported. Verified against
     // archiver 5's core.js rather than assumed (onGlobMatch builds entryData from
@@ -1567,7 +1567,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
   }
   targetName = String(targetName || 'common').trim() || 'common';
-  // ⚠️ DECLARED HERE, NOT INSIDE THE `replace` BRANCH. [B-420, 2026-09-24] It is written in that
+  // DECLARED HERE, NOT INSIDE THE `replace` BRANCH. [B-420, 2026-09-24] It is written in that
   // branch and read by three later places - the cancel restore, the success disposal and the
   // failure restore - so a `let` inside the branch would be invisible to all of them. This file
   // is not in strict mode, so the missing declaration would not have thrown: it would have made a
@@ -1579,7 +1579,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
     }
     if (mode === 'replace') {
-      // ⚠️⚠️ SET ASIDE, DO NOT DELETE. [B-420, 2026-09-24] THIS PATH USED TO REMOVE THE EXISTING
+      // SET ASIDE, DO NOT DELETE. [B-420, 2026-09-24] THIS PATH USED TO REMOVE THE EXISTING
       // FOLDER AND THEN WRITE, AND THAT HAS NO SAFE FAILURE MODE.
       //
       // Reported on a real export: `EPERM: operation not permitted, rmdir
@@ -1588,26 +1588,26 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       // error AND the user's existing common folder was gone, reduced to three empty
       // directories. The export failed and took the thing it was replacing with it.
       //
-      // ⚠️ THE CAUSE OF THAT PARTICULAR FAILURE IS STILL UNKNOWN, and this is not a fix for it.
+      // THE CAUSE OF THAT PARTICULAR FAILURE IS STILL UNKNOWN, and this is not a fix for it.
       // Measured and ruled out: the read-only attribute (read-only directories delete fine there),
       // the location (a tree built at that same path deletes fine), and a prior hash pass holding
-      // handles. It could not be reproduced. ⭐ WHICH IS THE ARGUMENT FOR THIS CHANGE RATHER THAN
+      // handles. It could not be reproduced. WHICH IS THE ARGUMENT FOR THIS CHANGE RATHER THAN
       // AGAINST IT: the removal is allowed to fail for reasons we do not control, so it must not
       // be the step that destroys the old folder.
       //
-      // ⭐⭐ THE PATTERN IS NOT NEW - the FONT export has always done it this way
+      // THE PATTERN IS NOT NEW - the FONT export has always done it this way
       // (soundFontEntries, `ORIGINAL.<name>`), for a different reason: a rename is one metadata
       // write where a delete is a round trip per file, which is what makes a cancel instant on a
       // board card. The robustness came along free, and this path never got either half. The
       // seven `DELETE.*` folders sitting at the destination are the font path surviving exactly
       // this and moving on.
       //
-      // ⚠️ SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by construction.
-      // ⚠️ A LEFTOVER FROM AN EARLIER RUN IS LEFT ALONE - see the note on the font path and
+      // SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by construction.
+      // A LEFTOVER FROM AN EARLIER RUN IS LEFT ALONE - see the note on the font path and
       // [B-436]. Sweeping them here would delete on an unrelated export and would hide the
       // very thing the reporting was added to surface.
       asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
-      // ⚠️ A stale aside means a previous run died between the rename and the disposal. Its
+      // A stale aside means a previous run died between the rename and the disposal. Its
       // content is the OLDER copy of a folder the user has since replaced, so the live tree wins;
       // clearing it is what makes this repeatable instead of jamming on the second attempt.
       if (fs.existsSync(asideDir)) {
@@ -1642,25 +1642,25 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     try {
       await copyTreeWithProgress(srcDir, targetDir, { onBytes, refused: _exportRefused,
         shouldStop: opts.shouldStop || null,
-        // ⭐ The tally the cancel-cleanup rule reads. Owned by the caller's gate token so one
+        // The tally the cancel-cleanup rule reads. Owned by the caller's gate token so one
         // object counts for the whole operation. Without it the offer branch below can never
         // fire, which is a branch that exists and does nothing. [B-005 item 4]
         wrote: opts.wrote || null });
     } catch (err) {
-      // ⭐ Same rule as a font ([B-005 item 4]): `targetDir` was created by this call - 'replace'
+      // Same rule as a font ([B-005 item 4]): `targetDir` was created by this call - 'replace'
       // removed the old tree first, 'rename' minted a new name - so the partial is ours to take
       // back, and a half-copied voice pack on a card is worse than an absent one. It boots, it
       // is listed, and it fails at the moment a sound is needed.
       if (require('./sfExportCopy').isCancel(err)) {
         const out = { ok: true, canceled: true, partialRemoved: false, restored: false,
                       destPath: targetDir, item: targetName, leftovers: [] };
-        // ⭐⭐ RESTORE FIRST, DISPOSE SECOND, AND THE ORDER IS THE WHOLE POINT. [B-420,
+        // RESTORE FIRST, DISPOSE SECOND, AND THE ORDER IS THE WHOLE POINT. [B-420,
         // 2026-09-24] Mirrors the font export exactly. Getting the user's folder back is two
         // metadata renames - instant even on a board card - and it must not wait behind a
         // recursive delete that costs a round trip per file. If the process dies between the two
         // steps they still have a COMPLETE folder under ORIGINAL.<name>, which is why the aside
         // is renamed back LAST rather than first.
-        // ⚠️ Before this, cancelling a replace here left NOTHING: the old folder had already been
+        // Before this, cancelling a replace here left NOTHING: the old folder had already been
         // deleted outright and the partial was removed on the way out.
         if (asideDir) {
           const junk0 = path.join(destDir, `DELETE.${targetName}`);
@@ -1676,7 +1676,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
             out.restored = true;
             out.destPath = targetDir;
           } catch {
-            // ⚠️ Their folder is still WHOLE, just under the wrong name. Say so rather than
+            // Their folder is still WHOLE, just under the wrong name. Say so rather than
             // reporting a clean stop - they need to know ORIGINAL.<name> is theirs and must
             // not be deleted.
             out.leftovers.push(asideDir);
@@ -1698,13 +1698,13 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
           }
           return out;
         }
-        // ⭐⭐ THE SAME RULE THE FONT EXPORT FOLLOWS. [B-005 item 4] Found reviewing for parity
+        // THE SAME RULE THE FONT EXPORT FOLLOWS. [B-005 item 4] Found reviewing for parity
         // 2026-09-21: this door removed its partial unconditionally while the font door
         // offered on a board card, so cancelling a voice pack could sit through a per-file
         // delete across the bridge that cancelling a font never did. Same shape of job, same
         // destination, same thresholds - it must get the same treatment.
         //
-        // ⭐ Safe by construction, exactly as there: `targetDir` was minted by this call, so
+        // Safe by construction, exactly as there: `targetDir` was minted by this call, so
         // renaming or removing it cannot touch content that was already the user's.
         const _ed = require('./exportDestination');
         const _wf = (opts.wrote && opts.wrote.files) || 0;
@@ -1718,7 +1718,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
             return out;
           } catch { /* rename failed - fall through to the ordinary removal */ }
         }
-        // ⚠️ Retried: on Windows a directory holding a file with an open handle cannot be
+        // Retried: on Windows a directory holding a file with an open handle cannot be
         // removed, and a write stream's handle release is asynchronous.
         let removed = false;
         for (let i = 0; i < 4 && !removed; i++) {
@@ -1730,14 +1730,14 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       }
       throw err;
     }
-    // ⭐ THE "AND ONLY THEN DELETE THE ORIGINAL" HALF. [B-420, 2026-09-24] Everything above this
+    // THE "AND ONLY THEN DELETE THE ORIGINAL" HALF. [B-420, 2026-09-24] Everything above this
     // line is reversible; past it the new folder is complete at the destination and the parked
     // copy is genuinely superseded.
-    // ⚠️ RENAMED TO DELETE.<name> BEFORE REMOVAL, NOT REMOVED DIRECTLY. The rename is instant, so
+    // RENAMED TO DELETE.<name> BEFORE REMOVAL, NOT REMOVED DIRECTLY. The rename is instant, so
     // the user's replace is COMPLETE the moment it returns; a disposal that fails or is
     // interrupted then leaves something whose NAME says what it is, rather than a second copy of
     // a folder they would have to identify.
-    // ⚠️ NOT FATAL. The export succeeded - a leftover folder is untidy, not broken, and turning
+    // NOT FATAL. The export succeeded - a leftover folder is untidy, not broken, and turning
     // it into an error would report a successful write as a failure. This is precisely the case
     // that was reported as `Cannot remove existing folder`: it is now a note instead of a loss.
     let replacedLeftover = null;
@@ -1781,14 +1781,14 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
         _observedItem = targetName;
       }
     } catch {}
-    // ⚠️ RETURNED, NOT DROPPED ([B-364]) - same defect and same fix as the entry export.
+    // RETURNED, NOT DROPPED ([B-364]) - same defect and same fix as the entry export.
     return { ok: true, destPath: targetDir, refused: _exportRefused, replacedLeftover,
              observedItem: _observedItem, observed: _observedOut };
   } catch (err) {
     // Best-effort cleanup of a partial copy so the user doesn't end up with
     // half a common folder mixed in with their other content.
     try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
-    // ⚠️⚠️ AND PUT THEIR FOLDER BACK. [B-420, 2026-09-24] This branch is any failure that is not
+    // AND PUT THEIR FOLDER BACK. [B-420, 2026-09-24] This branch is any failure that is not
     // a cancel - an unreadable source, a full card, a write that threw. Before the set-aside
     // existed there was nothing to restore, because the old folder had already been deleted; now
     // there is, and failing to put it back would be the same data loss arriving by a different

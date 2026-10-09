@@ -1,4 +1,4 @@
-// ⭐⭐ THE FULL SOURCE WINS. [B-415]
+// THE FULL SOURCE WINS. [B-415]
 //
 // The rule, 2026-09-19: "it's really the full source wins. duplicate font but one has more stuff
 // around it... that wins." And the case that produced it, both paths handed over and
@@ -12,24 +12,24 @@
 //   29 distinct hashes in the desktop copy. 29 of them present in the original. ZERO unique to it.
 //   100% contained, with five other board flavors sitting alongside in the package it came from.
 //
-// ⚠️⚠️ EQUALITY CANNOT SEE THIS AND NEVER WILL. Those two sources share no contentHash - one
+// EQUALITY CANNOT SEE THIS AND NEVER WILL. Those two sources share no contentHash - one
 // digest covers 213 files, the other covers 32 - so the intra-batch twin check ([B-314], and its
 // [B-415] extension to contentHash) finds nothing, and BOTH import. Reported: "those would both
 // import and be called identical fonts." The relationship is CONTAINMENT, not equality, and it is
 // the normal shape of a real folder rather than an exotic one: a full download kept for reference
 // plus the one font somebody pulled out of it to actually use.
 //
-// ⚠️ WHY NOT COMPARE THE DETECTED FONTS INSTEAD. detectCandidates knows exactly this - it reports
+// WHY NOT COMPARE THE DETECTED FONTS INSTEAD. detectCandidates knows exactly this - it reports
 // `{name:'Electro', path:'Proffie', multiBoard:true, otherFlavors:['Asteria','cfx',...]}` - but it
 // runs at COMMIT, after the user has decided, while the twin check runs during ANALYZE. Asking for
 // it earlier means a detection pass over every staged source in the batch. The file hashes are
 // already in hand from the contentHash pass, so this answers the same question for free.
-// ⭐ THAT FREENESS IS THE POINT. [B-415] said to look for the cheap path before building the
+// THAT FREENESS IS THE POINT. [B-415] said to look for the cheap path before building the
 // expensive one, because a second walk over extracted content is precisely what [B-398] spent a
 // day making yield so the window would stop freezing. Nothing here touches the disk.
 'use strict';
 
-// ⚠️ A DEFENSIVE CEILING ON THE PAIRWISE WORK, not a correctness knob. The comparison below is
+// A DEFENSIVE CEILING ON THE PAIRWISE WORK, not a correctness knob. The comparison below is
 // driven by an inverted index, so it only ever looks at sources that actually share a file - but a
 // batch of voicepacks is thousands of sources sharing hundreds of identical wavs each, and that is
 // the shape that turns "only what shares" into everything. If a single file is this widely shared
@@ -79,23 +79,23 @@ function rankByContainment(sources) {
     const sizeA = sets.get(a).size;
     let best = null;
     for (const [b, shared] of row) {
-      // ⚠️⚠️ EVERY ONE OF A's FILES MUST BE IN B. A partial overlap is NOT containment: two fonts
+      // EVERY ONE OF A's FILES MUST BE IN B. A partial overlap is NOT containment: two fonts
       // from the same creator share a font.wav and a readme without either being a copy of the
       // other, and discarding a source over that would lose a font the user owns.
       if (shared !== sizeA) continue;
       const sizeB = sets.get(b).size;
-      // ⚠️ STRICTLY FULLER, so mutual containment - the exact-twin case, identical sets - is NOT
+      // STRICTLY FULLER, so mutual containment - the exact-twin case, identical sets - is NOT
       // decided here. That is [B-314]'s job and it has its own tie-break; deciding it in both
       // places is how two mechanisms come to disagree.
       if (sizeB <= sizeA) continue;
       if (!best || sizeB > best.size || (sizeB === best.size && b < best.idx)) best = { idx: b, size: sizeB };
     }
-    // ⚠️ The largest container wins, and ties break on the lower index so the outcome never
+    // The largest container wins, and ties break on the lower index so the outcome never
     // depends on the order the folder happened to be walked in.
     if (best) out.set(a, { container: best.idx, contained: sizeA, of: best.size });
   }
 
-  // ⚠️⚠️ NO CHAINS. If A is inside B and B is inside C, B has been marked a loser - and A must not
+  // NO CHAINS. If A is inside B and B is inside C, B has been marked a loser - and A must not
   // be held back in favour of a source that is itself being discarded. Re-point A at the survivor.
   for (const [a, info] of out) {
     let c = info.container, guard = 0;
