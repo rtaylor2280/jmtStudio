@@ -500,6 +500,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCommonGroup:     (params)     => ipcRenderer.invoke('common:deleteGroup', params),
 
   // Shared Tracks folder (maps to /tracks/ at SD card root)
+  // [B-318] The library size figure. Returns the LAST KNOWN value immediately and recomputes
+  // behind the caller, so nothing ever waits on a 15,000-file walk. The fresh figure arrives
+  // on onSoundFontsSizeUpdated.
+  soundFontsSize:        ()           => ipcRenderer.invoke('soundFonts:size'),
+  onSoundFontsSizeUpdated: (handler) => {
+    const fn = (_e, figure) => handler(figure);
+    ipcRenderer.on('soundFonts:sizeUpdated', fn);
+    return () => ipcRenderer.removeListener('soundFonts:sizeUpdated', fn);
+  },
   sharedTracksExists:    ()           => ipcRenderer.invoke('sharedTracks:exists'),
   sharedTracksCreate:    ()           => ipcRenderer.invoke('sharedTracks:create'),
   sharedTracksListFiles: ()           => ipcRenderer.invoke('sharedTracks:listFiles'),

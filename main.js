@@ -22,6 +22,7 @@ const soundFontVoicepack = require('./soundFontVoicepack');
 const sdCardDetect = require('./sdCardDetect');
 const soundFontSharedTracks = require('./soundFontSharedTracks');
 const soundFontRemoval = require('./soundFontRemoval');
+const soundFontLibrarySize = require('./soundFontLibrarySize');
 const soundFontAttachments = require('./soundFontAttachments');
 const soundFontLinkImport = require('./soundFontLinkImport');
 
@@ -1697,6 +1698,39 @@ ipcMain.handle('soundFonts:create', () => {
       }, null, 2));
     }
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+// ── What the library costs on disk ────────────────────────────── [B-318]
+//
+// NEVER BLOCKS THE RENDERER. The figure comes from a walk of every file in the library, which
+// measured 3.3 seconds on a 15,000-file store and does not get faster on a second run. So this
+// hands back whatever was last computed, immediately, and always starts a fresh walk behind the
+// caller. The renderer is told when that walk lands and replaces the number in place.
+//
+// WHY IT RECOMPUTES EVERY TIME RATHER THAN TRACKING STALENESS. Better than thirty handlers mutate
+// what the library holds: imports, deletes, file adds, reorganize, shared tracks, voicepacks,
+// common folders. Asking each one to flag the figure means one that forgets shows a number the
+// user's own file manager contradicts, which is precisely what this readout exists to prevent,
+// and a missed call is invisible. Recomputing unconditionally has no such hole. The cost is a
+// read-only background walk when the user is already looking at this panel, next to the entry,
+// source and common listings that refresh beside it.
+let _sfSizeWalk = null;        // in-flight walk, so repeated refreshes do not stack
+ipcMain.handle('soundFonts:size', (event) => {
+  try {
+    const userData = app.getPath('userData');
+    const known = soundFontLibrarySize.read(userData);
+    if (!_sfSizeWalk) {
+      _sfSizeWalk = soundFontLibrarySize.refresh(userData)
+        .then((figure) => {
+          if (figure) { try { event.sender.send('soundFonts:sizeUpdated', figure); } catch {} }
+        })
+        .catch(() => {})
+        .then(() => { _sfSizeWalk = null; });
+    }
+    return { ok: true, size: known };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }

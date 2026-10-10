@@ -2775,7 +2775,23 @@
   /* Override the styles-legend horizontal padding for the SF footer
      (styles-legend's later cascade rule zeroes horizontal padding, which
      works in the Style Library but pushes content to the SF view edges). */
-  #sf-legend.styles-legend { padding: 4px 20px; }
+  /* [B-318] The Sound Fonts footer carries two things: the swatch legend centered on the BAR,
+     and the library size at the right, where Style Library already puts #styles-footer-meta.
+     A three-column grid rather than that panel's absolute positioning. Absolute was the first
+     attempt and it collapsed the bar: with no config open the swatch legend is empty, so an
+     out-of-flow readout left the bar with no content at all, it shrank to its own padding, and
+     the figures spilled off the bottom of the window where they could not even be hovered. As
+     grid items both children contribute height, and the empty first column is what keeps the
+     middle one centered on the bar rather than on the space the size readout leaves behind. */
+  #sf-legend.styles-legend { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 4px 20px; }
+  #sf-lib-size { grid-column: 3; justify-self: end; min-width: 0; font-size: 0.7rem; color: var(--c-text-dim); white-space: nowrap; pointer-events: auto; cursor: default; }
+  #sf-lib-size .sf-lib-sep { color: var(--c-text-faint); margin: 0 5px; }
+  #sf-lib-size .sf-lib-saved { color: var(--jmt-blue); }
+  #sf-legend-items { grid-column: 2; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  /* Narrow window: the figures and the centered legend would collide, and the legend is the one
+     that explains the card colours the user is looking at right now. The column collapses to
+     zero width, so the legend stays centered. */
+  @media (max-width: 1100px) { #sf-lib-size { display: none; } }
   /* In-use indicator — font directory matches a preset's font in the open
      config. Mirrors the Style Library convention: subtle blue border + tint
      at rest, full blue on hover. Selected state still wins if both apply. */
@@ -5267,8 +5283,15 @@
         </div>
         <!-- Legend mirrors Style Library's footer key — same colored swatches +
              labels, surfacing card-state meanings without forcing the user to
-             hover or guess. Hidden when nothing in the library is in any state. -->
-        <div id="sf-legend" class="styles-legend" style="display:none"></div>
+             hover or guess. The swatches hide when nothing is in any state; the
+             bar itself stays, because it also carries the library size. -->
+        <div id="sf-legend" class="styles-legend">
+          <!-- DOM order has to match column order. These are explicitly placed in grid columns 2
+               and 3, and grid auto-placement does not run backwards: with the size written first
+               it took row 1 and shunted the legend onto a second row. -->
+          <span id="sf-legend-items"></span>
+          <span id="sf-lib-size"></span>
+        </div>
       </div>
     </div>
   </div>
@@ -26147,9 +26170,13 @@ require(['vs/editor/editor.main'], function () {
         // Legend: same colored-swatch pattern Style Library uses. Only the
         // in-use swatch is meaningful for SF right now; future states (broken
         // source links, etc.) can stack here without re-doing the structure.
+        // The swatches go in their own span, not into the bar: the bar also holds the library
+        // size readout, which has its own lifecycle and must survive a legend re-render.
+        const itemsEl = document.getElementById('sf-legend-items');
+        if (!itemsEl) return;
         const inUseCountInLibrary = _sfAllEntries.filter(e => inUseFonts.has(e.name)).length;
         if (inUseCountInLibrary === 0 && missing.length === 0 && !needsCommon) {
-          legendEl.style.display = 'none';
+          itemsEl.innerHTML = '';
           return;
         }
         const items = [];
@@ -26159,8 +26186,7 @@ require(['vs/editor/editor.main'], function () {
         if (missing.length > 0 || needsCommon) {
           items.push(`<span class="legend-item"><span class="legend-swatch red"></span>Referenced but not imported</span>`);
         }
-        legendEl.innerHTML = items.join('');
-        legendEl.style.display = items.length ? 'flex' : 'none';
+        itemsEl.innerHTML = items.join('');
       };
       // ── Common folder sidecar ────────────────────────────
       // State:
@@ -29255,6 +29281,10 @@ require(['vs/editor/editor.main'], function () {
         + `word-break:break-all;">${_sfEscape(p)}</a>`;
       window.refreshSoundFontsView = async () => {
         await _refreshSoundFontsToggleLock();
+        // [B-318] Footer size. Deliberately NOT awaited: this hands back the last known figure
+        // and recomputes behind us, so the panel refresh never waits on the walk. Every path
+        // that changes the library ends here, which is why the readout needs no other hook.
+        window._sfRequestLibrarySize?.();
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
         const layerBrowse  = document.getElementById('sf-browse');
         const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
@@ -30752,16 +30782,95 @@ require(['vs/editor/editor.main'], function () {
         if (typeof onSuccess === 'function') onSuccess(trimmed);
         return true;
       };
+      // TRUNCATES, IT DOES NOT ROUND, AND THAT IS ABOUT CREDIBILITY RATHER THAN PRECISION.
+      // [B-318, 2026-10-09] Windows Explorer truncates: a folder of 8,374,637,521 bytes reads
+      // 7.79 GB there. Rounding gives 7.80, so a size shown here sat one digit above the same
+      // folder's Properties dialog. For a library whose whole argument is that our number is the
+      // honest one, being visibly larger than the user's own file manager is the worst direction
+      // to be wrong in. Verified against a real Properties dialog: bytes and file counts matched
+      // exactly, and the only disagreement was this rounding.
+      // Truncation can also only ever UNDER-claim, which is the same direction as the standing
+      // copy rule that a conservative reconcilable claim beats a bigger unverifiable one.
       const _sfFormatBytes = (n) => {
         if (!n) return '0 B';
+        const cut = (v, dp) => { const p = Math.pow(10, dp); return (Math.floor(v * p) / p).toFixed(dp); };
         if (n < 1024) return `${n} B`;
-        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-        if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-        return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (n < 1024 * 1024) return `${cut(n / 1024, 1)} KB`;
+        if (n < 1024 * 1024 * 1024) return `${cut(n / 1024 / 1024, 1)} MB`;
+        return `${cut(n / 1024 / 1024 / 1024, 2)} GB`;
       };
       // Expose for other SF modules (bulk import, etc.) so byte formatting
       // is consistent across every progress surface in the app.
       if (typeof window !== 'undefined') window._sfFormatBytes = _sfFormatBytes;
+
+      // ── Library size readout ───────────────────────────────── [B-318]
+      // Three numbers in the footer: what the files add up to, what the drive is holding, and the
+      // difference. The first is deliberately the same rule a file manager uses, so a user who
+      // checks it against their own folder gets the same answer to the byte.
+      //
+      // The segments collapse to one when nothing is shared yet. "7.79 GB of files · 7.79 GB on
+      // disk · 0 B saved" is true but reads as a broken calculation, and there is no saving to
+      // report on a library that has not deduped anything.
+      //
+      // Prefixed "Library" because this bar sits under a grid that the search box filters. The
+      // figure is the whole store and has to say so.
+      const _sfRenderLibrarySize = (figure) => {
+        const el = document.getElementById('sf-lib-size');
+        if (!el) return;
+        if (!figure || typeof figure.apparent !== 'number') {
+          // First run on this machine: nothing has been stamped yet and the walk is underway.
+          el.textContent = 'Measuring library…';
+          el.removeAttribute('title');
+          return;
+        }
+        if (figure.apparent === 0) {
+          // Nothing imported yet. The browse layer is always active, so this bar is on screen for
+          // a brand new library too, and "Library: 0 B of files" is clutter on a fresh install.
+          el.textContent = '';
+          el.removeAttribute('title');
+          return;
+        }
+        const sep = `<span class="sf-lib-sep">·</span>`;
+        const parts = [`Library: ${_sfFormatBytes(figure.apparent)} of files`];
+        if (figure.saved > 0) {
+          parts.push(`${_sfFormatBytes(figure.onDisk)} on disk`);
+          parts.push(`<span class="sf-lib-saved">${_sfFormatBytes(figure.saved)} saved</span>`);
+        }
+        el.innerHTML = parts.join(sep);
+        // The exact bytes live on hover. On screen the numbers stay plain; the tooltip is where
+        // the claim becomes checkable, including the part a file manager gets wrong.
+        const n = (v) => Number(v || 0).toLocaleString();
+        const pct = figure.apparent > 0
+          ? Math.round((figure.saved / figure.apparent) * 100) : 0;
+        // "takes up ... on the drive", never "disk space". Explorer has its own "Size on disk"
+        // line and it reads about 7.83 GB against our 3.44, because it neither dedupes nor stops
+        // at the logical length: every file rounds up to a whole cluster. Borrowing its wording
+        // for the honest number is how a user decides we are the ones lying.
+        const counts = `${n(figure.files)} files, ${n(figure.folders)} folders`;
+        // The percent is saved against the apparent total, so it sits beside the on-disk figure.
+        const lines = figure.saved > 0 ? [
+          `Fonts with identical audio share one copy, so your library only takes up`,
+          `${_sfFormatBytes(figure.onDisk)} on the drive, saving ${pct}%. Your file manager counts each`,
+          `one separately and reports the full ${_sfFormatBytes(figure.apparent)} (${counts}).`,
+        ] : [
+          `Your library holds ${_sfFormatBytes(figure.apparent)} (${counts}).`,
+        ];
+        el.title = lines.join('\n');
+      };
+      // Ask for the figure. Returns the last one instantly; the fresh one arrives on the event
+      // below and replaces it in place, so the footer never blanks or shows a spinner.
+      const _sfRequestLibrarySize = async () => {
+        try {
+          const r = await window.electronAPI.soundFontsSize();
+          _sfRenderLibrarySize(r && r.ok ? r.size : null);
+        } catch { /* leave whatever is on screen */ }
+      };
+      try {
+        window.electronAPI.onSoundFontsSizeUpdated?.((figure) => _sfRenderLibrarySize(figure));
+      } catch {}
+      // On window, like the other cross-scope SF helpers: refreshSoundFontsView is defined above
+      // this point and calling through window avoids depending on which initialises first.
+      if (typeof window !== 'undefined') window._sfRequestLibrarySize = _sfRequestLibrarySize;
       // Mirror of soundFontEntries._sanitizeEntryName so the UI shows the
       // disk-safe form before the user commits.
       const _sfSanitizeName = (name) => String(name || '').trim()
