@@ -5980,7 +5980,7 @@
       <div class="sf-import-progress-track"><div class="sf-import-progress-bar" id="sf-import-progress-bar"></div></div>
       <p class="sf-import-progress-detail" id="sf-import-progress-detail"></p>
       <p class="sf-import-progress-detail" id="sf-import-progress-elapsed" style="color:var(--c-text-sub)"></p>
-      <!-- [B-424] EJECT WHEN FINISHED, and it is on the PROGRESS phase for a specific reason:
+      <!-- [B-424] EJECT AFTER COMPLETION, and it is on the PROGRESS phase for a specific reason:
            this is the one offer that survives the user walking away. The toast at the end is the
            other half, but a toast expires - and his case is exactly someone who starts a long
            import off a card, leaves, and comes back after the offer has gone. Ticking this before
@@ -6093,7 +6093,7 @@
       <label class="sf-bulk-explain-auto" id="sf-import-eject-wrap"
              style="display:none; margin-right:auto;">
         <input type="checkbox" id="sf-import-eject">
-        <span>Eject when finished</span>
+        <span>Eject after completion</span>
       </label>
       <button class="modal-btn-cancel" id="sf-import-cancel-btn">Cancel</button>
       <button class="modal-btn-primary" id="sf-import-confirm-btn" style="display:none" disabled>Add to Library</button>
@@ -6910,7 +6910,7 @@
          so the surfaces that genuinely cannot be stopped do not offer a button that lies.
          It lives in the SHARED progress modal rather than at each door: nine export doors, one
          cancel, and a door added later inherits it instead of being the one that forgot. -->
-    <!-- EJECT WHEN FINISHED. [B-005 item 4] His requirement is a checkbox "before/during"
+    <!-- EJECT AFTER COMPLETION. [B-005 item 4] His requirement is a checkbox "before/during"
          with a button at the end if it was not ticked, on any export to REMOVABLE media.
          Hidden until the destination is known to be removable, and the lookup that answers
          that costs ~1.9s - so it is started alongside the export and this appears a moment in
@@ -7075,7 +7075,7 @@
            and the offer would be a lie. -->
       <!-- ONE LEFT-HAND STACK, because the two offers can now be on screen TOGETHER. [B-462]
            Ticking "continue to quick import" is what makes the rest of the run unattended, and that
-           is exactly when "eject when finished" starts to mean something - so the second is gated on
+           is exactly when "Eject after completion" starts to mean something - so the second is gated on
            the first rather than replacing it. The reasoning the eject label used to carry (safe by
            construction, because their conditions cannot both hold) is no longer true BY DESIGN, and
            its own note said to re-check rather than assume if that ever changed.
@@ -7109,7 +7109,7 @@
       <label class="sf-bulk-explain-auto" id="sf-bulk-import-eject-wrap"
              style="display:none;">
         <input type="checkbox" id="sf-bulk-import-eject">
-        <span>Eject when finished</span>
+        <span>Eject after completion</span>
       </label>
       </div>
       <button class="modal-btn-cancel" id="sf-bulk-import-cancel-btn">Cancel</button>
@@ -7151,6 +7151,17 @@
     <p class="sf-import-hint" id="sf-backup-prep-auto" role="status" aria-live="polite"
        style="display:none; margin-top:6px; color: var(--c-text-muted);"></p>
     <div class="modal-btns" style="margin-top: 18px">
+      <!-- The eject offer belongs on THIS screen as well as the progress one, because this
+           screen starts itself. A 15-second countdown means the user may not be here when the
+           work begins, so a choice only available afterwards is a choice they cannot make.
+           Shown only when the destination is removable, same rule the progress box uses.
+           Ticking it counts as interaction and therefore cancels the countdown - see the
+           WCAG note above; the box is wired to the same stop as every other control here. -->
+      <label class="sf-bulk-explain-auto" id="sf-backup-prep-eject-wrap"
+             style="display:none;margin-right:auto;">
+        <input type="checkbox" id="sf-backup-prep-eject">
+        <span>Eject after completion</span>
+      </label>
       <button class="modal-btn-cancel" id="sf-backup-prep-cancel">Cancel</button>
       <button class="modal-btn-primary" id="sf-backup-prep-start" disabled>Start export</button>
     </div>
@@ -7222,7 +7233,7 @@
       <label class="sf-bulk-explain-auto" id="sf-backup-eject-wrap"
              style="display:none;margin-right:auto;">
         <input type="checkbox" id="sf-backup-eject">
-        <span>Eject when finished</span>
+        <span>Eject after completion</span>
       </label>
       <button class="modal-btn-cancel" id="sf-backup-progress-cancel">Cancel</button>
     </div>
@@ -8203,13 +8214,24 @@ window._sfShowPartialFailures = _sfShowPartialFailures;
 // \u26A0\uFE0F Its own paragraph here: the refusal above is about SPACE, and "nothing was deleted" is a
 // different fact about a different operation. Running them together reads as one sentence about
 // the card.
-async function _sfRefuseNotEnoughRoom(fit, { blockedDelete = false } = {}) {
+// \u26A0\uFE0F TWO THINGS HERE ARE DELIBERATE AND LOOK LIKE INCONSISTENCIES. [B-478, 2026-10-11]
+//
+// 1. THE SHORTFALL IS FORMATTED UP, THE OTHER TWO DOWN. A shortfall is the one number in this
+//    dialog someone ACTS on, by going and freeing space. Truncating it understates what they
+//    need to clear, so the write refuses a second time. See `_sfFormatBytesUp`.
+// 2. THE NOUN IS THE CALLER'S. This dialog is shared, and a BACKUP is not an EXPORT - [B-500]
+//    settled that export is the human artifact and backup is the machine one. Calling a backup
+//    an export on its own door contradicts the distinction in the one place a user meets it.
+//    Default stays 'export' so the font and source doors are untouched.
+async function _sfRefuseNotEnoughRoom(fit, { blockedDelete = false, noun = 'export' } = {}) {
   const fb = (n) => String((window._sfFormatBytes || ((v) => `${v} B`))(n)).replace(' ', '\u00A0');
+  const fbUp = (n) => String((window._sfFormatBytesUp || window._sfFormatBytes
+    || ((v) => `${v} B`))(n)).replace(' ', '\u00A0');
   await promptConfirm({
     title: 'Not enough room',
-    message: `This export needs ${fb(fit && fit.needBytes)} `
+    message: `This ${noun} needs ${fb(fit && fit.needBytes)} `
       + `but only ${fb(fit && fit.bytesFree)} is free. `
-      + `It is ${fb(fit && fit.shortfallBytes)} short.`
+      + `It is ${fbUp(fit && fit.shortfallBytes)} short.`
       + (blockedDelete ? '\n\nNothing was deleted.' : ''),
     confirmText: 'OK',
     confirmKind: 'primary',
@@ -8515,6 +8537,30 @@ async function _sfWarnSlowImport(sourceDir, { files = 0, bytes = 0, filePaths = 
   }
 }
 window._sfWarnSlowImport = _sfWarnSlowImport;
+
+// [B-479] DID THIS READ FAIL BECAUSE OF THE FILE, OR BECAUSE OF THE WIRE IT CAME DOWN?
+//
+// Saying "damaged" accuses the one file a person cannot afford to distrust. It was proved wrong
+// with a control: the same bytes on the same card restored cleanly through a reader and came back
+// "Bad archive" through the saber. A backup is what someone reaches for on their worst day, so a
+// false "damaged" is how a good backup gets deleted and remade.
+//
+// A zip is read by seeking to its end for the central directory and back for members, and the
+// board's mass-storage bridge is slow and seek-heavy; a short read partway through surfaces to the
+// zip layer as a malformed archive. Identical symptom, opposite cause.
+//
+// TWO ARGUMENTS, AND BOTH HAVE TO BE YES:
+//   reason - only the two codes that mean "these bytes did not read as a zip". A not-a-backup,
+//     newer-schema or missing-file verdict is about CONTENT and is equally true over any
+//     transport, so those keep their own wording.
+//   knownIsBoardCard - pass the CACHED verdict, never a fresh probe. `null` means nobody has
+//     established the transport, which is not the same as false: with no answer we do not get to
+//     blame the wire either, so the plain message stands.
+function _sfReadFailureIsLikelyTransport(reason, knownIsBoardCard) {
+  const readFailed = reason === 'unreadable' || reason === 'bad-manifest';
+  return readFailed && knownIsBoardCard === true;
+}
+window._sfReadFailureIsLikelyTransport = _sfReadFailureIsLikelyTransport;
 
 // THE SMALL OVERLAY IS GONE FROM THE EXPORT PATH. [B-420, 2026-09-23]
 //
@@ -8876,7 +8922,19 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
       }
     }
     const p = (r && r.ok && r.result) || null;
-    if (!p) return out;                    // cannot measure: never block a write they asked for
+    if (!p) {
+      // Cannot measure: never block a write they asked for. But SAY SO. A destination check
+      // that declines to decide and leaves no trace is indistinguishable from one that passed,
+      // and that is how a door reads as gated while writing to a card that cannot hold it.
+      console.warn('[preflight] no result for', destDir, '- fit and health both UNCHECKED', r);
+      return out;
+    }
+    // Same reasoning one level down: the call succeeded but the volume would not report free
+    // space, or the job could not be sized, so the fit limb never ran.
+    if (p.skippedFitCheck || p.ok === false) {
+      console.warn('[preflight] fit NOT checked for', destDir,
+        { reachedVolume: p.ok, skippedForSize: p.skippedFitCheck, bytesFree: p.bytesFree, bytes });
+    }
 
     out.boardCard = !!p.boardCard;
     out.removable = p.removable;
@@ -29279,6 +29337,258 @@ require(['vs/editor/editor.main'], function () {
       const _sfPathLinkHtml = (p) => `<a href="#" class="sf-open-path" data-path="${_sfEscape(p)}"`
         + ' style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer;'
         + `word-break:break-all;">${_sfEscape(p)}</a>`;
+      // THE WIRING LIVES BESIDE THE BUILDER. Every dialog printing a path link calls this one
+      // function, which is what stopped the export summary growing a blue "Show in folder" button
+      // while the import closeout kept a quiet link for the same job.
+      const _sfWirePathLinks = (sel = '.sf-open-path') => {
+        for (const a of document.querySelectorAll(sel)) {
+          a.addEventListener('click', (e) => {
+            e.preventDefault();
+            try { window.electronAPI.showItemInFolder(a.getAttribute('data-path')); } catch {}
+          });
+        }
+      };
+
+      // ── THE UNREADABLE-FILES GATE ─────────────────────────────────────────────── [B-478]
+      //
+      // Asked before a backup starts, and it is a QUESTION rather than an auto-skip. The file
+      // that produced this on 2026-10-11 was being held by JMT Studio itself, so "we left a file
+      // out of your backup" can mean the user's disk is failing OR that this app has a defect -
+      // two readings, with different right answers, which is what a confirm is for. Silently
+      // excluding would also be the app deciding to omit the user's data because of its own bug.
+      //
+      // `showItemInFolder` reveals the file SELECTED in Explorer, so the link lands the user on
+      // the thing itself rather than on a folder to go hunting in.
+      // WHAT THE APP KNOWS IS THAT THE OPEN WAS REFUSED, AND NOTHING MORE. Only two codes carry
+      // a cause that can be stated: EIO comes from the device, and ENOENT means the file left
+      // between the listing and the read.
+      const _SF_UNREADABLE_WHY = {
+        EIO: 'The drive reported a read error, which can mean the media is failing.',
+        ENOENT: 'The file was listed but is no longer there.',
+      };
+      const _sfUnreadableWhy = (list) => {
+        const codes = new Set(list.map(u => String(u.code || '')));
+        if (codes.size === 1) {
+          const only = [...codes][0];
+          if (_SF_UNREADABLE_WHY[only]) return _SF_UNREADABLE_WHY[only];
+        }
+        // EPERM, EACCES and EBUSY arrive for a lock, a permission change and a failing drive
+        // alike, and nothing in the error separates them, so the sentence lists them without
+        // ranking. An earlier wording opened with "usually", which claims a frequency nothing
+        // here measures and sends the user after the wrong thing when it is wrong.
+        return 'A file can be held open by another program, have had its permissions changed, '
+             + 'be corrupted, or sit on a drive that is having trouble.';
+      };
+      // WHERE THE FILE IS IN THEIR LIBRARY, not where it is on disk. A path answers "which
+      // bytes"; this answers "which of my things", which is what someone has to know before
+      // they can decide whether losing it matters.
+      // The nouns are the ones the confirm screen already uses - sources, fonts, common folders -
+      // so the same object is not a "font" on one screen and an "entry" on the next.
+      // A name that already begins with an article must not get a second one. Sound font and
+      // bundle names are user data, and names beginning with "The" are common.
+      const _sfArticled = (article, item) => (/^(the|a|an)\s/i.test(item) ? item : `${article} ${item}`);
+      const _sfUnreadableWhere = (u) => {
+        const item = (u && u.item) || '';
+        switch (u && u.bucket) {
+          case 'sharedTracks': return 'in your shared tracks';
+          case 'library':      return item ? `in ${_sfArticled('your', item)} sound font` : 'in one of your sound fonts';
+          case 'sources':      return item ? `in ${_sfArticled('the', item)} source` : 'in one of your sound font sources';
+          case 'common':       return item ? `in ${_sfArticled('your', item)} common folder` : 'in one of your common folders';
+          case 'attachments':  return item ? `in the proof of purchase for ${item}` : 'in your proof of purchase files';
+          default:             return '';
+        }
+      };
+
+      // ── GROUPING, FOR THE PLURAL CASE ─────────────────────────────────────────────
+      //
+      // Files that cannot be read cluster: a font folder loses its permissions, a card goes bad
+      // under one source. Twelve rows of filename-plus-path is thirty lines of dialog that buries
+      // the thing the user needs first, which is WHICH OF MY FONTS. Grouped, it is five lines and
+      // the location is the headline.
+      //
+      // One link per group rather than per file, because opening the folder is the action -
+      // nobody clicks twelve links. The link targets the first file of the group so Explorer
+      // lands INSIDE the folder with a real offending file selected, rather than in the parent.
+      const _sfUnreadableGroups = (list) => {
+        const by = new Map();
+        for (const u of list) {
+          const key = `${u.bucket}\u0000${u.item || ''}`;
+          if (!by.has(key)) by.set(key, { where: _sfUnreadableWhere(u), files: [], first: u });
+          by.get(key).files.push(String(u.name || u.path).split(/[\\/]/).pop());
+        }
+        return [...by.values()];
+      };
+      const _sfUnreadableGroupHtml = (g) => {
+        const MAX_NAMES = 6;
+        const names = g.files.slice(0, MAX_NAMES).map(f => _sfEscape(f)).join(', ');
+        const extra = g.files.length > MAX_NAMES ? ` and ${g.files.length - MAX_NAMES} more` : '';
+        const count = g.files.length === 1
+          ? `<strong>${_sfEscape(g.files[0])}</strong>`
+          : `<strong>${g.files.length} files</strong>`;
+        return `<div style="margin:10px 0;">${count}`
+          + (g.where ? ` ${_sfEscape(g.where)}` : '')
+          + (g.files.length === 1 ? '' : `<div style="color:var(--c-text-sub);">${names}${extra}</div>`)
+          + `<div style="margin-top:2px;">${_sfPathLinkHtml(g.first.path)}</div></div>`;
+      };
+      const _sfUnreadableLine = (u) => {
+        const where = _sfUnreadableWhere(u);
+        const leaf = _sfEscape(String(u.name || u.path).split(/[\\/]/).pop());
+        return `<div style="margin:8px 0;"><strong>${leaf}</strong>`
+          + (where ? ` ${_sfEscape(where)}` : '')
+          + `<div style="margin-top:2px;">${_sfPathLinkHtml(u.path)}</div></div>`;
+      };
+      // A WHOLE ITEM GOING IS A DIFFERENT SIZE OF ANSWER, AND THE SENTENCE HAS TO CARRY IT.
+      // [B-478 ruling, 2026-10-12: "if not fully readable it can't be there"] A font with one
+      // unreadable file would restore looking complete and be missing a sound, so the item is
+      // left out whole. The readable files are still on disk, which is why this is the safer
+      // trade - but it is a much larger thing to agree to than skipping one file, and a dialog
+      // that said "without 1 file" would be collecting consent for something else.
+      const _sfItemNoun = (bucket) => (
+        bucket === 'library' ? 'sound font'
+        : bucket === 'sources' ? 'source'
+        : bucket === 'common' ? 'common folder'
+        : bucket === 'attachments' ? 'proof of purchase'
+        : 'item');
+      // ONE LOSS, ONE ROW. [2026-10-15] A font and the source it came from are the same thing to
+      // the user, so listing them separately makes them pair the two up by eye. Items arrive
+      // carrying a `groupKey` naming their source.
+      //
+      // ONLY A GROUP THAT CONTAINS THE SOURCE COMBINES. Two fonts sharing a source that was
+      // carried are still two separate losses, and rolling them under that source would describe
+      // a loss that did not happen.
+      const _sfGroupDropped = (items) => {
+        const out = [];
+        const byKey = new Map();
+        for (const it of items || []) {
+          if (!it.groupKey) { out.push([it]); continue; }
+          let g = byKey.get(it.groupKey);
+          if (!g) { g = []; byKey.set(it.groupKey, g); out.push(g); }
+          g.push(it);
+        }
+        return out.flatMap(g =>
+          (g.length > 1 && !g.some(i => i.bucket === 'sources')) ? g.map(i => [i]) : [g]);
+      };
+      // A combined row leads with the FONT name where there is one: a source's own name is a
+      // bundle filename, and the font is the name the user recognises.
+      // PLAIN TEXT. The dialog title takes it as-is and the row escapes it, so escaping here
+      // would double-escape a font name carrying an ampersand in one of the two places.
+      const _sfDroppedLabel = (g) => {
+        if (g.length === 1) {
+          const noun = _sfItemNoun(g[0].bucket);
+          return g[0].item ? `${g[0].item} ${noun}` : `a ${noun}`;
+        }
+        const fonts = g.filter(i => i.bucket === 'library');
+        const src = g.find(i => i.bucket === 'sources');
+        if (fonts.length === 1) {
+          const n = fonts[0].item || '';
+          return n ? `${n} sound font and its source` : 'a sound font and its source';
+        }
+        const n = (src && src.item) || '';
+        if (fonts.length > 1) {
+          return n ? `${n} source and its ${fonts.length} sound fonts`
+                   : `a source and its ${fonts.length} sound fonts`;
+        }
+        return n ? `${n} source` : 'a source';
+      };
+      // THE COUNT ON A ROW IS THE FAULT, NEVER THE SIZE OF THE HOLE. [2026-10-15] How many files
+      // could not be READ is what went wrong and what the user can act on; how many files the
+      // dropped item happened to contain is an artifact of its size and is not reported.
+      // `tense`: 'ask' at the gate, where it has not happened yet; 'done' at completion.
+      const _sfDroppedRowHtml = (g, tense) => {
+        const label = _sfEscape(_sfDroppedLabel(g));
+        const many = g.length > 1;
+        const verb = tense === 'done'
+          ? (many ? 'were left out' : 'was left out')
+          : 'cannot be backed up';
+        const unread = g.reduce((a, i) => a + (i.unreadable || 0), 0);
+        const links = g.map(i => `<div style="margin-top:2px;">${_sfPathLinkHtml(i.path)}</div>`).join('');
+        // STATE THE FACT. [2026-10-15] The bold line above already says what was left out, so this
+        // line carries only what is not there: how many reads failed, and that it is why the whole
+        // item went rather than the unreadable files alone.
+        return `<div style="margin:10px 0;"><strong>Your whole ${label} ${verb}</strong>`
+          + `<div style="color:var(--c-text-sub);">`
+          + `${unread} file${unread === 1 ? '' : 's'} could not be read, invalidating the copy.</div>`
+          + links + `</div>`;
+      };
+      const _sfAskUnreadableFiles = async (list, consequence) => {
+        const MAX_GROUPS = 5;
+        const items = (consequence && consequence.items) || [];
+        const looseFiles = consequence ? (consequence.files || []) : list;
+        const n = list.length;
+        // ITEMS FIRST. They are the bigger loss, so they lead regardless of how many loose files
+        // sit beside them.
+        const itemGroups = _sfGroupDropped(items);
+        const itemRows = itemGroups.map(g => _sfDroppedRowHtml(g, 'ask')).join('');
+        // One loose file keeps the single-file layout exactly as it is; grouping only earns its
+        // place once there is more than one.
+        const groups = looseFiles.length <= 1 ? null : _sfUnreadableGroups(looseFiles);
+        const shownGroups = groups ? groups.slice(0, MAX_GROUPS) : [];
+        const hiddenGroups = groups ? groups.length - shownGroups.length : 0;
+        const hiddenFiles = groups
+          ? groups.slice(MAX_GROUPS).reduce((a, g) => a + g.files.length, 0) : 0;
+        const fileRows = looseFiles.length === 0 ? ''
+          : looseFiles.length === 1 ? _sfUnreadableLine(looseFiles[0])
+          : shownGroups.map(_sfUnreadableGroupHtml).join('');
+        const rows = itemRows + fileRows;
+        // NAME WHAT THE LIST DOES NOT SHOW. A truncated list that does not say it is truncated
+        // reads as the complete answer.
+        const more = hiddenGroups
+          ? `<p>…and ${hiddenFiles} more file${hiddenFiles === 1 ? '' : 's'} in `
+            + `${hiddenGroups} other place${hiddenGroups === 1 ? '' : 's'}, not listed here.</p>`
+          : '';
+        // NOT AWAITED BEFORE WIRING. The links only exist once the dialog has rendered, and
+        // awaiting first would wire them after it had already closed.
+        // THE TITLE NAMES THE LARGEST THING BEING LOST. When one font goes, "One file cannot be
+        // read" is true and badly understates what the button agrees to.
+        // Keyed off GROUPS, not items: a font and its source are one loss, so a run that takes
+        // both still has a single thing to name.
+        const title = (itemGroups.length === 1 && looseFiles.length === 0)
+          ? `Your ${_sfDroppedLabel(itemGroups[0])} cannot be fully read`
+          : n === 1 ? 'One file cannot be read' : `${n} files cannot be read`;
+        const ok = promptConfirm({
+          title,
+          messageHtml:
+            // RED, NOT AMBER. Amber marks uncertainty - a close variant, a low-confidence match,
+            // something to check before continuing. A read that failed is not uncertain: it has
+            // already happened and it is terminal for that file. Same colour on the completion
+            // screen, so the fact wears one colour across the question and the report.
+            `<p style="color:var(--c-danger-text);">${n === 1 ? 'This file' : 'These files'} `
+            + `could not be opened, so ${n === 1 ? 'it' : 'they'} cannot go into the backup.</p>`
+            + `<div style="margin:10px 0;">${rows}</div>`
+            + more
+            + `<p>${_sfEscape(_sfUnreadableWhy(list))}</p>`
+            + `<p>Click a path to open its folder with the file selected. Everything else in your `
+            + `library will be backed up.</p>`,
+          confirmText: n === 1 ? 'Back up without it' : 'Back up without them',
+          confirmKind: 'primary',
+          cancelText: 'Cancel',
+        });
+        _sfWirePathLinks();
+        return !!(await ok);
+      };
+
+      // THE BACKSTOP, for a file that goes unreadable DURING a run - locked by something after
+      // the gate had already passed it. The gate cannot cover this: readability is only ever
+      // true as of the moment it was measured.
+      const _sfShowUnreadableFailure = async (r) => {
+        const p = String(r.unreadablePath);
+        const why = _sfUnreadableWhy([{ code: r.unreadableCode }]);
+        const dlg = promptConfirm({
+          title: 'Backup stopped - a file could not be read',
+          messageHtml:
+            '<p>The backup stopped because this file could not be read, so it cannot ship an '
+            + 'archive that is quietly missing a file.</p>'
+            + `<div style="margin:10px 0;">${_sfPathLinkHtml(p)}</div>`
+            + `<p>${_sfEscape(why)}</p>`
+            + '<p>Nothing was written to the destination. Deal with the file and run the backup '
+            + 'again, and it will offer to continue without it.</p>',
+          confirmText: 'OK',
+          confirmKind: 'danger',
+          hideCancel: true,
+        });
+        _sfWirePathLinks();
+        await dlg;
+      };
       window.refreshSoundFontsView = async () => {
         await _refreshSoundFontsToggleLock();
         // [B-318] Footer size. Deliberately NOT awaited: this hands back the last known figure
@@ -30799,9 +31109,33 @@ require(['vs/editor/editor.main'], function () {
         if (n < 1024 * 1024 * 1024) return `${cut(n / 1024 / 1024, 1)} MB`;
         return `${cut(n / 1024 / 1024 / 1024, 2)} GB`;
       };
+      // ── The same formatter, rounding the OTHER way ──────────────────── [B-478]
+      //
+      // `_sfFormatBytes` truncates, which is correct for "how much is here": it can never
+      // overstate what you have. A SHORTFALL is the opposite kind of number - "how much you
+      // must clear" - and truncating that UNDERSTATES it, so following the advice exactly
+      // still fails.
+      //
+      // Measured off his 2026-10-11 screenshot: need 25.28 GB, free 11.94 GB, "13.33 GB short".
+      // The true shortfall was 13.3350 GB, so freeing exactly 13.33 GB leaves you 5.1 MB short
+      // and the write still refuses. It also reads as an arithmetic error, because 25.28 minus
+      // 11.94 is 13.34 and the dialog says 13.33 - three numbers that do not reconcile on a
+      // screen whose entire job is to state three numbers.
+      //
+      // Use this ONLY for a number someone has to act on by freeing space. Everything that
+      // reports a quantity keeps the truncating form.
+      const _sfFormatBytesUp = (n) => {
+        if (!n) return '0 B';
+        const up = (v, dp) => { const p = Math.pow(10, dp); return (Math.ceil(v * p) / p).toFixed(dp); };
+        if (n < 1024) return `${Math.ceil(n)} B`;
+        if (n < 1024 * 1024) return `${up(n / 1024, 1)} KB`;
+        if (n < 1024 * 1024 * 1024) return `${up(n / 1024 / 1024, 1)} MB`;
+        return `${up(n / 1024 / 1024 / 1024, 2)} GB`;
+      };
       // Expose for other SF modules (bulk import, etc.) so byte formatting
       // is consistent across every progress surface in the app.
       if (typeof window !== 'undefined') window._sfFormatBytes = _sfFormatBytes;
+      if (typeof window !== 'undefined') window._sfFormatBytesUp = _sfFormatBytesUp;
 
       // ── Library size readout ───────────────────────────────── [B-318]
       // Three numbers in the footer: what the files add up to, what the drive is holding, and the
@@ -36605,7 +36939,7 @@ require(['vs/editor/editor.main'], function () {
         const _box2 = (_attBox && _custBox) ? _custBox : null;
         const res = await promptConfirm({
           title: `Export "${label}"`,
-          message: 'A zip keeps it as one file and remembers the details you added, '
+          message: 'A zip keeps it as one file with the details you added, '
                  + 'so importing it back into JMT Studio brings them with it. '
                  + 'A folder is just the files, unzipped.',
           middleText: 'Folder',
@@ -39164,6 +39498,9 @@ require(['vs/editor/editor.main'], function () {
           await _sfRefuseNotEnoughRoom(r.tooBig, { blockedDelete: r.blockedDelete === true });
           return false;
         }
+        // [B-478] An unreadable source file gets its own ending, because the generic failure
+        // dialog can only print the sentence - this one can hand over the file.
+        if (r && !r.ok && r.unreadablePath) { await _sfShowUnreadableFailure(r); return false; }
         if (!r || !r.ok) { _sfExportFailed((r && r.error) || 'unknown error'); return false; }
 
         // A CANCEL WE COULD NOT CONFIRM IS NOT A FINISHED CANCEL. [B-420, 2026-09-21]
@@ -41359,7 +41696,7 @@ require(['vs/editor/editor.main'], function () {
           if (t && typeof title === 'string' && title) t.textContent = title;
         },
 
-        // ── The "eject when finished" checkbox ───────────────────── [B-005 item 4]
+        // ── The "Eject after completion" checkbox ───────────────────── [B-005 item 4]
         //
         // OFFERED DURING, NOT BEFORE. Knowing whether a destination is removable costs a
         // ~1,900 ms device lookup, and blocking the START of an export on it to decide
@@ -41384,6 +41721,12 @@ require(['vs/editor/editor.main'], function () {
           const w = this.ejectWrapEl(), b = this.ejectBoxEl();
           if (w) w.style.display = 'none';
           if (b) b.checked = false;
+          // THE MATCHING RESET for the greying a cancel applies. [B-478] A set with no reset is
+          // session-sticky: one cancel would leave the offer greyed for every run afterwards, on
+          // a destination that is perfectly ejectable. This runs on every modal open, which is
+          // the right moment - earlier than any door can offer the box again.
+          if (b) b.disabled = false;
+          if (w) w.style.opacity = '';
           this._syncActions();
         },
         wantsEject() {
@@ -43662,12 +44005,7 @@ require(['vs/editor/editor.main'], function () {
         // THE PATH LINKS ARE WIRED HERE, ONCE, for every notice that prints one. Doing it per
         // caller is how the export-complete dialog ended up with a blue "Show in folder" button
         // while the import closeout had a quiet link for the same job.
-        for (const a of document.querySelectorAll('.sf-open-path')) {
-          a.addEventListener('click', (e) => {
-            e.preventDefault();
-            try { window.electronAPI.showItemInFolder(a.getAttribute('data-path')); } catch {}
-          });
-        }
+        _sfWirePathLinks();
         if (ctx.ejectTarget) {
           _sfPlaceEjectRowInButtons();
           _sfWireEjectRow({ target: ctx.ejectTarget, vocab: ctx.ejectVocab,
@@ -48584,6 +48922,19 @@ require(['vs/editor/editor.main'], function () {
         const n = (cs && cs.attachments) || 0;
         return n > 0 ? `, ${n} proof${n === 1 ? '' : 's'} of purchase` : '';
       };
+      // THE WHOLE SENTENCE, not only its tail clause. [2026-10-15] The note above already named
+      // the rule and only the proofs obeyed it; the counts and the total were written out twice,
+      // and the two copies disagreed - the completion quoted the pre-flight survey, so an export
+      // that left a font out still reported the library's own count.
+      // Both callers pass the figures for the ARCHIVE, never the library on disk.
+      const _sfLibrarySummary = (cs, totalBytes) => {
+        const c = cs || {};
+        const n = (v) => v || 0;
+        return `Library: ${n(c.sources)} source${n(c.sources) === 1 ? '' : 's'}, `
+             + `${n(c.library)} font${n(c.library) === 1 ? '' : 's'}, `
+             + `${n(c.common)} common folder${n(c.common) === 1 ? '' : 's'}${_sfProofPart(c)}. `
+             + `Total ${_sfFormatBytesShort(totalBytes || 0)}.`;
+      };
       const _sfOpenExportBackup = async () => {
         // Pick the destination zip path first so the benchmark can run on
         // the actual target drive (USB vs internal SSD make a real diff).
@@ -48592,6 +48943,21 @@ require(['vs/editor/editor.main'], function () {
         catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok) return;
         const destPath = pick.filePath;
+        // START THE REMOVABLE LOOKUP NOW, NOT WHEN THE DIALOG OPENS. [B-478, 2026-10-11]
+        // It decides whether the confirm screen offers an eject, and it is only cheap once
+        // warm - on this screen the destination cache is COLD, because the runner's phase 1
+        // has not run yet. Started at the dialog it raced the 15-second countdown and lost:
+        // absent on one export and present on the next. That is the one case the offer exists
+        // for - a run that starts itself while nobody is watching.
+        // Kicked off here, where the destination is already known, so it resolves long before
+        // the countdown begins. Never awaited on the critical path.
+        const _bkRemovable = (async () => {
+          try {
+            const dir = String(destPath).replace(/[\/][^\/]*$/, '');
+            return await window._sfDestIdentity.removable(dir);
+          } catch { return null; }   // null means cannot tell, and we do not offer on that
+        })();
+        _bkRemovable.catch(() => {});
         // Prep — run survey + benchmark before showing the confirm.
         const prepModal = document.getElementById('modal-sf-backup-prep');
         const summaryEl = document.getElementById('sf-backup-prep-summary');
@@ -48603,6 +48969,27 @@ require(['vs/editor/editor.main'], function () {
         startBtn.disabled = true;
         if (progTrack) progTrack.style.display = '';
         prepModal.classList.add('active');
+
+        // THE EJECT OFFER GOES UP WITH THE DIALOG, NOT AFTER THE SURVEY. [B-478, 2026-10-11]
+        // This modal has two states - surveying, then the countdown - and it is one dialog, so
+        // the offer belongs to both. Placed in the countdown block it did not exist during the
+        // survey at all, which is most of the time the dialog is on screen and is exactly when
+        // someone reads it and walks away.
+        // Removable destinations only: `removable() === true`, where null means cannot tell and
+        // offering to eject a possible internal disk is worse than not offering. The lookup was
+        // started at the destination pick, so this usually resolves immediately.
+        const prepEjectWrap = document.getElementById('sf-backup-prep-eject-wrap');
+        const prepEjectBox  = document.getElementById('sf-backup-prep-eject');
+        if (prepEjectWrap) prepEjectWrap.style.display = 'none';
+        if (prepEjectBox) { prepEjectBox.checked = false; prepEjectBox.disabled = false; }
+        (async () => {
+          try {
+            if (await _bkRemovable === true
+                && prepEjectWrap && prepModal.classList.contains('active')) {
+              prepEjectWrap.style.display = '';
+            }
+          } catch { /* no offer is the safe outcome */ }
+        })();
 
         // THE CANCEL BUTTON WAS WIRED TO NOTHING FOR THE WHOLE SURVEY. [2026-09-24]
         // Reported: *"clicking cancel has no visible response."* The click listener was attached
@@ -48636,21 +49023,87 @@ require(['vs/editor/editor.main'], function () {
         try { prep = await window.electronAPI.sfBackupPrep({ destPath }); }
         catch (err) { prep = { ok: false, error: String(err && err.message || err) }; }
         cancelBtn.removeEventListener('click', onPrepCancel);
-        if (progTrack) progTrack.style.display = 'none';
         // Checked BEFORE the error branch: they already left. A survey that also failed is not
         // news they asked for, and a red dialog over a dismissed screen is not an answer to "stop".
         if (prepCancelled) return;
         if (!prep || !prep.ok) {
+          if (progTrack) progTrack.style.display = 'none';
           prepModal.classList.remove('active');
           promptError('Could not prepare export', (prep && prep.error) || 'unknown error');
           return;
         }
         const { survey } = prep;
-        const totalSize = _sfFormatBytesShort(survey.totalBytes);
-        const cs = survey.counts;
-        summaryEl.textContent =
-          `Library: ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}${_sfProofPart(cs)}. ` +
-          `Total ${totalSize}.`;
+        // ── Will it actually fit? ───────────────────────────────────────────────────── [B-478]
+        //
+        // The machinery already existed and this was the one door that never called it. The font
+        // and source export doors refuse through this same pair, and a 9.55 GB backup still
+        // started writing to a card that could not hold it. Nothing has been written at this
+        // point, so refusing costs only the survey already paid for.
+        //
+        // THE UNDEDUPED TOTAL IS THE RIGHT SIZE HERE, which is the opposite of what the new
+        // library readout reports. Hardlinks do not survive a zip, so every NAME becomes its own
+        // entry carrying its own bytes: measured on a real backup at 18,465 entries for 5,649
+        // distinct files. Sizing this from the on-disk figure would understate the archive by
+        // more than half. `totalBytes` is an upper bound, since zip still compresses a little,
+        // which errs toward refusing a borderline write rather than failing one an hour in.
+        //
+        // The progress track stays up through the lookup: on a big job preflight walks the device
+        // association, and a modal that has gone still is a modal that looks hung.
+        const _bkDestDir = String(destPath).replace(/[\\/][^\\/]*$/, '');
+        let _bkFit = null;
+        try {
+          const r = await window.electronAPI.preflightExportDest({
+            destDir: _bkDestDir,
+            totalBytes: survey.totalBytes,
+          });
+          _bkFit = (r && r.ok && r.result) || null;
+        } catch { /* a preflight that cannot run must not block a backup that would have fit */ }
+        if (progTrack) progTrack.style.display = 'none';
+        // HEALTH AHEAD OF ROOM, matching preflight's own order and the shared gate's. A damaged
+        // volume still reports free space, so "it will not fit" would be an answer computed from
+        // a number we have just been told not to trust, and telling someone about room on a card
+        // they should not write to is the wrong conversation. [B-441]
+        // This door checked NEITHER. [B-478] names only the second, but the answer to the first
+        // arrives in the same call and dropping it on the floor is not a scope boundary.
+        if (_bkFit && _bkFit.unhealthy) {
+          await _sfRefuseUnhealthyDestination(_bkFit.unhealthy, {
+            destDir: _bkDestDir,
+            // The successor owns the close: the dialog awaits a naming lookup before it can show,
+            // so closing here would leave the screen bare for the length of it.
+            closePrevious: () => prepModal.classList.remove('active'),
+          });
+          return;
+        }
+        if (_bkFit && _bkFit.tooBig) {
+          prepModal.classList.remove('active');
+          // 'backup', not 'export' - this door writes a backup, and [B-500] settled that those
+          // are different artifacts. The shared dialog defaults to 'export' for the font and
+          // source doors, which genuinely are exports.
+          await _sfRefuseNotEnoughRoom(_bkFit.tooBig, { noun: 'backup' });
+          return;
+        }
+        // ── CAN EVERY FILE BE READ? ───────────────────────────────────────────────── [B-478]
+        //
+        // AFTER the destination refusals and BEFORE the summary. Those two end the run outright,
+        // so there is no point asking about source files for a backup that is not going to
+        // happen; this one is a question the user answers and carries on from.
+        //
+        // The prep modal stays up underneath - a confirm over a modal is the stacked-transient
+        // case, not the stash-and-restore one.
+        const _bkUnreadable = (prep && prep.unreadable) || [];
+        let _bkSkipPaths = [];
+        if (_bkUnreadable.length) {
+          const proceed = await _sfAskUnreadableFiles(_bkUnreadable, prep && prep.consequence);
+          if (!proceed) { prepModal.classList.remove('active'); return; }
+          _bkSkipPaths = _bkUnreadable.map(u => u.path);
+        }
+        // THE SUMMARY DESCRIBES THE BACKUP, NOT THE LIBRARY. [2026-10-15] The gate above runs
+        // first, so by this line the user has already agreed to drop items - and quoting the raw
+        // survey promised 13 fonts immediately after they agreed to leave one out. `prep.adjusted`
+        // is the same arithmetic the manifest uses, so this figure and the one on the completion
+        // screen come from one place.
+        const _bkFigure = (_bkSkipPaths.length && prep && prep.adjusted) ? prep.adjusted : survey;
+        summaryEl.textContent = _sfLibrarySummary(_bkFigure.counts, _bkFigure.totalBytes);
         startBtn.disabled = false;
         await new Promise((resolve) => {
           // ── AUTO-START COUNTDOWN ─────────────────────────────── [B-420, 2026-09-24]
@@ -48696,6 +49149,11 @@ require(['vs/editor/editor.main'], function () {
                 + 'Cancel if you do not want it.';
             }
           };
+          // Ticking it is an interaction, so it stops the countdown - WCAG 2.2.1, same as every
+          // other control on this dialog. Without this the box could be ticked a half-second
+          // before the timer fired and the user would never know which state it started in.
+          if (prepEjectBox) prepEjectBox.addEventListener('change', () => stopAuto());
+
           if (autoEl) { autoEl.style.display = ''; }
           paint();
           autoTimer = setInterval(() => {
@@ -48738,8 +49196,10 @@ require(['vs/editor/editor.main'], function () {
           // block. The survey-and-confirm screen above STAYS here, per the ruling: deciding
           // whether to export is not exporting.
           const onStart = async () => {
+            // Read BEFORE cleanup() tears the dialog down.
+            const wantEject = !!(prepEjectBox && prepEjectBox.checked);
             cleanup();
-            _sfRunExportBackup(destPath, survey);
+            _sfRunExportBackup(destPath, survey, wantEject, _bkSkipPaths);
           };
           const onCancel = () => cleanup();
           startBtn.addEventListener('click', onStart);
@@ -48774,7 +49234,11 @@ require(['vs/editor/editor.main'], function () {
       // outcome handler reads `canceled` (one L). Normalised HERE, at the boundary, rather than
       // teaching the shared handler about one door's spelling - that is how a shared thing
       // accumulates thirteen special cases and stops being shared.
-      const _sfRunExportBackup = async (destPath, survey) => {
+      // `skipPaths` is the answer the user gave at the readability gate on the confirm screen.
+      // PASSED AS AN ARGUMENT, not read from an outer variable: the confirm screen and this run
+      // are separate functions, and reaching across them is a ReferenceError at the moment the
+      // user clicks Start - which is exactly what it was on first test.
+      const _sfRunExportBackup = async (destPath, survey, wantEject = false, skipPaths = []) => {
         const opId = `sfBackup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const destDir = String(destPath || '').replace(/[\\/][^\\/]*$/, '');
         const cs = survey && survey.counts;
@@ -48818,19 +49282,40 @@ require(['vs/editor/editor.main'], function () {
 
           produce: async () => {
             startMs = Date.now();
+            // Carry the confirm screen's choice onto the progress screen's box. The runner's
+            // box is the ONE source of truth - the close-out reads `wantsEject()` and nothing
+            // else - so the pre-choice is reflected into it rather than tracked separately,
+            // which is how two controls end up disagreeing. Safe before the row is visible:
+            // `offerEject()` only changes display, never the checked state.
+            if (wantEject) {
+              try {
+                const b = _sfDeleteProgress.ejectBoxEl && _sfDeleteProgress.ejectBoxEl();
+                if (b) b.checked = true;
+              } catch {}
+            }
             // THE CLOSE GUARD STAYS. This flag is what lets the app refuse an OS-level X while
             // atomic disk work is in flight - the in-app Cancel is the only safe exit, because it
             // is the one that unlinks the partial archive. Cleared in the finally so a failure
             // cannot leave the app permanently unclosable.
             window._sfBackupBusy = true;
             try {
-              const r = await window.electronAPI.sfBackupExport({ opId, destPath });
+              // `skipPaths` carries the user's answer from the readability gate into the run, so
+              // the count pass and the archive drop exactly the files that were asked about and
+              // the progress counter stays truthful. Empty on every ordinary export.
+              const r = await window.electronAPI.sfBackupExport({ opId, destPath, skipPaths });
               bkResult = r;
               return {
                 ok: !!(r && r.ok),
                 canceled: !!(r && r.cancelled),     // see the spelling note above
                 error: (r && r.error) || null,
                 refused: (r && r.refused) || [],
+                // Kept apart from `refused` all the way to the screen. The refusal dialog removes
+                // what it reports; these files were left alone.
+                skipped: (r && r.skipped) || [],
+                skippedItems: (r && r.skippedItems) || [],
+                // Mapped, or the ending has the sentence and not the file. [B-478]
+                unreadablePath: (r && r.unreadablePath) || null,
+                unreadableCode: (r && r.unreadableCode) || null,
                 // NOT `leftovers`. [B-420, 2026-09-21] `residualPath` is a TEMP
                 // file, not something left at the destination — and `leftovers` is what the
                 // shared notice uses to decide modal-vs-toast. Mapping it here meant a cancel
@@ -48862,6 +49347,20 @@ require(['vs/editor/editor.main'], function () {
             // current file)", and on 2026-09-20 testing found the extra confirm actively broken on
             // other doors - "cancel and ok from there do the same thing". One door keeping a
             // dialog the other twelve dropped is exactly the drift this entry exists to end.
+            //
+            // GREY THE EJECT OFFER. [B-478, 2026-10-11, the ruling: "fix the grey out so can't
+            // change it/click it during the cancel process".] It is a pre-commitment about what
+            // happens when the run FINISHES, and only the close-out reads it - a cancel never
+            // gets there, so a tick left live is a promise this path will not keep.
+            // DISABLED, NOT UNCHECKED: clearing the answer reads as the app changing the user's
+            // mind rather than retiring the question. `clearEject()` resets both on the next
+            // modal open, which is the matching half - a set without one goes session-sticky.
+            try {
+              const b = _sfDeleteProgress.ejectBoxEl && _sfDeleteProgress.ejectBoxEl();
+              const w = _sfDeleteProgress.ejectWrapEl && _sfDeleteProgress.ejectWrapEl();
+              if (b) b.disabled = true;
+              if (w) w.style.opacity = '0.5';
+            } catch {}
             try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
           },
 
@@ -48877,10 +49376,15 @@ require(['vs/editor/editor.main'], function () {
           onCompleted: async () => {
             const r = bkResult || {};
             const elapsedSec = startMs ? (Date.now() - startMs) / 1000 : 0;
-            const totalSize = _sfFormatBytesShort(survey ? survey.totalBytes : 0);
-            const summaryLine = cs
-              ? `Library: ${cs.sources} source${cs.sources === 1 ? '' : 's'}, ${cs.library} font${cs.library === 1 ? '' : 's'}, ${cs.common} common folder${cs.common === 1 ? '' : 's'}${_sfProofPart(cs)}. Total ${totalSize}.`
-              : '';
+            // FROM THE MANIFEST, WHICH DESCRIBES THE ARCHIVE. [2026-10-15] This line exists so
+            // the user can check that what was packaged matches what was promised, and it cannot
+            // do that while it reports the pre-flight survey: an export that dropped a font and
+            // its source still said 21 sources and 13 fonts over an archive holding 20 and 12.
+            // The survey remains the fallback for an archive with no manifest.
+            const _mf = r.manifest || null;
+            const summaryLine = (_mf && _mf.counts)
+              ? _sfLibrarySummary(_mf.counts, _mf.totals && _mf.totals.totalBytes)
+              : (cs ? _sfLibrarySummary(cs, survey ? survey.totalBytes : 0) : '');
             const message = [
               `Backup written to:\n${r.destPath || destPath}`,
               summaryLine,
@@ -48900,7 +49404,66 @@ require(['vs/editor/editor.main'], function () {
             // [B-420] Same as every archive door: the summary carries the eject button so the
             // checkbox has something to press. Backup lost that button when it migrated and
             // nobody noticed, because the during-export checkbox still appeared.
-            await _sfCompletionNotice({ title: 'Export complete', message, destDir });
+            // Press the eject when the box was ticked, on either screen. `_sfCompletionNotice`
+            // has accepted `ejectAuto` all along and this door simply never passed it, so the
+            // checkbox had nothing on the other end of it. Read at completion only - a cancel
+            // never reaches here, which is why the cancel path greys the box instead.
+            // SAY WHAT IS NOT IN THE ARCHIVE, ON THE SCREEN THAT SAYS IT FINISHED. [B-478]
+            // A backup reported as complete while quietly missing files is the failure this
+            // whole path exists to prevent - the user agreed to the omission at the gate, and
+            // the record of it has to survive to the end rather than only existing in a dialog
+            // they clicked through minutes ago.
+            const skipped = r.skipped || [];
+            const droppedItems = r.skippedItems || [];
+            if (skipped.length || droppedItems.length) {
+              // THE SAME SHAPE THE QUESTION USED. Describing a file one way when asking and
+              // another way when reporting makes the user match them up by eye.
+              const sGroups = skipped.length <= 1 ? null : _sfUnreadableGroups(skipped);
+              const sShown = sGroups ? sGroups.slice(0, 5) : [];
+              const sHiddenG = sGroups ? sGroups.length - sShown.length : 0;
+              const sHiddenF = sGroups
+                ? sGroups.slice(5).reduce((a, g) => a + g.files.length, 0) : 0;
+              // Items first here too, and reported in the PAST tense: at the gate they were
+              // about to go, here they are gone.
+              const itemRows = _sfGroupDropped(droppedItems)
+                .map(g => _sfDroppedRowHtml(g, 'done')).join('');
+              const rows = itemRows + (
+                skipped.length === 0 ? ''
+                : skipped.length === 1 ? _sfUnreadableLine(skipped[0])
+                : sShown.map(_sfUnreadableGroupHtml).join(''));
+              const more = sHiddenG
+                ? `<p>…and ${sHiddenF} more file${sHiddenF === 1 ? '' : 's'} in `
+                  + `${sHiddenG} other place${sHiddenG === 1 ? '' : 's'}, not listed here.</p>` : '';
+              // THE NUMBER IS THE FAULT, NOT THE HOLE. [2026-10-15] Summing each dropped item's
+              // whole file count reports one bad sector inside a 305-file source as 305 unreadable
+              // files - measured at 368 against 9 that genuinely could not be read. This counts
+              // the files that could not be READ, which is the number the gate asked about and the
+              // only one that describes the user's disk.
+              const missingFiles = skipped.length
+                + droppedItems.reduce((a, it) => a + (it.unreadable || 0), 0);
+              await _sfCompletionNotice({
+                title: 'Export complete, with files left out',
+                messageHtml: `<div>${_sfEscape(message).replace(/\n/g, '<br>')}</div>`
+                  // RED, and the title is what keeps that honest: "Export complete, with files
+                  // left out" owns the operation's outcome, so this line owns the FILE's. A
+                  // failed read is an error even when the run routed around it.
+                  // THE HEADLINE COUNTS EVERYTHING MISSING, items included. Counting only the
+                  // loose files would report "1 file left out" on a backup short a whole font.
+                  // SEPARATED FROM THE BLOCK ABOVE IT. [2026-10-15] `.modal p` carries a bottom
+                  // margin and no top one, so this line sat flush under "Took 1m 44s." and read
+                  // as a statement about the elapsed time. 20px is the same gap the stylesheet
+                  // puts between paragraphs and matches the blank line the message's own blocks
+                  // are separated by, so the red line is one block among equals.
+                  + `<p style="margin-top:20px; color:var(--c-danger-text);"><strong>${missingFiles} file`
+                  + `${missingFiles === 1 ? '' : 's'} could not be read and `
+                  + `${missingFiles === 1 ? 'is' : 'are'} not in this backup:</strong></p>`
+                  + `<div style="margin:10px 0;">${rows}</div>` + more,
+                destDir, ejectAuto: _sfDeleteProgress.wantsEject(),
+              });
+              return;
+            }
+            await _sfCompletionNotice({ title: 'Export complete', message, destDir,
+                                        ejectAuto: _sfDeleteProgress.wantsEject() });
           },
         });
       };
@@ -49098,6 +49661,13 @@ require(['vs/editor/editor.main'], function () {
         const els = _sfBackupProgressEls();
         if (els && els.bkEjectWrap) els.bkEjectWrap.style.display = 'none';
         if (els && els.bkEjectBox) els.bkEjectBox.checked = false;
+        // THE MATCHING RESET for what the cancel path greys, and it is the half that gets
+        // forgotten. The bulk door learned this on 2026-10-06: a set with no reset is
+        // session-sticky, so ONE cancel leaves the eject offer greyed for every run after it,
+        // on a card that is perfectly ejectable. Re-arming is the right place because it runs
+        // per run, before the row can be shown again.
+        if (els && els.bkEjectBox) els.bkEjectBox.disabled = false;
+        if (els && els.bkEjectWrap) els.bkEjectWrap.style.opacity = '';
         if (!srcPath || !window._sfEjectContext) return;
         (async () => {
           try {
@@ -49149,12 +49719,8 @@ require(['vs/editor/editor.main'], function () {
         els.bar.style.width = '100%';
         els.bar.classList.add('indeterminate');
         if (els.cancel) els.cancel.style.display = 'none';
-        // AND THE EJECT OFFER, which is about the WORK and not about this wait. The inspect and
-        // compare phases happen before the user has chosen merge or replace, so there is nothing
-        // yet to finish and eject after. Caught ticked and visible here on a second run:
-        // *"after using the eject when finished it showed up here... shouldn't be. this is before
-        // the S2 modal."* Hidden explicitly rather than relying on the arming, because the arming
-        // runs at apply time and this screen is earlier than that.
+        // Hides the eject offer. Arming runs at apply time, which is later than this screen, so
+        // the row has to be hidden here rather than left to the arming.
         if (els.bkEjectWrap) els.bkEjectWrap.style.display = 'none';
         els.modal.classList.add('active');
         return () => {
@@ -49634,6 +50200,17 @@ require(['vs/editor/editor.main'], function () {
           if (els.detail) els.detail.style.display = 'none';
           els.cancel.disabled = true;
           els.cancel.textContent = 'Cancelling…';
+          // AND THE EJECT OFFER WITH IT. [B-478, 2026-10-11, the ruling: "we don't eject on
+          // cancel only on completion".] The box is a pre-commitment about what happens when the
+          // run FINISHES, on a run that is not going to finish - and the close-out is the only
+          // thing that reads it, so a tick left live here is a promise the cancel path will not
+          // keep. Same shape and same reasoning as the bulk import door's cancel, 2026-10-06.
+          // DISABLED, NOT UNCHECKED: clearing the answer would read as the app changing the
+          // user's mind rather than retiring the question. `_sfArmBackupEject` resets both.
+          // Deliberately in BOTH restore branches - [B-401] is the entry about fixing one of
+          // these two and not the other, and they are byte-identical by design.
+          if (els.bkEjectBox) els.bkEjectBox.disabled = true;
+          if (els.bkEjectWrap) els.bkEjectWrap.style.opacity = '0.5';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
         };
         els.cancel.addEventListener('click', onCancel);
@@ -49772,6 +50349,17 @@ require(['vs/editor/editor.main'], function () {
           if (els.detail) els.detail.style.display = 'none';
           els.cancel.disabled = true;
           els.cancel.textContent = 'Cancelling…';
+          // AND THE EJECT OFFER WITH IT. [B-478, 2026-10-11, the ruling: "we don't eject on
+          // cancel only on completion".] The box is a pre-commitment about what happens when the
+          // run FINISHES, on a run that is not going to finish - and the close-out is the only
+          // thing that reads it, so a tick left live here is a promise the cancel path will not
+          // keep. Same shape and same reasoning as the bulk import door's cancel, 2026-10-06.
+          // DISABLED, NOT UNCHECKED: clearing the answer would read as the app changing the
+          // user's mind rather than retiring the question. `_sfArmBackupEject` resets both.
+          // Deliberately in BOTH restore branches - [B-401] is the entry about fixing one of
+          // these two and not the other, and they are byte-identical by design.
+          if (els.bkEjectBox) els.bkEjectBox.disabled = true;
+          if (els.bkEjectWrap) els.bkEjectWrap.style.opacity = '0.5';
           try { await window.electronAPI.sfBackupCancel({ opId }); } catch {}
         };
         els.cancel.addEventListener('click', onCancel);
@@ -49902,6 +50490,50 @@ require(['vs/editor/editor.main'], function () {
             'missing-file': 'File not found',
           };
           const reason = inspect && inspect.reason;
+          // [B-479] A read that failed over the board is not evidence of a bad archive. The
+          // predicate carries the reasoning; the transport verdict is the one the slow-import
+          // gate above already established, so this costs no second probe.
+          if (_sfReadFailureIsLikelyTransport(reason, window._sfDestIdentity.knownIsBoardCard(zipPath))) {
+            // THE DIALOG CARRIES THE EJECT, because the next thing this message asks for is a card
+            // reader - and getting the card out is the step the user is about to discover they
+            // cannot take. Windows refuses the eject here, and its only offered alternative is
+            // "Continue", which force-closes handles and risks data loss. Our own eject goes
+            // through the platform's safe-removal path instead, so it is both the honest exit and
+            // the one that cannot cost them the card. [B-479]
+            //
+            // Same three helpers and the same ORDER as every other summary in the app: build the
+            // row, render the dialog, THEN wire - the row goes into the shared confirm's button
+            // bar, which only exists once the dialog is live DOM.
+            const _ejCtx = (await (window._sfEjectContext
+              ? window._sfEjectContext(zipPath).catch(() => ({}))
+              : Promise.resolve({}))) || {};
+            const _ejRow = (_ejCtx.ejectTarget && window._sfEjectRowHtml)
+              ? window._sfEjectRowHtml(_ejCtx.ejectTarget, _ejCtx.ejectVocab) : '';
+            // The copy describes the TRANSPORT and never the file's size. An earlier draft said
+            // the read drops out on a large file; nothing here measures size, and a 50-byte file
+            // reaches this branch just as readily, so the claim would have been false on screen.
+            const _transportMsg =
+              '<p>JMT Studio could not read the backup while the card is in the saber. That '
+            + 'connection is slow, and part of the read can drop out, which looks exactly like a '
+            + 'damaged backup.</p>'
+            + '<p>This does not mean your backup is bad. Put the card in a card reader and import '
+            + 'it again.</p>';
+            const _transportDone = promptConfirm({
+              title: 'Could not read the backup from this card',
+              messageHtml: _transportMsg + _ejRow,
+              confirmText: 'OK',
+              confirmKind: 'danger',
+              hideCancel: true,
+            });
+            if (_ejRow) {
+              try {
+                window._sfPlaceEjectRowInButtons();
+                window._sfWireEjectRow({ target: _ejCtx.ejectTarget, vocab: _ejCtx.ejectVocab, auto: false });
+              } catch (e) { console.warn('[B-479] eject row did not render on the read-failure dialog:', e); }
+            }
+            await _transportDone;
+            return;
+          }
           await promptConfirm({
             title: titleByReason[reason] || 'Import failed',
             message: (inspect && inspect.error) || 'Unknown error.',

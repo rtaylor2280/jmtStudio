@@ -30,10 +30,9 @@
 // while a fresh walk runs, and nothing more.
 //
 // ── IT YIELDS, AND THAT IS NOT OPTIONAL ─────────────────────────────────────
-// Fifteen thousand synchronous stat calls on the main process is a frozen window: that exact
-// shape reported 0 B of 62.4 MB for seventeen seconds with the title bar reading Not Responding
-// earlier the same day. The walk breathes between directories so the app stays answerable while
-// it runs.
+// Fifteen thousand synchronous stat calls on the main process is a frozen window. Measured on
+// that exact shape: 0 B of 62.4 MB after seventeen seconds, with the title bar reading Not
+// Responding. The walk breathes between directories so the app stays answerable while it runs.
 
 'use strict';
 

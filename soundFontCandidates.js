@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const StreamZip = require('node-stream-zip');
 const { cleanSuggestedName, deriveBundlePrefix } = require('./soundFontNameClean');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 
 // Composite-path separator that encodes "inside an inner zip." When a
 // candidate's path contains this character, the part before it is the
@@ -851,7 +852,7 @@ async function _walkInnerZipCandidates(source, innerZipName, fallbackName) {
   const tmpZip = path.join(tmpDir, 'inner.zip');
   try {
     fs.writeFileSync(tmpZip, bytes);
-    const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+    const zip = openZipOwned(tmpZip, { skipEntryNameValidation: true });
     try {
       const entryMap = await zip.entries();
       // Reshape the inner zip entries into the form groupByParent

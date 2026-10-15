@@ -1844,6 +1844,34 @@ function _looksLikeFlashError(line) {
   return /error|libusb_control_transfer returned|LIBUSB_ERROR|cannot open|access is denied|no dfu capable|timed out|failed/i.test(line);
 }
 
+// "Cannot open DFU device" means two opposite things, and which one it is depends entirely on
+// WHEN it arrives. Before the download it is the driver-binding failure - a real fault, and the
+// one that has to stay loud. After the download it is our own `-s 0x08000000:leave` doing its
+// job: the board manifests, resets and re-enumerates, so the DFU device no longer exists by the
+// time dfu-util reopens it to poll final status. A board still openable at that point would mean
+// the leave did NOT happen, so the quiet version is the broken one.
+//
+// It was printed red directly above "--- Flash successful ---" on 100% of successful flashes,
+// which is the shape that makes a good flash read as a failed one. The discriminator was already
+// in the stream and only needed to be used. (2026-10-10, B-467)
+const DFU_DOWNLOAD_DONE = /download done|file downloaded successfully/i;
+// Narrow to OUR ids on purpose: a cannot-open about somebody else's hardware is not explained
+// by our leave flag and must not be quietly reclassified along with it.
+const DFU_LEFT_MODE     = /cannot open dfu device\s*(?:0483:df11|1209:6668)/i;
+
+function _isDfuDownloadDone(line) {
+  return DFU_DOWNLOAD_DONE.test(line);
+}
+// Returns the line as it should be logged, plus whether it is an error. Pure, and takes the
+// download state as an argument rather than reading it, so the decision can be tested without
+// a board.
+function _classifyDfuStderrLine(line, downloadDone) {
+  if (downloadDone && DFU_LEFT_MODE.test(line)) {
+    return { text: `${line} (expected - the board left DFU mode as instructed)`, isError: false };
+  }
+  return { text: line, isError: _looksLikeFlashError(line) };
+}
+
 // ── Run dfu-util flash (shared by flash and flashDFU) ─
 async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
   onLog(expectedSN ? `Flashing firmware to board ${expectedSN}...` : 'Flashing firmware...', false);
@@ -1854,10 +1882,10 @@ async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
     // matches ANY device with those IDs, so dfu-util flashes whichever board happens to
     // be in the bootloader - not the one the user selected. The COM port only ever drove
     // the touch reset; it never constrained the target.
-    // Found 2026-07-26 by Note: the user unplugged the board on COM12, plugged a DIFFERENT board
-    // in, clicked Flash, and the log narrated COM12 while the firmware went to the board
-    // that was actually present. Since 0483:df11 is the GENERIC STM32 bootloader ID, the
-    // unconstrained form can also target a non-Proffieboard STM32 sitting in DFU.
+    // Found 2026-07-26: a board on COM12 was unplugged, a DIFFERENT board plugged in, Flash
+    // clicked - and the log narrated COM12 while the firmware went to the board that was
+    // actually present. Since 0483:df11 is the GENERIC STM32 bootloader ID, the unconstrained
+    // form can also target a non-Proffieboard STM32 sitting in DFU.
     // When the serial is unknown (manual Bootloader Mode with no port selected) we keep
     // the old behaviour, because there is nothing better to go on.
     const dfuArgs = ['-d', '1209:6668,0483:df11'];
@@ -1900,15 +1928,22 @@ async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
       };
     }
 
+    // Which stream carries "Download done." varies by dfu-util build, so both streams feed the
+    // flag that tells the classifier a leave is now expected.
+    let downloadDone = false;
+
     const outEmu = makeTermEmu(line => {
       if (!line) return;
       stdout += line + '\n';
+      if (_isDfuDownloadDone(line)) downloadDone = true;
       onLog(line, false);
     });
     const errEmu = makeTermEmu(line => {
       if (!line) return;
       stderr += line + '\n';
-      onLog(line, _looksLikeFlashError(line));
+      if (_isDfuDownloadDone(line)) downloadDone = true;
+      const c = _classifyDfuStderrLine(line, downloadDone);
+      onLog(c.text, c.isError);
     });
 
     proc.stdout.on('data', d => outEmu.write(d.toString()));

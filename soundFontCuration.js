@@ -43,6 +43,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const StreamZip = require('node-stream-zip');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 
 const SIDECAR_NAME = '.jmt-curation.json';
 // Files the sidecar brings along (proofs of purchase) live under one root
@@ -550,7 +551,7 @@ function summarize(payload, attachmentsWritten, customizedWritten) {
 // extraction, no hashing, no walk.
 async function peekZip(zipPath) {
   let zip;
-  try { zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true }); }
+  try { zip = openZipOwned(zipPath, { skipEntryNameValidation: true }); }
   catch { return null; }
   try {
     const entries = await zip.entries();

@@ -114,7 +114,10 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
 {
   const doors = [
     { name: 'backup (door 10)',
-      start: 'const _sfRunExportBackup = async (destPath, survey)',
+      // Anchored on the NAME, not the parameter list. [B-478, 2026-10-11] The old anchor was
+      // the full signature, so adding a third argument broke the locator and this door
+      // reported as missing - an anchor that is the subject of a change cannot survive it.
+      start: 'const _sfRunExportBackup = async (',
       end:   '// Merge-import run' },
     // RE-ANCHORED 2026-09-22. This ended at `_sfAddCommonFiles`, and the new
     // common-as-folder door was then inserted BETWEEN the two - so door 8's body silently
@@ -247,10 +250,10 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
   const misses = [];
   // (a) a migrated door regrowing a progress modal
   {
-    const i = H.indexOf('const _sfRunExportBackup = async (destPath, survey)');
+    const i = H.indexOf('const _sfRunExportBackup = async (');
     const j = H.indexOf('// Merge-import run', i);
     const mutated = H.slice(0, j) + "\n_sfDeleteProgress.show('x','y');\n" + H.slice(j);
-    const mi = mutated.indexOf('const _sfRunExportBackup = async (destPath, survey)');
+    const mi = mutated.indexOf('const _sfRunExportBackup = async (');
     const mj = mutated.indexOf('// Merge-import run', mi);
     if (!/_sfDeleteProgress\.show\(/.test(mutated.slice(mi, mj))) misses.push('regrown modal not caught');
   }

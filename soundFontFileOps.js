@@ -52,6 +52,7 @@ function _markLocationDirty(userData, kind, id) {
       entries.markEntryEffectsDirty(userData, id);
     } else if (kind === 'common') {
       require('./soundFontCommon').markCommonContentDirty(userData, id);
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
     }
   } catch {}
 }
@@ -249,7 +250,7 @@ async function copyAcrossLocations({
       const tmpZip = path.join(tmpDir, 'inner.zip');
       try {
         fs.writeFileSync(tmpZip, innerBytes);
-        const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+        const zip = openZipOwned(tmpZip, { skipEntryNameValidation: true });
         try {
           const entryMap = await zip.entries();
           const insidePrefix = insidePath.endsWith('/') ? insidePath : insidePath + '/';

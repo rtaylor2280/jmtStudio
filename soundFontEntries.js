@@ -21,6 +21,7 @@ const StreamZip = require('node-stream-zip');
 const soundFontSources = require('./soundFontSources');
 const { copyTreeWithProgress } = require('./sfExportCopy');
 const { rmWithRetry } = require('./fsRemove');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 
 // WHAT ONE FILE COSTS, EXPRESSED AS BYTES. [B-005 item 7b, 2026-09-26]
 //
@@ -180,7 +181,7 @@ async function _extractNestedZipToDir(source, innerZipPath, destDir, onProgress)
   const tmpZip = path.join(tmpDir, 'nested.zip');
   try {
     await fs.promises.writeFile(tmpZip, buf);
-    const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+    const zip = openZipOwned(tmpZip, { skipEntryNameValidation: true });
     try {
       const entryMap = await zip.entries();
       const destDirResolved = path.resolve(destDir);
@@ -807,9 +808,8 @@ const _ENTRY_TO_SOURCE_FIELD_MAP = {
   // by the entry-side projection). The two diverged for bulk-imported
   // sources, leaving the source detail's Acquired field empty even when
   // the corresponding entry showed a date. Both routings now converge
-  // on source.purchaseDate; acquisitionDate stays as a legacy fallback
-  // in the projection and migrateSourceLevelFields backfills any null
-  // purchaseDate from the legacy field or sourceFileDate.
+  // on source.purchaseDate; acquisitionDate stays as a fallback in the
+  // projection below.
   acquisitionDate: 'purchaseDate',
   // linkUrl — "where to get this font" — is a per-source property
   // (one purchase / download page per bundle, shared across every
@@ -829,12 +829,12 @@ function _projectSourceFieldsOntoEntry(entryMeta, sourceMeta) {
   entryMeta.author = sourceMeta.vendor || '';
   entryMeta.vendorWebsite = sourceMeta.vendorWebsite || '';
   entryMeta.purchased = sourceMeta.purchased === true;
-  // Date fallback chain reads source.purchaseDate first (canonical post-
-  // unification), then source.acquisitionDate (legacy migration field),
-  // then source.sourceFileDate (raw archive mtime, always populated at
-  // import). The fallback covers existing on-disk data that pre-dates the
-  // unification — once migrateSourceLevelFields runs, purchaseDate carries
-  // the value and the fallback is a no-op.
+  // Date fallback chain reads source.purchaseDate first (canonical), then
+  // source.acquisitionDate, then source.sourceFileDate (raw archive mtime,
+  // always populated at import).
+  // ALL THREE ARE LIVE. acquisitionDate is written from restored provenance
+  // (soundFontSources.js, `_prov.acquisitionDate`), so it is not a migration
+  // leftover and the chain cannot be shortened. Measured 2026-10-15.
   entryMeta.acquisitionDate = sourceMeta.purchaseDate
     || sourceMeta.acquisitionDate
     || sourceMeta.sourceFileDate
@@ -845,80 +845,6 @@ function _projectSourceFieldsOntoEntry(entryMeta, sourceMeta) {
   entryMeta.vendorAutoDetected = sourceMeta.vendorAutoDetected === true;
 }
 
-// Migration: hoist source-level fields from any derived entry up to its
-// source when the source is missing them. Idempotent — runs to completion
-// then becomes a no-op (the source will have the fields and the projection
-// at read time will mirror them back). Called on startup (main.js) so
-// existing libraries from before this refactor transparently migrate.
-function migrateSourceLevelFields(userData) {
-  const libRoot = entriesRoot(userData);
-  const srcRoot = soundFontSources.sourcesRoot(userData);
-  if (!fs.existsSync(libRoot) || !fs.existsSync(srcRoot)) {
-    return { ok: true, migrated: 0, skipped: 0 };
-  }
-
-  // Group entries by sourceUuid; pick the most-informative values
-  // (any-true for purchased, earliest for acquisitionDate, first
-  // non-empty for the strings).
-  const bySrc = new Map();
-  for (const e of fs.readdirSync(libRoot, { withFileTypes: true })) {
-    if (!e.isDirectory()) continue;
-    const meta = _readEntryMeta(path.join(libRoot, e.name));
-    if (!meta || !meta.sourceUuid) continue;
-    if (!bySrc.has(meta.sourceUuid)) bySrc.set(meta.sourceUuid, []);
-    bySrc.get(meta.sourceUuid).push(meta);
-  }
-
-  let migrated = 0;
-  let skipped = 0;
-  for (const [uuid, entries] of bySrc.entries()) {
-    const srcDir = path.join(srcRoot, uuid);
-    const srcMeta = soundFontSources.readSourceMeta(srcDir);
-    if (!srcMeta) { skipped++; continue; }
-
-    const updates = {};
-    // purchased: any entry true → source true. The whole-bundle-same-tier
-    // assumption (vendors never mix free/paid in a single source) means
-    // we don't need a tiebreaker.
-    if (srcMeta.purchased == null) {
-      const any = entries.some(en => en.purchased === true);
-      if (any || entries.some(en => en.purchased === false)) {
-        updates.purchased = any;
-      }
-    }
-    // purchaseDate: hoist any per-entry acquisitionDate up to the source.
-    // Earliest non-empty wins (the moment the bundle entered the user's
-    // library — re-imports of the same source might have different
-    // sourceFileDate values across entries). Falls back to the source's
-    // existing acquisitionDate (set by an earlier migration pass) and
-    // finally to sourceFileDate (the archive mtime, always present from
-    // import). Writing to source.purchaseDate is the canonical field
-    // after the 2026-06-26 unification — see _ENTRY_TO_SOURCE_FIELD_MAP.
-    if (!srcMeta.purchaseDate) {
-      const dates = entries.map(en => en.acquisitionDate).filter(Boolean).sort();
-      const picked = dates[0]
-        || srcMeta.acquisitionDate
-        || srcMeta.sourceFileDate
-        || null;
-      if (picked) updates.purchaseDate = picked;
-    }
-    // vendor (author): first non-empty (entries should agree if vendor
-    // detection fired; if they disagree it's user edits and we take any).
-    if (!srcMeta.vendor) {
-      const authors = entries.map(en => en.author).filter(Boolean);
-      if (authors.length) updates.vendor = authors[0];
-    }
-    if (!srcMeta.vendorWebsite) {
-      const sites = entries.map(en => en.vendorWebsite).filter(Boolean);
-      if (sites.length) updates.vendorWebsite = sites[0];
-    }
-
-    if (Object.keys(updates).length === 0) { skipped++; continue; }
-    const res = soundFontSources.updateSourceMeta(userData, uuid, updates);
-    if (res && res.ok) migrated++;
-  }
-  return { ok: true, migrated, skipped };
-}
 function updateEntryMeta({ userData, currentName, newName, updates }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!currentName) return { ok: false, error: 'Missing currentName' };
@@ -2801,7 +2727,6 @@ module.exports = {
   planWorkBytes,
   entryFolderExistsAt,
   listEntryFiles,
-  migrateSourceLevelFields,
   recomputeEntryContentHash,
   getEntryContentHash,
   getEntryCustomization,

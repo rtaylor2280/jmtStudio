@@ -442,7 +442,7 @@ ok('no synchronous whole-buffer export writes remain',
 // things that make the answer structural: the door goes through the runner, and the runner
 // preflights before it produces.
 ok('the backup door goes through the shared export runner',
-   /const _sfRunExportBackup = async \(destPath, survey\) => \{[\s\S]{0,2000}?await _sfRunExport\(\{/.test(H),
+   /const _sfRunExportBackup = async \([^)]*\) => \{[\s\S]{0,2000}?await _sfRunExport\(\{/.test(H),
    'a truncated backup is the artefact someone reaches for when everything else went wrong');
 {
   const i = H.indexOf('const _sfRunExport = async (door');
@@ -583,9 +583,6 @@ ok('its synchronous recursive copy is gone',
    !/e\.isDirectory\(\) \? cpDir\(sp, dp\) : fs\.copyFileSync\(sp, dp\)/.test(main),
    'readdirSync + copyFileSync with no awaits is the shape that froze the app');
 
-console.log(failed ? `\n${failed} FAILED` : '\nexport-wiring: all passing');
-process.exit(failed ? 1 : 0);
-
 // ── A CANCEL MUST NOT BE REPORTED AS A FAILURE ──────────────── [B-420]
 //
 // `_sfExportOutcome` tests `!r.ok` BEFORE it tests `r.canceled`, so a door whose produce()
@@ -601,9 +598,16 @@ process.exit(failed ? 1 : 0);
   const i = H.indexOf('const _sfRunExport = async (door');
   const j = H.indexOf('// Convenience for the export+delete sequence', i);
   const body = (i > 0 && j > i) ? H.slice(i, j) : '';
+  // Matched on the NORMALISATION, not on one spelling of the line around it. The original
+  // pinned `if (res && res.canceled) res.ok = true;` and went stale the moment the nullish
+  // guard moved out into an enclosing `typeof res === 'object'` check - the behaviour never
+  // changed. It sat red and unseen because the exit above it cut this whole region off.
   ok('the runner forces ok:true when a door reports a cancel',
-     /if \(res && res\.canceled\) res\.ok = true;/.test(body),
+     /res\.canceled\)\s*res\.ok = true;/.test(body),
      'otherwise the outcome handler shows "Export failed" for a deliberate cancel');
+  ok('a runner that never normalises IS caught',
+     !/res\.canceled\)\s*res\.ok = true;/.test(body.replace(/res\.ok = true;/g, 'noop;')),
+     'the pattern is too loose to distinguish a runner that does this from one that does not');
   const norm = body.indexOf('res.ok = true');
   const read = body.indexOf('out.ok = !!(res && res.ok)');
   ok('and it does so BEFORE reading ok',
@@ -686,3 +690,90 @@ process.exit(failed ? 1 : 0);
     lines.length = 0; lines.push(...saved);
   }
 }
+
+
+// ── The BACKUP export door checks for room, like every other export door ──  [B-478]
+//
+// This is the exact defect this file is named for, found in the wild rather than by a test:
+// `exportDestination.preflight` computed `fits` / `shortfallBytes`, `_sfRefuseNotEnoughRoom`
+// stated them, the font and source doors both called the pair - and `_sfOpenExportBackup` called
+// NEITHER. A 9.55 GB backup started writing to a card that could not hold it. Every unit test in
+// the repo passed, because the producer was correct and nothing asked who consumed it.
+{
+  const start = H.indexOf('const _sfOpenExportBackup');
+  ok('the backup export door is findable', start > 0);
+  // Bound the region at the next top-level const so a match from a neighbouring door cannot
+  // be read as this one's.
+  const after = H.indexOf('\n      const _sfOpen', start + 10);
+  const door = H.slice(start, after > start ? after : start + 9000);
+
+  ok('the backup door calls preflight', /preflightExportDest\(/.test(door),
+     'the room check exists and this door is the one that never called it');
+  ok('and it refuses through the SHARED refusal, not a bespoke dialog',
+     /_sfRefuseNotEnoughRoom\(/.test(door),
+     'one condition, one wording, whichever surface the user meets first');
+  ok('it refuses on tooBig specifically', /\.tooBig/.test(door));
+
+  // The refusal must happen BEFORE the write starts, or it is a recovery, not a refusal.
+  const fitAt    = door.indexOf('_sfRefuseNotEnoughRoom(');
+  const exportAt = door.indexOf('sfBackupExport');
+  ok('the refusal comes before the export call', fitAt > 0 && (exportAt < 0 || fitAt < exportAt),
+     'refusing after the write has begun is [B-203] all over again');
+
+  // SIZING. Hardlinks do not survive a zip, so the archive carries every NAME. Sizing this from
+  // the library's deduped on-disk figure would understate it by more than half and let a backup
+  // that cannot fit start anyway - the precise failure being fixed.
+  ok('it sizes from the survey total, not from the deduped on-disk figure',
+     /totalBytes:\s*survey\.totalBytes/.test(door),
+     'the archive stores every name; on-disk is the wrong number here');
+  ok('it does not size from the library readout', !/soundFontsSize|figure\.onDisk/.test(door));
+
+  // CONTROL: the region rule has to be capable of failing, or a clean pass means nothing.
+  {
+    const fake = door.replace(/preflightExportDest\(/g, 'somethingElse(');
+    ok('a door with no preflight call IS caught', !/preflightExportDest\(/.test(fake),
+       'the region rule is selecting too much - it would pass a door that checks nothing');
+  }
+}
+
+// ── THE GATE'S ANSWER HAS TO CROSS A FUNCTION BOUNDARY  [B-478, 2026-10-12] ───────────────
+//
+// The readability gate runs on the confirm screen; the export runs in `_sfRunExportBackup`, a
+// separate function. The list of files the user agreed to skip therefore travels as an argument.
+// Naming the confirm screen's variable inside the run body is a ReferenceError thrown at the
+// click, after the question has already been asked and answered, and an identifier that is
+// present and out of scope looks identical to a wired one in a text search.
+//
+// Three assertions, catching different drift. The parameter and body checks catch a run body
+// that reaches across the boundary; arity catches a parameter added here and never passed.
+{
+  const decl = H.match(/_sfRunExportBackup\s*=\s*async\s*\(([^)]*)\)/);
+  ok('the run function is declared with its parameters', !!decl);
+  if (decl) {
+    const params = decl[1].split(',').map(s => s.trim()).filter(Boolean);
+    ok('the run function takes the skip list', params.some(p => /^skipPaths\b/.test(p)),
+       decl[1]);
+
+    const callAt = H.indexOf('_sfRunExportBackup(');
+    const call = callAt > 0 ? H.slice(callAt, H.indexOf(')', callAt) + 1) : '';
+    const args = call.replace(/^[^(]*\(/, '').replace(/\)$/, '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    ok('the call site passes as many arguments as the declaration takes',
+       args.length >= params.length,
+       `declared ${params.length} (${params.join(', ')}), called with ${args.length} (${args.join(', ')})`);
+
+    // And the run body must use the PARAMETER, never a name belonging to the confirm screen.
+    const bodyAt = H.indexOf('_sfRunExportBackup = async');
+    const body = H.slice(bodyAt, bodyAt + 20000);
+    ok('the run body does not reach for the confirm screen\'s variable',
+       !/_bkSkipPaths/.test(body),
+       '_bkSkipPaths belongs to the confirm screen and is not in scope here');
+  }
+}
+
+// THE SUMMARY AND THE EXIT BELONG AT THE BOTTOM, AND THEY WERE NOT.
+// They sat at line 587 of 733, so roughly 145 lines of assertions below them never ran and
+// this file reported "all passing" without reaching them - the exact defect it exists to find,
+// in the file that exists to find it. Anything appended here must stay BELOW nothing.
+console.log(failed ? `\n${failed} FAILED` : '\nexport-wiring: all passing');
+process.exit(failed ? 1 : 0);

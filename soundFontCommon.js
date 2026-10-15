@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 const { copyTreeWithProgress } = require('./sfExportCopy');
 const { rmWithRetry } = require('./fsRemove');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 
 function commonRoot(userData) {
   return path.join(userData, 'soundFonts', 'common');
@@ -548,7 +549,7 @@ async function scanIncomingCommon(srcPath) {
     return out;
   }
   // A picked .zip: read each entry's leading bytes without extracting the archive.
-  const zip = new StreamZip.async({ file: srcPath });
+  const zip = openZipOwned(srcPath);
   try {
     const entries = await zip.entries();
     for (const name of Object.keys(entries)) {

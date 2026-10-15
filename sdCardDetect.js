@@ -10,6 +10,7 @@
 'use strict';
 
 const fs = require('fs');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
@@ -992,7 +993,7 @@ function _readmeTitle(dirPath) {
 // (zip read); read-only. Shared by the doc viewer and the guided-import late naming.
 async function docxToText(absPath) {
   const StreamZip = require('node-stream-zip');
-  const zip = new StreamZip.async({ file: absPath });
+  const zip = openZipOwned(absPath);
   try {
     const buf = await zip.entryData('word/document.xml');
     let x = buf.toString('utf8')

@@ -67,8 +67,9 @@ try { fs.linkSync(A, B); } catch { linked = false; fs.copyFileSync(A, B); }
      !linked || f.apparent > f.onDisk, 'identical figures mean the inode key is not working');
 
   // ── the walk must not block ──────────────────────────────────────────────
-  // Fifteen thousand synchronous stats froze the window earlier the same day. A timer that never
-  // ticks during the walk is that defect, caught here instead of on a card.
+  // Fifteen thousand synchronous stats freeze the window: measured at seventeen seconds showing
+  // no progress. A timer that never ticks during the walk is that defect, caught here rather
+  // than on a card.
   {
     let ticks = 0;
     const timer = setInterval(() => { ticks++; }, 1);

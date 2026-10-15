@@ -14,8 +14,16 @@
 // prior visual state.
 
 const fs = require('fs');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 const path = require('path');
 const soundFontEntries = require('./soundFontEntries');
+// [B-478] Phase marks for the main-thread stall probe. Inert unless the probe is armed
+// (userData/.stall-probe), so this costs nothing in a normal run. It is required here
+// because a 40.6 SECOND main-process block during a backup export was captured on
+// 2026-10-11 and the probe could only report it as "(idle - nothing marked)" - the whole
+// export path marked no phases, so the one instrument that saw the freeze could not say
+// which part of it was blocking.
+const stallProbe = require('./stallProbe');
 
 const SCHEMA_VERSION = 1;
 const BACKUP_TYPE = 'jmt-soundfontlibrary';
@@ -40,6 +48,18 @@ const BACKUP_TYPE = 'jmt-soundfontlibrary';
 // spellings are load-bearing; a wrong one silently empties an index instead of erroring.
 const FILEHASH_DIR = '.filehashes';
 const FILEHASH_SUBDIR = { library: 'entries', sources: 'sources', common: 'commons' };
+
+// [B-297] Loose files that sit at a bucket ROOT rather than inside an item directory. The
+// seen-backfill marker lives in the library root so a restored library carries its own migration
+// state, which only works if the archive carries it.
+//
+// Every site that reads a zip entry name and keys off its first path segment has to classify
+// these out, because `library/.seen-backfill-done` splits into a bucket and an id exactly like
+// `library/Ahsoka/hum.wav` does: the inspect count, the merge survey's per-item aggregate and the
+// restore's per-item lists each turn it into a phantom font named `.seen-backfill-done`.
+const CARRIED_MARKERS = ['library/.seen-backfill-done'];
+const _isCarriedMarker = (zipName) =>
+  CARRIED_MARKERS.includes(String(zipName || '').replace(/\\/g, '/'));
 
 // Side-effect call into soundFontEntries: its _readEntryMeta backfills
 // entryUuid into any legacy meta.json that doesn't have one. Running
@@ -102,7 +122,163 @@ function _commonRoot(userData) {
 // total-bytes field and for the export progress accounting (we tick bytes
 // after each file lands in the archive). Silent on per-file errors so a
 // transient permissions blip doesn't abort the whole survey.
-function _dirBytes(dir) {
+// Returns the fs error code when a file cannot be opened for reading, or null when it can.
+//
+// AN OPEN, NOT `fs.access`. Measured 2026-10-12 against a file carrying a Windows DENY ace:
+//     fs.accessSync(p, R_OK)  ->  OK
+//     fs.openSync(p, 'r')     ->  EPERM
+// An access check cannot see an ACL denial, so a readability sweep built on it reports a clean
+// library and the export still stops on the file.
+//
+// The descriptor is closed in the `finally`. A probe that leaks one would recreate the hold that
+// [B-479] was opened for, on every file in the library.
+function _probeReadable(abs) {
+  let fd = null;
+  try { fd = fs.openSync(abs, 'r'); return null; }
+  catch (e) { return (e && e.code) || 'EUNKNOWN'; }
+  finally { if (fd !== null) { try { fs.closeSync(fd); } catch {} } }
+}
+
+// The display name of a top-level item, for telling the user WHERE a file is in their library
+// rather than only where it is on disk. `sources` and `common` are uuid-named on disk, so the
+// name has to come out of their meta; `library` directories are the font name already.
+//
+// ONLY EVER CALLED FOR A FILE THAT FAILED, which is what makes the meta read free: an ordinary
+// export resolves nothing because nothing is unreadable.
+function _friendlyTop(userData, bucket, top) {
+  if (!top) return '';
+  const abs = path.join(_soundFontsRoot(userData), bucket, top);
+  try {
+    if (bucket === 'sources') {
+      const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+      return (m && (m.bundleName || m.originalName)) || '';
+    }
+    if (bucket === 'common') {
+      const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+      return (m && m.name) || '';
+    }
+    if (bucket === 'attachments') {
+      const a = JSON.parse(fs.readFileSync(path.join(abs, 'attachment.json'), 'utf8'));
+      return (a && (a.label || a.name)) || '';
+    }
+  } catch { /* an unnamed item still reports its path, which is the part that must not fail */ }
+  return bucket === 'library' ? top : '';
+}
+
+// The source a dropped item belongs to, so a font and the source it came from report as ONE
+// loss rather than two unrelated ones. 2026-10-15.
+//
+// ONE KEY TO MANY ITEMS, not a pair: a bundle source owns several fonts, and a bad sector inside
+// shared bytes can take the source and more than one of them in the same run.
+//
+// The drop decision stays per item. A readable source whose font is damaged is still carried -
+// it is the original purchase archive and the half that can rebuild the font, so combining the
+// REPORT is not combining the RULE.
+function _sourceGroupKey(userData, bucket, top) {
+  if (!top) return null;
+  if (bucket === 'sources') return `src:${top}`;
+  if (bucket !== 'library') return null;
+  try {
+    const m = JSON.parse(fs.readFileSync(
+      path.join(_soundFontsRoot(userData), 'library', top, 'meta.json'), 'utf8'));
+    return m && m.sourceUuid ? `src:${m.sourceUuid}` : null;
+  } catch { return null; }
+}
+
+// A survey with the agreed skips taken out of it. [2026-10-15]
+//
+// ONE FUNCTION FOR THE PROMISE AND THE REPORT. The confirm screen states what the backup will
+// contain and the manifest records what it does contain; those are the same arithmetic over the
+// same inputs, and two copies of it would be two numbers to keep in agreement forever. The
+// confirm screen asked the user to drop items and then quoted a figure that still counted them.
+//
+// COUNTS ARE PER ITEM FOR EVERY BUCKET EXCEPT sharedTracks, which counts wav files. So a skipped
+// file inside a font does not change `counts.library` - the font is still there, one file lighter
+// - while a skipped track does reduce `counts.sharedTracks`, and a dropped item takes one off its
+// bucket as well as its bytes.
+//
+// The survey itself is left alone: it drives the progress bar and the destination fit check,
+// which are about work to be done rather than bytes stored.
+function applySkipAdjustment(survey, { skipped = [], skippedItems = [] } = {}) {
+  const bytesByBucket = {};
+  let tracks = 0;
+  for (const s of skipped) {
+    bytesByBucket[s.bucket] = (bytesByBucket[s.bucket] || 0) + (s.bytes || 0);
+    if (s.bucket === 'sharedTracks' && /\.wav$/i.test(s.name || '')) tracks++;
+  }
+  const perBucket = {};
+  for (const s of skippedItems) {
+    perBucket[s.bucket] = (perBucket[s.bucket] || 0) + 1;
+    bytesByBucket[s.bucket] = (bytesByBucket[s.bucket] || 0) + (s.bytes || 0);
+  }
+  const counts = { ...(survey.counts || {}) };
+  if (tracks) counts.sharedTracks = Math.max(0, (counts.sharedTracks || 0) - tracks);
+  for (const b of Object.keys(perBucket)) {
+    if (counts[b] != null) counts[b] = Math.max(0, counts[b] - perBucket[b]);
+  }
+  const totals = { ...(survey.totals || {}) };
+  let totalBytes = survey.totalBytes || 0;
+  for (const b of Object.keys(bytesByBucket)) {
+    const n = bytesByBucket[b];
+    if (totals[b] != null) totals[b] = Math.max(0, totals[b] - n);
+    totalBytes = Math.max(0, totalBytes - n);
+  }
+  return { counts, totals, totalBytes };
+}
+
+// What agreeing to the skip would actually cost, so the question can state it. [B-478]
+//
+// The gate must not say "back up without 1 file" when the answer removes a whole font. This
+// returns the same split the exporter applies - loose tracks go file by file, anything inside an
+// item takes the item with it - so the sentence the user reads and the rule the export enforces
+// come from one function rather than two that have to be kept in agreement.
+function describeSkipConsequence(userData, unreadable) {
+  const root = path.resolve(_soundFontsRoot(userData));
+  const files = [];
+  const itemsByKey = new Map();
+  for (const u of unreadable || []) {
+    const rel = path.relative(root, path.resolve(u.path));
+    const segs = (!rel || rel.startsWith('..')) ? [] : rel.split(path.sep);
+    if (segs.length < 2 || segs[0] === 'sharedTracks') {
+      // bucket + bytes so the same adjustment that builds the manifest can run on this, and the
+      // confirm screen quotes a figure that already has the agreed skips out of it.
+      let bytes = 0;
+      try { bytes = fs.statSync(u.path).size; } catch {}
+      files.push({ ...u, bucket: u.bucket || segs[0] || '', bytes });
+      continue;
+    }
+    const [bucket, top] = segs;
+    const key = `${bucket}/${top}`;
+    if (itemsByKey.has(key)) { itemsByKey.get(key).unreadable++; continue; }
+    const abs = path.join(root, bucket, top);
+    let count = 0;
+    let bytes = 0;
+    const tally = (dir) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { tally(p); continue; }
+        if (!e.isFile()) continue;
+        count++;
+        try { bytes += fs.statSync(p).size; } catch {}
+      }
+    };
+    tally(abs);
+    itemsByKey.set(key, {
+      bucket, top, path: abs, item: _friendlyTop(userData, bucket, top),
+      groupKey: _sourceGroupKey(userData, bucket, top),
+      files: count, bytes, unreadable: 1,
+    });
+  }
+  return { files, items: [...itemsByKey.values()] };
+}
+
+// `unreadable`, when passed, collects { path, code } for every file that cannot be opened.
+// The probe rides this walk rather than taking its own: it is the same set of files, and a
+// second pass would double the syscalls to learn nothing new. Measured 2026-10-12 on an
+// 11,730-file library: 2,167 ms for the whole sweep.
+function _dirBytes(dir, unreadable, where) {
   let total = 0;
   if (!fs.existsSync(dir)) return total;
   const walk = (cur) => {
@@ -114,6 +290,13 @@ function _dirBytes(dir) {
       if (e.isDirectory()) walk(abs);
       else if (e.isFile()) {
         try { total += fs.statSync(abs).size; } catch {}
+        if (unreadable) {
+          const code = _probeReadable(abs);
+          // The bucket and item travel with the finding so the dialog can say "in your Revan
+          // sound font" instead of only printing a path. Captured here because this is the
+          // only point that knows which top-level item the walk is inside.
+          if (code) unreadable.push({ path: abs, name: e.name, code, ...(where || {}) });
+        }
       }
     }
   };
@@ -149,8 +332,14 @@ function _dirBytes(dir) {
 //
 // [B-398] established the pattern this follows: yield inside every per-item pass so the window
 // keeps answering Windows. Same helper, same reason.
-async function surveyLibraryAsync(userData) {
+// `opts.probeReadability` adds a readability check to the walk and returns everything that could
+// not be opened, so the export can ask about it BEFORE anything is archived. Without it the first
+// unreadable file ends a run that may already have written gigabytes, and archiver gives no way
+// back: its EPERM arrives as a stream-level `error`, so the partial zip can never be finished.
+// Measured 2026-10-12 - ten good files archived, 188 MB on disk, `finalize()` still unsettled.
+async function surveyLibraryAsync(userData, opts) {
   const { breathe } = require('./soundFontFileHash');
+  const unreadable = (opts && opts.probeReadability) ? [] : null;
   const buckets = ['sources', 'library', 'common', 'attachments'];
   const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
   const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
@@ -167,7 +356,11 @@ async function surveyLibraryAsync(userData) {
     // would leave the longest stretch exactly as blocking as it is now.
     for (const d of dirs) {
       await breathe();
-      totals[b] += _dirBytes(path.join(root, d.name));
+      // The RAW directory name rides along; the display name is resolved after the walk, only
+      // for what actually failed. Resolving here would read a meta.json per top-level item on
+      // every probed export to answer a question almost nobody asks.
+      totals[b] += _dirBytes(path.join(root, d.name), unreadable,
+        unreadable ? { bucket: b, top: d.name } : null);
     }
   }
   const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
@@ -183,14 +376,44 @@ async function surveyLibraryAsync(userData) {
       // it buys, so it yields in batches. The loop still never runs long enough to drop a frame.
       if (++since >= 25) { since = 0; await breathe(); }
       counts.sharedTracks++;
-      try { totals.sharedTracks += fs.statSync(path.join(stRoot, e.name)).size; } catch {}
+      // Counted before the probe. The survey reports what is in the library; whether a file can
+      // be read is a separate question, and the exclusion happens downstream once the user has
+      // answered it.
+      const stAbs = path.join(stRoot, e.name);
+      try { totals.sharedTracks += fs.statSync(stAbs).size; } catch {}
+      if (unreadable) {
+        const code = _probeReadable(stAbs);
+        // sharedTracks is a flat bucket with no top-level item, so there is nothing to name
+        // beyond the bucket itself.
+        if (code) unreadable.push({ path: stAbs, name: e.name, code, bucket: 'sharedTracks' });
+      }
     }
   }
   const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks
     + totals.attachments;
-  return { counts, totals, totalBytes };
+  // Display names resolved LAST and only for failures, so an ordinary export reads no meta at all.
+  if (unreadable) {
+    for (const u of unreadable) {
+      if (u.top) u.item = _friendlyTop(userData, u.bucket, u.top);
+    }
+  }
+  return { counts, totals, totalBytes, unreadable: unreadable || [] };
 }
 
+// DO NOT CALL THIS FROM THE MAIN PROCESS. USE `surveyLibraryAsync`. [B-478, 2026-10-11]
+//
+// This walk is synchronous, so while it runs the event loop cannot dispatch input: the window
+// stops answering clicks and Windows paints "Not Responding". `exportBackup` called it for
+// months and that is one of the blocking spans behind the freezes recorded on 2026-10-11.
+//
+// Measured on the real library (12.13 GB, 22k files), 50 ms heartbeat alongside:
+//     surveyLibrary       3,649 ms, heartbeat ticked  0 times
+//     surveyLibraryAsync  3,256 ms, heartbeat ticked 44 times
+// Identical result, 12,128,949,076 bytes, and the async form is not slower.
+//
+// It is kept rather than deleted because it has no production caller left to break and
+// `test/backup-prep-autostart.test.js` slices source text around its declaration. If you are
+// reaching for a library survey, the answer is the async one.
 function surveyLibrary(userData) {
   const buckets = ['sources', 'library', 'common', 'attachments'];
   const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
@@ -293,6 +516,8 @@ async function exportBackup({
   destPath,
   appVersion,
   prefs = {},
+  // [B-478] Absolute paths the user agreed to leave out after the readability gate named them.
+  skipPaths = [],
   onProgress = () => {},
   signal = null,
 }) {
@@ -301,8 +526,38 @@ async function exportBackup({
   // Warm cold candidate caches before the survey + zip. Stamped values
   // become part of meta.json which lands in the backup archive — restores
   // get the cache for free, no recomputation needed on the receiving side.
-  await _ensureCandidateCaches(userData);
-  const survey = surveyLibrary(userData);
+  // BOTH OF THESE RUN BEFORE A SINGLE BYTE IS ZIPPED, AND ONE OF THEM IS SYNCHRONOUS.
+  // Marked rather than diagnosed: a 40,626 ms main-process stall was measured during an
+  // export on 2026-10-11 and the probe had no phase to pin it to. These two labels are the
+  // discriminator - the next armed run says which, instead of anyone reasoning about it.
+  //
+  // Worth knowing while reading this, NOT a conclusion: `surveyLibrary` is not awaited, so it
+  // walks the library synchronously on the main process. The other full-library walk in this
+  // app - `soundFontLibrarySize.js` - was deliberately written to "breathe between
+  // directories so the app stays answerable while it runs", and that was done BECAUSE the
+  // window went Not Responding. That walk measured 7,698 ms on this library. Same tree, and
+  // only one of the two yields.
+  // ── THE EXPORT USED THE BLOCKING TWIN OF A WALK THAT ALREADY HAD A YIELDING ONE ──
+  //
+  // `surveyLibrary` is synchronous and this is the main process, so for its whole duration the
+  // loop cannot dispatch input: the window stops answering, nothing is clickable, and Windows
+  // paints "Not Responding". `surveyLibraryAsync` was already written, already exported from
+  // this same module, and already used by the destination preflight.
+  //
+  // MEASURED on the real library 2026-10-11 (12.13 GB, 22k files), with a 50 ms heartbeat
+  // running alongside to record what the UI would feel:
+  //     surveyLibrary       3,649 ms wall,  heartbeat ticked   0 times - loop fully blocked
+  //     surveyLibraryAsync  3,256 ms wall,  heartbeat ticked  44 times, worst gap 416 ms
+  // Both returned 12,128,949,076 bytes. Same answer, same work, and the async form is not
+  // slower - the only difference is whether the app can answer while it runs.
+  //
+  // THIS IS ONE BLOCKING SPAN, NOT THE WHOLE FAULT. The stalls recorded during real exports on
+  // 2026-10-11 were 40,626 ms and 11,193 ms, and 3.6 s does not account for those. The phase
+  // marks here are what will name the rest; do not read this fix as closing the question.
+  await stallProbe.around('sfBackup:ensureCandidateCaches',
+    () => _ensureCandidateCaches(userData));
+  const survey = await stallProbe.around('sfBackup:surveyLibrary',
+    () => surveyLibraryAsync(userData));
 
   // Content-hash pre-pass. One sha256 per top-level item, written into
   // the manifest so the Replace-import survey can do a true byte-level
@@ -338,6 +593,44 @@ async function exportBackup({
   const { checkCarryableFile } = require('./sdCardDetect');
   const refused = [];
   const refusedAbs = new Set();
+  // [B-478] Files the user was shown at the readability gate and chose to go without. They join
+  // `refusedAbs` so the archiver skips them and the per-item counts stay in step, but they are
+  // reported on their own channel: `refused` means a program this app REMOVES from the library,
+  // and these are the user's own files, untouched and still on disk.
+  const skipSet = new Set((skipPaths || []).map(p => path.resolve(String(p))));
+  const skipped = [];
+
+  // AN ITEM THAT IS NOT FULLY READABLE IS NOT CARRIED AT ALL. [B-478 ruling, 2026-10-12]
+  //
+  // A font with one unreadable file would otherwise restore looking complete and be missing a
+  // sound, which is a worse artifact than its absence: the readable files are still on the
+  // user's disk, so nothing is lost by leaving the item out, while a partial copy is a trap for
+  // whoever opens the backup later. It also removes the stale-identity problem by construction -
+  // an item's stored contentHash / contentFileCount / contentTotalBytes travel inside its own
+  // meta.json, and a partial item would carry a record describing content the archive lacks.
+  //
+  // DERIVED HERE RATHER THAN SENT BY THE DIALOG. The rule belongs to the exporter: a caller that
+  // passes a file path must not be able to produce a partial item by not knowing about this.
+  //
+  // sharedTracks is exempt because it has no items - it is a flat bucket of independent tracks,
+  // each its own thing, with no record claiming the others are present.
+  const _sfRootAbs = path.resolve(_soundFontsRoot(userData));
+  const droppedItems = new Set();   // "bucket/top"
+  // How many files inside each dropped item could not be read. The report states the FAULT, and
+  // the fault is a count of unreadable files - not the item's size, which is a consequence.
+  const droppedUnreadable = new Map();   // "bucket/top" -> count
+  for (const abs of skipSet) {
+    const rel = path.relative(_sfRootAbs, abs);
+    if (!rel || rel.startsWith('..')) continue;
+    const segs = rel.split(path.sep);
+    if (segs.length < 2) continue;
+    const [bucket, top] = segs;
+    if (bucket === 'sharedTracks') continue;
+    const key = `${bucket}/${top}`;
+    droppedItems.add(key);
+    droppedUnreadable.set(key, (droppedUnreadable.get(key) || 0) + 1);
+  }
+  const skippedItems = [];
   for (const bucket of ['sources', 'library', 'common', 'attachments']) {
     const root = path.join(_soundFontsRoot(userData), bucket);
     if (!fs.existsSync(root)) continue;
@@ -347,6 +640,29 @@ async function exportBackup({
     for (const top of topEntries) {
       if (!top.isDirectory()) continue;
       const abs = path.join(root, top.name);
+      // DROPPED BEFORE IT REACHES bucketTops, so nothing downstream can archive it: the bucket
+      // loop walks this list, the progress gates are keyed off it, and the manifest counts it.
+      // Removing the item here is what makes "not fully readable, not carried" true everywhere
+      // rather than in one place that a later change could miss.
+      if (droppedItems.has(`${bucket}/${top.name}`)) {
+        let files = 0;
+        let bytes = 0;
+        const tally = (dir) => {
+          let items;
+          try { items = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+          for (const it of items) {
+            const p = path.join(dir, it.name);
+            if (it.isDirectory()) { tally(p); continue; }
+            if (!it.isFile()) continue;
+            files++;
+            try { bytes += fs.statSync(p).size; } catch {}
+          }
+        };
+        tally(abs);
+        skippedItems.push({ bucket, top: top.name, path: abs, files, bytes,
+                            unreadable: droppedUnreadable.get(`${bucket}/${top.name}`) || 0 });
+        continue;
+      }
       bucketTops[bucket].push({ name: top.name, abs });
       // archive.directory() emits 'entry' events for files AND
       // sub-directories. The user-facing counter should only track
@@ -361,6 +677,20 @@ async function exportBackup({
           if (it.isDirectory()) { walk(path.join(dir, it.name)); continue; }
           if (!it.isFile()) continue;
           const fileAbs = path.join(dir, it.name);
+          // THE SKIP COMES BEFORE THE CARRY TEST, AND BEFORE THE ATTACHMENTS EXEMPTION BELOW.
+          // An unreadable attachment stops the archive exactly like any other file, so the one
+          // bucket that is exempt from the program check is not exempt from this.
+          if (skipSet.has(path.resolve(fileAbs))) {
+            // Same location fields the gate carried, so the completion screen can describe the
+            // file the same way the question did rather than falling back to a bare path.
+            // `bytes` is what the manifest subtracts; stat still answers on a file that cannot
+            // be opened, which is why the size is available at all.
+            let bytes = 0;
+            try { bytes = fs.statSync(fileAbs).size; } catch {}
+            skipped.push({ path: fileAbs, name: it.name, bucket, top: top.name, bytes });
+            refusedAbs.add(fileAbs);
+            continue;
+          }
           // DECLINE HERE, WHERE THE COUNT IS MADE ([B-369]). The backup gates each
           // top item on its entry events - `await _gateFor(topKey).promise` resolves
           // only once `filesPerTopItem` entries have arrived - so a file filtered out
@@ -437,6 +767,13 @@ async function exportBackup({
         // .wav filter above is a shape test, not a safety one - a program renamed to
         // hum.wav passes it, which is exactly what the content check is for.
         const fAbs = path.join(stRoot, f.name);
+        if (skipSet.has(path.resolve(fAbs))) {
+          let bytes = 0;
+          try { bytes = fs.statSync(fAbs).size; } catch {}
+          skipped.push({ path: fAbs, name: f.name, bucket: 'sharedTracks', bytes });
+          refusedAbs.add(fAbs);
+          continue;
+        }
         const v = checkCarryableFile(fAbs, f.name);
         if (v.blocked) {
           refused.push({ _kind: 'sharedTracks', _id: '', _itemRel: f.name, relPath: f.name, name: f.name, kind: v.kind,
@@ -539,13 +876,35 @@ async function exportBackup({
 
   // Build the manifest first so a corrupted partial zip still gets the
   // type marker even if it doesn't finish.
+  // THE MANIFEST DESCRIBES THE ARCHIVE, NOT THE LIBRARY. [B-478, 2026-10-12]
+  //
+  // `survey` ran before any file was known to be unreadable, so its counts and totals include
+  // files this archive does not contain. Shipping those numbers makes the archive overstate
+  // itself: a backup carrying ten tracks would claim twelve, and nothing inside it would say
+  // otherwise. The adjustment is applied to copies - `survey` still drives the progress bar and
+  // the destination fit check, which are both about work to be done rather than bytes stored.
+  //
+  // COUNTS ARE PER ITEM FOR EVERY BUCKET EXCEPT sharedTracks, which counts wav files. So a
+  // skipped file inside a font does not change `counts.library` - the font is still in the
+  // archive, one file lighter - while a skipped track does reduce `counts.sharedTracks`.
+  const { counts: _manifestCounts, totals: _manifestTotals, totalBytes: _manifestTotalBytes } =
+    applySkipAdjustment(survey, { skipped, skippedItems });
+  // THE BAR'S DENOMINATOR IS WHAT WILL BE WRITTEN. [2026-10-15] A dropped item is never walked by
+  // the archive loop, so its bytes can never arrive - a bar measured against the raw survey stops
+  // short of its own total by exactly the weight of what the user agreed to leave out. It also
+  // disagreed with the figure the confirm screen had quoted seconds earlier.
+  //
+  // THE DESTINATION FIT CHECK STILL USES THE RAW SURVEY, deliberately: asking for room the backup
+  // may not need is the safe direction, and the check runs before the skip is even agreed.
+  const _archiveTotalBytes = _manifestTotalBytes;
+
   const manifest = {
     type: BACKUP_TYPE,
     schemaVersion: SCHEMA_VERSION,
     appVersion: appVersion || '',
     exportedAt: new Date().toISOString(),
-    counts: { ...survey.counts },
-    totals: { ...survey.totals, totalBytes: survey.totalBytes },
+    counts: _manifestCounts,
+    totals: { ..._manifestTotals, totalBytes: _manifestTotalBytes },
     settings: _captureLibrarySettings(prefs),
     // Per-item canonical content hashes, see soundFontFileHash.js for
     // what's included and excluded. Backups without this field fall
@@ -585,17 +944,66 @@ async function exportBackup({
   // cannot see it. [B-420]
   const _abortGates = [];
   let cancelled = false;
+  // Mark a SYNCHRONOUS span for the stall probe without changing what it does. Each inner
+  // try/catch below is left exactly where it was, so behaviour is identical with the probe
+  // armed or not. [B-478]
+  const _span = (label, fn) => {
+    stallProbe.begin(label);
+    try { return fn(); } finally { stallProbe.end(label); }
+  };
   const onAbort = () => {
     cancelled = true;
+    // CANCEL ITSELF BLOCKS THE LOOP, AND THIS IS WHERE THAT GETS LOCATED. [B-478, 2026-10-11]
+    // A cancel during an export produced an 8,129 ms stall that the probe could only file as
+    // "(idle - nothing marked)". A STALL means the event loop could not tick, which rules out
+    // the partial-file unlink below - that is promise-based and would cost wall time without
+    // blocking - and points at something synchronous in here. Three steps, three labels, so
+    // the next cancel names the one that blocks instead of anyone reasoning about it.
+    // Note this path has already been tuned once: the gate release below is [B-420]'s fix for
+    // a cancel that took minutes. This is a different span inside a path someone optimised.
+    //
     // *** RELEASE EVERY PENDING GATE FIRST. [B-420, 2026-09-21]
     // The dispatch loop may be parked on a bucket gate that only the archiver can resolve,
     // and abort() stops it resolving. Settle them BEFORE aborting or the loop never gets to
     // see `cancelled` at all, and the cancel hangs until an outer ceiling fires. This is the
     // line that turns a minutes-long cancel into a one-second one, and it is the real answer
     // to the measurement: "I barely coppied anything to it... why is cancel taking so long?"
-    for (const g of _abortGates) { try { g.resolve(); } catch {} }
-    try { archive.abort(); } catch {}
-    try { ws.destroy(); } catch {}
+    _span('sfBackup:cancel:releaseGates',
+      () => { for (const g of _abortGates) { try { g.resolve(); } catch {} } });
+    _span('sfBackup:cancel:archiveAbort', () => { try { archive.abort(); } catch {} });
+    // abort() does not close the file it is reading. Measured 2026-10-11 against archiver
+    // 5.3.2: `_task.source.destroyed` is false after abort() and only becomes true when the
+    // stream is destroyed here. `_abort()` calls `_queue.kill()`, which drops QUEUED tasks and
+    // never touches the one in flight, and `_shutdown()` only runs when the queue is already
+    // idle. So every cancel left one file open until the process exited.
+    // Reaches into archiver internals because the in-flight source is not exposed; guarded on
+    // every hop and pinned to archiver 5.3.2.
+    // The OUTCOME is recorded as its own phase label so a real cancel can be checked rather
+    // than assumed. The probe has no free-text log, but a phase name is text, so the result
+    // lands in the PHASE DURATIONS block as `sfBackup:cancel:result:<outcome>`. Costs nothing
+    // when the probe is disarmed - begin/end are no-ops then.
+    // Without this, a cancel only ever proved the release CODE ran, never that a handle went.
+    _span('sfBackup:cancel:releaseInFlight', () => {
+      let outcome = 'noInFlightSource';
+      try {
+        const src = archive && archive._task && archive._task.source;
+        if (!src) {
+          outcome = 'noInFlightSource';
+        } else if (typeof src.destroy !== 'function') {
+          outcome = 'sourceHasNoDestroy';
+        } else if (src.destroyed) {
+          outcome = 'alreadyDestroyed';
+        } else {
+          src.destroy();
+          outcome = src.destroyed ? 'destroyed' : 'destroyDidNotTake';
+        }
+      } catch { outcome = 'threw'; }
+      try {
+        const tag = 'sfBackup:cancel:result:' + outcome;
+        stallProbe.begin(tag); stallProbe.end(tag);
+      } catch {}
+    });
+    _span('sfBackup:cancel:streamDestroy', () => { try { ws.destroy(); } catch {} });
   };
   if (signal) {
     if (signal.aborted) onAbort();
@@ -900,7 +1308,7 @@ async function exportBackup({
       onProgress({
         verb: 'Backing up',
         processedBytes,
-        totalBytes: survey.totalBytes,
+        totalBytes: _archiveTotalBytes,
         currentItem: displayName,
         topItemName: 'Source Files',
         topItemFilesProcessed: archiveSources.idx,
@@ -924,7 +1332,7 @@ async function exportBackup({
       onProgress({
         verb: 'Backing up',
         processedBytes,
-        totalBytes: survey.totalBytes,
+        totalBytes: _archiveTotalBytes,
         currentItem: displayName,
         topItemName: `${friendlyTop} Files`,
         topItemFilesProcessed: newIdx,
@@ -941,7 +1349,7 @@ async function exportBackup({
       onProgress({
         verb: 'Backing up',
         processedBytes,
-        totalBytes: survey.totalBytes,
+        totalBytes: _archiveTotalBytes,
         currentItem: entry.name,
         topItemName: 'Shared Tracks',
         topItemFilesProcessed: archiveSharedTracks.idx,
@@ -963,7 +1371,7 @@ async function exportBackup({
       onProgress({
         verb: 'Backing up',
         processedBytes,
-        totalBytes: survey.totalBytes,
+        totalBytes: _archiveTotalBytes,
         currentItem: displayName,
         topItemName: 'Attachments',
         topItemFilesProcessed: archiveAttachments.idx,
@@ -975,6 +1383,35 @@ async function exportBackup({
       }
     }
   });
+
+  // A file the archive cannot read must END the run, not park it. Measured 2026-10-11: one
+  // unreadable file leaves `archive.finalize()` unsettled forever - reproduced with three
+  // good files and one carrying a DENY ace, where the other three archived and finalize had
+  // still not settled after 20 seconds. The run reports a percentage and never moves again.
+  //
+  // Rejecting `done` below does not help, because at the moment of the error nothing is
+  // awaiting `done` yet - the run is parked on `await archive.finalize()` one frame later.
+  // `fatal` exists so that await can be raced against the failure.
+  let fatalError = null;
+  const noteFatal = (err) => {
+    if (!fatalError) {
+      fatalError = err;
+      // Same leak as the cancel path: the source being read when it died stays open.
+      try {
+        const src = archive && archive._task && archive._task.source;
+        if (src && typeof src.destroy === 'function' && !src.destroyed) src.destroy();
+      } catch {}
+    }
+  };
+  const fatal = new Promise((_, reject) => {
+    archive.on('error', err => { noteFatal(err); reject(err); });
+    archive.on('warning', err => {
+      // ENOENT means a file vanished mid-walk, which the walk can carry on past.
+      if (err.code === 'ENOENT') return;
+      noteFatal(err); reject(err);
+    });
+  });
+  fatal.catch(() => {});
 
   const done = new Promise((resolve, reject) => {
     ws.on('close', resolve);
@@ -1018,15 +1455,29 @@ async function exportBackup({
     // (onGlobMatch builds entryData from match.relative + match.stat), not assumed.
     // Only files already declined during the COUNT pass are dropped here, so the gates
     // and the archive stay in agreement.
-    const _skipRefused = (rootAbs) => (entry) => {
+    // `bucket` is passed only for the WHOLE-BUCKET calls. Removing an item from `bucketTops` is
+    // what keeps it out of the library and common loops, and those walk one item at a time, so
+    // their root is the item itself and the first path segment is a file inside it.
+    //
+    // A DROPPED ITEM HAS TO BE REJECTED HERE TOO, not only out of `bucketTops`. The count pass
+    // skips a dropped item before the walk that fills `refusedAbs`, so its unreadable files are
+    // in no skip set at all - and sources and attachments are archived as one directory call
+    // that walks the item regardless. The archiver then reads a file the user was told would be
+    // left out, and the EPERM leaves finalize() unsettled forever.
+    const _skipRefused = (rootAbs, bucket) => (entry) => {
       if (!entry || !entry.name) return entry;
+      if (bucket) {
+        const top = String(entry.name).split(/[\\/]/)[0];
+        // Before the directory check, so a dropped item's sub-directories are rejected too.
+        if (top && droppedItems.has(`${bucket}/${top}`)) return false;
+      }
       if (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory()) return entry;
       return refusedAbs.has(path.join(rootAbs, entry.name)) ? false : entry;
     };
     if (!cancelled) {
       const srcRoot = path.join(_soundFontsRoot(userData), 'sources');
       if (fs.existsSync(srcRoot)) {
-        archive.directory(srcRoot, 'sources', _skipRefused(srcRoot));
+        archive.directory(srcRoot, 'sources', _skipRefused(srcRoot, 'sources'));
         // Wait for the entire sources bucket to flush before starting
         // library, otherwise archiver interleaves sources entries with
         // the first library entries and the user-facing label flips
@@ -1070,7 +1521,9 @@ async function exportBackup({
     if (!cancelled) {
       const attRoot = path.join(_soundFontsRoot(userData), 'attachments');
       if (fs.existsSync(attRoot)) {
-        archive.directory(attRoot, 'attachments');
+        // FILTERED LIKE THE REST. Attachments are exempt from the carry test, never from the
+        // readability skip - an unreadable receipt stops the archive exactly like any other file.
+        archive.directory(attRoot, 'attachments', _skipRefused(attRoot, 'attachments'));
         if (attachmentsFilesExpected > 0) await attachmentsBucketGate.promise;
       }
     }
@@ -1091,12 +1544,28 @@ async function exportBackup({
     //
     // NOT CARRY-SCREENED EITHER. Every file here is JSON this app wrote itself, keyed by
     // uuid, never user content — the refusal machinery has nothing to decide about them.
+    // [B-297] The bucket-root markers, carried at their real paths so a restored library brings
+    // its own migration state back. Ungated and unlabelled for the same reasons as the manifests
+    // below, and ahead of them so the manifests stay last.
+    //
+    // Read here instead of handing archiver the path: an unreadable file inside an ungated call
+    // leaves finalize() unsettled, which is [B-478]. These are a few bytes each.
+    if (!cancelled) {
+      for (const rel of CARRIED_MARKERS) {
+        let buf;
+        try { buf = fs.readFileSync(path.join(_soundFontsRoot(userData), rel)); }
+        catch { continue; }
+        archive.append(buf, { name: rel });
+      }
+    }
     if (!cancelled) {
       const fhRoot = path.join(_soundFontsRoot(userData), FILEHASH_DIR);
       if (fs.existsSync(fhRoot)) archive.directory(fhRoot, FILEHASH_DIR);
     }
 
-    if (!cancelled) await archive.finalize();
+    // Raced against `fatal` so an unreadable file ends the run instead of parking it here
+    // forever. Without the race this await is where the export stops and never returns.
+    if (!cancelled) await Promise.race([archive.finalize(), fatal]);
     await done.catch(() => {}); // swallow during cancel; race handles exits
   })();
 
@@ -1121,6 +1590,24 @@ async function exportBackup({
     if (cancelled) {
       const e = new Error('Cancelled');
       e.cancelled = true;
+      e.residualPath = cleaned.residual;
+      throw e;
+    }
+    // NAME THE FILE. A backup that stops because one file could not be read is actionable
+    // only if the message says which one - the alternative is the user deleting folders to
+    // find it, which is what the afternoon of 2026-10-11 was spent doing. The path rides on
+    // the fs error; the code (EPERM / EACCES / EBUSY) is what distinguishes "something has it
+    // open" from "it is not there".
+    const srcPath = (fatalError && (fatalError.path || fatalError.data && fatalError.data.sourcePath)) || null;
+    if (srcPath) {
+      // THE FULL PATH, NOT THE BASENAME. [B-478, 2026-10-12] The basename is unique in a test
+      // fixture and useless in a real library, where the file that cannot be read is called
+      // hum.wav and there are hundreds of those. The renderer turns this line into a link.
+      const e = new Error(
+        `Could not read ${srcPath} - the backup was stopped so it cannot ship `
+        + `an archive that is quietly missing a file.`);
+      e.unreadablePath = srcPath;
+      e.code = fatalError.code || null;
       e.residualPath = cleaned.residual;
       throw e;
     }
@@ -1164,7 +1651,12 @@ async function exportBackup({
     try { await fs.promises.unlink(destPath); } catch {}
   }
   await fs.promises.rename(partialPath, destPath);
-  return { destPath, manifest, refused };
+  for (const s of skipped) { if (s.top) s.item = _friendlyTop(userData, s.bucket, s.top); }
+  for (const s of skippedItems) {
+    s.item = _friendlyTop(userData, s.bucket, s.top);
+    s.groupKey = _sourceGroupKey(userData, s.bucket, s.top);
+  }
+  return { destPath, manifest, refused, skipped, skippedItems };
 }
 
 // Read + validate a backup zip without unpacking it. Returns the manifest
@@ -1247,13 +1739,14 @@ function _screenRestored(target, sink) {
   } catch { return true; }
 }
 
+
 async function inspectBackup(zipPath) {
   if (!zipPath) return { ok: false, reason: 'missing-path', error: 'Missing zip path' };
   if (!fs.existsSync(zipPath)) return { ok: false, reason: 'missing-file', error: 'File not found' };
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
+    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     return { ok: false, reason: 'unreadable', error: String(err && err.message || err) };
   }
@@ -1297,6 +1790,7 @@ async function inspectBackup(zipPath) {
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      if (_isCarriedMarker(e.name)) continue;
       const parts = e.name.split('/');
       const bucket = parts[0];
       if (!buckets[bucket]) continue;
@@ -1417,7 +1911,7 @@ async function applyReplace({
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
+    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     // Rollback before re-throwing.
     try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
@@ -1759,6 +2253,9 @@ async function applyReplace({
     // grammar to its keys. They have no place in "Restoring Ahsoka (45 of 451 files)" —
     // they restore as one quiet aggregate step at the end.
     const hashManifestFiles = [];
+    // [B-297] Same treatment, same reason: these land at a bucket root, so the per-item grouping
+    // below would read one as a font directory.
+    const markerFiles = [];
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (e.isDirectory) continue;
@@ -1766,6 +2263,7 @@ async function applyReplace({
       if (isSkipped(e.name)) continue;
       const parts = e.name.split('/');
       const bucket = parts[0] || '';
+      if (_isCarriedMarker(e.name)) { markerFiles.push(e); continue; }
       if (bucket === FILEHASH_DIR) { hashManifestFiles.push(e); continue; }
       if (bucketFiles[bucket]) bucketFiles[bucket].push(e);
     }
@@ -1974,6 +2472,15 @@ async function applyReplace({
     // deleted a working index rather than merely failing to bring one back.
     // One label for the whole set. They are uuid-keyed json; a name flying past here
     // would tell the user nothing they could act on.
+    // [B-297] The bucket-root markers, extracted to their real paths with no label of their own:
+    // a name flying past here would tell the user nothing they could act on.
+    if (!cancelled && markerFiles.length > 0) {
+      for (const e of markerFiles) {
+        if (cancelled) break;
+        await extractFile(e);
+      }
+    }
+
     if (!cancelled && hashManifestFiles.length > 0) {
       onProgress({
         processedBytes, totalBytes,
@@ -2064,7 +2571,7 @@ async function surveyMerge({ userData, zipPath }) {
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
+    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     throw new Error(`Could not open backup zip: ${err.message}`);
   }
@@ -2121,6 +2628,7 @@ async function surveyMerge({ userData, zipPath }) {
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      if (_isCarriedMarker(e.name)) continue;
       const parts = e.name.split('/');
       if (parts.length < 2) continue;
       const bucket = parts[0];
@@ -2577,7 +3085,7 @@ async function applyMerge({
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
+    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     throw new Error(`Could not open backup zip: ${err.message}`);
   }
@@ -3227,6 +3735,8 @@ module.exports = {
   BACKUP_TYPE,
   surveyLibrary,
   surveyLibraryAsync,
+  describeSkipConsequence,
+  applySkipAdjustment,
   benchmarkDestination,
   estimateSeconds,
   suggestedFileName,

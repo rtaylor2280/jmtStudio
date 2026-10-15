@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 const path        = require('path');
 const fs          = require('fs');
 const crypto      = require('crypto');
@@ -2167,44 +2168,36 @@ ipcMain.handle('sources:detectCandidates', async (_, { uuid } = {}) => {
 // Entries are curated subsets of a source, extracted into
 // userData/soundFonts/library/<name>/ with a meta.json linking back to the
 // source by UUID. Phase 2 wires these into the browse grid and migration.
-// One-shot migration guard: source-level fields (vendor/website/purchased/
-// acquisitionDate) became canonical on the source meta on 2026-06-23, but
-// legacy entries from before that landed have these values stored on the
-// entry meta. First entries:list call after launch runs the migration,
-// which hoists any non-empty entry-level values up to their source if the
-// source is missing them. Idempotent — subsequent runs short-circuit
-// because the source already has the field.
+// No source-field hoist runs here. 2026-10-15: it migrated entries written before source-level
+// fields became canonical on 2026-06-23, a date inside 1.8's own development, and the whole Sound
+// Font Library is unreleased — v1.7.2 has no soundFontEntries.js at all, so no install can hold a
+// library in the shape it migrated.
 let _entriesMigrationRan = false;
 ipcMain.handle('entries:list', () => {
   try {
     if (!_entriesMigrationRan) {
       _entriesMigrationRan = true;
-      try { soundFontEntries.migrateSourceLevelFields(app.getPath('userData')); } catch {}
       // ONCE EVER, NOT ONCE PER LAUNCH - and the distinction is the whole
       // feature. `_entriesMigrationRan` above is a PROCESS flag, so it re-runs on
       // every start; a backfill behind it would stamp every newly imported font as
       // seen the next time the app opened. Import, restart, and NEW silently
       // empties. The persisted flag is what makes this a one-time upgrade step
       // rather than a nightly eraser. [B-213]
-      // THE MARKER MOVED INTO THE LIBRARY. [B-297] It was a prefs.json key guarding a field that
+      // THE MARKER LIVES IN THE LIBRARY. [B-297] It was a prefs.json key guarding a field that
       // lives on each entry's meta.json — two stores, desyncing both ways. Losing prefs re-ran the
-      // backfill and stamped 109 genuinely-new entries as seen; restoring a library with prefs
-      // intact would light every restored font up as NEW at once.
-      // ONE-TIME ADOPTION, so an existing install does not re-run the backfill just because the
-      // marker moved: if the old prefs key says done, write the new marker and stop. Without this
-      // every current user's NEW set would be stamped once on upgrade — the exact bug, shipped as
-      // the fix for it.
+      // backfill and stamped 109 genuinely-new entries as seen; a library restored beside intact
+      // prefs read as already-done and lit every restored font up as NEW at once.
+      //
+      // NO ADOPTION STEP FROM THE OLD PREFS KEY. 2026-10-15: the whole Sound Font Library is 1.8
+      // and unreleased — v1.7.2 has no soundFontEntries.js at all, and the commit that introduced
+      // the NEW badge is in no release tag — so no install outside this one has ever written that
+      // key. A branch with no audience also masked the only state that exercises the carry.
       try {
         const _ud = app.getPath('userData');
         if (!soundFontEntries.seenBackfillDone(_ud)) {
-          if (Store.get('seenBackfillDone')) {
-            soundFontEntries.markSeenBackfillDone(_ud);
-            console.log('[seen] backfill marker adopted from prefs into the library');
-          } else {
-            const r = soundFontEntries.backfillSeenAt(_ud);
-            soundFontEntries.markSeenBackfillDone(_ud);
-            console.log(`[seen] one-time backfill stamped ${r.stamped} entries`);
-          }
+          const r = soundFontEntries.backfillSeenAt(_ud);
+          soundFontEntries.markSeenBackfillDone(_ud);
+          console.log(`[seen] one-time backfill stamped ${r.stamped} entries`);
         }
       } catch {}
     }
@@ -3748,7 +3741,7 @@ async function _sfFileExportImpl(event, { kind, id, paths, suggestedName, asFile
     const tmpZip = path.join(tmpDir, 'inner.zip');
     try {
       fs.writeFileSync(tmpZip, innerBytes);
-      const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+      const zip = openZipOwned(tmpZip, { skipEntryNameValidation: true });
       try {
         const entryMap = await zip.entries();
         const insidePrefix = insidePath
@@ -4473,8 +4466,22 @@ ipcMain.handle('sfBackup:prep', async () => {
     // on Cancel were never dispatched. It was reported as "cancel does nothing"; it was "the screen
     // was never there". Confirmed by instrumenting the renderer: handler attached, button enabled,
     // and not one click event delivered during the survey.
-    const survey = await soundFontBackup.surveyLibraryAsync(userData);
-    return { ok: true, survey };
+    // THE READABILITY PROBE RIDES THE SURVEY, because this is the last point at which the answer
+    // is free: nothing has been written, and the fit refusal below already turns the user around
+    // from here. Once the archive starts there is no way back - archiver's EPERM is a
+    // stream-level error, so the partial zip can never be completed.
+    const survey = await soundFontBackup.surveyLibraryAsync(userData, { probeReadability: true });
+    // WHAT SAYING YES WOULD COST, computed here so the dialog states the real consequence. An
+    // unreadable file inside a font takes the whole font out of the archive, and a question that
+    // says "without 1 file" would be asking for agreement to something much larger.
+    const consequence = soundFontBackup.describeSkipConsequence(userData, survey.unreadable || []);
+    // [2026-10-15] The survey counts what is on disk. Agreeing to the skip is the only way past
+    // this point, so what the backup will contain is already known here - and the confirm screen
+    // quotes it. Same function that adjusts the manifest, so the promise and the report cannot
+    // drift apart.
+    const adjusted = soundFontBackup.applySkipAdjustment(survey,
+      { skipped: consequence.files, skippedItems: consequence.items });
+    return { ok: true, survey, unreadable: survey.unreadable || [], consequence, adjusted };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -4506,7 +4513,7 @@ ipcMain.handle('dialog:selectBackupExportPath', async () => {
 // fires the AbortController; the backup module's signal listener wipes
 // the partial file before throwing.
 const _sfBackupOps = new Map();
-ipcMain.handle('sfBackup:export', async (event, { opId, destPath } = {}) => {
+ipcMain.handle('sfBackup:export', async (event, { opId, destPath, skipPaths = [] } = {}) => {
   if (!opId || !destPath) return { ok: false, error: 'Missing opId or destPath' };
   if (_sfBackupOps.has(opId)) return { ok: false, error: 'Op already running' };
   const controller = new AbortController();
@@ -4523,12 +4530,23 @@ ipcMain.handle('sfBackup:export', async (event, { opId, destPath } = {}) => {
       destPath,
       appVersion: app.getVersion(),
       prefs,
+      // The user's answer from the readability gate. Only paths they were shown and accepted
+      // reach here, so the export never excludes a file nobody was told about.
+      skipPaths: Array.isArray(skipPaths) ? skipPaths : [],
       signal: controller.signal,
       onProgress: (p) => {
         try { event.sender.send('sfBackup:progress', { opId, ...p }); } catch {}
       },
     });
-    return { ok: true, destPath: result.destPath, manifest: result.manifest, refused: result.refused || [] };
+    return { ok: true, destPath: result.destPath, manifest: result.manifest, refused: result.refused || [],
+             // SEPARATE FROM `refused`, and that separation is the point: a refusal is a program
+             // this app removes from the library, while a skipped file is the user's own data
+             // left exactly where it is. Same list shape, opposite consequence.
+             skipped: result.skipped || [],
+             // [B-478] Whole items left out because something inside them could not be read.
+             // Reported apart from `skipped` because the consequence is a different size: a
+             // missing track versus a missing font.
+             skippedItems: result.skippedItems || [] };
   } catch (err) {
     // `teardownIncomplete` rides along. [B-420] It means the cancel deadline fired and the
     // archiver is STILL WRITING to the destination — so the renderer must not report a clean
@@ -4538,7 +4556,12 @@ ipcMain.handle('sfBackup:export', async (event, { opId, destPath } = {}) => {
                residualPath: err.residualPath || null,
                teardownIncomplete: !!err.teardownIncomplete };
     }
-    return { ok: false, error: String(err && err.message || err) };
+    // [B-478] The path rides along so the renderer can offer to open it. An Error's own
+    // properties do not survive the IPC boundary, so anything the dialog needs has to be lifted
+    // onto the reply explicitly.
+    return { ok: false, error: String(err && err.message || err),
+             unreadablePath: (err && err.unreadablePath) || null,
+             unreadableCode: (err && err.code) || null };
   } finally {
     _sfBackupOps.delete(opId);
   }

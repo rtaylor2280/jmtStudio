@@ -10,6 +10,7 @@
 // purchasedDefault, matchedFile, matchType } on success, or
 // { vendorId: null, vendor: null, vendorAutoDetected: false } on no match.
 
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 const vendors = [
   // JMT Sabers — the house brand. the house fonts carry a readme.txt that
   // names "JMT Sabers"; the content match is specific enough to sit first
@@ -937,7 +938,7 @@ async function _detectVendorInNestedZip(source) {
   let result = null;
   try {
     const StreamZip = require('node-stream-zip');
-    const innerZip = new StreamZip.async({ file: tmpPath, skipEntryNameValidation: true });
+    const innerZip = openZipOwned(tmpPath, { skipEntryNameValidation: true });
     try {
       const map = await innerZip.entries();
       const innerEntries = [];

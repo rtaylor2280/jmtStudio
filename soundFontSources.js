@@ -20,6 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 
 // OS-level archive noise: macOS Finder shadow tree, AppleDouble sidecars,
 // Windows / Mac metadata leftovers. Never real content. Filtered at
@@ -1842,7 +1843,7 @@ function discardPreparedSource(userData, uuid) {
 // We re-add zip-slip protection at extractTo time by validating that each
 // destination path stays inside destDir.
 function _openZip(zipPath) {
-  return new StreamZip.async({ file: zipPath, skipEntryNameValidation: true });
+  return openZipOwned(zipPath, { skipEntryNameValidation: true });
 }
 
 // Normalize node-stream-zip's entries object into our internal shape: an
@@ -2036,7 +2037,7 @@ async function _resolveCompositeReadBytes(readable, subPath) {
   const tmpZip = path.join(tmpDir, 'inner.zip');
   try {
     fs.writeFileSync(tmpZip, innerBytes);
-    const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+    const zip = openZipOwned(tmpZip, { skipEntryNameValidation: true });
     try {
       const innerReadable = {
         async readFile(p) { return await zip.entryData(p); },
@@ -2602,7 +2603,7 @@ async function listSourceInnerZipFiles(userData, uuid, innerZipPath) {
   const tmpZip = path.join(tmpDir, 'inner.zip');
   try {
     fs.writeFileSync(tmpZip, bytes);
-    const zip = new StreamZip.async({ file: tmpZip, skipEntryNameValidation: true });
+    const zip = openZipOwned(tmpZip, { skipEntryNameValidation: true });
     try {
       const entryMap = await zip.entries();
       const entries = [];
