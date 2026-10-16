@@ -10786,7 +10786,7 @@ window._jmtNumberedName = _jmtNumberedName;
 const _STRUCTURAL_EDITS = new Set([
   // whole presets appearing or disappearing
   'preset-add', 'preset-add-first', 'preset-add-first-in-bank', 'sf-card-add-preset',
-  'preset-delete', 'disabled-preset-delete', 'batch-delete',
+  'preset-delete', 'disabled-preset-delete', 'batch-delete', 'preset-move-bank',
   'preset-disable', 'preset-enable', 'batch-disable', 'batch-enable', 'enable-all',
   'sf-missing-disable', 'isolate-preset',
   // whole banks
@@ -52407,6 +52407,22 @@ require(['vs/editor/editor.main'], function () {
       _batchDelete();
     });
 
+    // The preset menu's own submenu element. A sibling of #preset-ctx-menu so the dismissal
+    // listener does not fight it, lazily created, and styled by the same global classes the
+    // Sound Fonts card menu uses - that one keeps its own instance in a scope this cannot reach.
+    const _presetMoveSubmenu = (() => {
+      let el = null;
+      return () => {
+        if (!el) {
+          el = document.createElement('div');
+          el.className = 'preset-ctx-menu';
+          el.style.display = 'none';
+          document.body.appendChild(el);
+        }
+        return el;
+      };
+    })();
+
     function _showPresetContextMenu(e) {
       e.preventDefault();
       const menu          = document.getElementById('preset-ctx-menu');
@@ -52420,7 +52436,9 @@ require(['vs/editor/editor.main'], function () {
       const totalLive     = arr?.presets.length || 0;
 
       const mkSep  = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
-      const mkItem = (text, cls, fn) => { const d = document.createElement('div'); d.className = 'preset-ctx-item' + (cls ? ' ' + cls : ''); d.textContent = text; d.addEventListener('mousedown', e2 => { e2.stopPropagation(); _hidePresetContextMenu(); fn(); }); menu.appendChild(d); };
+      // Returns the element so a caller can hang a submenu off it, and tolerates a null fn for
+      // items that only open one rather than doing something themselves.
+      const mkItem = (text, cls, fn) => { const d = document.createElement('div'); d.className = 'preset-ctx-item' + (cls ? ' ' + cls : ''); d.textContent = text; d.addEventListener('mousedown', e2 => { e2.stopPropagation(); if (!fn) return; _hidePresetContextMenu(); fn(); }); menu.appendChild(d); return d; };
 
       // Label only when multiple selected
       if (total > 1) {
@@ -52459,6 +52477,54 @@ require(['vs/editor/editor.main'], function () {
                () => _nameFromFont(_namePool.map((p, i) => i)));
       }
 
+      // ── Move to another bank ───────────────────────────────────────────────── [2026-10-15]
+      // NAMED WHEN THERE IS ONE DESTINATION, A SUBMENU WHEN THERE ARE SEVERAL. With two banks
+      // the only possible answer is the other one, so saying its name turns a two-step menu
+      // into a one-click action. The submenu shape is the one "Replace in config preset…"
+      // already uses, down to the shared sibling element and the ▸ affordance.
+      //
+      // LIVE PRESETS ONLY - a disabled preset is commented-out text, and moving it is also a
+      // ruling on whether it stays disabled. The count below says what will actually move.
+      const _otherArrays = (result.arrays || [])
+        .map((a, i) => ({ a, i }))
+        .filter(({ i }) => i !== _activeArrayIndex);
+      if (liveCount > 0 && _otherArrays.length > 0) {
+        const _moveSuffix = liveCount > 1 ? ` (${liveCount})` : '';
+        if (_otherArrays.length === 1) {
+          const { a, i } = _otherArrays[0];
+          mkItem(`→ Move to ${a.name || `Array ${i + 1}`}${_moveSuffix}`, '',
+                 () => _moveSelectedToArray(i));
+        } else {
+          const moveItem = mkItem(`→ Move to…${_moveSuffix}`, 'has-submenu', null);
+          const buildMoveSubmenu = () => {
+            const sub = _presetMoveSubmenu();
+            sub.innerHTML = '';
+            sub.style.minWidth = '200px';
+            for (const { a, i } of _otherArrays) {
+              const item = document.createElement('div');
+              item.className = 'preset-ctx-item';
+              item.textContent = a.name || `Array ${i + 1}`;
+              item.addEventListener('mousedown', e2 => {
+                e2.stopPropagation();
+                _hidePresetContextMenu();
+                sub.style.display = 'none';
+                _moveSelectedToArray(i);
+              });
+              sub.appendChild(item);
+            }
+            const r = moveItem.getBoundingClientRect();
+            sub.style.display = 'block';
+            sub.style.left = Math.min(r.right - 2, window.innerWidth - 210) + 'px';
+            sub.style.top  = Math.min(r.top, window.innerHeight - (sub.offsetHeight || 80)) + 'px';
+          };
+          moveItem.addEventListener('mouseenter', buildMoveSubmenu);
+          menu.addEventListener('mouseleave', () => {
+            const sub = _presetMoveSubmenu();
+            setTimeout(() => { if (!sub.matches(':hover')) sub.style.display = 'none'; }, 120);
+          });
+        }
+      }
+
       mkSep();
 
       mkItem(`× Delete${total > 1 ? ` (${total})` : ''}`, 'danger', _batchDelete);
@@ -52474,6 +52540,13 @@ require(['vs/editor/editor.main'], function () {
       const menu = document.getElementById('preset-ctx-menu');
       if (!menu) return;
       menu.style.display = 'none';
+      // The move submenu goes with it. Choosing a sibling action after hovering it open would
+      // otherwise leave the bank list floating over the editor with nothing behind it.
+      try {
+        const sub = _presetMoveSubmenu();
+        sub.style.display = 'none';
+        sub.innerHTML = '';
+      } catch {}
       // Clear any per-use width override (the SF effect-chip menu sets
       // minWidth: 0 for a content-fit dropdown). Subsequent menus that
       // rely on the CSS default min-width: 150px get their breathing
@@ -59258,6 +59331,125 @@ function _getFreshFieldRange(fieldName) {
       _selectedPresetIndex = 0;
       _selectedDisabledPreset = null;
       editor.focus();
+      _scheduleRebuild();
+    }
+
+    // Move the selected live presets to the end of another bank, in one edit. [2026-10-15]
+    //
+    // ONE EDIT, NOT A DELETE THEN AN INSERT. Monaco resolves a multi-edit batch against the
+    // ORIGINAL coordinates, so removing lines from one bank and appending to another lands
+    // correctly whichever order they sit in the file. Two separate edits would make the second
+    // set of line numbers stale the moment the first applied.
+    //
+    // A TRAILING COMMA IS LEGAL IN AN ARRAY INITIALISER AND IS WHAT MAKES APPENDING SAFE. The
+    // last entry in a bank often has none, so the anchor gains one and every moved block is
+    // normalised to end with one. Without that the two entries fuse into one expression and the
+    // config stops compiling.
+    //
+    // DISABLED PRESETS ARE OUT OF SCOPE, deliberately: they are commented-out text, so moving one
+    // is also a decision about whether it stays disabled. The menu item counts live presets only.
+    function _moveSelectedToArray(targetIdx) {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const src    = result.arrays[_activeArrayIndex];
+      const dst    = result.arrays[targetIdx];
+      if (!src || !dst || targetIdx === _activeArrayIndex) return;
+
+      const model  = editor.getModel();
+      const lastLine = model.getLineCount();
+      const moving = [..._selectedLive].sort((a, b) => a - b)
+        .map(i => src.presets[i]).filter(Boolean);
+      if (!moving.length) return;
+
+      // EVERY PRESET CARRIES ONE STYLE PER BLADE AND NUM_BLADES IS GLOBAL, so a move between
+      // banks should always be shape-compatible. Asserted rather than assumed: a mismatch means
+      // something upstream is wrong, and writing the preset anyway produces a config that does
+      // not compile, discovered later and far from here.
+      const dstSlots = dst.presets.length ? (dst.presets[0].styles || []).length : null;
+      if (dstSlots !== null) {
+        const bad = moving.find(p => (p.styles || []).length !== dstSlots);
+        if (bad) {
+          promptError('Cannot move this preset',
+            `"${bad.displayName || 'This preset'}" has ${(bad.styles || []).length} blade `
+            + `style${(bad.styles || []).length === 1 ? '' : 's'} and ${dst.name} expects `
+            + `${dstSlots}. Moving it would produce a config that does not compile.`);
+          return;
+        }
+      }
+
+      const edits = [];
+      // Remove from the source bank, eating the blank line that follows so the bank does not
+      // accumulate gaps. Same shape as _batchDelete.
+      for (const preset of moving) {
+        const afterLine = preset.endLine + 1;
+        const eatExtra  = afterLine <= lastLine && model.getLineContent(afterLine).trim() === '';
+        edits.push({
+          range: { startLineNumber: preset.startLine, startColumn: 1,
+                   endLineNumber: Math.min(eatExtra ? afterLine + 1 : afterLine, lastLine + 1),
+                   endColumn: 1 },
+          text: '',
+        });
+      }
+
+      const withComma = (t) => (t.trimEnd().endsWith(',') ? t.trimEnd() : t.trimEnd() + ',');
+      const blocks = moving.map(p => withComma(model.getValueInRange({
+        startLineNumber: p.startLine, startColumn: 1,
+        endLineNumber:   p.endLine,   endColumn: model.getLineMaxColumn(p.endLine),
+      })));
+
+      // Anchor on the last preset in the target rather than the bank's closing brace: it is the
+      // position the parser is surest about, and "the end of that bank" is what was asked for.
+      const anchorLine = dst.presets.length
+        ? dst.presets[dst.presets.length - 1].endLine
+        : dst.startLine;
+      const anchorCol  = model.getLineMaxColumn(anchorLine);
+      const anchorText = model.getLineContent(anchorLine).trimEnd();
+      const lead = (dst.presets.length && !anchorText.endsWith(',')) ? ',' : '';
+      edits.push({
+        range: { startLineNumber: anchorLine, startColumn: anchorCol,
+                 endLineNumber:   anchorLine, endColumn:   anchorCol },
+        text: lead + '\n' + blocks.join('\n'),
+      });
+
+      const landingIdx = dst.presets.length;
+      const movedCount = moving.length;
+      const firstName  = moving[0].displayName || '';
+
+      edits.sort((a, b) => a.range.startLineNumber - b.range.startLineNumber);
+      _atomicEdit(editor, 'preset-move-bank', edits);
+
+      // FOLLOW THE PRESET, SELECTED. Leaving the user in the source bank makes a move look
+      // exactly like a delete - the row is simply gone from the list they are looking at.
+      _parseResult = presetParser.parsePresets(editor.getValue());
+      _activeArrayIndex       = targetIdx;
+      _selectedPresetIndex    = landingIdx;
+      _selectedDisabledPreset = null;
+      _refreshStrip();
+      if (!_sidecarOpen) _openSidecar();
+      else _rebuildSidecar();
+      _selectPreset(_parseResult.arrays[targetIdx], landingIdx);
+      // SELECTING IS NOT SHOWING. `_selectPreset` sets state, paints the decoration and renders
+      // the detail panel, but it scrolls neither surface - the row-click path does that itself
+      // with `_navigateToLine`, which is why clicking a preset looks different from landing on
+      // one. A move that lands off-screen in both the list and the editor reads as nothing
+      // having happened.
+      const _landed = _parseResult.arrays[targetIdx]?.presets[landingIdx];
+      if (_landed) _navigateToLine(_landed.startLine, _landed.endLine);
+      // Deferred past the rebuild's layout so the scroll math sees final positions, and
+      // `block: 'center'` rather than 'nearest' because nearest no-ops on a partially visible
+      // row and leaves it clipped at the edge. Same shape the new-preset path uses.
+      setTimeout(() => {
+        const row = document.querySelector(
+          `#preset-list-top .preset-row[data-live-idx="${landingIdx}"]`);
+        if (row) requestAnimationFrame(() => row.scrollIntoView({ block: 'center', behavior: 'auto' }));
+      }, 50);
+      // One moved preset is its own confirmation once selected. Several are not: only the first
+      // can be shown, so the count has to be said.
+      if (movedCount > 1) {
+        showToast(`Moved ${movedCount} presets to ${dst.name}.`);
+      } else if (firstName) {
+        showToast(`Moved "${firstName}" to ${dst.name}.`);
+      }
       _scheduleRebuild();
     }
 

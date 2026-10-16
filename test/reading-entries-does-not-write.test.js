@@ -12,8 +12,8 @@
  * silently - nothing errors, the file is simply different afterwards. The property worth holding
  * is not "no uuid backfill", it is that enumerating the library leaves it byte-for-byte alone.
  *
- * ⚠️ THE FIXTURE OMITS entryUuid DELIBERATELY. An entry that already has one would be left alone
- * by the old code too, so it would pass against both and prove nothing.
+ * THE FIXTURE OMITS entryUuid DELIBERATELY. An entry that already has one would be left alone by
+ * the old code too, so it would pass against both and prove nothing.
  *
  * Run: node test/reading-entries-does-not-write.test.js
  */
