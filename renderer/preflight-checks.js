@@ -530,6 +530,418 @@
     },
   });
 
+
+  // ── A define that nothing in the selected OS version reads ───────────────
+  //
+  // [B-445, re-scoped 2026-10-15.] The entry's original design was a TABLE: enumerate every
+  // define each prop reads, decide which are prop-specific, and keep it current across releases.
+  // Measured at 179 defines across 15 prop files, of which 13 from prop_base.h LOOK prop-specific
+  // and survive any prop switch - a table built from that count warns on defines that are always
+  // correct, which is the wolf-cry every check here exists to avoid.
+  //
+  // THE RE-SCOPE DELETES THE TABLE. Ask the selected OS version what it actually reads, and flag
+  // what nothing reads. Correct for every version without anyone maintaining a list, covers the
+  // JMT wrapper's own defines for free because it is just another header in that tree, and it
+  // catches the case `prop-defines-without-prop` structurally cannot: that check abstains the
+  // instant any prop include is present, which is every prop SWITCH.
+  //
+  // THE WHOLE TREE, NOT props/. A value define like VOLUME is read as a plain identifier in C++
+  // and never through #ifdef, and MOTION_TIMEOUT is read by prop_base.h rather than any prop.
+  // Scanning props alone would flag a pile of perfectly correct core defines.
+  //
+  // MEASURED BEFORE ANY OF IT WAS BUILT, over 100 real configs against seven installed versions:
+  // 60 flagged nothing at all, the median was 0 and the worst was 7. The rule does not cry wolf.
+  // That run also turned up FETT263_BM_DISABLE_SAVE sitting in 35 configs that no installed
+  // ProffieOS reads, and JMT_DISABLE_COLOR_SAVE in 7.
+  //
+  // THREE REMEDIES, NOT ONE, BECAUSE THE RIGHT ANSWER IS NOT OURS TO PICK. A name nothing reads
+  // may be a typo, a leftover from a prop switch, or something to park while the user decides.
+  // Disable uses the same @jmt-disabled marker the preset list uses, so the vocabulary is one
+  // vocabulary and the line stays visible and reversible.
+  //
+  // A SUGGESTION IS NOT ALLOWED TO BE AN ANTONYM, and that is a measurement rather than caution.
+  // FETT263_SWING_OFF is edit distance 2 from FETT263_SWING_ON - the opposite meaning - so raw
+  // nearest-match would offer the most confidently wrong advice available. The real mistake there
+  // is subtler and worth preserving: FETT263_TWIST_OFF exists, so the user generalised a pattern
+  // that has no SWING member.
+  const _DEFINE_OPPOSITES = [['ON', 'OFF'], ['ENABLE', 'DISABLE'], ['SHOW', 'HIDE'],
+                             ['TRUE', 'FALSE'], ['MIN', 'MAX'], ['UP', 'DOWN']];
+
+  // Defines the BUILD consumes rather than the source. ENABLE_WEBUSB is selected in the USB
+  // dropdown and reaches the compiler as a flag, so no file in the tree mentions it and a
+  // whole-tree read would call a correct config wrong.
+  const _BUILD_LEVEL_DEFINES = new Set([
+    'ENABLE_WEBUSB', 'ENABLE_SERIAL', 'ENABLE_MASS_STORAGE', 'USB_CLASS',
+  ]);
+
+  // Every ProffieOS that has ever existed reads these. If the derivation comes back without them
+  // it did not read the tree, and a partial read is how this check turns into a liar - the same
+  // sentinel discipline the style-factory check uses, for the same reason.
+  const _TREE_SENTINELS = ['NUM_BLADES', 'CONFIG_PRESETS', 'ENABLE_MOTION'];
+
+  function _tokensIn(text) {
+    const out = new Set();
+    const m = String(text || '').match(/\b[A-Z][A-Z0-9_]{2,}\b/g);
+    if (m) for (const t of m) out.add(t);
+    return out;
+  }
+
+  function _levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = cur;
+    }
+    return prev[n];
+  }
+
+  // True when two names differ only by an opposing word. Compared on the UNDERSCORE SEGMENTS
+  // rather than the raw strings, so SWING_ON vs SWING_OFF is caught while a name that merely
+  // contains "ON" inside a longer word is not.
+  function _areOpposites(a, b) {
+    const pa = a.split('_'), pb = b.split('_');
+    if (pa.length !== pb.length) return false;
+    let differing = null;
+    for (let i = 0; i < pa.length; i++) {
+      if (pa[i] === pb[i]) continue;
+      if (differing !== null) return false;
+      differing = [pa[i], pb[i]];
+    }
+    if (!differing) return false;
+    return _DEFINE_OPPOSITES.some(([x, y]) =>
+      (differing[0] === x && differing[1] === y) || (differing[0] === y && differing[1] === x));
+  }
+
+  function _suggestFor(name, known) {
+    let best = null;
+    for (const k of known) {
+      if (k === name) continue;
+      // Only ever suggest within the same family. A FETT263_ name is never repaired to a JMT_ one,
+      // and without this the nearest neighbour is frequently from a prop the user is not using.
+      const famA = name.split('_')[0], famB = k.split('_')[0];
+      if (famA !== famB) continue;
+      const d = _levenshtein(name, k);
+      if (!best || d < best.d) best = { name: k, d };
+    }
+    if (!best) return null;
+    // A third of the name may differ, capped at 4. Beyond that it is a different define rather
+    // than a misspelling of this one, and FETT263_BM_DISABLE_SAVE's nearest neighbour at
+    // distance 10 is exactly the case this refuses.
+    const budget = Math.min(4, Math.max(2, Math.floor(name.length / 3)));
+    if (best.d > budget) return null;
+    if (_areOpposites(name, best.name)) return null;
+    return best.name;
+  }
+
+  // The line a define sits on, in document coordinates, from the ORIGINAL text. Found by
+  // scanning rather than carried, because ctx.defines is a set of names with no positions.
+  function _defineLines(text, name) {
+    const lines = String(text || '').split('\n');
+    const re = new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + name + '\\b');
+    const out = [];
+    for (let i = 0; i < lines.length; i++) if (re.test(lines[i])) out.push({ line: i + 1, text: lines[i] });
+    return out;
+  }
+
+
+  // Reading the whole tree would be ~350 file reads on every compile. Asking the search index
+  // for ONE name is cheap and answers exactly the right question, so the lookup is per candidate
+  // and memoised per version for the life of the session - a second compile of the same config
+  // costs nothing.
+  // Keyed by version NAME and held for the session. A version's tree does not change under a
+  // running app, and the key is the name rather than the contents - so a version replaced in
+  // place behind the app would answer from the cache until restart. Accepted: the cost is a
+  // stale verdict on a tree nobody swapped, against ~350 file reads on every compile.
+  const _nameCache = new Map();   // "version::NAME" -> bool   (:: not a control char: a NUL in source breaks grep and diffs)
+  // A hit only counts as EVIDENCE if the file would actually be compiled.
+  //
+  // TWO EXCLUSIONS, BOTH MEASURED ON A REAL TREE RATHER THAN REASONED ABOUT.
+  //
+  // config/ IS OURS, NOT THE OS. The app stages the user's own config there as my_config.h at
+  // build time, so every define they wrote appears in the tree BECAUSE THEY WROTE IT. Counting
+  // it makes the check self-referential: it can barely fire on any config that has been compiled
+  // once, and the only reason a misspelling was caught at all was that the staged copy still
+  // held the previous spelling. A false negative hiding behind a true positive.
+  //
+  // props/ IS SCOPED TO THE PROP IN USE. Every prop header sits in that folder whether or not
+  // the config includes it, so a define belonging to a prop you switched AWAY from still looks
+  // read - which is exactly the case this check exists for. Hits in props/ count only for the
+  // prop the config includes and the prop headers that one includes itself: the JMT wrapper
+  // pulls in saber_fett263_buttons.h, so selecting the wrapper legitimately reads both, while
+  // selecting Fett alone reads only one.
+  //
+  // Everything else - core, blades, common, styles, sound - always counts.
+  function _hitCounts(relPath, allowedProps) {
+    const p = String(relPath || '').replace(/\\/g, '/');
+    if (/(^|\/)config\//i.test(p)) return false;
+    const m = p.match(/(^|\/)props\/([^/]+)$/i);
+    if (!m) return true;
+    // prop_base.h IS NOT A PROP. Every prop is a PropBase subclass, so its defines survive any
+    // switch and are read whatever the config includes. The original table-based design counted
+    // its 13 defines as prop-specific because each is read by exactly one file, and warning on
+    // them is the false positive that design died on. Allowed unconditionally rather than left
+    // to the include walk, which would only find it when a prop spells the include out.
+    if (/^prop_base\.h$/i.test(m[2])) return true;
+    return allowedProps.has(m[2].toLowerCase());
+  }
+
+  // The props that are actually COMPILED: the one the config includes, and the prop headers it
+  // includes in turn. Reuses the walk the voicepack check already does rather than running a
+  // second one - two mechanisms for "which props are in play" would have to be kept in agreement
+  // forever, and this one already handles three things a fresh walk gets wrong.
+  //
+  //   · NO PROP INCLUDE STILL MEANS A PROP. ProffieOS.ino falls back to props/saber.h, so an
+  //     empty CONFIG_PROP is saber.h rather than nothing. Treating it as nothing would orphan
+  //     every prop define in a default-prop config.
+  //   · LIVE TEXT ONLY. An include inside an #ifdef the user has not defined is not compiled,
+  //     and vpkLiveText evaluates those against ctx.defines instead of reading raw text.
+  //   · BOUNDED, so a cycle or a deep chain cannot turn one question into a tree read.
+  const _allowedPropsCache = new Map();
+  async function _allowedProps(ctx) {
+    const roots = vpkPropIncludes(ctx.text).map(p => p.split('/').pop()).filter(Boolean);
+    const key = ctx.versionName + '::' + (roots.join(',') || 'default');
+    if (_allowedPropsCache.has(key)) return _allowedPropsCache.get(key);
+
+    let queue = roots.slice();
+    if (!queue.length) queue = ['saber.h'];
+    const seen = new Set();
+    while (queue.length && seen.size < 16) {
+      const file = queue.shift();
+      if (!file || seen.has(file)) continue;
+      seen.add(file);
+      let res = null;
+      try { res = await ctx.readVersionFile(ctx.versionName, 'ProffieOS/props/' + file); } catch {}
+      if (!res || !res.ok || !res.content) continue;
+      for (const i of vpkLiveText(res.content, ctx.defines).matchAll(/#\s*include\s+"([^"]+)"/g)) {
+        const inc = i[1];
+        if (!inc.includes('/') || /(^|\/)props\//.test(inc)) queue.push(inc.split('/').pop());
+      }
+    }
+    const allowed = new Set([...seen].map(f => f.toLowerCase()));
+    _allowedPropsCache.set(key, allowed);
+    return allowed;
+  }
+
+  async function _treeHasName(ctx, name) {
+    const allowed = await _allowedProps(ctx);
+    // The allowed set is part of the answer, so it is part of the key. Switching props must not
+    // read back a verdict computed under the previous one.
+    const key = ctx.versionName + '::' + [...allowed].sort().join(',') + '::' + name;
+    if (_nameCache.has(key)) return _nameCache.get(key);
+    let found = false;
+    try {
+      const hits = await ctx.searchVersionFiles(ctx.versionName, name);
+      if (hits && hits.ok && Array.isArray(hits.results)) {
+        found = hits.results.some(r => r && r.type !== 'dir' && _hitCounts(r.path, allowed));
+      }
+    } catch { found = false; }
+    _nameCache.set(key, found);
+    return found;
+  }
+
+  // THE SEARCH HAS TO PROVE ITSELF BEFORE ITS SILENCE MEANS ANYTHING. A search that is broken,
+  // unavailable, or pointed at an unpacked version returns nothing for everything, and this check
+  // would then report every define in the config as dead - the most destructive false positive it
+  // could produce, with Delete sitting next to it. Same sentinel discipline the style-factory
+  // check uses: no sentinel, no verdict.
+  async function _searchIsTrustworthy(ctx) {
+    for (const s of _TREE_SENTINELS) {
+      if (await _treeHasName(ctx, s)) return true;
+    }
+    return false;
+  }
+
+  // Real names sharing an orphan's family, for the suggestion. Only ever reached when there IS an
+  // orphan, which the corpus says is rare, so the cost rides on the uncommon path.
+  const _familyCache = new Map();
+  async function _familyNames(ctx, prefix) {
+    const key = ctx.versionName + '::' + prefix + '::' + ctx.cleanText.length;
+    if (_familyCache.has(key)) return _familyCache.get(key);
+    const names = new Set();
+    try {
+      const hits = await ctx.searchVersionFiles(ctx.versionName, prefix + '_');
+      if (hits && hits.ok && Array.isArray(hits.results)) {
+        const allowed = await _allowedProps(ctx);
+        for (const r of hits.results.slice(0, 40)) {
+          if (r.type !== 'file' || !/\.(h|hpp|ino|cpp|cc|c)$/i.test(r.path || '')) continue;
+          // Same scoping as the lookup: suggesting a name from a prop the config does not
+          // include would answer "nothing reads this" with "use this other thing nothing reads".
+          if (!_hitCounts(r.path, allowed)) continue;
+          const f = await ctx.readVersionFile(ctx.versionName, r.path);
+          if (!f || !f.ok || !f.content) continue;
+          const m = f.content.match(new RegExp('\\b' + prefix + '_[A-Z0-9_]+\\b', 'g'));
+          if (m) for (const n of m) names.add(n);
+        }
+      }
+    } catch { /* an empty family simply yields no suggestion */ }
+    _familyCache.set(key, names);
+    return names;
+  }
+
+  preflight.register({
+    id: 'define-nothing-reads',
+    severity: 'warn',
+    title: 'Defines nothing reads',
+    async run(ctx) {
+      if (!ctx.versionName) return null;
+      const clean = ctx.cleanText;
+      if (!clean) return null;
+      // Same abstention the prop check makes: a CONFIG_TOP block pasted on a forum is not a
+      // config, and judging one is how a rule is right about the text and wrong about what it is.
+      if (!preflight.sectionBody(clean, 'CONFIG_PRESETS')) {
+        return { unsure: 'this looks like a config fragment, not a whole config' };
+      }
+
+      if (!(await _searchIsTrustworthy(ctx))) {
+        return { unsure: 'could not read the selected ProffieOS version' };
+      }
+
+      // The prop the judgement was made against. ProffieOS.ino falls back to props/saber.h when a
+      // config includes none, so there is always one to name - and naming it is the point: the
+      // answer is only true for this version WITH this prop.
+      const _propFile = (vpkPropIncludes(ctx.text).map(p => p.split('/').pop()).filter(Boolean)[0])
+        || 'saber.h';
+
+      const orphans = [];
+      for (const name of ctx.defines) {
+        if (_BUILD_LEVEL_DEFINES.has(name)) continue;
+        // A FUNCTION-LIKE MACRO IS THE USER'S OWN CODE, NOT AN OPTION. `#define FIRE1PTR(NUM,
+        // DELAY)` is a helper someone wrote to build their own styles; no prop was ever going to
+        // read it, so "nothing reads this, here is Delete" is both wrong and alarming. Measured on
+        // a real config 2026-10-16, where it accused FIRE1PTR and FIRE1_DELAY alongside two
+        // genuine orphans. The distinguisher is the open bracket immediately after the name,
+        // which is what makes a define a macro rather than a value.
+        if (new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + name + '\\(', 'm').test(clean)) continue;
+        if (await _treeHasName(ctx, name)) continue;
+        // A define the config uses ITSELF is correct and read by nobody in the OS tree - a
+        // value referenced from the blade array, or a flag the user tests in their own styles.
+        const uses = (clean.match(new RegExp('\\b' + name + '\\b', 'g')) || []).length;
+        const defs = (clean.match(new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + name + '\\b', 'gm')) || []).length;
+        if (uses > defs) continue;
+        orphans.push(name);
+      }
+      if (!orphans.length) return null;
+
+      // ONE MESSAGE, A LIST UNDERNEATH - the shape the export-conflict dialog uses. The
+      // explanation is identical for every orphan, so it is said once above the list and each
+      // row carries only what differs: the name, where it is, and its own remedies.
+      //
+      // Splitting this into one finding per define said the same sentence five times and buried
+      // the single fact they share.
+      const rows = [];
+      for (const name of orphans) {
+        const suggestion = _suggestFor(name, await _familyNames(ctx, name.split('_')[0]));
+        const where = _defineLines(ctx.text, name);
+        // Renaming the define wherever it is defined. Shared by the two ways a new name can
+        // arrive: typed into the row's own editor, or taken from the suggestion below it.
+        const renameTo = (c, value) => {
+          const edits = [];
+          for (const w of _defineLines(c.text, name)) {
+            const col = w.text.indexOf(name);
+            if (col < 0) continue;
+            edits.push({ startLine: w.line, startCol: col,
+                         endLine: w.line, endCol: col + name.length, text: value });
+          }
+          return edits;
+        };
+
+        rows.push({
+          label: name,
+          // Static, so the row reads as the line it came from and the keyword stays out of the
+          // field the user is editing.
+          prefix: '#define',
+          note: where.length
+            ? (where.length === 1 ? `line ${where[0].line}`
+                                  : `lines ${where.map(w => w.line).join(', ')}`)
+            : '',
+          // TWO SEPARATE OFFERS, because they are different acts. The editor is the user
+          // supplying a name we do not have; the suggestion is us proposing one, and it only
+          // appears when there IS a near match. Pre-filling the editor with the suggestion would
+          // merge them and make taking our guess the path of least resistance - the same call the
+          // sound-font import makes in its own note.
+          rename: {
+            placeholder: 'define name',
+            hint: 'Correct a misspelled name and re-check',
+            plan: renameTo,
+          },
+          suggest: suggestion ? { name: suggestion, plan: renameTo } : null,
+          fixes: [
+            {
+              label: 'Disable',
+              hint: 'Comment out the line but leave it in your config',
+              // A PLAIN `//`, not the preset list's `@jmt-disabled` marker. That marker exists
+              // because the preset list has to find those entries again and render them as
+              // disabled; a commented-out define is just a commented-out line, and the user
+              // reads it in the editor rather than through a UI that has to parse it back.
+              // Indentation is preserved so the line stays where it sits in its block.
+              plan(c) {
+                const edits = [];
+                for (const w of _defineLines(c.text, name)) {
+                  const indent = (w.text.match(/^[ \t]*/) || [''])[0];
+                  edits.push({ startLine: w.line, startCol: 0,
+                               endLine: w.line, endCol: w.text.length,
+                               text: `${indent}//${w.text.slice(indent.length)}` });
+                }
+                return edits;
+              },
+            },
+            {
+              label: 'Delete',
+              hint: 'Remove the line from your config',
+              plan(c) {
+                const edits = [];
+                const total = String(c.text || '').split('\n').length;
+                for (const w of _defineLines(c.text, name)) {
+                  // The whole line including its break, so deleting does not leave a blank where
+                  // the define was. The last line of the file has no break to take.
+                  if (w.line < total) {
+                    edits.push({ startLine: w.line, startCol: 0, endLine: w.line + 1, endCol: 0, text: '' });
+                  } else {
+                    edits.push({ startLine: w.line, startCol: 0, endLine: w.line, endCol: w.text.length, text: '' });
+                  }
+                }
+                return edits;
+              },
+            },
+          ],
+        });
+      }
+
+      const n = rows.length;
+      return {
+        findings: [{
+          kind: 'orphan-defines',
+          // STATE THE FACT AND NAME WHAT IT WAS JUDGED AGAINST. No claim about how they got
+          // here: the user may have one OS version, no prop of their own, and may never have
+          // changed anything - a config copied from a forum arrives exactly like this.
+          title: `${n} define${n === 1 ? '' : 's'} ${n === 1 ? 'is' : 'are'} not used by `
+               + `${ctx.versionName} with ${_propFile}.`,
+          // STATE THE MECHANISM, NOT THE CONSEQUENCE. What the check knows is that the name
+          // appears nowhere in the source that will compile. What that MEANS splits three ways
+          // and it cannot tell which: a misspelling leaves the define the user meant missing, so
+          // a feature they are counting on is off; a version or prop skew makes it inactive here
+          // and correct elsewhere; a leftover is harmless. One reading per remedy, which is why
+          // the row offers the choices and the sentence picks none.
+          //
+          // AND IT MUST NOT PROMISE THE BUILD SUCCEEDS. A define that reaches nothing cannot
+          // break a build by itself, but a MISSPELLED one is a prerequisite that is now absent,
+          // and prerequisites are enforced with #error: jmt_fett263_wrapper.h:91 stops the build
+          // when JMT_SWING_ON_BLOCK has no blade detect method. Misspell BLADE_DETECT_PIN there
+          // and the compile fails. The promise was reachable and false.
+          detail: `On their own these do nothing. If one is a misspelling, the define you meant `
+                + `is missing, which can change how the saber behaves or stop the build where `
+                + `something else requires it.`,
+          rows,
+        }],
+      };
+
+    },
+  });
+
   // ── A style factory name that does not exist ─────────────────────────────
   //
   // [B-324]. A misspelled wrapper — `StyleRainBowPtr` with a capital B — is a hard

@@ -280,6 +280,18 @@
           detail:   f.detail || '',
           items:    f.items || [],
           fix:      f.fix || null,
+          // A finding may offer SEVERAL remedies where the right one is the user's call rather
+          // than ours. An orphaned define can be a typo to replace, a leftover to delete, or
+          // something to disable while they decide - and we cannot tell which from the text.
+          // Normalised to an array here so the renderer has one shape to draw, with `fix` kept
+          // as the single-remedy spelling every existing check uses.
+          fixes:    Array.isArray(f.fixes) ? f.fixes.filter(Boolean)
+                    : (f.fix ? [f.fix] : []),
+          // A finding that covers several items the user must answer SEPARATELY carries rows:
+          // one message, a list underneath, each row with its own remedies. The alternative -
+          // one finding per item - repeats the explanation once per row and buries the single
+          // fact they all share. Shape: { label, note, fixes }.
+          rows:     Array.isArray(f.rows) ? f.rows.filter(Boolean) : [],
           kind:     f.kind || null,
         });
       }

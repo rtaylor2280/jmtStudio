@@ -936,32 +936,11 @@
     100% { color: #4a4; background: rgba(20,60,20,0.55); box-shadow: none; }
   }
 
-  /* ── Progress bar ── */
-  #build-progress-wrap {
-    height: 3px;
-    background: var(--c-bg-elevated);
-    flex-shrink: 0;
-    display: none;
-    position: relative;
-    overflow: hidden;
-  }
-  #build-progress-wrap.visible { display: block; }
-  #build-progress-bar {
-    height: 100%;
-    width: 0%;
-    background: #4af;
-    transition: width 0.3s ease, background 0.4s ease;
-  }
-  #build-progress-bar.success { background: var(--jmt-blue); }
-  #build-progress-bar.error   { background: #e44; }
-  #build-progress-bar.indeterminate {
-    width: 40%;
-    animation: indeterminate 1.2s ease-in-out infinite;
-  }
-  @keyframes indeterminate {
-    0%   { left: -40%; }
-    100% { left: 110%; }
-  }
+  /* `#build-progress-wrap` / `#build-progress-bar` lived here with no markup and no script
+     referencing them, from the initial commit to 2026-10-16, and the keyframe animated `left`
+     on a statically positioned element so it could not have moved had it been wired. The build
+     toolbar says it is working through the Compile button's own label and `.busy-dots`, which
+     is the app's convention for that everywhere else. Removed rather than wired. */
 
   /* ── Log panel ── */
   #build-log {
@@ -1498,6 +1477,12 @@
   /* Four-button modals (add / remove / proceed / cancel) get a little more room
      so the button row fits horizontally, same layout as every other modal. */
   #modal-confirm .modal.modal-confirm-wide { max-width: 600px; }
+  /* Preflight is a LIST of findings, not a sentence with buttons. Each row holds
+     an editable name, a location, a suggestion and two remedies on one line, and
+     at the 520px default the name column collapses to an ellipsis. It gets its
+     own width rather than borrowing modal-confirm-wide, which was sized for a
+     four-button row. */
+  #modal-confirm .modal.modal-preflight { max-width: 820px; }
   /* Prop-link modals: three buttons plus a quoted include line and, on a swap
      away from the wrapper, a warning paragraph. At the 380px default the button
      row wraps and the prose goes ragged. */
@@ -2848,6 +2833,35 @@
   #modal-sf-import input.invalid { border-color: #e44; }
   #modal-sf-import textarea { resize: vertical; min-height: 60px; }
   .sf-import-modal { max-width: 600px; width: 92vw; max-height: 86vh; display: flex; flex-direction: column; }
+
+  /* ── The app's busy overlay ───────────────────────────────────────────────
+     MINI (no cancel): a bar and a label, centred, only as wide as it needs to be. Nothing to
+     press, so nothing to lay out.
+     STANDARD (a cancel): wide enough for a sentence and a button row, with the button
+     bottom-right where every modal in the app keeps it. The cancel is what makes it standard —
+     a button centred under a narrow label looks like a card that was not finished.
+     NOT the 600px of .sf-import-modal, which is sized for a form; one short label across that
+     width is mostly empty space.
+     A third size exists and is not this component: a long process with its own modal runs the
+     wait as a PHASE in that modal, so the user stays in one surface. */
+  #app-busy-overlay { position: fixed; inset: 0; z-index: 11000; display: flex;
+                      align-items: center; justify-content: center;
+                      background: rgba(0, 0, 0, 0.55); }
+  #app-busy-card { background: var(--c-bg-raised); border: 1px solid var(--c-border);
+                   border-radius: 8px; padding: 22px 28px; color: var(--c-text);
+                   min-width: 250px; text-align: center; }
+  #app-busy-card .sf-import-progress-track { margin: 0 0 12px 0; }
+  #app-busy-text { font-size: 0.9rem; }
+  #app-busy-cancel-wrap { display: none; margin-top: 18px; justify-content: flex-end; }
+  /* Standard reverses the stack: the label leads and the bar sits under it, which is how every
+     modal with a progress bar in this app reads. Mini has no room to lead with anything, so
+     there the bar comes first and the label hangs below it. Ordered rather than re-templated,
+     so both sizes are one DOM and the sizes cannot drift apart. */
+  #app-busy-card.standard { max-width: 440px; width: 92vw; text-align: left;
+                            display: flex; flex-direction: column; }
+  #app-busy-card.standard #app-busy-text { order: 1; font-size: 0.95rem; }
+  #app-busy-card.standard .sf-import-progress-track { order: 2; margin: 12px 0 0 0; }
+  #app-busy-card.standard #app-busy-cancel-wrap { order: 3; display: flex; }
   .sf-import-phase { overflow-y: auto; max-height: calc(86vh - 130px); }
   .sf-import-phase::-webkit-scrollbar { width: 6px; }
   .sf-import-phase::-webkit-scrollbar-track { background: transparent; }
@@ -3039,7 +3053,7 @@
      import modal and the ProffieOS download, which parked at a hardcoded 90%
      then 97% through extract and import - phases that report no percent at
      all. Extending this selector rather than writing a third copy of the
-     animation; #build-progress-bar has its own, older variant. */
+     animation. */
   .sf-import-progress-bar.indeterminate,
   #dl-progress-bar.indeterminate { position: absolute; left: 0; width: 30% !important; background: var(--jmt-blue); transition: none; animation: knightrider 1.4s ease-in-out infinite; }
   /* The detail line under every determinate progress bar is ONE line that
@@ -3840,6 +3854,28 @@
   .sf-save-conflict-choices { display: flex; gap: 10px; flex-shrink: 0; }
   .sf-save-conflict-choices label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; color: var(--c-text-sub); cursor: pointer; user-select: none; }
   .sf-save-conflict-choices input[type="radio"] { margin: 0; }
+
+  /* ── Preflight finding rows ──────────────────────────────────────────────
+     Reuses the export-conflict row, with one difference: the name is editable,
+     so the name cell stacks a head line (name, pencil, confirm) over a sub line
+     (location, suggestion) instead of being a single ellipsised span. */
+  .preflight-row .sf-save-conflict-name { display: flex; flex-direction: column; gap: 2px;
+                                          white-space: normal; overflow: visible; }
+  .preflight-row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .preflight-row-prefix { font-family: 'Cascadia Code', 'Consolas', monospace;
+                          color: var(--c-text-dim); font-weight: 400; flex-shrink: 0; }
+  .preflight-row-label { font-family: 'Cascadia Code', 'Consolas', monospace; min-width: 0;
+                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .preflight-row-rename { flex: 1 1 auto; min-width: 0; background: var(--c-bg-inset);
+                          color: var(--c-text); border: 1px solid var(--jmt-blue);
+                          border-radius: 3px; padding: 2px 6px; outline: none;
+                          font-size: 0.82rem;
+                          font-family: 'Cascadia Code', 'Consolas', monospace; }
+  .preflight-row-suggest-name { color: var(--c-text); font-weight: 700;
+                                font-family: 'Cascadia Code', 'Consolas', monospace; }
+  .preflight-row-suggest { color: var(--jmt-blue); cursor: pointer; text-decoration: none; }
+  .preflight-row-suggest:hover { text-decoration: underline; }
+  .preflight-row-suggest-taken { color: #4a4; }
   /* Slice 10: source detail modal */
   /* Fixed height MATCHING the entry detail modal exactly — the two swap into
      each other, so identical frames make the swap geometry-invariant, and the
@@ -9762,6 +9798,7 @@ window.runPreflight = async function () {
   let ctx = makeCtx();
   let res = await window.preflight.run(ctx);
 
+
   // A check that threw is a check that said nothing. It must never take the
   // compile with it — the user asked to build, and our inability to read their
   // config is our problem. Logged so it is debuggable rather than invisible.
@@ -9796,14 +9833,99 @@ window.runPreflight = async function () {
   const rowsHtml = (findings) => findings.map((f, i) => {
     const items = (f.items || []).slice(0, 8).map(_preflightEsc).join(', ');
     const more  = (f.items || []).length > 8 ? `, and ${f.items.length - 8} more` : '';
-    const fixBtn = f.fix
-      ? `<div style="margin-top:6px"><button type="button" class="modal-btn-save preflight-fix" `
-        + `data-fix="${i}" style="padding:3px 10px;font-size:12px">${_preflightEsc(f.fix.label)}</button></div>`
+    // ONE BUTTON PER REMEDY, because some findings have more than one right answer and
+    // choosing between them is the user's call. An orphaned define may be a typo to replace, a
+    // leftover to delete, or something to disable while they decide, and the text cannot say
+    // which. Findings with a single remedy render exactly as before.
+    const fixes  = f.fixes && f.fixes.length ? f.fixes : (f.fix ? [f.fix] : []);
+    const fixBtn = fixes.length
+      ? `<div style="margin:6px 0 2px;display:flex;gap:6px;align-items:center;flex-wrap:nowrap">`
+        + fixes.map((fx, j) =>
+            // A remedy that needs a VALUE carries its field in the row rather than behind a
+            // dialog. Seeded with the suggestion when there is one, so taking it is pressing the
+            // button and overriding it is typing first - one control for both. Checks never see
+            // the DOM: they declare `input` and the value arrives as plan()'s second argument.
+            (fx.input
+              ? `<input type="text" class="preflight-fix-input" data-fix="${i}" data-fix-n="${j}" `
+                + `value="${_preflightEsc(fx.input.initial || '')}" `
+                + `placeholder="${_preflightEsc(fx.input.placeholder || '')}" `
+                + `spellcheck="false" autocomplete="off" `
+                + `style="padding:3px 6px;font-size:12px;font-family:'Cascadia Code','Consolas',monospace;`
+                + `width:200px;flex:0 1 200px;background:var(--c-bg-inset);color:var(--c-text);`
+                + `border:1px solid var(--c-border-strong);border-radius:3px">`
+              : '')
+            + `<button type="button" class="modal-btn-save preflight-fix" data-fix="${i}" `
+            + `data-fix-n="${j}" style="padding:3px 10px;font-size:12px">`
+            + `${_preflightEsc(fx.label)}</button>`).join('')
+        + `</div>`
       : '';
-    return `<li style="margin-bottom:10px">`
+    // ONE MESSAGE, A LIST UNDERNEATH. Rows reuse the export-conflict row classes so a list of
+    // things-to-answer looks the same wherever it appears: the name on the left, its controls on
+    // the right. Findings without rows render exactly as before.
+    //
+    // THE NAME IS EDITED IN PLACE, AND THE SUGGESTION IS A SEPARATE OFFER BELOW IT.
+    // `rename` is the user typing a name they chose; `suggest` is one the check proposes and they
+    // take in a click. They stay separate because they are different acts, and leaving the editor
+    // unseeded is the call the sound-font import makes for the same reason. The editor follows the
+    // shared inline pattern: pencil opens an input, check commits. A row may carry either, both,
+    // or neither.
+    const rowsList = (f.rows && f.rows.length)
+      ? `<div class="sf-save-conflict-list" style="margin-top:8px;max-height:46vh">`
+        + f.rows.map((r, ri) => {
+            const d = `data-fix="${i}" data-row="${ri}"`;
+            // WHERE it is rides on the name's tooltip rather than a line of its own. It is
+            // reference information - the row can rename, disable or delete without the user
+            // going to look - so it does not earn a second line under every name.
+            const nameTitle = r.note ? `${r.label} (${r.note})` : r.label;
+            // The row reads as the line it came from. The keyword is STATIC: it is not part of
+            // what the user is correcting, so it stays out of the edit field and out of the
+            // value the plan receives.
+            const head = `<span class="preflight-row-head">`
+              + (r.prefix
+                  ? `<span class="preflight-row-prefix">${_preflightEsc(r.prefix)}</span>`
+                  : '')
+              + `<span class="preflight-row-label" ${d} title="${_preflightEsc(nameTitle)}">`
+              + `${_preflightEsc(r.label)}</span>`
+              + (r.rename
+                  ? `<input type="text" class="preflight-row-rename" ${d} style="display:none" `
+                    + `value="${_preflightEsc(r.label)}" `
+                    + `placeholder="${_preflightEsc(r.rename.placeholder || '')}" `
+                    + `spellcheck="false" autocomplete="off">`
+                    + `<button type="button" class="detail-pencil preflight-row-pencil" ${d} `
+                    + `title="${_preflightEsc(r.rename.hint || 'Correct the name')}">&#9998;</button>`
+                    + `<button type="button" class="detail-confirm preflight-row-confirm" ${d} `
+                    + `title="Apply and re-check" style="display:none">&#10003;</button>`
+                  : '')
+              + `</span>`;
+            // THE SOUND-FONT IMPORT'S SHAPE: the proposed value in bold, and a link that says
+            // what pressing it DOES. A clickable value alone leaves the user to work out that
+            // clicking a word applies it.
+            const sub = r.suggest
+              ? `<span class="sf-save-conflict-sub">`
+                + `Did you mean <strong class="preflight-row-suggest-name">`
+                + `${_preflightEsc(r.suggest.name)}</strong>? `
+                + `<a href="#" class="preflight-row-suggest" ${d}>Apply suggestion</a>`
+                + `</span>`
+              : '';
+            return `<div class="sf-save-conflict-row preflight-row">`
+              + `<span class="sf-save-conflict-name" title="${_preflightEsc(nameTitle)}">`
+              + head + sub + `</span>`
+              + `<span class="sf-save-conflict-choices" style="gap:6px">`
+              + (r.fixes || []).map((fx, j) =>
+                  `<button type="button" class="modal-btn-cancel preflight-fix" data-fix="${i}" `
+                  + `data-row="${ri}" data-fix-n="${j}" style="padding:2px 9px;font-size:12px"`
+                  + (fx.hint ? ` title="${_preflightEsc(fx.hint)}"` : '') + `>`
+                  + `${_preflightEsc(fx.label)}</button>`).join('')
+              + `</span></div>`;
+          }).join('')
+        + `</div>`
+      : '';
+
+    return `<li style="margin-bottom:14px;line-height:1.45">`
       + `<strong>${_preflightEsc(f.title)}</strong>`
       + (items ? `<br><strong>${items}</strong>${more}.` : '')
       + (f.detail ? `<br>${_preflightEsc(f.detail)}` : '')
+      + rowsList
       + fixBtn
       + `</li>`;
   }).join('');
@@ -9822,6 +9944,10 @@ window.runPreflight = async function () {
   // because stopping is the safe answer here and the risky one should not be the
   // thing your hand goes to.
   const paint = () => {
+    // Preflight's own width. promptConfirm toggles `modal-confirm-wide` for four-button rows and
+    // leaves every other class alone, and preflight is a two-button dialog, so the two never
+    // collide. Cleared in the finally below so the next plain confirm is not left wide.
+    modal.querySelector('.modal')?.classList.add('modal-preflight');
     const one = res.findings.length === 1;
     titleEl.textContent = res.blocking
       ? (one ? 'This Config Cannot Compile' : 'This Config Cannot Compile Yet')
@@ -9831,16 +9957,13 @@ window.runPreflight = async function () {
   };
 
   let busy = false;
-  const onFixClick = async (e) => {
-    const btn = e.target.closest('.preflight-fix');
-    if (!btn || busy) return;
-    e.preventDefault();
-    busy = true;
-    btn.disabled = true;
-    btn.textContent = 'Fixing…';
+
+  // Every remedy ends the same way: apply one atomic edit, rebuild the context from the document
+  // as it now is, re-run every check, and repaint. Factored out because three controls reach it —
+  // a remedy button, the rename confirm, and accepting a suggestion.
+  const applyPlan = async (planFn, value) => {
     try {
-      const finding = res.findings[Number(btn.dataset.fix)];
-      const edits = (finding.fix.plan(ctx) || []).map(x => ({
+      const edits = (planFn(ctx, value) || []).map(x => ({
         range: {
           startLineNumber: x.startLine, startColumn: x.startCol + 1,
           endLineNumber:   x.endLine,   endColumn:   x.endCol + 1,
@@ -9864,8 +9987,101 @@ window.runPreflight = async function () {
     paint();
   };
 
+  const _rowOf = (el) => {
+    const finding = res.findings[Number(el.dataset.fix)];
+    const rowIdx  = el.dataset.row === undefined ? null : Number(el.dataset.row);
+    return (rowIdx !== null && finding && finding.rows) ? finding.rows[rowIdx] : null;
+  };
+
+  // The shared inline edit (index.html:3650): the pencil swaps the label for an input and shows
+  // the check; the check commits. Escape reverts and closes without touching the document.
+  const _setEditing = (el, on) => {
+    const sel = `[data-fix="${el.dataset.fix}"][data-row="${el.dataset.row}"]`;
+    const label   = modal.querySelector(`.preflight-row-label${sel}`);
+    const input   = modal.querySelector(`.preflight-row-rename${sel}`);
+    const pencil  = modal.querySelector(`.preflight-row-pencil${sel}`);
+    const confirm = modal.querySelector(`.preflight-row-confirm${sel}`);
+    if (!label || !input) return null;
+    label.style.display   = on ? 'none' : '';
+    input.style.display   = on ? '' : 'none';
+    if (pencil)  pencil.style.display  = on ? 'none' : '';
+    if (confirm) confirm.style.display = on ? '' : 'none';
+    if (on) { input.focus(); input.select(); }
+    return input;
+  };
+
+  const _commitRename = async (el) => {
+    const row   = _rowOf(el);
+    const sel   = `[data-fix="${el.dataset.fix}"][data-row="${el.dataset.row}"]`;
+    const input = modal.querySelector(`.preflight-row-rename${sel}`);
+    if (!row || !row.rename || !input) return;
+    const value = String(input.value || '').trim();
+    // An empty or unchanged name is not an edit. Close the editor and leave the document alone,
+    // rather than rewriting the define to nothing, which would delete it by another route.
+    if (!value || value === row.label) { _setEditing(el, false); return; }
+    busy = true;
+    await applyPlan(row.rename.plan, value);
+  };
+
+  const onFixClick = async (e) => {
+    const pencil = e.target.closest('.preflight-row-pencil');
+    if (pencil) { e.preventDefault(); if (!busy) _setEditing(pencil, true); return; }
+
+    const confirm = e.target.closest('.preflight-row-confirm');
+    if (confirm) { e.preventDefault(); if (!busy) await _commitRename(confirm); return; }
+
+    const suggest = e.target.closest('.preflight-row-suggest');
+    if (suggest) {
+      e.preventDefault();
+      if (busy) return;
+      const row = _rowOf(suggest);
+      if (!row || !row.suggest) return;
+      busy = true;
+      suggest.classList.add('preflight-row-suggest-taken');
+      await applyPlan(row.suggest.plan, row.suggest.name);
+      return;
+    }
+
+    const btn = e.target.closest('.preflight-fix');
+    if (!btn || busy) return;
+    e.preventDefault();
+    busy = true;
+    btn.disabled = true;
+    btn.textContent = 'Fixing…';
+    const finding = res.findings[Number(btn.dataset.fix)];
+    // A row's remedy when the button carries a row index, the finding's otherwise.
+    const rowIdx  = btn.dataset.row === undefined ? null : Number(btn.dataset.row);
+    const fixes   = rowIdx !== null && finding.rows && finding.rows[rowIdx]
+      ? (finding.rows[rowIdx].fixes || [])
+      : ((finding.fixes && finding.fixes.length)
+          ? finding.fixes : (finding.fix ? [finding.fix] : []));
+    const chosen  = fixes[Number(btn.dataset.fixN || 0)] || fixes[0];
+    if (!chosen) { busy = false; btn.disabled = false; return; }
+    await applyPlan(chosen.plan, null);
+  };
+
+  // Enter commits, Escape reverts — the same keys the shared inline edit binds.
+  const onRenameKey = async (e) => {
+    const input = e.target.closest('.preflight-row-rename');
+    if (!input) return;
+    if (e.key === 'Enter')  { e.preventDefault(); if (!busy) await _commitRename(input); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      const row = _rowOf(input);
+      input.value = row ? row.label : input.value;
+      _setEditing(input, false);
+    }
+  };
+
   paint();
   modal.addEventListener('click', onFixClick);
+  modal.addEventListener('keydown', onRenameKey);
+
+  // THIS DIALOG IS THE SUCCESSOR, SO IT CLOSES WHAT CAME BEFORE IT. The compile path raises a
+  // busy overlay on the click and deliberately does not take it down when the checks answer;
+  // doing that would leave a frame of nothing between the two. Closed here, in the same task
+  // that shows this dialog, so both are briefly present and no frame shows neither.
+  hideBusy();
 
   let answer;
   try {
@@ -9885,6 +10101,8 @@ window.runPreflight = async function () {
     });
   } finally {
     modal.removeEventListener('click', onFixClick);
+    modal.removeEventListener('keydown', onRenameKey);
+    modal.querySelector('.modal')?.classList.remove('modal-preflight');
   }
 
   // Two buttons, so promptConfirm is in its plain boolean mode: true = the
@@ -11892,42 +12110,60 @@ document.getElementById('btn-sf-import-sd-empty')?.addEventListener('click', (e)
 // Path-2 on-ramp: read a Proffie SD card, then (next increments) populate the Sound Font
 // Library from it and surface any configs to open. Entry point only for now — the card
 // detection + import + config-surfacing steps are built out next.
-// Self-contained busy overlay for the SD flow (the shared _sfDeleteProgress lives inside
-// the Sound Fonts scope and isn't reachable here). Reuses the global indeterminate-bar CSS.
-function _sdBusy(show, text, opts) {
-  let el = document.getElementById('sd-busy-overlay');
+// THE APP'S BUSY OVERLAY: a small centred card over a dimmed screen, carrying the knight rider
+// bar, one line saying what is happening, and an optional Cancel. Reuses the global
+// indeterminate-bar CSS.
+//
+// Raise it with `showBusy(text, { onCancel })` and take it down with `hideBusy()`. Those two are
+// the API; this is the implementation and callers do not use it directly.
+//
+// It is NOT self-closing. Per the modal handoff rule, the next surface closes this one and
+// only a final state (a cancel, an error with nowhere to go) closes it itself. Hiding it the
+// moment the work finishes leaves a frame of nothing before its successor paints.
+// TWO SIZES, AND THE CANCEL DECIDES WHICH. A mini card is a bar and a label with nothing to
+// press, so it can be small and centred. The moment it carries a button that button belongs
+// bottom-right, where every modal in the app puts it, and a button row needs the room: standard
+// is the width of the font import modal. Centring a lone Cancel under a narrow label is what
+// the one-size version did, and it reads as unfinished.
+function _busyOverlay(show, text, opts) {
+  let el = document.getElementById('app-busy-overlay');
   if (!el && show) {
     el = document.createElement('div');
-    el.id = 'sd-busy-overlay';
-    el.style.cssText = 'position:fixed; inset:0; z-index:11000; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55);';
-    el.innerHTML = '<div style="background:var(--c-bg-raised); border:1px solid var(--c-border); border-radius:8px; padding:22px 28px; text-align:center; color:var(--c-text); min-width:250px;">'
-      + '<div class="sf-import-progress-track" style="margin-bottom:12px;"><div class="sf-import-progress-bar indeterminate"></div></div>'
-      + '<div id="sd-busy-text" style="font-size:0.9rem;"></div>'
-      + '<div id="sd-busy-cancel-wrap" style="margin-top:14px; display:none;"><button class="btn-neutral" id="sd-busy-cancel">Cancel</button></div></div>';
+    el.id = 'app-busy-overlay';
+    el.innerHTML = '<div id="app-busy-card">'
+      + '<div class="sf-import-progress-track"><div class="sf-import-progress-bar indeterminate"></div></div>'
+      + '<div id="app-busy-text"></div>'
+      + '<div id="app-busy-cancel-wrap"><button class="btn-neutral" id="app-busy-cancel">Cancel</button></div></div>';
     document.body.appendChild(el);
   }
   if (!el) return;
   if (show) {
-    const t = document.getElementById('sd-busy-text');
+    const onCancel = opts && opts.onCancel;
+    const t = document.getElementById('app-busy-text');
     if (t) t.textContent = text || 'Working...';
-    // Every open starts indeterminate; a caller with real numbers switches
-    // the bar over via _sdBusyProgress.
+    // Every open starts indeterminate; a caller with real numbers switches the bar over.
     const bar = el.querySelector('.sf-import-progress-bar');
     if (bar) { bar.classList.add('indeterminate'); bar.style.width = ''; }
-    // Optional cancel ([B-348]): a long operation needs a guaranteed exit.
-    // Callers may also update #sd-busy-text live while they wait.
-    const wrap = document.getElementById('sd-busy-cancel-wrap');
-    const btn = document.getElementById('sd-busy-cancel');
-    if (wrap && btn) {
-      const onCancel = opts && opts.onCancel;
-      wrap.style.display = onCancel ? '' : 'none';
-      btn.onclick = onCancel || null;
-    }
+    // A guaranteed exit wherever the wait can outlast the user's patience or fail to end at
+    // all. [B-348] Its presence is also what selects the standard size.
+    const card = document.getElementById('app-busy-card');
+    if (card) card.classList.toggle('standard', !!onCancel);
+    const btn = document.getElementById('app-busy-cancel');
+    if (btn) btn.onclick = onCancel || null;
     el.style.display = 'flex';
   } else {
     el.style.display = 'none';
   }
 }
+
+// The named pair every caller uses. `onCancel` is offered wherever the wait can outlast the
+// user's patience or fail to end at all; without a guaranteed exit the only way out is killing
+// the app. [B-348]
+function showBusy(text, opts) { _busyOverlay(true, text, opts); }
+function hideBusy()           { _busyOverlay(false); }
+window.showBusy = showBusy;
+window.hideBusy = hideBusy;
+
 // `_sdBusyProgress` WAS DELETED HERE, AND ITS ABSENCE IS THE HONEST STATE. [2026-09-23]
 //
 // It was written 2026-09-08 for the catch - "showing indeterminate when it is determinable" -
@@ -11950,10 +12186,10 @@ async function _pickCardOrFolder() {
   let picked = null;
   try { picked = await window.electronAPI.pickFolder(); } catch {}
   if (!picked) return null;
-  _sdBusy(true, 'Scanning files…');
+  showBusy('Scanning files…');
   let result = null;
   try { result = await window.electronAPI.scanPath(picked); } catch {}
-  _sdBusy(false);
+  hideBusy();
   if (result && result.rejected) {
     await promptConfirm({
       title: 'Not an SD card',
@@ -12791,10 +13027,10 @@ async function _sdSyncEjectRow() {
 async function _sdOpenConfigFromCard() {
   const root = _sdActiveRoot();
   if (!root) return;
-  _sdBusy(true, 'Looking for a config...');
+  showBusy('Looking for a config...');
   let configs = [];
   try { configs = await window.electronAPI.findSdConfigs(root); } catch { configs = []; }
-  _sdBusy(false);
+  hideBusy();
   if (!configs || !configs.length) {
     await promptConfirm({ title: 'No config found', message: "JMT Studio didn't find a Proffie config file at the top of this card. If the config lives inside a folder, open it from the file list.", confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
     return;
@@ -12930,12 +13166,12 @@ async function _sdRenderList() {
   // between cards IS the decision the warning exists to inform.
   const need = cards.filter(c => c && !c._execScan && (c.mountPath || c.drive));
   if (need.length) {
-    _sdBusy(true, need.length === 1 ? 'Reading the card…' : 'Reading the cards…');
+    showBusy(need.length === 1 ? 'Reading the card…' : 'Reading the cards…');
     await Promise.all(need.map(async (c) => {
       try { c._execScan = await window.electronAPI.sdExecutables(c.mountPath || c.drive); }
       catch { c._execScan = { files: [], complete: false }; }
     }));
-    _sdBusy(false);
+    hideBusy();
   }
   const body = _sdSetView(title);
   _sdShowOthers(false);
@@ -12968,7 +13204,7 @@ async function _sdRenderBrowse() {
   // before the paint, no recursive folder badges after it, no footer status,
   // no cloud-drive consent gate (there is nothing left to consent to).
   // Corruption is found where the files are read anyway — at import.
-  _sdBusy(true, 'Reading the card…');
+  showBusy('Reading the card…');
   const res = await window.electronAPI.listSdDir(cur.path);
   if (_sdReport.stack[_sdReport.stack.length - 1] !== cur) return; // navigated away while loading
   // THE ONE CARD-WIDE PASS THAT SURVIVES [B-361], and it survives because it opens
@@ -13006,7 +13242,7 @@ async function _sdRenderBrowse() {
   };
   if (res.error) {
     body.innerHTML = summary + crumb + `<div class="sf-entry-files-browser"><div class="sf-entry-files-empty">Couldn't read this folder: ${_sdEsc(res.error)}</div></div>`;
-    wireActions(); _sdWireCrumb(body); document.getElementById('sd-report-overlay')?.classList.add('active'); _sdBusy(false); return;
+    wireActions(); _sdWireCrumb(body); document.getElementById('sd-report-overlay')?.classList.add('active'); hideBusy(); return;
   }
   const isAud = (nm) => /\.(wav|mp3|ogg|flac)$/i.test(nm);
   const isImg = (nm) => /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(nm);
@@ -13216,7 +13452,7 @@ async function _sdRenderBrowse() {
   // already up, e.g. navigating) and drop the overlay, together. This is the
   // only place the report is brought up.
   document.getElementById('sd-report-overlay')?.classList.add('active');
-  _sdBusy(false);
+  hideBusy();
 }
 // Scoped import: scan just the picked folder (a lone font folder = one source)
 // and run it through the same import flow. Mirrors _sdImportFontsFromCard's
@@ -13442,9 +13678,9 @@ async function startSdCardImport(context) {
   // including the two that exist precisely because the user wants FONTS. Defaults to
   // 'config' so the Config Manager caller is unchanged. ([B-245])
   _sdReport.context = (context === 'sfl') ? 'sfl' : 'config';
-  _sdBusy(true, 'Looking for your SD card...');
+  showBusy('Looking for your SD card...');
   try { cards = await window.electronAPI.scanSdCards(); } catch { cards = []; }
-  _sdBusy(false);
+  hideBusy();
   if (!cards || !cards.length) {
     const choose = await promptConfirm({
       title: 'No SD card found',

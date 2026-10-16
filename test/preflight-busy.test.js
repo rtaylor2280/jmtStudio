@@ -237,9 +237,17 @@ ok('_sfWarnSlowWrite is gone, not merely uncalled',
 }
 
 // ── Rule: the busy overlay it leans on still exists ──
-ok('_sdBusy is still the shared indeterminate overlay',
-  /function _sdBusy\(show, text, opts\)/.test(src)
+// Renamed from `_sdBusy` on 2026-10-16 when the compile gate became its second caller: the
+// surface was always general and the name said otherwise. The anchor moved with it and gained
+// the named pair, which is what callers bind to - a rename that left `_busyOverlay` in place
+// but dropped `showBusy` would pass the old assertion while breaking every call site.
+ok('the shared indeterminate overlay still exists',
+  /function _busyOverlay\(show, text, opts\)/.test(src)
   && /sf-import-progress-bar indeterminate/.test(src));
+ok('and callers still reach it through the named pair',
+  /function showBusy\(text, opts\)/.test(src) && /function hideBusy\(\)/.test(src));
+ok('nothing calls the old name',
+  !/\b_sdBusy\s*\(/.test(src));
 
 console.log(failures ? `\npreflight-busy: ${failures} failing` : '\npreflight-busy: all passing');
 process.exit(failures ? 1 : 0);

@@ -680,6 +680,43 @@ async function initBuildPanel() {
   await refreshPorts();
 }
 
+// ── Gate phase ─────────────────────────────────────────
+// Everything between pressing Compile and the build starting: the SD guard, preflight and the
+// dirty prompts. Preflight reads and searches the OS tree over IPC, so the window is long enough
+// to read as a dead click.
+//
+// It raises the app's busy overlay - the small centred card with the knight rider bar and one
+// line of text. Not the build modal: that one carries a log pane and an Abort, and during the
+// gates there is nothing to log and nothing to abort, so it renders as an empty terminal.
+//
+// It also covers the window where a second Compile click was possible: `isBusy` is not set
+// until the build starts, so doCompile's own re-entry guard did not reach the gates.
+//
+// IT CARRIES A CANCEL BECAUSE THIS WAIT CAN FAIL TO END. The checks read and search the OS tree
+// over IPC and neither handler has a timeout (main.js versions:readFile / versions:search), so a
+// search that never answers leaves the user with no way out but killing the app. Cancel cannot
+// abort work already in main; it stops WAITING on it and abandons the build, which is the part
+// the user is asking for.
+//
+// Raising it is this function's job; taking it down is the SUCCESSOR's, per the modal handoff
+// rule - the preflight dialog and the build modal each close it as they paint. The only closes
+// here are terminal ones: a cancel, or a gate the user declined.
+let _gateCancelled = false;
+
+function setGatePhase(on) {
+  if (typeof showBusy !== 'function') return;
+  if (on) {
+    _gateCancelled = false;
+    // "Preparing to compile", not "Checking your config": the window covers the guard, the
+    // checks AND the save prompts, so a label naming only the checking is wrong for the last
+    // third of it. One line names the umbrella; naming the current STEP is what the progress
+    // detail line is for, and this card does not have one.
+    showBusy('Preparing to compile...', { onCancel: () => { _gateCancelled = true; hideBusy(); } });
+  } else {
+    hideBusy();
+  }
+}
+
 // ── Compile ────────────────────────────────────────────
 async function doCompile() {
   if (isBusy) return;
@@ -711,7 +748,7 @@ async function doCompile() {
   const _sdCompile = window.checkMassStorageSafety
     ? await window.checkMassStorageSafety(selectedUsb, 'compile')
     : true;
-  if (!_sdCompile) return; // Cancel from the SD guard
+  if (!_sdCompile || _gateCancelled) { setGatePhase(false); return; } // Cancel from the SD guard
 
   // Preflight registry: every config-truth check we have, run once, reported in
   // ONE dialog. Adding a check is adding an entry to preflight-checks.js — not an
@@ -719,10 +756,16 @@ async function doCompile() {
   //
   // Sits ahead of the dirty check for the same reason the two gates above do: a
   // fix a check offers edits the config, so it must be offered for saving.
+  //
+  // THE WAIT STARTS HERE, NOT AT THE CLICK. This is the only gate that reads the OS tree over
+  // IPC; the guard above reads config text and returns in a frame. Raising the card before it
+  // would put a card on screen for no wait, and would sit under the guard's own dialog if it
+  // had one to show.
+  setGatePhase(true);
   const _preflight = window.runPreflight
     ? await window.runPreflight()
     : true;
-  if (!_preflight) return; // Cancel from the preflight gate
+  if (!_preflight || _gateCancelled) { setGatePhase(false); return; } // Cancel from the preflight gate
 
   // Dirty checks — prompt the user instead of auto-saving. Config first (Save As is
   // offered since the user may want to compile a copy at a new path), then Style
@@ -744,29 +787,37 @@ async function doCompile() {
     // Save As is asked for unconditionally: promptUnsaved suppresses it whenever
     // there is no file path, because "save as" is never valid for something that
     // has never been saved. That rule lives there, once, so every caller gets it.
-    const choice = await window.promptUnsaved(
-      _msg,
-      { saveAs: true, discard: false }
-    );
-    if (choice === 'cancel') return;
+    // The prompt is the SUCCESSOR, so it closes the busy card. Started without awaiting, the
+    // card closed, then the answer awaited - both are briefly present and no frame shows
+    // neither. A clean config reaches here with the card still up, because preflight only
+    // closes it when it has a dialog of its own to show.
+    const _unsaved = window.promptUnsaved(_msg, { saveAs: true, discard: false });
+    hideBusy();
+    const choice = await _unsaved;
+    if (choice === 'cancel') { setGatePhase(false); return; }
     // Cancelling the Save / Save As file picker (or a write failure) bails the
     // compile — same effect as picking Cancel on the dirty modal.
-    if (choice === 'save'   && !await window.doSave())   return;
-    if (choice === 'saveas' && !await window.doSaveAs()) return;
+    if (choice === 'save'   && !await window.doSave())   { setGatePhase(false); return; }
+    if (choice === 'saveas' && !await window.doSaveAs()) { setGatePhase(false); return; }
   }
   if (window._isStylesDirty?.()) {
-    const choice = await window.promptUnsaved(
+    const _stylesUnsaved = window.promptUnsaved(
       'Unsaved changes in Style Library (my_styles.h). Save before compiling?',
       { discard: false }
     );
-    if (choice === 'cancel') return;
+    hideBusy();
+    const choice = await _stylesUnsaved;
+    if (choice === 'cancel') { setGatePhase(false); return; }
     if (choice === 'save')   await window.saveStylesFile();
   }
 
   // Re-read content in case Save As changed the path / metadata.
   const content = window.getEditorContent();
 
+  // The build modal is the successor here, so IT closes the busy overlay rather than the gate
+  // phase closing itself and leaving a hole. Opened first, in the same task.
   showBuildModal('⚙ Compiling');
+  hideBusy();
   const _recompileReason = window.consumeSdRecompileReason?.();
   startCompileHints(_recompileReason || (_sdCompile === 'compile-anyway'
     ? 'Compiling without SD card protection. I have a bad feeling about this…'
