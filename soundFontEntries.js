@@ -60,22 +60,17 @@ function fileHashManifestPath(userData, kind, uuid) {
   return path.join(userData, 'soundFonts', '.filehashes', kind, `${uuid}.json`);
 }
 
-// entryUuid backfill: every library entry needs a per-folder identity so
-// the backup merge step can disambiguate duplicates (Sabine vs Sabine_KT
-// that both came from the same source candidate). Entries created before
-// entryUuid landed get a fresh uuid assigned on first read and persisted
-// to disk so subsequent reads see the same value. The field is treated
-// as immutable once written (see _ENTRY_META_IMMUTABLE below).
+// Every library entry carries a per-folder identity so the backup merge step can disambiguate
+// duplicates (Sabine vs Sabine_KT from the same source candidate). It is assigned at creation,
+// regenerated when an entry is duplicated, and immutable afterwards (see _ENTRY_META_IMMUTABLE).
+//
+// THIS READS AND DOES NOT WRITE. 2026-10-15: assigning a uuid to any entry lacking one and
+// persisting it made a read path write to the user's meta.json. The only entries that could lack
+// one predate the field, and the field predates every release carrying the sound font library at
+// all - v1.7.2 has no soundFontEntries.js.
 function _readEntryMeta(entryDir) {
-  let meta;
-  try { meta = JSON.parse(fs.readFileSync(path.join(entryDir, 'meta.json'), 'utf8')); }
+  try { return JSON.parse(fs.readFileSync(path.join(entryDir, 'meta.json'), 'utf8')); }
   catch { return null; }
-  if (meta && !meta.entryUuid) {
-    meta.entryUuid = crypto.randomUUID();
-    try { fs.writeFileSync(path.join(entryDir, 'meta.json'), JSON.stringify(meta, null, 2)); }
-    catch {}
-  }
-  return meta;
 }
 
 function listEntries(userData) {

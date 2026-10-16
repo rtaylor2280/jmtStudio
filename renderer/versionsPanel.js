@@ -1885,7 +1885,7 @@ async function _vpJmtFlow(v) {
     if (relevant.length > 0) {
       const entries = relevant.map(c => `
         <div style="margin-bottom:8px;">
-          <div style="font-size:0.78rem;font-weight:600;color:var(--c-text);">v${_vpEsc(c.version)}${c.date ? ` <span style="color:var(--c-text-dim);font-weight:400">— ${_vpEsc(c.date)}</span>` : ''}</div>
+          <div style="font-size:0.78rem;font-weight:600;color:var(--c-text);">v${_vpEsc(c.version)}${c.date ? ` <span style="color:var(--c-text-dim);font-weight:400">· ${_vpEsc(c.date)}</span>` : ''}</div>
           <div style="font-size:0.75rem;color:var(--c-text-sub);white-space:pre-wrap;margin-top:2px;">${_vpEsc(c.notes || '').replace(/\n/g, '<br>')}</div>
         </div>`).join('');
       releaseNotesHtml = `

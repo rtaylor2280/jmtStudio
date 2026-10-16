@@ -76,7 +76,7 @@ const stubs = `
 const F = new Function(`${stubs}\n${NAMES.map(lift).join(';\n')};\nreturn { ${NAMES.join(', ')} };`)();
 ok('the three report functions lift and evaluate', NAMES.every(n => typeof F[n] === 'function'));
 
-// ── the input comes from the REAL producer, not from a fixture I shaped ───
+// ── the input comes from the REAL producer, not from a hand-shaped fixture ───
 // A fixture built by hand would agree with whatever the renderer expects. describeSkipConsequence
 // is the function that actually feeds this dialog, so it decides the shape AND the groupKey.
 function buildLibrary() {

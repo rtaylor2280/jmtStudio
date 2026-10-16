@@ -75,7 +75,7 @@ function replay(lines) {
 }
 const find = (rows, rx) => rows.find(r => rx.test(r.line));
 
-// His log, 2026-10-05, verbatim and in order. The run exits 0 and the flash is good.
+// A captured log, 2026-10-05, verbatim and in order. The run exits 0 and the flash is good.
 const SUCCESS = [
   'Download\t[=========================] 100%       427488 bytes',
   'Download done.',

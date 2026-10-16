@@ -43,12 +43,18 @@ const DQ = /"(?:[^"\\\n]|\\.)*"/;
 const BT = /`(?:[^`\\]|\\.)*`/;
 const STR = new RegExp([SQ.source, DQ.source, BT.source].join('|'), 'g');
 
-// Frozen 2026-09-30, after the second pass took 21 fixed to 50 of 65 sites.
-//   · 7 are typographic and deliberately kept (separators, empty-value glyphs, label suffixes).
-//   · 8 are label-plus-qualifier suffixes awaiting a taste call; they are listed on [B-443].
+// LOWERED 15 -> 2 on 2026-10-15, when the thirteen awaiting a taste call got one. What is left
+// is the only two with a reason that is not taste:
+//   · the window TITLE BAR, "<config> — JMT Studio". Every application on both platforms titles
+//     windows this way; it is a platform convention, not prose.
+//   · "— port released for flash —" in the build output. A log-pane rule, where the dashes are
+//     doing visual work rather than joining a sentence.
+// The other thirteen became: "(current)" instead of "— current"; "·" where a dash was separating
+// a label from a value (file size, version date, two gutter tooltips); parentheses around the
+// three qualifier phrases; and the bracket hints became their own sentence.
 // Lower this when real ones are removed. NEVER raise it - raising it is how a ratchet becomes
 // a record of the thing it was built to stop.
-const BASELINE = 15;
+const BASELINE = 2;
 
 let failures = 0;
 function ok(label, cond, detail) {

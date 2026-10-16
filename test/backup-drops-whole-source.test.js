@@ -1,7 +1,7 @@
 /**
  * A dropped item is dropped from the ARCHIVE WALK too, in every bucket.  [B-478]
  *
- * WHY THIS EXISTS, and it is a real defect found by his dev test on 2026-10-13. The export
+ * WHY THIS EXISTS, and it is a real defect found in a dev test on 2026-10-13. The export
  * reached the gate, listed a source as "cannot be backed up", the user agreed, and then the
  * export sat at 806 MB of 1.89 GB forever: zero bytes and zero CPU for ten seconds, parked on
  * a file inside the very source it had promised to leave out.

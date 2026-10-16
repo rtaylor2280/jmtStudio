@@ -1,6 +1,6 @@
 // A failed read over the board must not be reported as a damaged backup.  [B-479]
 //
-// His control is what makes this a defect rather than a guess: the same bytes on the same card
+// A control is what makes this a defect rather than a guess: the same bytes on the same card
 // restored cleanly through a reader and came back "Bad archive" through the saber. The message
 // accuses the one file a person cannot afford to distrust.
 //
