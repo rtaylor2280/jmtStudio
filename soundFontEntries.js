@@ -56,9 +56,8 @@ function ensureEntriesRoot(userData) {
 // export to an SD card. Keyed by uuid: entries/<entryUuid>.json (the live current state
 // of a library font), sources/<sourceUuid>.json (the static source version). See
 // local/sound-font-provenance-design.md §12.4.
-function fileHashManifestPath(userData, kind, uuid) {
-  return path.join(userData, 'soundFonts', '.filehashes', kind, `${uuid}.json`);
-}
+const fileHashManifestPath = (userData, kind, uuid) =>
+  require('./soundFontFileHash').fileHashManifestPath(userData, kind, uuid);
 
 // Every library entry carries a per-folder identity so the backup merge step can disambiguate
 // duplicates (Sabine vs Sabine_KT from the same source candidate). It is assigned at creation,
@@ -963,10 +962,9 @@ async function deleteEntry(userData, name) {
     // THE MANIFEST FOLLOWS THE FOLDER, NOT THIS CALL'S RETURN VALUE. [B-310]
     // A removal that tears the directory down and then throws leaves the folder gone and the
     // manifest behind, and the retry takes the missing-folder return above - so the drop runs
-    // on the error path too, keyed on whether the directory is actually still there. A failure
-    // with the folder intact keeps its hashes, because the entry is still live.
-    if (entryUuid && !fs.existsSync(dir)) {
-      try { fs.rmSync(fileHashManifestPath(userData, 'entries', entryUuid), { force: true }); } catch {}
+    // on the error path too. Shared with the source and common delete paths.
+    if (entryUuid) {
+      require('./soundFontFileHash').dropManifestIfOwnerGone(userData, 'entries', entryUuid, dir);
     }
     if (_rmErr) throw _rmErr;
     // AFTER the folder is gone, never before ([B-316], 2026-09-05). Pooled

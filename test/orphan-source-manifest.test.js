@@ -49,7 +49,7 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   ok('and takes the manifest with it', !manifestExists('aaa'));
 }
 
-// ── 🚨 THE CASE THAT WAS PERMANENT ────────────────────────────────────────
+// ── THE CASE THAT WAS PERMANENT ────────────────────────────────────────
 {
   mkSource('bbb', { withDir: false });   // folder already gone, manifest stranded
   ok('fixture: a stranded manifest with no source folder', manifestExists('bbb')
@@ -57,7 +57,7 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   const r = sources.deleteSource(root, 'bbb');
   ok('delete still reports ok with nothing to remove', !!(r && r.ok && r.deleted === false),
      JSON.stringify(r));
-  ok('🚨 and the stranded manifest is reclaimed anyway', !manifestExists('bbb'),
+  ok('and the stranded manifest is reclaimed anyway', !manifestExists('bbb'),
      'this is the case that could never be cleaned: the early return fired first');
 }
 
@@ -66,7 +66,7 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   mkSource('ccc');                          // healthy
   mkSource('ddd', { withDir: false });      // orphan
 
-  // 🚨 AN ENTRY'S MANIFEST IS KEYED BY ITS entryUuid, NOT BY ITS FOLDER NAME. The folder is
+  // AN ENTRY'S MANIFEST IS KEYED BY ITS entryUuid, NOT BY ITS FOLDER NAME. The folder is
   // called Live_Font and the manifest is <uuid>.json. Comparing manifests against folder names
   // calls every live entry an orphan - measured against a real library mid-build: 25 live,
   // 25 manifests, and all 25 reported as orphaned. A remove pass on that reading empties the
@@ -85,25 +85,25 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   ok('the healthy source is not', !found.sources.map((x) => x.uuid).includes('ccc'));
   ok('the orphaned entry is found', found.entries.map((x) => x.uuid).includes(GONE_UUID),
      JSON.stringify(found.entries));
-  ok('🚨 and the LIVE entry is not, though its folder name matches no manifest',
+  ok('and the LIVE entry is not, though its folder name matches no manifest',
      !found.entries.map((x) => x.uuid).includes(LIVE_UUID)
      && !found.skipped.some((s) => /entries/.test(s)),
      `entries=${JSON.stringify(found.entries)} skipped=${JSON.stringify(found.skipped)}`);
 
-  // 🚨 REPORTING IS NOT REMOVING. A diagnostic that deletes as a side effect of running is
+  // REPORTING IS NOT REMOVING. A diagnostic that deletes as a side effect of running is
   // how a measurement becomes an incident.
-  ok('🚨 a plain call removes nothing', manifestExists('ddd') && found.removed === 0,
+  ok('a plain call removes nothing', manifestExists('ddd') && found.removed === 0,
      'the default must be a report');
 
   const swept = sources.findOrphanManifests(root, { remove: true });
   ok('and remove:true reclaims them', swept.removed === 2 && !manifestExists('ddd'),
      `removed=${swept.removed}`);
-  ok('🚨 leaving the healthy ones alone', manifestExists('ccc')
+  ok('leaving the healthy ones alone', manifestExists('ccc')
      && fs.existsSync(path.join(manEnt, `${LIVE_UUID}.json`)),
      'a live entry losing its manifest to the sweep is the worst outcome available here');
 }
 
-// ── 🚨 AN UNREADABLE OR EMPTY OWNER SIDE MUST NOT CONDEMN THE STORE ───────
+// ── AN UNREADABLE OR EMPTY OWNER SIDE MUST NOT CONDEMN THE STORE ───────
 // If the live folder cannot be read, every manifest looks orphaned. A remove pass on that
 // reading would take the entire store, which is the worst possible outcome of a cleanup.
 {
@@ -115,7 +115,7 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   fs.writeFileSync(path.join(m2, 'fff.json'), '{}');
 
   const r = sources.findOrphanManifests(root2, { remove: true });
-  ok('🚨 an empty live side with manifests present is refused, not swept',
+  ok('an empty live side with manifests present is refused, not swept',
      r.removed === 0 && r.sources.length === 0,
      JSON.stringify(r));
   // The substance, not the count: a later addition that records another skip is not a
@@ -127,7 +127,7 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   fs.rmSync(root2, { recursive: true, force: true });
 }
 
-// ── 🚨 AN ENTRY WHOSE OWNER CANNOT BE IDENTIFIED STOPS THE WHOLE SIDE ─────
+// ── AN ENTRY WHOSE OWNER CANNOT BE IDENTIFIED STOPS THE WHOLE SIDE ─────
 // Not hypothetical: the real dev library has a `Dark_Beskar_2` folder with no meta.json, so
 // its entryUuid is unknowable. A folder like that could own ANY manifest in the store, so
 // there is no safe way to call anything there an orphan. Refuse the side and say so.
@@ -143,7 +143,7 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   fs.writeFileSync(path.join(man3, 'uuid-mystery.json'), '{}');
 
   const r = sources.findOrphanManifests(r3, { remove: true });
-  ok('🚨 an unidentifiable owner refuses the entries side',
+  ok('an unidentifiable owner refuses the entries side',
      r.entries.length === 0 && r.removed === 0,
      JSON.stringify(r));
   ok('and names the reason',
@@ -153,7 +153,7 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   fs.rmSync(r3, { recursive: true, force: true });
 }
 
-// ── 🚨 "I COULD NOT LOOK" IS NOT "NOTHING IS WRONG" ───────────────────────
+// ── A STORE THAT COULD NOT BE READ IS NOT A STORE THAT IS CLEAN ───────────────────
 // A missing store and a clean store both produce an empty list. Only one of them means the
 // library is healthy, and reading the other as an answer is how a mistyped path becomes a
 // confident all-clear.
@@ -161,12 +161,12 @@ const manifestExists = (uuid) => fs.existsSync(path.join(manSrc, `${uuid}.json`)
   const r4 = fs.mkdtempSync(path.join(os.tmpdir(), 'b310d-'));
   fs.mkdirSync(path.join(r4, 'soundFonts', 'sources'), { recursive: true });
   const r = sources.findOrphanManifests(r4);
-  ok('🚨 a missing manifest store is reported, not passed over',
+  ok('a missing manifest store is reported, not passed over',
      r.skipped.some((s) => /no manifest store at/.test(s)), JSON.stringify(r.skipped));
   fs.rmSync(r4, { recursive: true, force: true });
 }
 
-// ── 🚨 THE ENTRY SIDE: THE MANIFEST FOLLOWS THE FOLDER, NOT THE RETURN VALUE ──
+// ── THE ENTRY SIDE: THE MANIFEST FOLLOWS THE FOLDER, NOT THE RETURN VALUE ──
 // `deleteEntry` dropped the manifest only on its success path, so a removal that tore the
 // directory down and then threw left the manifest behind - and the retry took the
 // missing-folder early return, making it permanent. That is the shape of the 2026-10-15 bulk
@@ -210,7 +210,7 @@ async function entryChecks() {
     ok('fixture: the folder really is gone', !fs.existsSync(dir));
     ok('a removal that throws after tearing the folder down reports failure',
        !!(r && r.ok === false), JSON.stringify(r));
-    ok('🚨 and the manifest goes anyway', !entManExists(),
+    ok('and the manifest goes anyway', !entManExists(),
        'this is the case the 10-15 bulk delete left behind');
   }
 
@@ -226,14 +226,98 @@ async function entryChecks() {
     finally { fs.promises.rm = realRm; }
     ok('fixture: the folder survived the failed removal', fs.existsSync(dir));
     ok('a failed removal reports failure', !!(r && r.ok === false), JSON.stringify(r));
-    ok('🚨 and a LIVE entry keeps its manifest', entManExists(),
+    ok('and a LIVE entry keeps its manifest', entManExists(),
        'the folder is intact, so the entry still owns its hashes');
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(path.join(manEnt, `${ENT_UUID}.json`), { force: true });
   }
 }
 
-entryChecks().catch((err) => { failures++; console.log('FAIL  entry checks threw', err); })
+// ── THE THIRD BUCKET ──────────────────────────────────────────────────────────────
+// `sources`, `entries` and `commons` all carry manifests. A sweep over two of them reports a
+// clean store while the third accumulates; the dev library held 16 manifests under `commons`.
+{
+  const r5 = fs.mkdtempSync(path.join(os.tmpdir(), 'b310e-'));
+  const com5 = path.join(r5, 'soundFonts', 'common');
+  const man5 = path.join(r5, 'soundFonts', '.filehashes', 'commons');
+  fs.mkdirSync(path.join(com5, 'live-common-uuid'), { recursive: true });
+  fs.mkdirSync(man5, { recursive: true });
+  fs.writeFileSync(path.join(man5, 'live-common-uuid.json'), '{}');
+  fs.writeFileSync(path.join(man5, 'gone-common-uuid.json'), '{}');
+
+  const found = sources.findOrphanManifests(r5);
+  ok('the commons bucket is swept at all',
+     !found.skipped.some((s) => /commons.*no manifest store/.test(s)), JSON.stringify(found.skipped));
+  ok('the orphaned common manifest is found',
+     found.commons && found.commons.map((x) => x.uuid).includes('gone-common-uuid'),
+     JSON.stringify(found.commons));
+  ok('and the live one is left alone',
+     !(found.commons || []).map((x) => x.uuid).includes('live-common-uuid'));
+
+  const swept = sources.findOrphanManifests(r5, { remove: true });
+  ok('remove:true reclaims it', swept.removed === 1
+     && !fs.existsSync(path.join(man5, 'gone-common-uuid.json'))
+     && fs.existsSync(path.join(man5, 'live-common-uuid.json')), `removed=${swept.removed}`);
+  fs.rmSync(r5, { recursive: true, force: true });
+}
+
+// ── COMMON DELETE OBEYS THE SAME RULE AS THE OTHER TWO ──────────────────────────
+async function commonChecks() {
+  const common = require(path.join(__dirname, '..', 'soundFontCommon.js'));
+  const r6 = fs.mkdtempSync(path.join(os.tmpdir(), 'b310f-'));
+  const com6 = path.join(r6, 'soundFonts', 'common');
+  const man6 = path.join(r6, 'soundFonts', '.filehashes', 'commons');
+  fs.mkdirSync(com6, { recursive: true });
+  fs.mkdirSync(man6, { recursive: true });
+  const mk = (uuid, withDir = true) => {
+    if (withDir) {
+      fs.mkdirSync(path.join(com6, uuid), { recursive: true });
+      fs.writeFileSync(path.join(com6, uuid, 'hum.wav'), 'x');
+    }
+    fs.writeFileSync(path.join(man6, `${uuid}.json`), '{}');
+  };
+  const has = (uuid) => fs.existsSync(path.join(man6, `${uuid}.json`));
+
+  mk('c-normal');
+  common.deleteCommon(r6, 'c-normal');
+  ok('an ordinary common delete takes its manifest', !has('c-normal'));
+
+  mk('c-stranded', false);                      // folder already gone
+  ok('fixture: a stranded commons manifest', has('c-stranded'));
+  const r = common.deleteCommon(r6, 'c-stranded');
+  ok('delete reports ok with nothing to remove', !!(r && r.ok && r.deleted === false), JSON.stringify(r));
+  ok('and the stranded commons manifest is reclaimed', !has('c-stranded'),
+     'before this the early return fired first and nothing could ever clean it');
+
+  fs.rmSync(r6, { recursive: true, force: true });
+}
+
+// ── THE SHARED RULE ITSELF, INCLUDING THE CASE THAT MUST NOT FIRE ───────────────
+// One function now carries this for all three buckets, so the control belongs with it: an
+// owner whose folder is still standing is LIVE and keeps its hashes. A version that drops
+// whenever it is called passes every other assertion in this file.
+{
+  const fh = require(path.join(__dirname, '..', 'soundFontFileHash.js'));
+  const r7 = fs.mkdtempSync(path.join(os.tmpdir(), 'b310g-'));
+  const owner = path.join(r7, 'soundFonts', 'sources', 'zzz');
+  const man7 = path.join(r7, 'soundFonts', '.filehashes', 'sources');
+  fs.mkdirSync(owner, { recursive: true });
+  fs.mkdirSync(man7, { recursive: true });
+  fs.writeFileSync(path.join(man7, 'zzz.json'), '{}');
+
+  const kept = fh.dropManifestIfOwnerGone(r7, 'sources', 'zzz', owner);
+  ok('an owner that still exists keeps its manifest',
+     kept === false && fs.existsSync(path.join(man7, 'zzz.json')),
+     'dropping here throws away a live item\'s hashes');
+
+  fs.rmSync(owner, { recursive: true, force: true });
+  const dropped = fh.dropManifestIfOwnerGone(r7, 'sources', 'zzz', owner);
+  ok('and once the owner is gone it is dropped',
+     dropped === true && !fs.existsSync(path.join(man7, 'zzz.json')));
+  fs.rmSync(r7, { recursive: true, force: true });
+}
+
+entryChecks().then(commonChecks).catch((err) => { failures++; console.log('FAIL  entry/common checks threw', err); })
   .then(() => {
     fs.rmSync(root, { recursive: true, force: true });
     console.log(failures ? `\n${failures} FAILURE(S)` : '\nall B-310 checks passed');

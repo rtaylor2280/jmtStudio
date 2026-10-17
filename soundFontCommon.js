@@ -759,6 +759,12 @@ function _linkOrCopyDirRecursive(srcDir, destDir, blocked, relBase) {
 function deleteCommon(userData, uuid) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   const dir = path.join(commonRoot(userData), uuid);
+  const _dropManifest = () =>
+    require('./soundFontFileHash').dropManifestIfOwnerGone(userData, 'commons', uuid, dir);
+  // ABOVE THE EXISTENCE GUARD, same as the source and entry paths. [B-310]
+  // With the folder already gone by any other route, every later call took the return below
+  // and the manifest could never be reclaimed.
+  _dropManifest();
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
   try {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -766,9 +772,11 @@ function deleteCommon(userData, uuid) {
     // common is the receipt-nobody-points-at mistake the source side already
     // fixed once. The SOURCE is deliberately left alone: cleanupOrphanSources
     // reclaims it on the next pass if nothing else references it.
-    try { fs.rmSync(path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`), { force: true }); } catch {}
+    _dropManifest();
     return { ok: true, deleted: true };
   } catch (err) {
+    // The removal may have torn the directory down before it threw.
+    _dropManifest();
     return { ok: false, error: String(err && err.message || err) };
   }
 }

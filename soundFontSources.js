@@ -1008,11 +1008,11 @@ function deleteSource(userData, uuid) {
   // Measured 2026-10-16 on the dev library: 29 source folders, 30 manifests. The orphan was
   // two days old, so this was still producing them rather than being old debris.
   //
-  // Safe to run unconditionally: `rmSync` with force does nothing when the file is absent,
-  // and a manifest whose source folder is gone has no reader. `_loadSourceBreadcrumb` only
-  // reaches the central store for a uuid it was handed, and a caller only has a uuid it got
-  // from a source that exists.
-  removeSourceManifest(userData, uuid);
+  // Keyed on the folder being ABSENT rather than dropped unconditionally: a removal that fails
+  // with the directory still standing leaves a live source, and a live source keeps its hashes.
+  // 19 of 159 sources carry no in-folder breadcrumb copy, so for those the central store is the
+  // only one there is.
+  require('./soundFontFileHash').dropManifestIfOwnerGone(userData, 'sources', uuid, dir);
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
   try {
     // RELEASE THE ATTACHMENTS FIRST, WHILE THE META STILL EXISTS TO NAME THEM.
@@ -1036,10 +1036,10 @@ function deleteSource(userData, uuid) {
       }
     } catch { /* no meta, or unreadable: nothing to release */ }
     fs.rmSync(dir, { recursive: true, force: true });
-    // Already dropped above, before the existence guard. Kept as a second call rather than
-    // removed: it costs one no-op rmSync and it means a future edit that moves the folder
-    // removal around cannot strand the manifest again.
-    removeSourceManifest(userData, uuid);
+    // The call above the existence guard could not fire while the folder was still standing,
+    // so this is the one that drops it on the ordinary path. Kept as a second call rather than
+    // the only one: a future edit that moves the folder removal around cannot strand it again.
+    require('./soundFontFileHash').dropManifestIfOwnerGone(userData, 'sources', uuid, dir);
     return { ok: true, deleted: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -2971,9 +2971,8 @@ function openSourceAtPath(absPath) {
 // ── Per-file source manifest (static provenance) ───────────────────────────
 // Central per-file manifest path (mirrors the entries helper in soundFontEntries;
 // kept here too so sources manage their own manifests without a cross-require).
-function fileHashManifestPath(userData, kind, uuid) {
-  return path.join(userData, 'soundFonts', '.filehashes', kind, `${uuid}.json`);
-}
+const fileHashManifestPath = (userData, kind, uuid) =>
+  require('./soundFontFileHash').fileHashManifestPath(userData, kind, uuid);
 
 // Build (once) the STATIC comprehensive per-file manifest for a source: EVERY file in
 // the source — extras, tracks, all variants, non-Proffie content — keyed by its path
@@ -3098,7 +3097,7 @@ function removeSourceManifest(userData, sourceUuid) {
 // a remove pass would take the lot. So an unreadable owner side aborts that kind rather than
 // reporting its whole store as garbage.
 function findOrphanManifests(userData, { remove = false } = {}) {
-  const out = { sources: [], entries: [], removed: 0, skipped: [] };
+  const out = { sources: [], entries: [], commons: [], removed: 0, skipped: [] };
   const KINDS = [
     // A source's folder name IS its uuid.
     { kind: 'sources', liveDir: sourcesRoot(userData), ownerKey: (dirName) => dirName },
@@ -3112,6 +3111,10 @@ function findOrphanManifests(userData, { remove = false } = {}) {
           return (m && m.entryUuid) || null;
         } catch { return null; }
       } },
+    // A common folder's name IS its uuid, like a source. Three buckets carry manifests; a
+    // sweep over two of them reports a clean store while the third accumulates unchecked.
+    { kind: 'commons', liveDir: path.join(userData, 'soundFonts', 'common'),
+      ownerKey: (dirName) => dirName },
   ];
   for (const { kind, liveDir, ownerKey } of KINDS) {
     const store = path.join(userData, 'soundFonts', '.filehashes', kind);

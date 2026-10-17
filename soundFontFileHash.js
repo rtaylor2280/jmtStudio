@@ -372,6 +372,31 @@ function readFileHashManifest(filePath) {
   } catch { return null; }
 }
 
+// The central store's path for one item's manifest. Three buckets, all keyed by uuid:
+// `sources`, `entries`, `commons`.
+function fileHashManifestPath(userData, kind, uuid) {
+  return path.join(userData, 'soundFonts', '.filehashes', kind, `${uuid}.json`);
+}
+
+// Drop an item's manifest when its folder is gone, for a delete path. [B-310]
+//
+// THE MANIFEST'S LIFETIME FOLLOWS THE FOLDER, NOT THE CALLER'S RETURN VALUE. A removal that
+// tears the directory down and then throws leaves the folder gone and the manifest behind,
+// and the retry takes the caller's missing-folder early return, so the leftover is permanent.
+// An owner whose folder is still standing keeps its manifest, because that item is still live.
+//
+// One function rather than one per bucket: the rule was written three different ways across
+// sources, entries and commons, and two of the three got it wrong in a different place.
+// Returns true when a manifest was removed.
+function dropManifestIfOwnerGone(userData, kind, uuid, ownerDir) {
+  if (!userData || !kind || !uuid || !ownerDir) return false;
+  try { if (fs.existsSync(ownerDir)) return false; } catch { return false; }
+  try {
+    fs.rmSync(fileHashManifestPath(userData, kind, uuid), { force: true });
+    return true;
+  } catch { return false; }
+}
+
 // Convenience: hash every top-level child directory inside `bucketRoot`
 // and return a { name: hash } map. The export pass uses this once per
 // bucket (sources, library, common) so the renderer's progress UI can
@@ -447,4 +472,5 @@ function dirSignals(root, excludeFn) {
 module.exports = {
   uniqueFileHashes, hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
   hashRecords, hashFile: _hashFile, hashFileAsync, copyFileHashing, writeFileHashManifest, readFileHashManifest, breathe,
+  fileHashManifestPath, dropManifestIfOwnerGone,
   dirSignals };
