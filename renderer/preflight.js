@@ -290,7 +290,10 @@
           // A finding that covers several items the user must answer SEPARATELY carries rows:
           // one message, a list underneath, each row with its own remedies. The alternative -
           // one finding per item - repeats the explanation once per row and buries the single
-          // fact they all share. Shape: { label, note, fixes }.
+          // fact they all share.
+          // Shape: { label, note, fixes } plus the optional `prefix` (static text before the
+          // label), `rename` (an inline editor for the label) and `suggest` (a proposed value
+          // the user can accept in one click).
           rows:     Array.isArray(f.rows) ? f.rows.filter(Boolean) : [],
           kind:     f.kind || null,
         });

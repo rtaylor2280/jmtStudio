@@ -404,7 +404,7 @@
             // phrase - which is what the entry asked for. The 'no prop is included' title below
             // already said "but", so the house style was right in one place and not the others.
             + `${one ? 'this preset does' : `${missing.length} presets do`} not list a shared folder.`,
-          detail: `Unless ${one ? 'that font contains' : 'those fonts contain'} their own copy of the `
+          detail: `Unless ${one ? 'that font contains its' : 'those fonts contain their'} own copy of the `
             + `voicepack, the saber will announce "voice pack not found" every time you switch to `
             + `${one ? 'it' : 'them'}. ${cardLine}`,
           items: missing.map(p => p.label ? `${p.font} (${p.label})` : p.font),
