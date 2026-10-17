@@ -95,6 +95,22 @@ function _hashFile(absPath) {
 // importSource, which is within 45ms of the ~5s at which Windows greys the window and offers to
 // kill the app. Yielding lets the loop pump between files.
 //
+// WHAT COUNTS AS CONTENT, FOR EVERY WALKER. The record walk and the freshness signal walk
+// both ask this, because they have to agree: the signals decide whether the manifest is
+// stale, so a file one of them counts and the other does not makes a folder permanently
+// describe a different set from the one measured to validate it.
+//   · meta.json AT THE ITEM ROOT ONLY. Nested meta.json files (rare - some vendors ship them
+//     in subfolders) are real content and stay in the hash.
+//   · `*.dedupe-tmp`, at any depth. The restore deduper links to that name and renames; a
+//     rename that fails leaves the temp behind, where it reads as a file the source does not
+//     have - a file the user never added, reported as their own edit. One survived on a real
+//     library from 2026-10-07 inside a common folder.
+function _isContentFile(name, relDir) {
+  if (relDir === '' && name === 'meta.json') return false;
+  if (name.endsWith('.dedupe-tmp')) return false;
+  return true;
+}
+
 // THE ALTERNATIVE WAS A SECOND WALKER, AND IT WAS THE WRONG ANSWER. The exclusion rules here
 // are load-bearing and fiddly — root-only meta.json, the empty-dir marker, the
 // only-child-was-excluded edge case, the streaming threshold — and a copy of them would agree on
@@ -122,10 +138,7 @@ function* _walkRecords(absDir, relDir, onFile, filter) {
         continue;
       }
       if (!e.isFile()) continue; // skip symlinks, sockets, etc. — irrelevant for SF
-      // Per-item meta.json exclusion: at the ITEM ROOT only. Nested
-      // meta.json files (rare — some vendors ship them in subfolders)
-      // are real content and stay in the hash.
-      if (relDir === '' && e.name === 'meta.json') continue;
+      if (!_isContentFile(e.name, relDir)) continue;
       sawAnything = true;
       let size = 0;
       try { size = fs.statSync(absChild).size; } catch {}
@@ -372,6 +385,55 @@ function readFileHashManifest(filePath) {
   } catch { return null; }
 }
 
+// Compare a WORKING COPY against the SOURCE SUBTREE it came from. [B-493]
+//
+// A source is the immutable origin; a working copy is the editable thing derived from it -
+// a font entry in one case, a common folder in the other. The relationship is the same for
+// both, so the comparison is written once here and the callers supply only their own
+// metadata. Two mechanisms that agree today is how those two drifted apart to begin with.
+//
+// `subPath` is the working copy's path within the source (an entry's candidatePath, a
+// common's sourceSubPath). Source records are archive-relative, so stripping that prefix
+// lines the two sides up. Verified on real data 2026-10-17 across 15 commons: 222 records
+// and 222 records, names and hashes equal on 14, and the fifteenth disagreement was a
+// leftover temp file rather than a mismatch in the model.
+//
+// EMPTY-DIR MARKERS ARE NOT CONTENT on either side ([B-342]). The item walker records an
+// empty directory; the source manifest walker does not. Diffing them verbatim reports every
+// vendor's empty effect folder as an addition the moment it is imported.
+//
+// Returns { known, added, removed, changed, addedKeys, removedKeys, changedKeys }.
+// `known: false` means the comparison could not be made and a caller must show NOTHING:
+// an item wrongly flagged as the user's own work is worse than an unflagged one.
+function diffAgainstSource(liveRecords, sourceRecords, subPath) {
+  const none = { known: false, added: 0, removed: 0, changed: 0,
+                 addedKeys: [], removedKeys: [], changedKeys: [] };
+  if (!Array.isArray(liveRecords) || !Array.isArray(sourceRecords)) return none;
+  const sub = String(subPath || '');
+  const pfx = sub ? sub + '/' : '';
+  const src = new Map();
+  for (const r of sourceRecords) {
+    if (!r || r.fileHash === '<empty>') continue;
+    const rp = String(r.relPath || '');
+    if (pfx && !rp.startsWith(pfx)) continue;
+    src.set(rp.slice(pfx.length), r.fileHash);
+  }
+  // No records under that path at all: the manifest predates this source's shape, or the
+  // subtree is not a plain one. Cannot tell, which is not the same as unchanged.
+  if (src.size === 0) return none;
+  const live = new Map(liveRecords
+    .filter((r) => r && r.fileHash !== '<empty>')
+    .map((r) => [String(r.relPath || ''), r.fileHash]));
+  const addedKeys = [], removedKeys = [], changedKeys = [];
+  for (const [k, h] of live) {
+    if (!src.has(k)) addedKeys.push(k);
+    else if (src.get(k) !== h) changedKeys.push(k);
+  }
+  for (const k of src.keys()) if (!live.has(k)) removedKeys.push(k);
+  return { known: true, added: addedKeys.length, removed: removedKeys.length,
+           changed: changedKeys.length, addedKeys, removedKeys, changedKeys };
+}
+
 // The central store's path for one item's manifest. Three buckets, all keyed by uuid:
 // `sources`, `entries`, `commons`.
 function fileHashManifestPath(userData, kind, uuid) {
@@ -461,7 +523,9 @@ function dirSignals(root, excludeFn) {
       if (excludeFn && !excludeFn(childRel)) continue;
       if (e.isDirectory()) { stack.push({ abs: childAbs, rel: childRel }); continue; }
       if (!e.isFile()) continue;
-      if (rel === '' && e.name === 'meta.json') continue;
+      // The same predicate the record walk uses - see _isContentFile. These two must agree,
+      // or the freshness check validates a different set from the one the manifest describes.
+      if (!_isContentFile(e.name, rel)) continue;
       fileCount++;
       try { totalBytes += fs.statSync(childAbs).size; } catch {}
     }
@@ -472,5 +536,6 @@ function dirSignals(root, excludeFn) {
 module.exports = {
   uniqueFileHashes, hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
   hashRecords, hashFile: _hashFile, hashFileAsync, copyFileHashing, writeFileHashManifest, readFileHashManifest, breathe,
-  fileHashManifestPath, dropManifestIfOwnerGone,
+  fileHashManifestPath, dropManifestIfOwnerGone, diffAgainstSource,
+  isContentFile: _isContentFile,
   dirSignals };

@@ -1952,12 +1952,15 @@ function _walkContentSignals(entryDir) {
     let entries;
     try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
     catch { return; }
+    // The freshness signals and the per-file manifest must count the same set, or the
+    // signals validate a manifest describing something else. One predicate, shared.
+    const isContent = require('./soundFontFileHash').isContentFile;
     for (const e of entries) {
-      if (!relBase && e.name === 'meta.json') continue;
       const abs = path.join(absDir, e.name);
       if (e.isDirectory()) {
         walk(abs, relBase ? `${relBase}/${e.name}` : e.name);
       } else if (e.isFile()) {
+        if (!isContent(e.name, relBase || '')) continue;
         fileCount++;
         try { totalBytes += fs.statSync(abs).size; } catch {}
       }
@@ -2428,32 +2431,14 @@ function getEntryCustomization(userData, entryName) {
     || readFileHashManifest(fileHashManifestPath(userData, 'sources', meta.sourceUuid));
   if (!sm || !Array.isArray(sm.records)) return unknown;
 
-  const cp = String(meta.candidatePath || '');
-  const pfx = cp ? cp + '/' : '';
-  // EMPTY-DIR MARKERS ARE NOT CONTENT ([B-342]). The entry walker records an
-  // empty directory as a '<empty>' marker; the source manifest walker records
-  // nothing for it. Diffing the two verbatim made every font whose vendor
-  // ships empty effect folders read "Customized: 2 added" the moment it was
-  // imported — Testing hit it on Volatile (empty bgndrag/ + enddrag/ in the
-  // vendor's own Proffie folder) on the first [B-311] dev pass, and a fresh
-  // copy-from-source lit up the same way. Filtered on BOTH sides so the answer
-  // cannot depend on which walker wrote which manifest. An empty folder the
-  // user adds is invisible to the marker, deliberately: no audio, no
-  // customization — and the export still carries it via the marker records.
-  const src = new Map();
-  for (const r of sm.records) {
-    if (!r || r.fileHash === '<empty>') continue;
-    const rp = String(r.relPath || '');
-    if (pfx && !rp.startsWith(pfx)) continue;
-    src.set(rp.slice(pfx.length), r.fileHash);
-  }
-  // No records under that path at all: the manifest predates this source's shape, or
-  // the candidate is not a plain subtree. Cannot tell.
-  if (src.size === 0) return unknown;
+  // The working-copy-against-source comparison is shared with common folders ([B-493]):
+  // same relationship, same rule, one copy. Empty-dir markers are filtered inside it on
+  // both sides ([B-342]) - diffing them verbatim made every font whose vendor ships empty
+  // effect folders read as customized the moment it was imported.
+  const { diffAgainstSource } = require('./soundFontFileHash');
+  const d = diffAgainstSource(em.records, sm.records, meta.candidatePath);
+  if (!d.known) return unknown;
 
-  const lib = new Map(em.records
-    .filter(r => r && r.fileHash !== '<empty>')  // same rule as the source side ([B-342])
-    .map(r => [String(r.relPath || ''), r.fileHash]));
   // TRACKS ARE THEIR OWN STATE, not an exclusion (2026-09-03:
   // "Customized (tracks only)"). Measured on a real library the day this was built:
   // 50 of 220 entries differ from their source, and 31 of those differ ONLY by
@@ -2461,16 +2446,14 @@ function getEntryCustomization(userData, entryName) {
   // font files. Folding them in makes the marker common and therefore ignorable;
   // dropping them hides a real difference that an export still has to carry. So it
   // reports WHICH, and the label says which.
+  // ENTRY-ONLY: a common folder has no tracks/ convention, which is why this stays
+  // here rather than moving into the shared comparison.
   const isTrack = (k) => k === 'tracks' || k.startsWith('tracks/');
-  let added = 0, removed = 0, changed = 0, nonTrack = 0;
-  for (const [k, h] of lib) {
-    if (!src.has(k)) { added++; if (!isTrack(k)) nonTrack++; }
-    else if (src.get(k) !== h) { changed++; if (!isTrack(k)) nonTrack++; }
-  }
-  for (const k of src.keys()) if (!lib.has(k)) { removed++; if (!isTrack(k)) nonTrack++; }
-  const customized = (added + removed + changed) > 0;
+  const nonTrack = [...d.addedKeys, ...d.removedKeys, ...d.changedKeys]
+    .filter((k) => !isTrack(k)).length;
+  const customized = (d.added + d.removed + d.changed) > 0;
   return stamp({
-    ok: true, known: true, customized, added, removed, changed,
+    ok: true, known: true, customized, added: d.added, removed: d.removed, changed: d.changed,
     // Only meaningful when customized. True = every difference is in tracks/.
     tracksOnly: customized && nonTrack === 0,
   });

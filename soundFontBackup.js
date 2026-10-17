@@ -1717,8 +1717,17 @@ function _makeContentDeduper(userData) {
         // link, never a hole where the file should be. Same shape ingestFile uses.
         const tmp = `${target}.dedupe-tmp`;
         try { fs.rmSync(tmp, { force: true }); } catch {}
-        fs.linkSync(existing, tmp);
-        fs.renameSync(tmp, target);
+        try {
+          fs.linkSync(existing, tmp);
+          fs.renameSync(tmp, target);
+        } finally {
+          // THE TEMP DOES NOT OUTLIVE THE ATTEMPT. A link that succeeds and a rename that
+          // fails leaves the extracted file correct and the temp beside it, where it reads
+          // as a file the source does not have - which is a file the user never added being
+          // reported as their own edit. Found 2026-10-17: one survivor from 2026-10-07,
+          // inside a common folder, 47 KB.
+          try { fs.rmSync(tmp, { force: true }); } catch {}
+        }
         return;
       }
     } catch { /* cross-volume or failed link: keep the extracted copy */ }

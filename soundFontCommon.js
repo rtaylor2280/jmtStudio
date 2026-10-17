@@ -1835,12 +1835,15 @@ function _walkCommonContentSignals(commonDir) {
     let entries;
     try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
     catch { return; }
+    // The freshness signals and the per-file manifest must count the same set, or the
+    // signals validate a manifest describing something else. One predicate, shared.
+    const isContent = require('./soundFontFileHash').isContentFile;
     for (const e of entries) {
-      if (!relBase && e.name === 'meta.json') continue;
       const abs = path.join(absDir, e.name);
       if (e.isDirectory()) {
         walk(abs, relBase ? `${relBase}/${e.name}` : e.name);
       } else if (e.isFile()) {
+        if (!isContent(e.name, relBase || '')) continue;
         fileCount++;
         try { totalBytes += fs.statSync(abs).size; } catch {}
       }
@@ -1890,6 +1893,65 @@ function recomputeCommonContentHash(userData, uuid) {
   try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
   catch {}
   return hash;
+}
+
+// Is this common folder different from the source subtree it came from? [B-493]
+//
+// A common folder is a working copy of a source, exactly as a font entry is; the only
+// difference is the metadata naming the subtree (`sourceSubPath` here, `candidatePath`
+// there). The comparison itself is `diffAgainstSource`, shared with the entry side.
+//
+// THE REFERENCE POINT IS THE STORED SOURCE, NOT THE SOURCE AS IT STANDS NOW. A stored
+// source archive is immutable, so this is a fixed comparison that cannot drift.
+//
+// NOTHING IS EXTRACTED AND NOTHING IS RE-HASHED. Both sides already keep per-file
+// manifests: the common's own under `.filehashes/commons`, and the source's covering
+// every file in the archive.
+//
+// Returns { ok, known, customized, added, removed, changed }. `known: false` means the
+// answer is unavailable - a missing manifest, no sourceSubPath - and a caller must show
+// NOTHING rather than guessing: a common wrongly flagged as the user's own work is worse
+// than an unflagged one.
+//
+// NO TAG IS WRITTEN. The entry side rides a "Customized" tag on the same determination;
+// commons carry no tags array at all (0 of 15 on a real library), so adding one is a UI
+// decision rather than a consequence of this reader.
+function getCommonCustomization(userData, uuid) {
+  const unknown = { ok: true, known: false, customized: false, added: 0, removed: 0, changed: 0 };
+  if (!uuid) return unknown;
+  const dir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return unknown; }
+  if (!meta || !meta.sourceUuid || meta.sourceSubPath == null) return unknown;
+
+  // FRESHNESS FIRST, against the disk rather than against the dirty flag. The flag only
+  // becomes true if a writer remembers to set it; getCommonContentHash compares the live
+  // file count and byte total against the stored ones and recomputes on any mismatch,
+  // which no addition or deletion can slip past. That also refreshes the per-file
+  // manifest this reads, since the recompute writes it.
+  try { getCommonContentHash(userData, uuid); } catch {}
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return unknown; }
+  if (!meta) return unknown;
+
+  const fh = require('./soundFontFileHash');
+  const cm = fh.readFileHashManifest(
+    path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`));
+  if (!cm || !Array.isArray(cm.records)) return unknown;
+
+  // Two locations, the order the source layer uses: the breadcrumb beside the archive
+  // first, then the central store.
+  const sDir = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid);
+  const sm = fh.readFileHashManifest(path.join(sDir, '.jmt-source-manifest.json'))
+    || fh.readFileHashManifest(fh.fileHashManifestPath(userData, 'sources', meta.sourceUuid));
+  if (!sm || !Array.isArray(sm.records)) return unknown;
+
+  const d = fh.diffAgainstSource(cm.records, sm.records, meta.sourceSubPath);
+  if (!d.known) return unknown;
+  return { ok: true, known: true, customized: (d.added + d.removed + d.changed) > 0,
+           added: d.added, removed: d.removed, changed: d.changed };
 }
 
 // Mark a common folder as content-modified — cheap meta.json write of
@@ -1963,6 +2025,7 @@ module.exports = {
   renameCommon,
   duplicateCommon,
   deleteCommon,
+  getCommonCustomization,
   setCommonGroup,
   setCommonGroupMany,
   renameCommonGroup,
