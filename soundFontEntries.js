@@ -960,10 +960,15 @@ async function deleteEntry(userData, name) {
         if (i < 3) await new Promise((r) => setTimeout(r, 150 * (i + 1)));
       }
     }
-    if (_rmErr) throw _rmErr;
-    if (entryUuid) {
+    // THE MANIFEST FOLLOWS THE FOLDER, NOT THIS CALL'S RETURN VALUE. [B-310]
+    // A removal that tears the directory down and then throws leaves the folder gone and the
+    // manifest behind, and the retry takes the missing-folder return above - so the drop runs
+    // on the error path too, keyed on whether the directory is actually still there. A failure
+    // with the folder intact keeps its hashes, because the entry is still live.
+    if (entryUuid && !fs.existsSync(dir)) {
       try { fs.rmSync(fileHashManifestPath(userData, 'entries', entryUuid), { force: true }); } catch {}
     }
+    if (_rmErr) throw _rmErr;
     // AFTER the folder is gone, never before ([B-316], 2026-09-05). Pooled
     // content is kept exactly as long as something uses it — "once they're no
     // longer used by anything, they are deleted" — and the filesystem answers

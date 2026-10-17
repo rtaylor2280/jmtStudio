@@ -997,6 +997,22 @@ function updateSourceMeta(userData, uuid, updates) {
 function deleteSource(userData, uuid) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   const dir = path.join(sourcesRoot(userData), uuid);
+  // THE MANIFEST IS CLEANED EVEN WHEN THE FOLDER IS ALREADY GONE. [B-310]
+  //
+  // It lives OUTSIDE the source folder, in the central store keyed by uuid, so the two can get
+  // out of step. This call sits ABOVE the existence guard deliberately. Below it, the stranded
+  // case is permanent: with the folder missing - a partial delete, a retry, any route that
+  // removed the directory without coming through here - every later call takes that return and
+  // reports ok, so nothing can reclaim the manifest.
+  //
+  // Measured 2026-10-16 on the dev library: 29 source folders, 30 manifests. The orphan was
+  // two days old, so this was still producing them rather than being old debris.
+  //
+  // Safe to run unconditionally: `rmSync` with force does nothing when the file is absent,
+  // and a manifest whose source folder is gone has no reader. `_loadSourceBreadcrumb` only
+  // reaches the central store for a uuid it was handed, and a caller only has a uuid it got
+  // from a source that exists.
+  removeSourceManifest(userData, uuid);
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
   try {
     // RELEASE THE ATTACHMENTS FIRST, WHILE THE META STILL EXISTS TO NAME THEM.
@@ -1020,7 +1036,10 @@ function deleteSource(userData, uuid) {
       }
     } catch { /* no meta, or unreadable: nothing to release */ }
     fs.rmSync(dir, { recursive: true, force: true });
-    removeSourceManifest(userData, uuid); // drop the central per-file manifest too
+    // Already dropped above, before the existence guard. Kept as a second call rather than
+    // removed: it costs one no-op rmSync and it means a future edit that moves the folder
+    // removal around cannot strand the manifest again.
+    removeSourceManifest(userData, uuid);
     return { ok: true, deleted: true };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -3059,6 +3078,90 @@ function removeSourceManifest(userData, sourceUuid) {
   try { fs.rmSync(fileHashManifestPath(userData, 'sources', sourceUuid), { force: true }); } catch {}
 }
 
+// Manifests in the central store whose owning source or entry is gone. [B-310]
+//
+// REPORTS BY DEFAULT AND DELETES ONLY WHEN ASKED. The caller passes `{ remove: true }` to
+// reclaim; without it this is a measurement and touches nothing. That split is the point:
+// this walks a store of the user's own data, and a sweep that deletes as a side effect of
+// being called is how a diagnostic becomes an incident.
+//
+// BOTH STORES, because both can strand, and THEY ARE KEYED DIFFERENTLY. `sources/` is keyed
+// by the source uuid, which IS the source's folder name. `entries/` is keyed by the entry's
+// `entryUuid`, which is NOT its folder name - a library folder is called `Blind_Cowboy` while
+// its manifest is `3e08a844-....json`. Comparing manifests against folder names reports every
+// live entry as an orphan, and a remove pass on that reading deletes the whole store. Measured
+// against a real library before this was believed: 25 live entries, 25 manifests, and the
+// folder-name comparison called all 25 of them orphaned.
+//
+// An EMPTY owner directory is not the same as a missing one. If the live folder cannot be
+// read at all - permissions, a drive that went away - every manifest would look orphaned and
+// a remove pass would take the lot. So an unreadable owner side aborts that kind rather than
+// reporting its whole store as garbage.
+function findOrphanManifests(userData, { remove = false } = {}) {
+  const out = { sources: [], entries: [], removed: 0, skipped: [] };
+  const KINDS = [
+    // A source's folder name IS its uuid.
+    { kind: 'sources', liveDir: sourcesRoot(userData), ownerKey: (dirName) => dirName },
+    // An entry's is not: read its own meta for the uuid the manifest is filed under. A folder
+    // whose meta is missing or unreadable yields null, which is treated as "cannot tell" below
+    // rather than as an absent owner.
+    { kind: 'entries', liveDir: path.join(userData, 'soundFonts', 'library'),
+      ownerKey: (dirName, dirPath) => {
+        try {
+          const m = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
+          return (m && m.entryUuid) || null;
+        } catch { return null; }
+      } },
+  ];
+  for (const { kind, liveDir, ownerKey } of KINDS) {
+    const store = path.join(userData, 'soundFonts', '.filehashes', kind);
+    // A MISSING STORE IS RECORDED, NOT PASSED OVER IN SILENCE. An absent store and a clean
+    // store produce the same empty result, and only one of them means the library is healthy.
+    // A mistyped path reads as an all-clear otherwise.
+    if (!fs.existsSync(store)) { out.skipped.push(`${kind}: no manifest store at ${store}`); continue; }
+    let live = null;
+    let unreadable = 0;
+    try {
+      const dirs = fs.readdirSync(liveDir, { withFileTypes: true }).filter((d) => d.isDirectory());
+      live = new Set();
+      for (const d of dirs) {
+        const key = ownerKey(d.name, path.join(liveDir, d.name));
+        if (key) live.add(key);
+        else unreadable++;
+      }
+    } catch {
+      out.skipped.push(`${kind}: owning directory could not be read`);
+      continue;
+    }
+    // An owner we could not identify might be the owner of any manifest here, so there is no
+    // safe way to call anything an orphan on this side.
+    if (unreadable) {
+      out.skipped.push(`${kind}: ${unreadable} owner(s) could not be identified, refusing to judge`);
+      continue;
+    }
+    // A readable but EMPTY owner side is only trustworthy when the store is empty too.
+    // Otherwise it is indistinguishable from a library that has not finished mounting.
+    let files = [];
+    try { files = fs.readdirSync(store).filter((f) => f.toLowerCase().endsWith('.json')); } catch { continue; }
+    if (!live.size && files.length) {
+      out.skipped.push(`${kind}: no live ${kind} found beside ${files.length} manifests, refusing to judge`);
+      continue;
+    }
+    for (const f of files) {
+      const owner = f.replace(/\.json$/i, '');
+      if (live.has(owner)) continue;
+      const full = path.join(store, f);
+      let bytes = 0;
+      try { bytes = fs.statSync(full).size; } catch {}
+      out[kind].push({ uuid: owner, file: full, bytes });
+      if (remove) {
+        try { fs.rmSync(full, { force: true }); out.removed++; } catch {}
+      }
+    }
+  }
+  return out;
+}
+
 // Load a deduped source's breadcrumb (its FULL original per-file tree). Prefers the durable
 // in-source copy that dedup writes (§13.1 — it travels with the source and is load-bearing),
 // falling back to the central manifest.
@@ -3243,6 +3346,7 @@ module.exports = {
   ensureSourcesRoot,
   ensureSourceManifest,
   removeSourceManifest,
+  findOrphanManifests,
   dedupeSource,
   isNoisePath: _isNoisePath,
   zipFolderToFile,
