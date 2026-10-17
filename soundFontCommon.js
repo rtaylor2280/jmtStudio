@@ -1936,6 +1936,35 @@ function getCommonCustomization(userData, uuid) {
   catch { return unknown; }
   if (!meta) return unknown;
 
+  // THE STAMP, so a list can afford to ask. Customization is a fact about the folder, so it
+  // is stored on the folder and keyed to the content hash it was derived from, which makes
+  // it self-invalidating. Without it the commons sidebar pays a full signal walk per row on
+  // every render - 15 rows of ~220 files is thousands of stats to paint a marker. Same shape
+  // and same reasoning as the entry side, which carries it for a 220-card grid.
+  // srcUuid is part of the key because re-pointing a common at a different source changes
+  // the comparison even when its own bytes did not.
+  const st = meta.customization;
+  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 1
+      && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
+    return { ok: true, known: true, customized: !!st.customized,
+             added: st.added | 0, removed: st.removed | 0, changed: st.changed | 0, cached: true };
+  }
+  // Persist a KNOWN answer only. An unknown usually means a manifest is missing and those
+  // get backfilled, so stamping one would make a recoverable gap permanent.
+  const stamp = (res) => {
+    try {
+      const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      m.customization = {
+        v: 1,
+        customized: res.customized, added: res.added, removed: res.removed, changed: res.changed,
+        forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,
+        at: new Date().toISOString(),
+      };
+      fs.writeFileSync(metaPath, JSON.stringify(m, null, 2));
+    } catch {}
+    return res;
+  };
+
   const fh = require('./soundFontFileHash');
   const cm = fh.readFileHashManifest(
     path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`));
@@ -1950,8 +1979,8 @@ function getCommonCustomization(userData, uuid) {
 
   const d = fh.diffAgainstSource(cm.records, sm.records, meta.sourceSubPath);
   if (!d.known) return unknown;
-  return { ok: true, known: true, customized: (d.added + d.removed + d.changed) > 0,
-           added: d.added, removed: d.removed, changed: d.changed };
+  return stamp({ ok: true, known: true, customized: (d.added + d.removed + d.changed) > 0,
+                 added: d.added, removed: d.removed, changed: d.changed });
 }
 
 // Mark a common folder as content-modified — cheap meta.json write of

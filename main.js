@@ -2936,6 +2936,14 @@ ipcMain.handle('common:delete', (_, { uuid } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+// Does this common folder differ from the source archive it came from? [B-493]
+// The common-side twin of `entries:customization`, over the same comparison.
+// Cheap: a diff of two manifests already on disk, nothing extracted or re-hashed.
+ipcMain.handle('common:customization', (_, { uuid } = {}) => {
+  try { return soundFontCommon.getCommonCustomization(app.getPath('userData'), uuid); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('common:listFiles', (_, { uuid } = {}) => {
   try { return { ok: true, files: soundFontCommon.listCommonFiles(app.getPath('userData'), uuid) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }

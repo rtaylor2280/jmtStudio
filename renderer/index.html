@@ -2673,7 +2673,11 @@
   .sf-common-row.is-dimmed > .sf-common-row-header:hover { opacity: 0.85; }
   .sf-common-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .sf-common-row-name { font-size: 0.78rem; color: var(--c-text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sf-common-row-meta { font-size: 0.66rem; color: var(--c-text-dim); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  /* Same word, same blue as the font side's Customized marker — a second vocabulary for the
+   same fact would make the user ask whether it means something different here. [B-493] */
+.sf-common-cust { color: var(--jmt-blue); font-weight: 500; }
+.sf-common-cust:not(:empty)::before { content: ' \00b7 '; color: var(--c-text-dim); font-weight: 400; }
+.sf-common-row-meta { font-size: 0.66rem; color: var(--c-text-dim); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
   /* mmain.wav quick-play button — inline before the file-count line so
      it reads as "press play to hear what this voice pack sounds like."
      Outlined when idle, filled (and a "stop" square glyph) while
@@ -27350,6 +27354,19 @@ require(['vs/editor/editor.main'], function () {
 
         // Render one common's card. Used by both ungrouped and grouped
         // sections so the card markup stays in one place.
+        // A common folder differs from its source the same way a font does, so it says so
+        // the same way: same word, same blue, same sentence. [B-493]
+        //
+        // PAINTED FROM THE STAMP ON meta WHEN THERE IS ONE, so a list of fifteen rows does
+        // not cost fifteen round trips on every render. The stamp is keyed to the content
+        // hash it came from, so a stale one cannot be believed - an absent or stale stamp
+        // just leaves the slot empty for the fill below.
+        const _sfCommonCustMarkup = (c) => {
+          const st = c && c.meta && c.meta.customization;
+          if (!st || st.v !== 1 || !c.meta.contentHash
+              || st.forHash !== c.meta.contentHash || st.srcUuid !== c.meta.sourceUuid) return '';
+          return st.customized ? 'Customized' : '';
+        };
         const renderCard = (c) => {
           const isExpanded = c.uuid === _sfSelectedCommonUuid;
           const isStarred = c.uuid === _sfStarredCommonUuid;
@@ -27391,7 +27408,7 @@ require(['vs/editor/editor.main'], function () {
               <span class="sf-common-row-chevron">&#9656;</span>
               <div class="sf-common-row-main">
                 <div class="sf-common-row-name">${_sfEscape(c.meta.name || '')}</div>
-                <div class="sf-common-row-meta">${mmainBtn}${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}</div>
+                <div class="sf-common-row-meta">${mmainBtn}${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}<span class="sf-common-cust" data-cust-uuid="${_sfEscape(c.uuid)}">${_sfCommonCustMarkup(c)}</span></div>
               </div>
               ${starBtn}
             </div>
@@ -27420,7 +27437,35 @@ require(['vs/editor/editor.main'], function () {
           </div>`);
         }
         list.innerHTML = parts.join('');
+        _sfFillCommonCustomized(++_sfCommonCustToken);
         if (_sfSelectedCommonUuid) await _sfRenderCommonFileTree();
+      };
+      // Every render bumps this, so a list re-rendered underneath a running fill (delete,
+      // rename, add) abandons the stale pass instead of painting a marker onto a row that
+      // now belongs to a different common.
+      let _sfCommonCustToken = 0;
+      // Filled AFTER the list paints, one at a time and deliberately sequential: the first
+      // read of a common recomputes a stale content hash, which is a full signal walk, and
+      // the IPC handlers run on the main process's single thread. Firing fifteen at once
+      // would stall the window; this way rows light up as they resolve and nothing blocks.
+      // Mirrors _sfFillSourceEntryCustomized on the font side.
+      const _sfFillCommonCustomized = async (token) => {
+        const slots = Array.from(document.querySelectorAll('.sf-common-cust[data-cust-uuid]'));
+        for (const slot of slots) {
+          if (token !== _sfCommonCustToken) return;
+          // Already answered from the stamp - nothing to ask.
+          if (slot.dataset.done === '1' || slot.textContent) { slot.dataset.done = '1'; continue; }
+          let r = null;
+          try { r = await window.electronAPI.commonCustomization({ uuid: slot.dataset.custUuid }); } catch {}
+          if (token !== _sfCommonCustToken) return;
+          // Marked resolved even when the answer is "not customized", so a later reader can
+          // tell "known clean" from "not asked yet". An empty marker cannot carry that.
+          slot.dataset.done = '1';
+          if (!r || !r.known || !r.customized) continue;
+          slot.textContent = 'Customized';
+          slot.title = 'This common folder differs from the source it came from. Those changes '
+            + 'are yours, and deleting it would take them with it.';
+        }
       };
       const _sfRenderCommonFileTree = async () => {
         const wrap = document.getElementById('sf-common-files');

@@ -137,6 +137,27 @@ const rec = (relPath, fileHash) => ({ relPath, fileHash, size: 1 });
      r.known && r.customized === false, `${JSON.stringify(r)} - this is the false positive`);
   fs.rmSync(path.join(cDir, 'files', 'c.wav.dedupe-tmp'));
 
+  // THE STAMP, which is what makes a list able to ask. A second read must come back from
+  // the stamp rather than re-deriving, and it must still be the right answer.
+  r = common.getCommonCustomization(root, UUID);
+  const stamped = JSON.parse(fs.readFileSync(path.join(cDir, 'meta.json'), 'utf8')).customization;
+  ok('the answer is stamped onto the common',
+     !!stamped && stamped.v === 1 && stamped.srcUuid === SRC && !!stamped.forHash,
+     JSON.stringify(stamped));
+  ok('and a repeat read comes back cached with the same verdict',
+     r.cached === true && r.customized === false, JSON.stringify(r));
+
+  // SELF-INVALIDATING, which is the whole reason it is safe to cache. Change the content and
+  // the stamp must not be believed - a cache that outlives its subject is worse than none.
+  fs.writeFileSync(path.join(cDir, 'files', 'd.wav'), 'ddd');
+  r = common.getCommonCustomization(root, UUID);
+  ok('a content change invalidates the stamp rather than being masked by it',
+     r.known && r.customized === true && r.added === 1 && !r.cached, JSON.stringify(r));
+  fs.rmSync(path.join(cDir, 'files', 'd.wav'));
+  r = common.getCommonCustomization(root, UUID);
+  ok('and removing it again returns to not customized',
+     r.known && r.customized === false, JSON.stringify(r));
+
   // Unknowns must not read as "unchanged".
   writeMeta({ sourceUuid: undefined });
   ok('a common with no source answers UNKNOWN',

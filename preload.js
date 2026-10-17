@@ -479,6 +479,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   renameCommon:          (params)     => ipcRenderer.invoke('common:rename', params),
   duplicateCommon:       (params)     => ipcRenderer.invoke('common:duplicate', params),
   deleteCommon:          (params)     => ipcRenderer.invoke('common:delete', params),
+  commonCustomization:   (params)     => ipcRenderer.invoke('common:customization', params),
   listCommonFiles:       (params)     => ipcRenderer.invoke('common:listFiles', params),
   addCommonFiles:        (params)     => ipcRenderer.invoke('common:addFiles', params),
   renameCommonFile:      (params)     => ipcRenderer.invoke('common:renameFile', params),
