@@ -29623,9 +29623,15 @@ require(['vs/editor/editor.main'], function () {
       // handler cannot fire before the module finishes evaluating. This project has already lost
       // a live flash to a renderer ReferenceError no check it runs could see; ordering that is
       // true beats ordering that merely happens to work.
-      const _sfPathLinkHtml = (p) => `<a href="#" class="sf-open-path" data-path="${_sfEscape(p)}"`
+      // THE LINK CAN SHOW A NAME AND STILL OPEN A PATH. `data-path` is what the click hands to
+      // the shell, so it stays the real path; the text is only what the user reads. A drive root
+      // prints as a bare letter and a backslash, the shortest and least identifiable thing we
+      // can say about a card somebody is physically holding. Callers pass the [B-403] name for
+      // the same reason the picker and the card browser do. Omitting the label keeps the old
+      // behaviour exactly.
+      const _sfPathLinkHtml = (p, label) => `<a href="#" class="sf-open-path" data-path="${_sfEscape(p)}"`
         + ' style="color:var(--jmt-blue);text-decoration:underline;cursor:pointer;'
-        + `word-break:break-all;">${_sfEscape(p)}</a>`;
+        + `word-break:break-all;">${_sfEscape(label == null ? p : label)}</a>`;
       // THE WIRING LIVES BESIDE THE BUILDER. Every dialog printing a path link calls this one
       // function, which is what stopped the export summary growing a blue "Show in folder" button
       // while the import closeout kept a quiet link for the same job.
@@ -44314,6 +44320,12 @@ require(['vs/editor/editor.main'], function () {
                                            confirmText = 'OK', ejectAuto, beforeOpen } = {}) => {
         let ctx = {};
         try { ctx = (await _sfEjectContext(destDir)) || {}; } catch { ctx = {}; }
+        // Resolved ONCE, before the body is built, because the builder below is synchronous and
+        // the name costs a volume lookup. `_sfDestDisplay` hands back the raw path unless the
+        // destination is a drive ROOT worth naming, so a deep folder path is unaffected and a
+        // fixed drive never gets called a removable disk.
+        let _destName = '';
+        try { _destName = (await _sfDestDisplay(destDir || '')) || ''; } catch { _destName = ''; }
         const esc = (t) => _sfEscape(String(t == null ? '' : t)).replace(/\n/g, '<br>');
         const row = ctx.ejectTarget ? _sfEjectRowHtml(ctx.ejectTarget, ctx.ejectVocab) : '';
         // ANY PATH IN A PLAIN MESSAGE BECOMES A LINK, HERE, FOR EVERY CALLER. [2026-09-24]
@@ -44335,11 +44347,13 @@ require(['vs/editor/editor.main'], function () {
         const _bodyFromMessage = () => {
           const raw = String(message == null ? '' : message);
           if (!destDir) return `<div>${esc(raw)}</div>`;
-          const html = raw.split('\n').map((ln) => (
-            ln.trim() && ln.trim().startsWith(destDir)
-              ? _sfPathLinkHtml(ln.trim())
-              : esc(ln)
-          )).join('<br>');
+          const html = raw.split('\n').map((ln) => {
+            const t = ln.trim();
+            if (!t || !t.startsWith(destDir)) return esc(ln);
+            // A line that IS the destination reads as its name; a deeper path under it already
+            // ends in a folder name that means something and is left alone.
+            return _sfPathLinkHtml(t, (t === destDir && _destName) ? _destName : null);
+          }).join('<br>');
           return `<div>${html}</div>`;
         };
         const body = messageHtml != null ? messageHtml : _bodyFromMessage();
@@ -47555,15 +47569,26 @@ require(['vs/editor/editor.main'], function () {
 
       // Async only because the shared-folder decision may read the prop source. The
       // parse below happens AFTER the await, so it always reads current editor state.
-      const _sfAddPresetWithFont = async (fontName) => {
-        _sfMarkSeen(fontName);   // choosing it for a config IS using it [B-213]
+      // TAKES ONE NAME OR SEVERAL. [B-425] A selection adds every font in it, and the whole
+      // batch is ONE edit so a single Ctrl+Z puts the config back the way it was. Adding five
+      // presets that take five undos to remove is its own kind of trap, and the warm path was
+      // already a single insert at a single line, so N blocks cost nothing extra there.
+      const _sfAddPresetWithFont = async (fontNameOrNames) => {
+        const _names = (Array.isArray(fontNameOrNames) ? fontNameOrNames : [fontNameOrNames])
+          .filter(Boolean);
+        if (!_names.length) return;
+        const fontName = _names[0];
+        for (const _nm of _names) _sfMarkSeen(_nm);   // choosing it for a config IS using it [B-213]
         if (typeof editor === 'undefined' || !editor) return;
         if (typeof presetParser === 'undefined' || !presetParser) return;
         // The font PATH gets the shared folder; the display NAME must not, or the preset
         // ends up called "Grand_Sentinel;common" in Edit Mode.
         const shared = await _sfSharedFolderForNewPreset();
-        const already = String(fontName).split(';').map(s => s.trim()).filter(Boolean).length > 1;
-        const fontPath = (shared && !already) ? `${fontName};${shared}` : fontName;
+        const _pathFor = (nm) => {
+          const already = String(nm).split(';').map(s => s.trim()).filter(Boolean).length > 1;
+          return (shared && !already) ? `${nm};${shared}` : nm;
+        };
+        const fontPath = _pathFor(fontName);
         const result = presetParser.parsePresets(editor.getValue());
         const activeIdx = (typeof _activeArrayIndex !== 'undefined' && result.arrays[_activeArrayIndex]) ? _activeArrayIndex : 0;
         const arr = result.arrays[activeIdx];
@@ -47596,14 +47621,25 @@ require(['vs/editor/editor.main'], function () {
                       + 'scaffold an empty config.');
           return;
         }
+        // THE COLD PATHS SEED ONE PRESET AND THEN RE-ENTER FOR THE REST. Scaffolding an empty
+        // config is somebody else's helper followed by a patch on a timer, so there is no
+        // single range to write N blocks into. The first font takes that route; once a preset
+        // exists the warm path below handles the remainder in one edit. On a selection that is
+        // two undo steps rather than one, and only on a config that had no presets at all.
+        const _seedRest = () => {
+          if (_names.length < 2) return;
+          setTimeout(() => { _sfAddPresetWithFont(_names.slice(1)); }, 160);
+        };
         if (!arr) {
           await _addFirst(result.bladeCount || 1);
           setTimeout(() => _sfPatchFreshPresetFont(0, 0, fontName), 80);
+          _seedRest();
           return;
         }
         if (!arr.presets.length) {
           await _insertInto(arr, activeIdx, result.bladeCount || 1);
           setTimeout(() => _sfPatchFreshPresetFont(activeIdx, 0, fontName), 80);
+          _seedRest();
           return;
         }
         // Common path: append to the existing array.
@@ -47651,36 +47687,46 @@ require(['vs/editor/editor.main'], function () {
         // style must still be in the library. Otherwise blade 1 keeps the
         // placeholder, because scaffolding a name with no definition behind it is
         // worse than scaffolding nothing.
-        let blade1Expr = 'StylePtr<Black>()';
-        try {
-          const entry  = (window._sfEntriesCache || []).find(e => e.name === fontName);
-          const linked = (entry && entry.meta && entry.meta.linkedStyleLibraryEntry || '').toString().trim();
-          const libStyles = (typeof window._getLibraryStyles === 'function')
-            ? window._getLibraryStyles()
-            : [];
-          if (linked && libStyles.includes(linked)) blade1Expr = _jmtStyleSlotExpr(linked);
-        } catch {}
-        const styleLines = [];
-        for (let i = 0; i < bladeCount; i++) {
-          styleLines.push(`${inner}${i === 0 ? blade1Expr : 'StylePtr<Black>()'},`);
-        }
-        const leadIn = prevHasTrailingBlank ? [] : [''];
-        const newText = [
-          ...leadIn,
-          `${indent}{ "${fontPath}", "",`,
-          ...styleLines,
-          '',
-          `${inner}"${fontName}" },`,
-          '',
-        ].join('\n') + '\n';
+        // Per font, because the linked style is a property of the entry, not of the batch.
+        const _blade1For = (nm) => {
+          try {
+            const entry  = (window._sfEntriesCache || []).find(e => e.name === nm);
+            const linked = (entry && entry.meta && entry.meta.linkedStyleLibraryEntry || '').toString().trim();
+            const libStyles = (typeof window._getLibraryStyles === 'function')
+              ? window._getLibraryStyles()
+              : [];
+            if (linked && libStyles.includes(linked)) return _jmtStyleSlotExpr(linked);
+          } catch {}
+          return 'StylePtr<Black>()';
+        };
+        const _blockFor = (nm, withLeadIn) => {
+          const styleLines = [];
+          const b1 = _blade1For(nm);
+          for (let i = 0; i < bladeCount; i++) {
+            styleLines.push(`${inner}${i === 0 ? b1 : 'StylePtr<Black>()'},`);
+          }
+          return [
+            ...(withLeadIn ? [''] : []),
+            `${indent}{ "${_pathFor(nm)}", "",`,
+            ...styleLines,
+            '',
+            `${inner}"${nm}" },`,
+            '',
+          ].join('\n') + '\n';
+        };
+        // The lead-in blank belongs to the FIRST block only. Each block already ends with one,
+        // so repeating it per font would open a widening gap down the array.
+        const newText = _names
+          .map((nm, i) => _blockFor(nm, i === 0 ? !prevHasTrailingBlank : false))
+          .join('');
         _atomicEdit(editor, 'sf-card-add-preset', [{
           range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
           text: newText,
         }]);
         if (typeof _scheduleRebuild === 'function') _scheduleRebuild();
-        // Success feedback: the card whose font we just attached becomes
+        // Success feedback: every card whose font we just attached becomes
         // .in-use after re-render, then flashes green over the new state.
-        _sfRefreshGridAndFlash([fontName]);
+        _sfRefreshGridAndFlash(_names);
       };
       // Patch helper for the cold paths: _addFirstPreset / _insertFirstEntry
       // ship a generic placeholder name + empty font. After the rebuild
@@ -47932,11 +47978,9 @@ require(['vs/editor/editor.main'], function () {
           // beats assuming the user knows what we're operating on.
           // Always enabled: with no presets it SCAFFOLDS one, which is exactly the path
           // that used to fail silently.
-          // HIDDEN ON A MULTI-SELECTION UNTIL IT CAN BATCH. [B-425] Adding N fonts has to be
-          // ONE atomic edit so a single Ctrl+Z puts the config back, and this helper writes one
-          // preset per call. Offering it here would act on one card out of N, which is the lie
-          // this entry exists to remove.
-          if (!_many) mkItem(`+ Add to config`, null, () => _sfAddPresetWithFont(fontName));
+          // The helper takes the whole selection and writes it as ONE atomic edit, so a single
+          // Ctrl+Z removes every preset it added. [B-425]
+          mkItem(`+ Add to config${_sfx(_n)}`, null, () => _sfAddPresetWithFont(_sel));
         }
         // Item 2: swap this font into an existing preset (submenu of presets).
         // Nothing to replace IN when the config has no presets — that submenu built
@@ -48172,11 +48216,21 @@ require(['vs/editor/editor.main'], function () {
         // `exportEntryToFolder` for one entry and runs its own destination preflight against
         // that one font's size. Several fonts need one preflight over the SUM and one summary,
         // which is the shape `_sfRunSourceExport` already has and this one does not.
-        if (!_many) mkItem('↗ Export font folder…', null, async () => {
+        mkItem(`↗ Export font folder${_sfx(_n)}…`, null, async () => {
           const pick = await window.electronAPI.pickExportDir({
-            title: `Choose export destination for "${fontName}"…`,
+            title: _many ? `Choose export destination for ${_n} fonts…`
+                         : `Choose export destination for "${fontName}"…`,
           });
           if (!pick || !pick.ok) return;
+          // [B-425] PER FONT, DECIDED ONCE, APPLIED IN ORDER. `planFolderWrites` and
+          // `_sfPromptSaveConflicts` were both plural already; what this door did was pass a
+          // one-element array to each. The export itself is per entry, so `produce` loops, and
+          // `deltas: true` means the progress stream accumulates across that loop against the
+          // summed plan rather than restarting per font.
+          const _fonts = _sel.slice();
+          const _plans = {};            // name -> write plan, used only for a replace
+          const _modes = new Map();     // name -> rename | replace | skip | identical
+          const _done = [];             // what each font actually did, for the summary
           // ── Will it fit? ──────────────────────────────────────────── [B-203]
           //
           // THIS DOOR WAS MISSED, AND TESTING FOUND IT IN ONE CLICK. The first pass guarded
@@ -48215,7 +48269,7 @@ require(['vs/editor/editor.main'], function () {
           const _t0 = Date.now();
           const _run = await _sfRunExport({
             label: 'files',
-            title: `Exporting ${fontName}`,
+            title: _many ? `Exporting ${_n} fonts` : `Exporting ${fontName}`,
             destDir: pick.destDir,
             // A folder export, not an archive - which is what decides the byte counter's
             // behaviour and the tail label inside the runner.
@@ -48260,16 +48314,25 @@ require(['vs/editor/editor.main'], function () {
             // alternative was correcting the total after the modal opened, which is the flash
             // this design exists to remove.
             plan: async () => {
+              let _planned = 0;
               try {
                 const pr = await window.electronAPI.planFolderWrites({
-                  names: [fontName], destDir: pick.destDir });
-                if (pr && pr.ok && pr.plans) _fontPlan = pr.plans[fontName] || null;
-              } catch { /* falls back to the meta figure, which is what it always used */ }
+                  names: _fonts, destDir: pick.destDir });
+                if (pr && pr.ok && pr.plans) {
+                  for (const nm of _fonts) if (pr.plans[nm]) _plans[nm] = pr.plans[nm];
+                  // The handler already sums workBytes across every name it was given.
+                  _planned = Number(pr.workBytes) || 0;
+                }
+                _fontPlan = _plans[fontName] || null;
+              } catch { /* falls back to the meta figures, which is what it always used */ }
+              // The fallback has to sum too, or a selection reports one font's size.
+              const _metaOf = (nm) => ((((_sfAllEntries || []).find(x => x && x.name === nm) || {}).meta) || {});
+              const _fallbackBytes = _fonts.reduce((t, nm) => t + (Number(_metaOf(nm).contentTotalBytes) || 0), 0);
+              const _files = _fonts.reduce((t, nm) => t + (Number(_metaOf(nm).contentFileCount) || 0), 0);
               return {
                 items: [],
-                totalBytes: _fontPlan ? (_fontPlan.workBytes || 0)
-                                      : (_fontBytes || _m.contentTotalBytes || 0),
-                fileCount: _m.contentFileCount || 0,
+                totalBytes: _planned || _fallbackBytes || _fontBytes || 0,
+                fileCount: _files,
               };
             },
             // NO NUMBERING ON THIS DOOR. [2026-09-22]
@@ -48318,34 +48381,54 @@ require(['vs/editor/editor.main'], function () {
                     return !!(el && el.classList.contains('active'));
                   } catch { return false; }
                 })();
-                m = await _sfRunWithByteProgress('Checking the destination', () =>
-                  window.electronAPI.entryMatchesAt({
-                    name: fontName, destDir: pick.destDir, writeCache: false, reportProgress: true,
-                  }), { alreadyOpen: _up, keepOpen: true });
-              } catch {}
-
-              // Nothing there. Write it under its own name; 'rename' only suffixes on a
-              // collision, and there is none.
-              if (!(m && m.ok && m.exists)) { _outcome = 'wrote'; return { mode: 'rename' }; }
-
-              // Identical needs no question and no work. The shared prompt says the same
-              // thing in its own copy: "Fonts that already match your library are not listed
-              // and were left alone."
-              if (m.identical) { _outcome = 'identical'; return { mode: 'skip' }; }
-
-              const picked = await _sfPromptSaveConflicts([fontName], {
-                title: `"${fontName}" is at the destination`,
-                description: 'The copy at the destination is different from your library. '
-                  + 'Choose whether to replace it or keep it.',
-                defaultMode: 'skip',
-              });
-              // null is the user backing out. The runner reads it as exactly that and
-              // abandons the export, which is correct: they answered the question with Cancel.
-              if (picked === null) return null;
-              const mode = (picked && typeof picked.get === 'function' && picked.get(fontName))
-                || 'skip';
-              _outcome = mode === 'replace' ? 'wrote' : 'kept';
-              return { mode };
+                // ONE QUESTION FOR THE WHOLE SELECTION. [B-425] Each font is checked against
+                // the destination, then everything that EXISTS AND DIFFERS goes into a single
+                // conflict prompt. `_sfPromptSaveConflicts` already takes a list and returns a
+                // per-name Map; this door was handing it a one-element array.
+                // Asking per font would be N dialogs for one decision the user makes once.
+                const _differing = [];
+                for (const nm of _fonts) {
+                  let mm = null;
+                  try {
+                    mm = await _sfRunWithByteProgress('Checking the destination', () =>
+                      window.electronAPI.entryMatchesAt({
+                        name: nm, destDir: pick.destDir, writeCache: false, reportProgress: true,
+                      }), { alreadyOpen: _up, keepOpen: true });
+                  } catch {}
+                  if (!(mm && mm.ok && mm.exists)) { _modes.set(nm, 'rename'); continue; }
+                  if (mm.identical) { _modes.set(nm, 'identical'); continue; }
+                  _differing.push(nm);
+                }
+                if (_differing.length) {
+                  const _picked = await _sfPromptSaveConflicts(_differing, {
+                    title: _differing.length === 1
+                      ? `"${_differing[0]}" is at the destination`
+                      : `${_differing.length} of these are at the destination`,
+                    description: 'The copies at the destination are different from your library. '
+                      + 'Choose whether to replace them or keep them.',
+                    defaultMode: 'skip',
+                  });
+                  if (_picked === null) return null;   // backed out; the runner stops
+                  for (const nm of _differing) {
+                    _modes.set(nm, (_picked && typeof _picked.get === 'function' && _picked.get(nm)) || 'skip');
+                  }
+                }
+                // Nothing left to write is still a valid answer, and the summary says so.
+                _outcome = _fonts.every((nm) => _modes.get(nm) === 'identical') ? 'identical'
+                         : _fonts.some((nm) => _modes.get(nm) === 'rename' || _modes.get(nm) === 'replace') ? 'wrote'
+                         : 'kept';
+                return { perFont: _modes };
+              } catch (err) {
+                // A FAILED CHECK MUST NOT BECOME A SILENT WRITE. Falling through to a default
+                // of `rename` here would export every font in the selection without ever asking
+                // about the copies already at the destination. Backing out is the honest
+                // answer: the runner reads null as the user declining and abandons the export.
+                console.warn('[B-425] destination check failed for the export selection:', err);
+                await promptError('Could not check the destination',
+                  'The fonts already at that folder could not be compared with your library, '
+                  + 'so nothing was exported.');
+                return null;
+              }
             },
             // syncManifest:false — a quick export is a plain copy, and must not seed card-sync
             // bookkeeping (jmt-sync.json) at an arbitrary folder.
@@ -48363,11 +48446,27 @@ require(['vs/editor/editor.main'], function () {
                 // site by scanning a fixed window from the opening brace, so a comment inside
                 // the literal pushes the closing brace out of range and the ratchet silently
                 // covers one door fewer. It caught exactly that here.
-                const _planArg = mode === 'replace' ? _fontPlan : null;
-                r = await window.electronAPI.exportEntryToFolder({
-                  name: fontName, destDir: pick.destDir, mode,
-                  plan: _planArg, syncManifest: false, boardCard,
-                });
+                // ONE PASS OVER THE SELECTION, each font with the mode decided for IT. A font
+                // whose copy matched, or that the user chose to keep, is not written at all and
+                // is recorded so the summary can say so. [B-425]
+                for (const nm of _fonts) {
+                  const _mode = _modes.get(nm) || 'rename';
+                  if (_mode === 'identical' || _mode === 'skip') {
+                    _done.push({ name: nm, mode: _mode, ok: true, skipped: true });
+                    continue;
+                  }
+                  const _planArg = _mode === 'replace' ? (_plans[nm] || null) : null;
+                  const _one = await window.electronAPI.exportEntryToFolder({
+                    name: nm, destDir: pick.destDir, mode: _mode,
+                    plan: _planArg, syncManifest: false, boardCard,
+                  });
+                  _done.push({ name: nm, mode: _mode, ..._one });
+                  if (nm === fontName) r = _one;
+                }
+                // The runner wants one verdict. A single failure is a failed export, and its
+                // error is carried up rather than swallowed behind the ones that worked.
+                const _bad = _done.find((x) => x && x.ok === false);
+                r = _bad ? _bad : (r || { ok: true });
               } catch (err) {
                 r = { ok: false, error: String(err && err.message || err) };
               }
@@ -48382,20 +48481,27 @@ require(['vs/editor/editor.main'], function () {
             // No em dashes, and nothing saying "already" beside a past tense that already
             // carries it.
             onCompleted: async () => {
+              const fmt = window._sfFormatBytesShort || window._sfFormatBytes || ((n) => n + ' B');
+              const _metaOf = (nm) => ((((_sfAllEntries || []).find(x => x && x.name === nm) || {}).meta) || {});
+              // Only what was actually WRITTEN is counted. A skipped font contributes no bytes
+              // and no files, so a summary that summed the selection would overstate the work.
+              const _wrote = _done.filter((x) => x && !x.skipped && x.ok !== false);
+              const _skipped = _done.filter((x) => x && x.skipped);
+              const size  = _wrote.reduce((t, x) => t + (Number(_metaOf(x.name).contentTotalBytes) || 0), 0);
+              const files = _wrote.reduce((t, x) => t + (Number(_metaOf(x.name).contentFileCount) || 0), 0);
               const dest = (r && r.destPath) || '';
               const landed = dest.split(/[\\/]/).pop() || fontName;
-              const fmt = window._sfFormatBytesShort || window._sfFormatBytes || ((n) => n + ' B');
-              const size = _fontBytes || _m.contentTotalBytes || 0;
-              const files = _m.contentFileCount || 0;
 
               // Nothing was written. Saying "Export complete" over that would be the same kind of
               // contradiction caught in the old collision wording.
-              if (_outcome === 'identical' || _outcome === 'kept') {
+              if (!_wrote.length) {
+                const _allSame = _skipped.length && _skipped.every((x) => x.mode === 'identical');
+                const _what = _many ? `All ${_n} fonts` : fontName;
                 await _sfCompletionNotice({
                   title: 'Nothing exported',
-                  message: _outcome === 'identical'
-                    ? `${fontName} at the destination matches your library.\n\n${pick.destDir}`
-                    : `${fontName} at the destination was kept.\n\n${pick.destDir}`,
+                  message: _allSame
+                    ? `${_what} at the destination ${_many ? 'match' : 'matches'} your library.\n\n${pick.destDir}`
+                    : `${_what} at the destination ${_many ? 'were' : 'was'} kept.\n\n${pick.destDir}`,
                   destDir: pick.destDir,
                 });
                 return;
@@ -48404,11 +48510,23 @@ require(['vs/editor/editor.main'], function () {
               const amount = files > 0
                 ? `${files} file${files === 1 ? '' : 's'} · ${fmt(size)}`
                 : fmt(size);
-              const lines = [`Exported ${landed}: ${amount}.`];
-              if (_outcome === 'wrote' && landed === fontName && r && r.replaced) {
+              const _subject = _many
+                ? `${_wrote.length} font${_wrote.length === 1 ? '' : 's'}`
+                : landed;
+              const lines = [`Exported ${_subject}: ${amount}.`];
+              // Say what did NOT move, or a selection of five that wrote two reads as five.
+              if (_skipped.length) {
+                const _ident = _skipped.filter((x) => x.mode === 'identical').length;
+                const _kept  = _skipped.length - _ident;
+                const _bits = [];
+                if (_ident) _bits.push(`${_ident} already matched your library`);
+                if (_kept)  _bits.push(`${_kept} ${_kept === 1 ? 'was' : 'were'} kept as ${_kept === 1 ? 'it is' : 'they are'}`);
+                lines.push(`${_bits.join(', and ')}.`);
+              }
+              if (!_many && r && r.replaced) {
                 lines.push(`Replaced the copy at the destination.`);
               }
-              lines.push(dest || pick.destDir);
+              lines.push(_many ? pick.destDir : (dest || pick.destDir));
               const secs = (Date.now() - _t0) / 1000;
               lines.push(window._sfFormatDuration
                 ? `Took ${window._sfFormatDuration(secs)}.`
@@ -48424,7 +48542,10 @@ require(['vs/editor/editor.main'], function () {
           // only makes sense when the export actually ran to completion - a cancelled export has
           // no refusal list worth showing.
           if (!_run || !_run.ok || _run.canceled) return;
-          await _sfShowProgramRefusal({ refused: (r && r.refused), kind: 'entry', id: fontName });
+          // Refusals from every font that ran, not just the clicked one. A program file blocked
+          // inside the third of five would otherwise never be reported. [B-425]
+          const _refused = _done.flatMap((x) => (x && x.refused) || []);
+          await _sfShowProgramRefusal({ refused: _refused, kind: 'entry', id: fontName });
         });
         // [B-425] THE COUNT IS NOT COSMETIC HERE. Delete was the dangerous one in this entry:
         // a user who selected two and right-clicked one had every reason to expect two to go,

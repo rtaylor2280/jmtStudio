@@ -135,9 +135,12 @@ const UNMIGRATED_MAX = 1;   // primary-early ONLY                       (2026-09
     // for regrowing the machinery, which is the drift this section exists to catch. A door on
     // the runner that nobody named is exactly the "covered handler reachable from an unguarded
     // call site" shape in exportDestination.js's header.
+    // RE-ANCHORED 2026-10-16 [B-425]: both labels gained a selection count, so the markers
+    // match the stable prefix rather than the whole literal. What is asserted inside the slice
+    // is unchanged.
     { name: 'font card (door 1)',
-      start: "mkItem('↗ Export font folder…'",
-      end:   "mkItem('× Delete'" },
+      start: 'mkItem(`↗ Export font folder',
+      end:   'mkItem(`× Delete' },
     // TRACKS CARRIES ONE DOCUMENTED EXEMPTION, AND IT IS NAMED RATHER THAN OMITTED.
     // It raises its own progress bar inside `plan`, which looks exactly like the regression
     // this section exists to catch. It is not: `plan` runs BEFORE the runner raises anything,

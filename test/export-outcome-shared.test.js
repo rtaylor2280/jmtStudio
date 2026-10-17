@@ -107,7 +107,10 @@ ok('the font-card quick export reaches the shared ending through the runner',
    // same reason: a fixed-width slice over this file has silently stopped covering its target
    // three times before today.
    (() => {
-     const i = H.indexOf('title: `Exporting ${fontName}`');
+     // RE-ANCHORED 2026-10-16 [B-425]: the title became a ternary when the door learned to
+     // export a selection, so `title: ` no longer sits against the template. The colon and the
+     // trailing comma are what keep this off the identically-worded line in a comment above.
+     const i = H.indexOf(': `Exporting ${fontName}`,');
      if (i < 0) return false;
      const start = H.lastIndexOf('await _sfRunExport({', i);
      if (start < 0) return false;

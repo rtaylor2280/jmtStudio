@@ -208,8 +208,11 @@ function ok(name, cond, extra) {
 // one, on any OS and any prop; OR B) the prop requires a voicepack. The sound font
 // library's own "selected common" must NOT be a factor — the library is optional.
 function makeChooser({ requires }) {
+  // RE-ANCHORED 2026-10-16: the end marker is only a slice boundary, and the function it
+  // names grew a parameter when [B-425] taught it to take a whole selection. Matched on the
+  // name alone now so a future signature change cannot break an unrelated test.
   const body = extract('const _sfSharedFolderForNewPreset = async () => {',
-                       '      const _sfAddPresetWithFont = async (fontName) => {');
+                       '      const _sfAddPresetWithFont = async (');
   const c = {
     presetParser, console,
     editor: { getValue: () => c.__text },

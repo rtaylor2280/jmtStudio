@@ -161,9 +161,46 @@ function ok(name, cond, extra) {
   // RE-ANCHORED 2026-10-16 with [B-425]. Both of these pinned a source shape that the
   // selection-aware menu changed, and both assert MORE than they did before rather than less:
   // each item now has a second gate, and the regex requires both.
-  ok('"Add to config" needs a config open AND a single selection',
-     /if \(_cfgOpen\) \{[\s\S]{0,1600}?if \(!_many\) mkItem\(`\+ Add to config`/.test(menu),
-     'it writes one preset per call, so on a selection it would act on one card out of N');
+  ok('"Add to config" is only offered when a config is open',
+     /if \(_cfgOpen\) \{[\s\S]{0,1600}?mkItem\(`\+ Add to config/.test(menu));
+  // It batches now, so the gate that briefly hid it on a selection is gone. What replaces that
+  // assertion is the thing the gate existed to protect: it must hand over the SELECTION, not
+  // the one card that was clicked.
+  ok('and it acts on the whole selection',
+     /mkItem\(`\+ Add to config\$\{_sfx\(_n\)\}`[\s\S]{0,80}?_sfAddPresetWithFont\(_sel\)/.test(menu),
+     'passing fontName here would act on one card out of N, which is the lie B-425 removes');
+
+  // THE REQUIREMENT BEHIND THE BATCH, asserted where it can actually be checked. [B-425]
+  // Five presets that take five undos to remove is its own trap, so the whole selection has
+  // to land as ONE edit. Two halves: the text is built by mapping the names, and exactly one
+  // edit object is handed to _atomicEdit.
+  {
+    const addFn = (html.match(/const _sfAddPresetWithFont = async \([\s\S]*?\n      \};/) || [''])[0];
+    ok('the add helper was located', addFn.length > 500, 're-anchor before trusting the two below');
+    ok('a batch add builds its text from every selected name',
+       /const newText = _names\s*\n?\s*\.map\(/.test(addFn), addFn.slice(-900, -600));
+    const edits = addFn.match(/_atomicEdit\(editor, 'sf-card-add-preset', \[\{[\s\S]*?\}\]\);/g) || [];
+    ok('and writes them in exactly one atomic edit',
+       edits.length === 1 && (edits[0].match(/range:/g) || []).length === 1,
+       `found ${edits.length} _atomicEdit call(s); one edit object is what makes a single Ctrl+Z undo the batch`);
+  }
+
+  // THE EXPORT DOOR MUST SIZE AND WRITE THE WHOLE SELECTION. [B-425]
+  // Found by mutation: changing the plan to size only the clicked font passed every existing
+  // test. The summed figure is what the destination preflight refuses on, so a plan that
+  // measures one font out of N is how a selection runs out of space halfway through.
+  {
+    const door = (html.match(/mkItem\(`↗ Export font folder[\s\S]*?mkItem\(`× Delete/) || [''])[0];
+    ok('the export-font-folder door was located', door.length > 800,
+       're-anchor before trusting the two below');
+    ok('it plans over every selected font, not the clicked one',
+       /planFolderWrites\(\{\s*\n?\s*names: _fonts,/.test(door),
+       'the summed workBytes is what the destination fit check refuses on');
+    ok('and writes each of them',
+       /for \(const nm of _fonts\)[\s\S]{0,600}?exportEntryToFolder\(\{/.test(door),
+       'one call with the clicked name would export one font out of N');
+  }
+
   ok('Replace is absent with no config open, and on any multi-selection',
      /const replaceItem = \(!_cfgOpen \|\| _many\) \? null :/.test(menu),
      'it picks ONE preset from a submenu, so with several fonts selected the verb is undefined');
