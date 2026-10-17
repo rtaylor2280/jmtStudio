@@ -2991,6 +2991,17 @@
   .sf-import-progress-label.has-parts > .sf-prog-label-fixed { flex: 0 0 auto; white-space: pre; }
   .sf-import-progress-label.has-parts > .sf-prog-label-name  { flex: 0 1 auto; min-width: 0;
      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Checkbox hint under a confirm dialog's checkbox.
+     TWO LINES THEN ELLIPSIS, because the text is whatever the caller passed: a list of receipt
+     filenames across several sources grew past the dialog and ran under the button row.
+     line-height IS LOAD-BEARING HERE, not decoration. `-webkit-line-clamp` clips to the line
+     box, so at the default height the descenders came off a line of ".pdf" filenames and the
+     text read as sitting on top of the buttons.
+     NO BOTTOM MARGIN. Spacing below belongs to the checkbox ROW, which already varies it on
+     purpose: 4px when a second checkbox follows so the pair reads as a pair, the full 20px when
+     it stands alone. A margin here is inside that row and fights it. */
+  .modal-cb-hint { overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+                   line-height: 1.5; }
   /* Item-name line lives between the label and the bar in the backup
      progress modal. white-space:nowrap + overflow:hidden + ellipsis
      keeps the modal width stable even when names flash through long
@@ -5739,7 +5750,11 @@
     <label id="modal-confirm-checkbox-row" style="display:none; margin: 10px 0 20px; font-size: 0.9rem; user-select:none; cursor:pointer;">
       <input type="checkbox" id="modal-confirm-checkbox" style="margin-right: 6px; vertical-align: middle;">
       <span id="modal-confirm-checkbox-label"></span>
-      <div id="modal-confirm-checkbox-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
+      <!-- Clamped to two lines by .modal-cb-hint. The hint is caller-supplied text of unbounded
+           length (a list of attachment filenames, for instance), and unclamped it grew past the
+           dialog and ran under the button row. The show/hide toggle must set the class's own
+           display value, not `block`, or the clamp is switched off at the moment it is needed. -->
+      <div id="modal-confirm-checkbox-hint" class="modal-cb-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
     </label>
     <!-- Second independent inclusion, same shape ([B-311]: proofs of purchase
          and customized fonts are separate decisions on the export dialog).
@@ -5748,7 +5763,7 @@
     <label id="modal-confirm-checkbox2-row" style="display:none; margin: 10px 0 20px; font-size: 0.9rem; user-select:none; cursor:pointer;">
       <input type="checkbox" id="modal-confirm-checkbox2" style="margin-right: 6px; vertical-align: middle;">
       <span id="modal-confirm-checkbox2-label"></span>
-      <div id="modal-confirm-checkbox2-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
+      <div id="modal-confirm-checkbox2-hint" class="modal-cb-hint" style="display:none; margin: 4px 0 0 22px; font-size: 0.75rem; color: var(--c-text-dim);"></div>
     </label>
     <div id="modal-confirm-dropdown-row" style="display:none; margin: 12px 0 20px;">
       <label id="modal-confirm-dropdown-label" for="modal-confirm-dropdown" style="display:block; font-size:0.72rem; color:var(--c-text-sub); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;"></label>
@@ -7895,7 +7910,9 @@ function promptConfirm(opts) {
       if (cbHint) {
         if (checkbox.hint) {
           cbHint.textContent = checkbox.hint;
-          cbHint.style.display = 'block';
+          // `-webkit-box`, not `block`: the two-line clamp on .modal-cb-hint only applies to a
+          // box, so showing it as a block would silently switch the clamp off.
+          cbHint.style.display = '-webkit-box';
         } else {
           cbHint.textContent = '';
           cbHint.style.display = 'none';
@@ -7933,7 +7950,13 @@ function promptConfirm(opts) {
       // Two rows shown together read as one group: pull the first's bottom
       // margin in so the gap between the pair is smaller than the gap to the
       // buttons. Reset when the second row is absent (element is reused).
-      cbRow.style.marginBottom = checkbox2 ? '4px' : '';
+      // BOTH BRANCHES SET A VALUE. `''` does not mean "leave it as the markup had it": the
+      // element's inline style is the SHORTHAND `margin: 10px 0 20px`, which the CSSOM holds as
+      // longhands, so clearing marginBottom deletes the 20px rather than restoring it. Nothing
+      // in the stylesheet backs it, so a single-checkbox dialog ended up with no gap at all and
+      // its hint sat on the button row.
+      // 4px when a second checkbox follows, so the pair reads as a pair.
+      cbRow.style.marginBottom = checkbox2 ? '4px' : '20px';
     } else if (cbRow) {
       cbRow.style.display = 'none';
       cbRow.style.marginBottom = '';
@@ -7964,7 +7987,9 @@ function promptConfirm(opts) {
       if (cb2Hint) {
         if (checkbox2.hint) {
           cb2Hint.textContent = checkbox2.hint;
-          cb2Hint.style.display = 'block';
+          // `-webkit-box` for the same reason as the first hint: `block` switches off the
+          // two-line clamp on .modal-cb-hint.
+          cb2Hint.style.display = '-webkit-box';
         } else {
           cb2Hint.textContent = '';
           cb2Hint.style.display = 'none';
@@ -12269,6 +12294,27 @@ function setProgLabelPlain(el, text) {
   if (!el) return;
   el.classList.remove('has-parts');
   el.textContent = text;
+}
+
+// ONE WRITER FOR A PROGRESS LABEL THAT MAY OR MAY NOT CARRY A NAME. A string writes plainly;
+// a { before, name, after } object goes through the parts form so only the NAME ellipsises.
+//
+// WHY IT EXISTS: a label like "<source name> (2 of 5) · Compressing · 22.8 MB of 158.0 MB"
+// has one variable-length piece and several fixed ones. Written as a single string it wraps to
+// a second line for a long name and back to one for a short one, so the modal changes height
+// as the run moves from item to item. Truncating the whole string is not the fix either,
+// because the name leads and the phase and byte count trail: the ellipsis would eat the part
+// that changes and keep the part that does not.
+//
+// It also routes the plain case through setProgLabelPlain rather than a raw textContent write,
+// which is what clears `has-parts` behind a previous parts-form call.
+function writeProgLabel(el, label) {
+  if (!el) return;
+  if (label && typeof label === 'object') {
+    setProgLabel(el, label.before || '', label.name == null ? '' : label.name, label.after || '');
+  } else {
+    setProgLabelPlain(el, label || '');
+  }
 }
 
 function makeBarPhaser(getEl, holdMs = 260) {
@@ -37034,11 +37080,25 @@ require(['vs/editor/editor.main'], function () {
       // then show the shared progress modal with a live elapsed clock while
       // the archive is written, and confirm the exact path with a toast on
       // success. The export is never silent, regardless of archive size.
-      _sfSourceDetailEls.exportBtn?.addEventListener('click', async () => {
-        if (!_sfSourceOriginalUuid) return;
-        const uuid = _sfSourceOriginalUuid;
-        const src = _sfAllSourcesByUuid[uuid];
-        const label = (src && src.meta && (src.meta.bundleName || src.meta.originalName)) || 'source';
+      // ONE FLOW, TWO DOORS. [B-425] The source detail's Export button and the font card
+      // context menu both land here, so the questions, the destination preflight and the
+      // summary cannot drift apart between them.
+      //
+      // The caller hands over a list that is ALREADY deduplicated to distinct sources. That
+      // matters more than it sounds: several selected fonts routinely share one bundle, so a
+      // five-card selection can be a single export. Deduplicating here rather than at the door
+      // would hide that from the menu, which has to name the count it is about to act on.
+      //
+      // `_sfRunSourceExport` below was plural from the day it was written and its `plan()`
+      // already sums bytes and files across the list, so the destination fit check needs no
+      // work for the many case. The summary did not: it read `exported[0]`, which was invisible
+      // because the only other plural caller suppresses the summary entirely.
+      const _sfExportSourcesFlow = async (sources) => {
+        const list = (Array.isArray(sources) ? sources : []).filter((s) => s && s.uuid);
+        if (!list.length) return;
+        const many = list.length > 1;
+        const uuid = list[0].uuid;
+        const label = many ? `${list.length} sources` : (list[0].label || 'source');
         const fmtB = window._sfFormatBytes || ((n) => `${n} B`);
         const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
         // The detail modal STAYS visible, dimmed under the flow's dialogs (
@@ -37135,8 +37195,12 @@ require(['vs/editor/editor.main'], function () {
         // the words: "why would we ask if there's none to choose from?"
         let _att = [];
         try {
-          const ar = await window.electronAPI.listAttachments({ uuid: _sfSourceOriginalUuid });
-          if (ar && ar.ok) _att = ar.attachments || [];
+          // Across EVERY source in the list, not just the first. The checkbox speaks for the
+          // whole export, so it has to count the whole export.
+          for (const s of list) {
+            const ar = await window.electronAPI.listAttachments({ uuid: s.uuid });
+            if (ar && ar.ok) _att = _att.concat(ar.attachments || []);
+          }
         } catch {}
         const _attBox = _att.length ? {
           label: _att.length === 1
@@ -37144,9 +37208,13 @@ require(['vs/editor/editor.main'], function () {
             : `Include ${_att.length} proofs of purchase with zip archive`,
           // Name the actual file. It is the one fact not already on this screen,
           // and it is the one someone about to pass a zip on would want.
-          hint: _att.length === 1
-            ? (_att[0].name || '')
-            : _att.map(a => a.name).filter(Boolean).join(', '),
+          // NAME THEM WHILE NAMING THEM HELPS. One receipt: which one is the useful fact. Two:
+          // still readable. Beyond that the label's count is the actionable part and the list is
+          // just a wall of near-identical order filenames, which is what it looks like across
+          // several sources.
+          hint: _att.length === 1 ? (_att[0].name || '')
+              : _att.length === 2 ? _att.map(a => a.name).filter(Boolean).join(', ')
+              : '',
           checked: true,
         } : null;
         // Customized fonts get the identical treatment ([B-311], the ruling
@@ -37160,12 +37228,14 @@ require(['vs/editor/editor.main'], function () {
         // so this list and that column can never disagree.
         let _custNames = [];
         try {
-          const _er = await window.electronAPI.listEntriesBySource({ sourceUuid: _sfSourceOriginalUuid });
-          for (const _e of ((_er && _er.ok && _er.entries) || [])) {
-            try {
-              const _cr = await window.electronAPI.entryCustomization({ name: _e.name });
-              if (_cr && _cr.ok && _cr.known && _cr.customized) _custNames.push(_e.name);
-            } catch {}
+          for (const s of list) {
+            const _er = await window.electronAPI.listEntriesBySource({ sourceUuid: s.uuid });
+            for (const _e of ((_er && _er.ok && _er.entries) || [])) {
+              try {
+                const _cr = await window.electronAPI.entryCustomization({ name: _e.name });
+                if (_cr && _cr.ok && _cr.known && _cr.customized) _custNames.push(_e.name);
+              } catch {}
+            }
           }
         } catch {}
         const _custBox = _custNames.length ? {
@@ -37181,7 +37251,7 @@ require(['vs/editor/editor.main'], function () {
         const _box1 = _attBox || _custBox;
         const _box2 = (_attBox && _custBox) ? _custBox : null;
         const res = await promptConfirm({
-          title: `Export "${label}"`,
+          title: many ? `Export ${list.length} sources` : `Export "${label}"`,
           message: 'A zip keeps it as one file with the details you added, '
                  + 'so importing it back into JMT Studio brings them with it. '
                  + 'A folder is just the files, unzipped.',
@@ -37206,7 +37276,9 @@ require(['vs/editor/editor.main'], function () {
         const format = choice === 'middle' ? 'folder' : 'zip';
 
         // 2) Where to?
-        const pick = await window.electronAPI.pickExportDir({ title: `Export "${label}" to…` });
+        const pick = await window.electronAPI.pickExportDir({
+          title: many ? `Export ${list.length} sources to…` : `Export "${label}" to…`,
+        });
         if (!pick || !pick.ok) { return; }
 
         // 3) Export with live progress in the import-convention layout: section +
@@ -37214,7 +37286,7 @@ require(['vs/editor/editor.main'], function () {
         // elapsed clock last. Sections: Reading files → Rebuilding → Compressing.
         // A LIST OF ONE. The door takes 1..N now and treats them identically, which is the
         // point - this caller is not a special case any more, it is the N=1 case. [2026-09-23]
-        const r = await _sfRunSourceExport({ sources: [{ uuid, label }], destDir: pick.destDir,
+        const r = await _sfRunSourceExport({ sources: list, destDir: pick.destDir,
                                              format, includeAttachments, includeCustomized });
         await _sfDeleteProgress.hide();
 
@@ -37263,16 +37335,27 @@ require(['vs/editor/editor.main'], function () {
         //
         // Read explicitly from `exported[0]` rather than having the door flatten itself when
         // N is 1. A result that changes shape with the count is how this bug gets written again.
-        const one = (r.exported && r.exported[0]) || {};
+        // THE SUMMARY REPORTS THE WHOLE EXPORT, NOT ITS FIRST ITEM. [B-425] It read
+        // `exported[0]`, which was right for the only door that existed and silently drops the
+        // rest now that a door can pass several. The gap survived because the other plural
+        // caller runs with `ending: 'none'` and never reaches this code.
+        const all = (r.exported || []).filter(Boolean);
+        const one = all[0] || {};
         const kind = one.format === 'folder' ? 'a folder' : 'a Zip archive';
         // One summary sentence, then subdued supporting lines — same presentation
         // standard as the import close-out (grouped paragraphs, counts formatted,
         // detail de-emphasized so the verdict line leads).
+        const _sumFiles = all.reduce((t, x) => t + (Number(x.fileCount) || 0), 0);
+        const _sumBytes = all.reduce((t, x) => t + (Number(x.totalBytes) || 0), 0);
         const meta = [];
-        if (one.fileCount != null) meta.push(`<strong>${Number(one.fileCount).toLocaleString()} files</strong>`);
-        if (one.totalBytes) meta.push(`<strong>${esc(fmtB(one.totalBytes))}</strong>`);
+        if (_sumFiles) meta.push(`<strong>${_sumFiles.toLocaleString()} files</strong>`);
+        if (_sumBytes) meta.push(`<strong>${esc(fmtB(_sumBytes))}</strong>`);
+        // The FORMAT stays singular when several went: it is one choice the user made once,
+        // not one per source.
+        const _what = many ? `<strong>${all.length || list.length} sources</strong>`
+                           : `<strong>${esc(label)}</strong>`;
         const lines = [
-          `Exported <strong>${esc(label)}</strong> as ${kind}${meta.length ? `: ${meta.join(' · ')}` : ''}${one.reconstructed ? ', rebuilt in full from your space-optimized source' : ''}.`,
+          `Exported ${_what} as ${kind}${meta.length ? `: ${meta.join(' · ')}` : ''}${all.some((x) => x && x.reconstructed) ? ', rebuilt in full from your space-optimized source' : ''}.`,
         ];
         // NO INVENTORY OF THE FONT CONTENT (2026-09-02). This used to
         // list every top-level folder, which was written for the multi-board
@@ -37320,9 +37403,22 @@ require(['vs/editor/editor.main'], function () {
         // this screen. The file is already out of the library by the time this renders.
         // The dedicated dialog below states it once, correctly, and offers the choice;
         // saying it twice was noise even while it was still true.
-        const _found = one.blocked || [];
+        // Merged across the export, same reason as the totals above.
+        const _found = all.flatMap((x) => (x && x.blocked) || []);
 
-        const _c = one.curation;
+        const _c = many
+          ? all.reduce((acc, x) => {
+              const c = x && x.curation;
+              if (!c || !c.any) return acc;
+              acc.any = true;
+              acc.notes = acc.notes || !!c.notes;
+              acc.tags = acc.tags || !!c.tags;
+              acc.links = acc.links || !!c.links;
+              acc.attachments = (acc.attachments || 0) + (Number(c.attachments) || 0);
+              acc.customized = (acc.customized || 0) + (Number(c.customized) || 0);
+              return acc;
+            }, { any: false, notes: false, tags: false, links: false, attachments: 0, customized: 0 })
+          : one.curation;
         if (_c && _c.any) {
           const parts = [];
           if (_c.notes) parts.push('notes');
@@ -37416,6 +37512,16 @@ require(['vs/editor/editor.main'], function () {
         }
         await _showP;
         _sfRemoveEjectRow();
+      };
+      window._sfExportSourcesFlow = _sfExportSourcesFlow;
+
+      // Door 1: the source detail modal's own Export button. One source, the one on screen.
+      _sfSourceDetailEls.exportBtn?.addEventListener('click', async () => {
+        if (!_sfSourceOriginalUuid) return;
+        const _u = _sfSourceOriginalUuid;
+        const _s = _sfAllSourcesByUuid[_u];
+        const _l = (_s && _s.meta && (_s.meta.bundleName || _s.meta.originalName)) || 'source';
+        await _sfExportSourcesFlow([{ uuid: _u, label: _l }]);
       });
       // Delete source with cascade warning.
       _sfSourceDetailEls.deleteBtn?.addEventListener('click', async () => {
@@ -41613,6 +41719,16 @@ require(['vs/editor/editor.main'], function () {
               ? `${_fb(p.bytesDone)} of ${_fb(p.totalBytes)}` : null;
             // "(1 of 2)" ONLY WHEN THERE IS MORE THAN ONE. On a single source it is noise -
             // the same suppression rule the rest of the app follows for counts of one.
+            // THE SOURCE NAME IS THE ONLY VARIABLE-LENGTH PIECE, so it is sent as its own part
+            // and everything else rides in the fixed tail. A vendor bundle name can be very
+            // long ("JUANSITH´S INQUISITOR PROFFIE update December 2023"), and joined into one
+            // string it wrapped to a second line for some sources and not others, which made
+            // the modal change height every time the run moved on.
+            const _tail = [
+              (p.sourceTotal > 1 && p.sourceIndex) ? `(${p.sourceIndex} of ${p.sourceTotal})` : null,
+              PHASE[p.phase] || null,
+              _bytes,
+            ].filter(Boolean);
             const _pos = (p.sourceTotal > 1 && p.sourceIndex)
               ? `${p.sourceLabel} (${p.sourceIndex} of ${p.sourceTotal})` : p.sourceLabel;
             const parts = [_pos, PHASE[p.phase] || null, _bytes].filter(Boolean);
@@ -41628,7 +41744,9 @@ require(['vs/editor/editor.main'], function () {
               ? Math.max(0, Math.min(1, p.bytesDone / p.totalBytes)) : null;
             if (_raw != null) _fracFloor = Math.max(_fracFloor, _raw);
             sink({
-              label: parts.join(' · ') || null,
+              label: p.sourceLabel
+                ? { name: String(p.sourceLabel), after: _tail.length ? ` · ${_tail.join(' · ')}` : '' }
+                : (parts.join(' · ') || null),
               frac: _raw == null ? null : _fracFloor,
               name: p.currentFile || '',
               // Declared per tick. The moment a compress tick arrives this goes false and the
@@ -42059,13 +42177,13 @@ require(['vs/editor/editor.main'], function () {
           // one arrived later with [B-408] and inherited nothing. A guard is not a property of the
           // methods that happened to be open when it was written.
           if (this.cancelling) {
-            if (l) { l.style.display = ''; l.textContent = 'Stopping…'; }
+            if (l) { l.style.display = ''; writeProgLabel(l, 'Stopping…'); }
             if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
             if (d) { d.textContent = file || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
             if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
             return;
           }
-          if (l) { l.style.display = ''; l.textContent = labelText || ''; }
+          if (l) { l.style.display = ''; writeProgLabel(l, labelText); }
           if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
           if (d) { d.textContent = file || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
           if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
@@ -42078,13 +42196,13 @@ require(['vs/editor/editor.main'], function () {
           // The file name and the CLOCK keep moving - that is what says "still working" rather
           // than "hung". Only the claim about how far along we are is withdrawn.
           if (this.cancelling) {
-            if (l) { l.style.display = ''; l.textContent = 'Stopping…'; }
+            if (l) { l.style.display = ''; writeProgLabel(l, 'Stopping…'); }
             if (b) { b.classList.add('indeterminate'); b.style.width = ''; }
             if (d) { d.textContent = file || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
             if (e) { e.style.display = ''; e.textContent = elapsedText || ''; }
             return;
           }
-          if (l) { l.style.display = ''; l.textContent = labelText || ''; }
+          if (l) { l.style.display = ''; writeProgLabel(l, labelText); }
           if (b) {
             b.classList.remove('indeterminate');
             b.style.width = Math.max(0, Math.min(1, frac || 0)) * 100 + '%';
@@ -42325,7 +42443,10 @@ require(['vs/editor/editor.main'], function () {
               if (typeof p.done  === 'number') done  = p.done;
               if (typeof p.total === 'number') total = p.total;
               if (p.name) currentFile = p.name;
-              if (typeof p.label === 'string') labelOverride = p.label;
+              // A door may send a plain string or the { before, name, after } parts form.
+              if (typeof p.label === 'string' || (p.label && typeof p.label === 'object')) {
+                labelOverride = p.label;
+              }
               if (typeof p.frac === 'number') fracOverride = p.frac;
               // SET ON EVERY TICK, NOT LATCHED. A door leaves an unsized phase by simply
               // reporting a sized one, so this has to fall back to false the moment it does -
@@ -47767,6 +47888,34 @@ require(['vs/editor/editor.main'], function () {
         // the config someone is most likely to be building up from nothing.
         // setFileOpen() is the one writer, and .no-config on <body> is the same signal
         // the CSS uses, so this agrees with what is on screen.
+        // ── THE MENU ACTS ON THE SELECTION ────────────────────────────────── [B-425]
+        //
+        // One rule with no special case: **the menu always acts on the current selection, and
+        // right-clicking outside the selection makes what you clicked the selection first.**
+        // Without the second half the same menu means different scopes depending on where the
+        // pointer was, which is the ambiguity this entry was opened about.
+        //
+        // Extending the selection was considered and rejected: growing a selection is
+        // Ctrl+click's job, and a right-click that silently adds to it is surprising in a menu
+        // whose verbs now act on everything selected.
+        //
+        // The failure mode to avoid is the one newer Windows Explorer shipped and gets bug
+        // reports for: clearing the selection and then showing NO menu. If the selection
+        // changes here, the menu for the clicked card still opens.
+        if (!_sfSelectedNames.has(fontName)) {
+          _sfSelectedNames.clear();
+          _sfBulkIncludeTracks = null;        // [B-287], same reset the toolbar's Clear does
+          _sfSelectedNames.add(fontName);
+          try { _sfRenderGrid(); } catch {}
+        }
+        const _sel = Array.from(_sfSelectedNames);
+        const _n = _sel.length;
+        const _many = _n > 1;
+        // A count in a menu item says what will CHANGE, not what is selected
+        // (ui-components.md, "Batch actions in the preset context menu"). `Mark as New (3)` on
+        // a selection of five means three of them are not currently New.
+        const _sfx = (k) => (k === 1 ? '' : ` (${k})`);
+
         const _cfgOpen = !!(typeof editor !== 'undefined' && editor
                             && typeof fileIsOpen !== 'undefined' && fileIsOpen);
         let _presetCount = 0;
@@ -47783,12 +47932,20 @@ require(['vs/editor/editor.main'], function () {
           // beats assuming the user knows what we're operating on.
           // Always enabled: with no presets it SCAFFOLDS one, which is exactly the path
           // that used to fail silently.
-          mkItem(`+ Add to config`, null, () => _sfAddPresetWithFont(fontName));
+          // HIDDEN ON A MULTI-SELECTION UNTIL IT CAN BATCH. [B-425] Adding N fonts has to be
+          // ONE atomic edit so a single Ctrl+Z puts the config back, and this helper writes one
+          // preset per call. Offering it here would act on one card out of N, which is the lie
+          // this entry exists to remove.
+          if (!_many) mkItem(`+ Add to config`, null, () => _sfAddPresetWithFont(fontName));
         }
         // Item 2: swap this font into an existing preset (submenu of presets).
         // Nothing to replace IN when the config has no presets — that submenu built
         // itself empty and the item still looked live.
-        const replaceItem = !_cfgOpen ? null : mkItem(
+        //
+        // NEVER OFFERED ON A MULTI-SELECTION, and unlike the item above that is permanent
+        // rather than pending: it picks ONE preset from a submenu and a preset holds one font,
+        // so with several selected the verb is UNDEFINED, not a no-op. [B-425]
+        const replaceItem = (!_cfgOpen || _many) ? null : mkItem(
           `Replace in config preset…`,
           _presetCount === 0
             ? { cls: 'has-submenu', disabledReason: 'This config has no presets yet. Use "Add to config" to create one.' }
@@ -47901,28 +48058,65 @@ require(['vs/editor/editor.main'], function () {
         // opposites — same noun, opposite verbs. "seen" is the mechanism's word and stays in code.
         // This is the ONLY place the reverse exists. Bulk was proposed and refused: "don't need
         // a button for mark new. I'm ok with right click, but not bulk."
+        // THE BULK REFUSAL QUOTED ABOVE WAS SUPERSEDED BY [B-425] rule (a), deliberately.
+        // Recorded so the next reader does not restore it as a lost constraint: the menu now
+        // acts on the whole selection, and that creates bulk Mark as New as a consequence.
+        //
+        // ON A SELECTION, BOTH LINES CAN APPEAR AND THAT IS NOT A CONTRADICTION. "never both"
+        // is the single-card rule, where the two are genuinely exclusive. Across five cards,
+        // three New and two seen, BOTH verbs are valid for the whole selection and each has
+        // real work to do; hiding one would put a valid verb out of reach. Each is rendered
+        // only when its own count is non-zero, so neither ever offers to do nothing.
         {
-          const _entry = (_sfAllEntries || []).find(x => x.name === fontName);
-          const _isNew = !!(_entry && !(_entry.meta && _entry.meta.seenAt));
-          mkItem(_isNew ? 'Clear New' : 'Mark as New', null, async () => {
-            try {
-              if (_isNew) await window.electronAPI.markEntrySeen({ name: fontName });
-              else        await window.electronAPI.markEntryNew({ name: fontName });
-            } catch (err) {
-              promptError(_isNew ? 'Could not clear New' : 'Could not mark as New',
-                String(err && err.message || err));
-              return;
-            }
-            try { await window.refreshSoundFontsView(); } catch {}
-          });
+          const _isNewName = (nm) => {
+            const e = (_sfAllEntries || []).find(x => x && x.name === nm);
+            return !!(e && !(e.meta && e.meta.seenAt));
+          };
+          const _newOnes  = _sel.filter(_isNewName);     // Clear New would change these
+          const _seenOnes = _sel.filter((nm) => !_isNewName(nm));   // Mark as New, these
+          const _afterMark = async () => { try { await window.refreshSoundFontsView(); } catch {} };
+
+          if (_newOnes.length) {
+            mkItem(`Clear New${_sfx(_newOnes.length)}`, null, async () => {
+              // One write path, the same helper the toolbar's "Clear all New" uses.
+              if (_newOnes.length > 1 && typeof _sfMarkSeenBulk === 'function') {
+                await _sfMarkSeenBulk(_newOnes, 'New');
+                return;
+              }
+              try { await window.electronAPI.markEntrySeen({ name: _newOnes[0] }); }
+              catch (err) { promptError('Could not clear New', String(err && err.message || err)); return; }
+              await _afterMark();
+            });
+          }
+          if (_seenOnes.length) {
+            mkItem(`Mark as New${_sfx(_seenOnes.length)}`, null, async () => {
+              let failed = 0;
+              for (const nm of _seenOnes) {
+                try {
+                  const r = await window.electronAPI.markEntryNew({ name: nm });
+                  if (!r || !r.ok) failed++;
+                } catch { failed++; }
+              }
+              if (failed) promptError('Could not mark as New',
+                `${failed} of ${_seenOnes.length} could not be updated.`);
+              await _afterMark();
+            });
+          }
         }
         // Duplicate this one font (the card that was right-clicked). Shares
         // the original's source, auto-numbered with a _N suffix. Same silent
         // "duplicate from source" operation, surfaced directly on the card so
         // the user doesn't have to drill into the source detail. No icon here:
         // context-menu items stay text (the ⧉ lives on the toolbar button).
-        // Multi duplicate lives on the selection-gated toolbar button, not here.
-        mkItem('Duplicate', null, async () => {
+        // [B-425] A SELECTION DELEGATES TO THE TOOLBAR BUTTON RATHER THAN REIMPLEMENTING IT.
+        // Bulk duplicate already exists there, naming, collision handling and all; a second
+        // copy here would be a mechanism to keep in agreement forever, and the two would drift
+        // the first time one of them learned something.
+        mkItem(`Duplicate${_sfx(_n)}`, null, async () => {
+          if (_many) {
+            document.getElementById('btn-sf-bulk-duplicate')?.click();
+            return;
+          }
           const newName = _sfSuggestCopyEntryName(fontName);
           let res;
           try {
@@ -47938,7 +48132,47 @@ require(['vs/editor/editor.main'], function () {
         // copy already there says so and stops; a differing one auto-numbers
         // to _2 per the house rules (export collisions auto-number, never
         // dead-end; the original is number one).
-        mkItem('↗ Export font folder…', null, async () => {
+        // Export the SOURCE the font came from, not the font folder. [B-425] Until this, the
+        // only way to reach a source export was to open the source and press its own button,
+        // which is a long way round for something the card already knows how to find.
+        //
+        // IT COUNTS SOURCES, NOT CARDS, and that is the honest number rather than the obvious
+        // one: fonts routinely share a bundle, so nine selected CAL fonts are ONE export. The
+        // menu convention is that a count says what will CHANGE, and what changes here is the
+        // set of archives written. Selecting nine and reading "(1)" is correct and is why the
+        // item says "source" in the singular when it is one.
+        //
+        // Deliberately NOT offering "Export common folder" here. That is a different artifact
+        // with its own door on the source; this menu is about the font in front of you.
+        {
+          const _selNames = (_sfSelectedNames && _sfSelectedNames.size && _sfSelectedNames.has(fontName))
+            ? Array.from(_sfSelectedNames)
+            : [fontName];
+          // Distinct sources, first-seen order, so the summary lists them the way the grid does.
+          const _srcSeen = new Map();
+          for (const _n of _selNames) {
+            const _e = (_sfAllEntries || []).find((x) => x && x.name === _n);
+            const _u = _e && _e.meta && _e.meta.sourceUuid;
+            if (!_u || _srcSeen.has(_u)) continue;
+            const _sm = (_sfAllSourcesByUuid[_u] || {}).meta || {};
+            _srcSeen.set(_u, { uuid: _u, label: _sm.bundleName || _sm.originalName || 'source' });
+          }
+          const _srcList = Array.from(_srcSeen.values());
+          // An item that would do nothing is not rendered, per ui-components.md. A font with no
+          // source behind it has nothing to export.
+          if (_srcList.length) {
+            const _n = _srcList.length;
+            mkItem(_n === 1 ? '↗ Export source…' : `↗ Export source (${_n})…`, null, async () => {
+              if (typeof window._sfExportSourcesFlow !== 'function') return;
+              await window._sfExportSourcesFlow(_srcList);
+            });
+          }
+        }
+        // HIDDEN ON A MULTI-SELECTION UNTIL IT CAN BATCH. [B-425] This door calls
+        // `exportEntryToFolder` for one entry and runs its own destination preflight against
+        // that one font's size. Several fonts need one preflight over the SUM and one summary,
+        // which is the shape `_sfRunSourceExport` already has and this one does not.
+        if (!_many) mkItem('↗ Export font folder…', null, async () => {
           const pick = await window.electronAPI.pickExportDir({
             title: `Choose export destination for "${fontName}"…`,
           });
@@ -48192,7 +48426,26 @@ require(['vs/editor/editor.main'], function () {
           if (!_run || !_run.ok || _run.canceled) return;
           await _sfShowProgramRefusal({ refused: (r && r.refused), kind: 'entry', id: fontName });
         });
-        mkItem('× Delete', { cls: 'danger' }, () => _sfDeleteFontFlow(fontName));
+        // [B-425] THE COUNT IS NOT COSMETIC HERE. Delete was the dangerous one in this entry:
+        // a user who selected two and right-clicked one had every reason to expect two to go,
+        // and the menu's unlabelled "Delete" took one. It now carries the count and routes to
+        // the same `_sfBulkDelete` the toolbar uses, so the confirm that names what is about to
+        // happen is the one the user has already seen.
+        mkItem(`× Delete${_sfx(_n)}`, { cls: 'danger' }, () => {
+          if (_many) { _sfBulkDelete(); return; }
+          _sfDeleteFontFlow(fontName);
+        });
+        // The way out of the selection, worded and counted exactly as the toolbar button is
+        // (`Clear selection (n)`). Two spellings of one action across two surfaces is the
+        // confusion this entry is about, one layer down. Only rendered when there is a
+        // selection to clear: an item that would do nothing is not rendered.
+        if (_many) {
+          mkItem(`Clear selection (${_n})`, null, () => {
+            _sfSelectedNames.clear();
+            _sfBulkIncludeTracks = null;    // [B-287]
+            _sfRenderGrid();
+          });
+        }
         // Hide submenu when hovering a sibling item that isn't the
         // submenu parent. (The submenu itself stays visible while the
         // user moves into it.)

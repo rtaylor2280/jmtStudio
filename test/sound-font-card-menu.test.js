@@ -158,10 +158,15 @@ function ok(name, cond, extra) {
   ok('it does NOT test currentFilePath', !/currentFilePath/.test(cfgOpenStmt),
      'that would hide the items on a brand-new config, which is the likeliest case');
 
-  ok('"Add to config" is only offered when a config is open',
-     /if \(_cfgOpen\) \{[\s\S]{0,400}?\+ Add to config/.test(menu));
-  ok('Replace is absent entirely with no config open',
-     /const replaceItem = !_cfgOpen \? null :/.test(menu));
+  // RE-ANCHORED 2026-10-16 with [B-425]. Both of these pinned a source shape that the
+  // selection-aware menu changed, and both assert MORE than they did before rather than less:
+  // each item now has a second gate, and the regex requires both.
+  ok('"Add to config" needs a config open AND a single selection',
+     /if \(_cfgOpen\) \{[\s\S]{0,1600}?if \(!_many\) mkItem\(`\+ Add to config`/.test(menu),
+     'it writes one preset per call, so on a selection it would act on one card out of N');
+  ok('Replace is absent with no config open, and on any multi-selection',
+     /const replaceItem = \(!_cfgOpen \|\| _many\) \? null :/.test(menu),
+     'it picks ONE preset from a submenu, so with several fonts selected the verb is undefined');
   ok('Replace is greyed WITH A REASON when there are no presets',
      /_presetCount === 0[\s\S]{0,200}?disabledReason:/.test(menu));
   ok('the reason names the way forward',
