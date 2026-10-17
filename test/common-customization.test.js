@@ -171,5 +171,66 @@ const rec = (relPath, fileHash) => ({ relPath, fileHash, size: 1 });
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-console.log(failures ? `\n${failures} FAILURE(S)` : '\nall B-493 customization checks passed');
-process.exit(failures ? 1 : 0);
+// ── duplicate: two modes, and they must produce DIFFERENT bytes ───────────────────
+// The whole reason "Duplicate from source" earns a menu slot is that it disagrees with
+// "Duplicate" on a customized folder. A test that only checks both succeed would pass with
+// mode ignored entirely, which is exactly the defect worth catching.
+async function duplicateChecks() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'b493-dup-'));
+  const SF = path.join(root, 'soundFonts');
+  const UUID = '11111111-2222-3333-4444-555555555555';
+  const SRC = '66666666-7777-8888-9999-aaaaaaaaaaaa';
+  const cDir = path.join(SF, 'common', UUID);
+  const srcTree = path.join(SF, 'sources', SRC, 'source', 'common');
+
+  fs.mkdirSync(path.join(cDir, 'files'), { recursive: true });
+  fs.mkdirSync(srcTree, { recursive: true });
+  // the source as shipped
+  fs.writeFileSync(path.join(srcTree, 'hum.wav'), 'vendor-hum');
+  fs.writeFileSync(path.join(srcTree, 'boot.wav'), 'vendor-boot');
+  fs.writeFileSync(path.join(SF, 'sources', SRC, 'meta.json'),
+    JSON.stringify({ uuid: SRC, format: 'folder' }, null, 2));
+  // the working copy, customized: one vendor file edited, one file added
+  fs.writeFileSync(path.join(cDir, 'files', 'hum.wav'), 'MY-EDIT');
+  fs.writeFileSync(path.join(cDir, 'files', 'boot.wav'), 'vendor-boot');
+  fs.writeFileSync(path.join(cDir, 'files', 'mine.wav'), 'MY-FILE');
+  fs.writeFileSync(path.join(cDir, 'meta.json'), JSON.stringify({
+    schemaVersion: 1, uuid: UUID, name: 'Pack', sourceUuid: SRC, sourceSubPath: 'common',
+  }, null, 2));
+
+  const read = (d, f) => { try { return fs.readFileSync(path.join(d, 'files', f), 'utf8'); } catch { return null; } };
+  const dirOf = (uuid) => path.join(SF, 'common', uuid);
+
+  const a = await common.duplicateCommon(root, UUID, 'Copy A', { mode: 'current' });
+  ok('duplicate (current) succeeds', !!(a && a.ok), JSON.stringify(a));
+  ok('and carries the edits', read(dirOf(a.uuid), 'hum.wav') === 'MY-EDIT'
+     && read(dirOf(a.uuid), 'mine.wav') === 'MY-FILE');
+
+  const b = await common.duplicateCommon(root, UUID, 'Copy B', { mode: 'source' });
+  ok('duplicate from source succeeds', !!(b && b.ok), JSON.stringify(b));
+  ok('and does NOT carry the edits', read(dirOf(b.uuid), 'hum.wav') === 'vendor-hum',
+     'mode ignored means this reads MY-EDIT and the menu item is a lie');
+  ok('nor the added file', read(dirOf(b.uuid), 'mine.wav') === null);
+  ok('while still carrying what the vendor shipped', read(dirOf(b.uuid), 'boot.wav') === 'vendor-boot');
+
+  // Both stay tied to the same immutable source, so neither delete can strand the other.
+  const bMeta = JSON.parse(fs.readFileSync(path.join(dirOf(b.uuid), 'meta.json'), 'utf8'));
+  ok('the duplicate references the same source', bMeta.sourceUuid === SRC
+     && bMeta.sourceSubPath === 'common', JSON.stringify(bMeta));
+
+  // A common with no stored source cannot offer the mode at all.
+  fs.writeFileSync(path.join(cDir, 'meta.json'), JSON.stringify({
+    schemaVersion: 1, uuid: UUID, name: 'Pack',
+  }, null, 2));
+  const c = await common.duplicateCommon(root, UUID, 'Copy C', { mode: 'source' });
+  ok('a common with no stored source refuses, and says why',
+     !!(c && c.ok === false && /no stored source/i.test(c.error || '')), JSON.stringify(c));
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+duplicateChecks().catch((err) => { failures++; console.log('FAIL  duplicate checks threw', err); })
+  .then(() => {
+    console.log(failures ? `\n${failures} FAILURE(S)` : '\nall B-493 customization checks passed');
+    process.exit(failures ? 1 : 0);
+  });

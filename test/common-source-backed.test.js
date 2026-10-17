@@ -85,7 +85,8 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     put(src, 'P/voicepack.ini', Buffer.from('version=2\r\n'));
     const a = await C.importCommonFromFolder(userData, path.join(src, 'P'), 'PackA');
     check('imported', a.ok, a.error);
-    const d = C.duplicateCommon(userData, a.uuid, 'PackB');
+    // Async since [B-493] added mode 'source', which re-extracts from the stored source.
+    const d = await C.duplicateCommon(userData, a.uuid, 'PackB');
     check('duplicated', !!(d && d.ok), d && d.error);
     const aFile = path.join(userData, 'soundFonts', 'common', a.uuid, 'files', 'mmain.wav');
     const bFile = path.join(userData, 'soundFonts', 'common', d.uuid, 'files', 'mmain.wav');

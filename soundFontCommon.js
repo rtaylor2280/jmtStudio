@@ -691,7 +691,16 @@ function renameCommon(userData, uuid, newName) {
 
 // Duplicate a common folder. New uuid, new name (validated unique), same
 // file contents copied byte-for-byte into the new dir's files/.
-function duplicateCommon(userData, sourceUuid, newName) {
+// Two modes, the same pair the entry side already draws. [B-493]
+//   mode 'current' — copy the working copy as it stands, edits and all.
+//   mode 'source'  — re-extract from the stored source, so the result is the subtree as
+//                    the vendor shipped it and local edits are NOT carried over.
+// A common folder is a working copy of a source exactly as a font entry is, so it gets
+// the same two doors rather than a common-shaped invention.
+// The caller is responsible for only OFFERING mode 'source' when the two would differ.
+// On an unmodified common both modes produce the same bytes, and a choice with one
+// outcome is noise that makes the user stop and wonder which is right.
+async function duplicateCommon(userData, sourceUuid, newName, { mode = 'current' } = {}) {
   if (!sourceUuid) return { ok: false, error: 'Missing source uuid' };
   const cleanName = String(newName || '').trim();
   if (!cleanName) return { ok: false, error: 'Name is required' };
@@ -700,23 +709,42 @@ function duplicateCommon(userData, sourceUuid, newName) {
   }
   const srcDir = path.join(commonRoot(userData), sourceUuid);
   if (!fs.existsSync(srcDir)) return { ok: false, error: 'Source common folder not found' };
+  const origMeta = _readMeta(srcDir) || {};
+  if (mode === 'source' && !origMeta.sourceUuid) {
+    return { ok: false, error: 'This common folder has no stored source to duplicate from' };
+  }
   ensureCommonRoot(userData);
   const newUuid = crypto.randomUUID();
   const newDir = path.join(commonRoot(userData), newUuid);
   try {
     fs.mkdirSync(newDir, { recursive: true });
+    if (mode === 'source') {
+      // The same extract the original import ran, against the same immutable tree, so the
+      // duplicate is the vendor's subtree rather than a copy of someone's edits.
+      const S = require('./soundFontSources');
+      const srcObj = S.openSource(userData, origMeta.sourceUuid);
+      if (!srcObj) { _cleanupPartial(newDir); return { ok: false, error: 'Stored source could not be opened' }; }
+      const filesDir = path.join(newDir, 'files');
+      fs.mkdirSync(filesDir, { recursive: true });
+      await srcObj.extractTo(origMeta.sourceSubPath || '', filesDir, null, { link: true });
+    } else {
     // POINTERS, NOT A SECOND COPY ([B-327]): the duplicate's names hardlink
     // the original's files. Duplicating a 20 MB voicepack costs directory
     // entries; edits on either side replace files (never write in place), so
     // the two diverge safely from that moment.
     _linkOrCopyDirRecursive(path.join(srcDir, 'files'), path.join(newDir, 'files'));
-    const sourceMeta = _readMeta(srcDir) || {};
+    }
+    const sourceMeta = origMeta;
     const meta = {
       schemaVersion: 1,
       uuid: newUuid,
       name: cleanName,
       createdAt: new Date().toISOString(),
-      importedFrom: sourceMeta.name ? `Duplicate of ${sourceMeta.name}` : 'Duplicate',
+      // Says which door it came through, because the two produce different bytes whenever
+      // the original was customized - which is the only time both are offered.
+      importedFrom: sourceMeta.name
+        ? (mode === 'source' ? `From source of ${sourceMeta.name}` : `Duplicate of ${sourceMeta.name}`)
+        : (mode === 'source' ? 'From source' : 'Duplicate'),
       // The duplicate references the same immutable source as the original,
       // so the source survives whichever of the two is deleted first.
       ...(sourceMeta.sourceUuid ? { sourceUuid: sourceMeta.sourceUuid, sourceSubPath: sourceMeta.sourceSubPath } : {}),

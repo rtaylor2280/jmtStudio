@@ -28330,16 +28330,19 @@ require(['vs/editor/editor.main'], function () {
         if (!res || !res.ok) { promptError('Rename failed', (res && res.error) || 'unknown error'); return; }
         await _sfRefreshCommons();
       };
-      const _sfDuplicateCommon = async (uuid) => {
+      const _sfDuplicateCommon = async (uuid, mode = 'current') => {
         const c = _sfCommons.find(x => x.uuid === uuid);
         if (!c) return;
         // Suggest a non-colliding _N name via the shared numbering helper
         // (app-wide convention; only OS Versions uses "copy").
         const suggested = _jmtNumberedName(c.meta.name, _sfCommons.map(x => (x.meta?.name || '')));
-        const name = await _sfPromptCommonName({ title: 'Duplicate common folder', defaultValue: suggested });
+        const name = await _sfPromptCommonName({
+          title: mode === 'source' ? 'Duplicate from source' : 'Duplicate common folder',
+          defaultValue: suggested,
+        });
         if (!name) return;
-        _sfDeleteProgress.show('Duplicating common folder', name);
-        const res = await window.electronAPI.duplicateCommon({ uuid, newName: name });
+        _sfDeleteProgress.show(mode === 'source' ? 'Duplicating from source' : 'Duplicating common folder', name);
+        const res = await window.electronAPI.duplicateCommon({ uuid, newName: name, mode });
         await _sfDeleteProgress.hide();
         if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown error'); return; }
         _sfSelectedCommonUuid = res.uuid;
@@ -49309,6 +49312,21 @@ require(['vs/editor/editor.main'], function () {
 
           mkItem('Rename…', '', () => _sfRenameCommon(uuid));
           mkItem('Duplicate…', '', () => _sfDuplicateCommon(uuid));
+          // "Duplicate from source" only earns a slot when the two would DIFFER. On an
+          // unmodified common the copy and the source version are the same bytes, so
+          // offering both is a choice with one outcome. [B-493]
+          // Read from the SLOT the fill wrote, so the menu always agrees with the marker on
+          // screen. `done` absent = the answer has not landed yet — show it anyway, because
+          // hiding a capability we cannot rule out is the worse failure of the two. Same
+          // rule and same reasoning as the font card's version of this item.
+          {
+            const cust = commonRow.querySelector('.sf-common-cust[data-cust-uuid]');
+            const resolved = !!(cust && cust.dataset.done);
+            const isCustomized = !!(cust && cust.textContent.trim());
+            if (targetCount === 1 && (isCustomized || !resolved)) {
+              mkItem('Duplicate from source…', '', () => _sfDuplicateCommon(uuid, 'source'));
+            }
+          }
           // TWO EXPORTS, NAMED FOR WHAT THEY PRODUCE. [2026-09-22]
           //
           // "Export…" alone was a hole: it only ever made a zip, so there was no way to put a

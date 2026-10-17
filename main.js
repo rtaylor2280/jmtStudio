@@ -2926,8 +2926,8 @@ ipcMain.handle('common:rename', (_, { uuid, newName } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:duplicate', (_, { uuid, newName } = {}) => {
-  try { return soundFontCommon.duplicateCommon(app.getPath('userData'), uuid, newName); }
+ipcMain.handle('common:duplicate', async (_, { uuid, newName, mode } = {}) => {
+  try { return await soundFontCommon.duplicateCommon(app.getPath('userData'), uuid, newName, { mode }); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
