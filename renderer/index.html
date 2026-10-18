@@ -38433,6 +38433,16 @@ require(['vs/editor/editor.main'], function () {
       // source), then Fonts (every library entry EXCEPT the open one).
       // Marks the entry's own source with " (this font's source)" so
       // the default selection is recognizable without reading the uuid.
+      // The own-source annotation, removed. One expression rather than three: it was copied
+      // into the breadcrumb and the selection label, both written for the font wording only,
+      // so adding the common wording silently left it showing in two places.
+      const _sfLibPickStripOwnTail = (label) =>
+        String(label || '').replace(/\s+\(this (?:font|common).s source\)$/u, '');
+      // Shared Tracks is a singleton folder with no uuid, but the option value, the key
+      // helper and the option lookup are all built from `kind::id`. It carries a constant id
+      // so none of them need a special case; `_resolveLocationDir` ignores the id for this
+      // kind, so the copy resolves to the same folder either way.
+      const _SF_TRACKS_ID = 'tracks';
       const _sfLibPickPopulateTargets = () => {
         const sel = _sfLibPickEls.target;
         if (!sel) return;
@@ -38489,6 +38499,14 @@ require(['vs/editor/editor.main'], function () {
         if (commonSources.length) {
           optgroups.push(`<optgroup label="Common folders">${commonSources.map(_srcOption).join('')}</optgroup>`);
         }
+        // SHARED TRACKS IS A PLACE FILES COME FROM, not only a place they go. It holds the
+        // music a user has already gathered, which is exactly what someone is looking for
+        // when they open this picker on a font. Hidden when it is the destination, because
+        // copying a folder into itself is the one case with nothing to offer.
+        const isTracksDest = !!(_sfLibPickDest && _sfLibPickDest.kind === 'sharedTracks');
+        if (!isTracksDest) {
+          optgroups.push(`<optgroup label="Shared Tracks"><option value="sharedTracks::${_SF_TRACKS_ID}">Shared Tracks</option></optgroup>`);
+        }
         sel.innerHTML = optgroups.join('');
         // Default to the entry's own source when available, otherwise
         // first source, otherwise first font.
@@ -38523,6 +38541,13 @@ require(['vs/editor/editor.main'], function () {
           } else if (kind === 'entry') {
             const r = await window.electronAPI.listEntryFiles({ name: id });
             _sfLibPickTree = (r && r.ok && r.files) || [];
+          } else if (kind === 'sharedTracks') {
+            // Flat by nature, and it returns { name, size } rather than tree nodes. Mapped
+            // into the node shape the tree renders, with no directories - a flat list is a
+            // valid tree, so nothing downstream needs to know the difference.
+            const r = await window.electronAPI.sharedTracksListFiles();
+            _sfLibPickTree = ((r && r.ok && r.files) || [])
+              .map(f => ({ name: f.name, isDir: false, size: f.size }));
           }
         } catch { _sfLibPickTree = []; }
         _sfRenderLibPickTree();
@@ -38625,7 +38650,7 @@ require(['vs/editor/editor.main'], function () {
         // Breadcrumb: target label + path segments.
         const t = _sfLibPickActive;
         const opt = t ? _sfLibPickEls.target?.querySelector(`option[value="${CSS.escape(`${t.kind}::${t.id}`)}"]`) : null;
-        const rootLabel = (opt?.textContent || 'Files').replace(/\s+\(this font.s source\)$/u, '');
+        const rootLabel = _sfLibPickStripOwnTail(opt?.textContent || 'Files');
         const segs = _sfLibPickPath.split('/').filter(Boolean);
         const crumbs = [`<span class="sf-libpick-crumb-item${segs.length === 0 ? ' current' : ''}" data-crumb="">${_sfEscape(rootLabel)}</span>`];
         let acc = '';
@@ -38731,9 +38756,9 @@ require(['vs/editor/editor.main'], function () {
         const key = _sfLibPickKey(t.kind, t.id, subPath);
         const existingIdx = _sfLibPickSelections.findIndex(s => _sfLibPickKey(s.kind, s.id, s.subPath) === key);
         if (checked && existingIdx < 0) {
-          // Target label (without the "this font's source" suffix).
+          // Target label, without the own-source annotation.
           const opt = _sfLibPickEls.target?.querySelector(`option[value="${CSS.escape(`${t.kind}::${t.id}`)}"]`);
-          const name = (opt?.textContent || t.id).replace(/\s+\(this font.s source\)$/u, '');
+          const name = _sfLibPickStripOwnTail(opt?.textContent || t.id);
           _sfLibPickSelections.push({
             kind: t.kind, id: t.id, name,
             subPath, fileName: subPath.split('/').pop(),
