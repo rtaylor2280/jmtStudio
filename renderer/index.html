@@ -27384,7 +27384,20 @@ require(['vs/editor/editor.main'], function () {
               <div class="sf-common-files-header">
                 <span class="sf-common-files-title">Files</span>
                 <button class="btn-neutral sf-common-files-add-btn" id="btn-sf-common-add-folder" title="Create a new subfolder">+ Folder</button>
-                <button class="btn-neutral sf-common-files-add-btn" id="btn-sf-common-add-files" title="Add wav files to this common folder">+ Add</button>
+                <span class="styles-tag-filter-wrap" style="position:relative">
+                  <button class="btn-neutral sf-common-files-add-btn" id="btn-sf-common-add-files" title="Add files to this common folder">+ Add</button>
+                  <div id="sf-common-add-dropdown" class="styles-tag-dropdown" style="display:none;min-width:160px;right:0;left:auto">
+                    <!-- Same two doors in the same order as the font entry and shared
+                         tracks menus: From library leads because it is the option that
+                         grows more useful as the library fills, Browse is the fallback. -->
+                    <button id="btn-sf-common-add-library" class="styles-tag-dropdown-item">
+                      <span class="styles-tag-dropdown-name">From library&hellip;</span>
+                    </button>
+                    <button id="btn-sf-common-add-browse" class="styles-tag-dropdown-item">
+                      <span class="styles-tag-dropdown-name">Browse&hellip;</span>
+                    </button>
+                  </div>
+                </span>
               </div>
               <div class="sf-common-files" id="sf-common-files"></div>
             </div>` : '';
@@ -28348,16 +28361,80 @@ require(['vs/editor/editor.main'], function () {
         _sfSelectedCommonUuid = res.uuid;
         await _sfRefreshCommons();
       };
+      // How many OTHER working copies does this common's source still have? [B-493]
+      // COUNTS BOTH KINDS. A source can back fonts and commons at once, and the font side's
+      // own version of this question asks `listEntriesBySource` and nothing else - so it is
+      // blind to commons and would call a source orphaned while a common still needs it.
+      // Measured 2026-10-17: zero such sources on this library, reachable the moment a vendor
+      // bundle carries a font and a common folder together.
+      const _sfCommonSourceReferents = async (uuid, sourceUuid) => {
+        if (!sourceUuid) return null;
+        let entries = 0;
+        try {
+          const er = await window.electronAPI.listEntriesBySource({ sourceUuid });
+          entries = ((er && er.ok && er.entries) || []).length;
+        } catch { return null; }   // cannot tell - the caller must not claim either way
+        const commons = _sfCommons.filter(c => c.uuid !== uuid
+          && c.meta && c.meta.sourceUuid === sourceUuid).length;
+        return { entries, commons, total: entries + commons };
+      };
+      const _sfBuildCommonDeleteMessage = async (uuid) => {
+        const c = _sfCommons.find(x => x.uuid === uuid);
+        const name = (c && c.meta && c.meta.name) || 'this common folder';
+        const q = `Remove <strong>"${_sfEscape(name)}"</strong> from your library?`;
+        let isCust = false;
+        try {
+          const cr = await window.electronAPI.commonCustomization({ uuid });
+          isCust = !!(cr && cr.known && cr.customized);
+        } catch {}
+        const ref = await _sfCommonSourceReferents(uuid, c && c.meta && c.meta.sourceUuid);
+        // No source, or we could not count: say nothing about the source rather than
+        // guessing. An unknown dressed as a verdict is the failure worth avoiding here.
+        if (!ref) {
+          return { html: q + (isCust ? _sfDelWarnHtml(`"${_sfEscape(name)}" is Customized. Deleting it destroys your edits.`) : ''), lastUser: false };
+        }
+        if (ref.total > 0) {
+          const parts = [];
+          if (ref.entries) parts.push(`${ref.entries} font${ref.entries === 1 ? '' : 's'}`);
+          if (ref.commons) parts.push(`${ref.commons} other common folder${ref.commons === 1 ? '' : 's'}`);
+          const cust = isCust ? _sfDelWarnHtml(`"${_sfEscape(name)}" is Customized. Deleting it destroys your edits: the source that stays only holds the creator's original.`) : '';
+          return { html: q + _sfDelDimHtml(`The source archive will stay on file (used by ${parts.join(' and ')}), so you can add this back later if you change your mind.`) + cust, lastUser: false };
+        }
+        const cust = isCust ? _sfDelWarnHtml(`"${_sfEscape(name)}" is Customized. "Export first" saves your customized copy; deleting without it destroys your edits.`) : '';
+        return { html: q + _sfDelDimHtml('This is the only thing using its source. The source archive will also be removed from your library.') + cust, lastUser: true, isCust };
+      };
       const _sfDeleteCommonPrompt = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
         if (!c) return;
-        const ok = await promptConfirm({
+        const built = await _sfBuildCommonDeleteMessage(uuid);
+        // The export offer is earned by the same condition the font side uses: it appears
+        // when the source is about to leave with the folder, because that is the moment
+        // something becomes unrecoverable.
+        const answer = await promptConfirm({
           title: 'Delete common folder',
-          message: `Delete the common folder "${c.meta.name}"?\nThis cannot be undone.`,
+          messageHtml: built.html,
           confirmText: 'Delete',
           confirmKind: 'danger',
+          checkbox: built.lastUser
+            ? { label: 'Export first', confirmTextChecked: 'Export and Delete', inline: true }
+            : undefined,
         });
-        if (!ok) return;
+        // TWO RETURN SHAPES, and reading the wrong one is silent. With a checkbox
+        // promptConfirm resolves to { confirmed, checked }; without one it resolves to a
+        // plain boolean - and an object is always truthy, so treating them alike makes
+        // Cancel read as Delete on exactly the branch where something is unrecoverable.
+        const confirmed = built.lastUser ? !!(answer && answer.confirmed) : !!answer;
+        const wantExport = built.lastUser && !!(answer && answer.checked);
+        if (!confirmed) return;
+        if (wantExport) {
+          // Reuses the existing archive export, which writes the WORKING COPY - so it
+          // carries the customization, which is the half that exists nowhere else.
+          const exported = await _sfExportCommonPrompt(uuid);
+          // A cancelled or failed export must not fall through into the delete: the user
+          // asked for the copy first, and deleting anyway destroys the thing they asked to
+          // keep. Same precondition rule the font side's export-source-first follows.
+          if (!exported) return;
+        }
         const res = await window.electronAPI.deleteCommon({ uuid });
         if (!res || !res.ok) { promptError('Delete failed', (res && res.error) || 'unknown error'); return; }
         if (_sfSelectedCommonUuid === uuid) {
@@ -28384,13 +28461,17 @@ require(['vs/editor/editor.main'], function () {
         // PICK FIRST, THEN show progress. The dialog is the user browsing; there
         // is no work happening behind it, and a bar sitting at zero while they
         // look for a folder reports progress on a job that has not started.
+        // RETURNS false WHEN NOTHING WAS WRITTEN. The delete flow offers this as
+        // "Export first", and a cancelled export must stop the delete rather than falling
+        // through it - otherwise the one action the user took to keep something is the
+        // action that loses it. [B-493]
         let pick;
         try { pick = await window.electronAPI.pickExportZipPath({ uuid }); }
-        catch (err) { promptError('Could not open the save dialog', String(err && err.message || err)); return; }
+        catch (err) { promptError('Could not open the save dialog', String(err && err.message || err)); return false; }
         // Cancelling is not a failure and says nothing worth reading - the user
         // closed a dialog they opened.
-        if (!pick || pick.canceled) return;
-        if (!pick.ok) { promptError('Export failed', pick.error || 'unknown error'); return; }
+        if (!pick || pick.canceled) return false;
+        if (!pick.ok) { promptError('Export failed', pick.error || 'unknown error'); return false; }
         // ══ ON THE SHARED RUNNER ════════════════════════════════════ [B-420, 2026-09-21]
         //
         // SECOND DOOR MIGRATED, and the shape Backup proved: the caller owns the picker, the
@@ -28487,6 +28568,9 @@ require(['vs/editor/editor.main'], function () {
             });
           },
         });
+        // Reported from what the exporter actually returned, not from reaching the end of
+        // this function: the runner can finish having written nothing.
+        return !!(_zipRes && _zipRes.ok);
       };
       // ── Export a common AS A FOLDER, the card shape ──────────── [2026-09-22]
       //
@@ -38195,6 +38279,15 @@ require(['vs/editor/editor.main'], function () {
         if (_sfEntryAddDropdown.style.display === 'none') return;
         const inside = _sfEntryAddDropdown.contains(e.target) || _sfEntryAddBtn?.contains(e.target);
         if (!inside) _sfEntryAddDropdown.style.display = 'none';
+      });
+      // The common folder's + Add menu closes the same way. Looked up per click rather than
+      // captured once: that block is re-rendered with its row, so a captured reference goes
+      // stale and the menu stops closing. [B-493]
+      document.addEventListener('click', (e) => {
+        const dd = document.getElementById('sf-common-add-dropdown');
+        if (!dd || dd.style.display === 'none') return;
+        const btn = document.getElementById('btn-sf-common-add-files');
+        if (!dd.contains(e.target) && !btn?.contains(e.target)) dd.style.display = 'none';
       });
       document.getElementById('btn-sf-entry-add-browse')?.addEventListener('click', () => {
         if (_sfEntryAddDropdown) _sfEntryAddDropdown.style.display = 'none';
@@ -49039,10 +49132,32 @@ require(['vs/editor/editor.main'], function () {
           if (uuid) _sfQuickPlay({ kind: 'common', id: uuid, subPath: 'mmain.wav', chipEl: mmainBtn });
           return;
         }
-        // 1a. + Add button inside the expanded files block.
+        // 1a. + Add inside the expanded files block — a menu, not a single action. [B-493]
+        // The same two doors a font entry and shared tracks already offer. Delegated rather
+        // than bound once, because this block is re-rendered with the row: a handler attached
+        // to the button would be attached to an element that no longer exists after the next
+        // refresh, which is the quiet way a control stops responding.
         if (e.target.closest('#btn-sf-common-add-files')) {
           e.stopPropagation();
+          const dd = document.getElementById('sf-common-add-dropdown');
+          if (dd) dd.style.display = dd.style.display === 'none' ? '' : 'none';
+          return;
+        }
+        if (e.target.closest('#btn-sf-common-add-browse')) {
+          e.stopPropagation();
+          const dd = document.getElementById('sf-common-add-dropdown');
+          if (dd) dd.style.display = 'none';
           _sfAddCommonFiles();
+          return;
+        }
+        if (e.target.closest('#btn-sf-common-add-library')) {
+          e.stopPropagation();
+          const dd = document.getElementById('sf-common-add-dropdown');
+          if (dd) dd.style.display = 'none';
+          // The common tree has no current-folder concept, so the destination is its root.
+          if (_sfSelectedCommonUuid) {
+            _sfOpenLibraryPicker({ kind: 'common', id: _sfSelectedCommonUuid, subPath: '' });
+          }
           return;
         }
         // 1b. + Folder button inside the expanded files block.
@@ -49339,15 +49454,9 @@ require(['vs/editor/editor.main'], function () {
               mkItem('Duplicate from source…', '', () => _sfDuplicateCommon(uuid, 'source'));
             }
           }
-          // The same door a font has: pull files in from anywhere else in the library.
-          // The destination is this common; the picker browses sources, entries and other
-          // commons exactly as it does for a font. [B-493]
-          if (targetCount === 1) {
-            mkItem('+ Add from library…', '', () => {
-              _sfSelectedCommonUuid = uuid;
-              _sfOpenLibraryPicker({ kind: 'common', id: uuid, subPath: '' });
-            });
-          }
+          // NO "Add from library" HERE. It lives on the + Add menu inside the expanded
+          // files block, where the destination is the thing you are looking at. On the row
+          // menu it has no visible destination and reads as ambiguous. (2026-10-17.)
           // TWO EXPORTS, NAMED FOR WHAT THEY PRODUCE. [2026-09-22]
           //
           // "Export…" alone was a hole: it only ever made a zip, so there was no way to put a
