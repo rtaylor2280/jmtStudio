@@ -5683,17 +5683,13 @@ ipcMain.handle('sources:finalizeStaged', async (_event, staged = {}) => {
       curation: staged.curation,
       curationTmp: staged.curationTmp,
       curationPayloadDir: staged.curationPayloadDir,
-      // WHATEVER WAS THERE BEFORE COMES BACK. [B-493, 2026-10-17]
-      // A source archive carrying a curation payload is a RESTORE, not a fresh import: it
-      // exists to reproduce a state, so asking which parts of your own snapshot you would
-      // like back is a question with one sensible answer. The payload already encodes the
-      // both-copies case - a customized copy does not claim its vendor path, and a stock
-      // copy at the same path still pushes it - so "everything" is exactly what was there.
-      // This supersedes the "only if checked" half of the 2026-09-08 rescope. The other
-      // half still holds: nothing lands until Add to Library.
-      // NOT A NEW PATH. The bulk door has always run with this false, so the no-picks
-      // restore is the one every bulk import already takes.
-      deferCustomized: false,
+      // This door serves the single-import review, so customized FONTS wait for Add to
+      // Library like every other row ([B-311] rescope, 2026-09-08).
+      // Customized COMMON FOLDERS do not wait and are not offered as rows: they restore on
+      // arrival, because this review is the font candidate screen and a common folder has no
+      // row in it. The flag still means "defer"; what it defers is kind-specific, in
+      // _writeSourceMetaAndStamp. [B-493, 2026-10-18]
+      deferCustomized: true,
     });
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
@@ -5793,10 +5789,12 @@ ipcMain.handle('sources:import', async (event, { sourcePath, originalName, metad
       // The same shape `_withExportCancel` hands its runs: a predicate over this token, so
       // `sources:importCancel` flips it and the next checkpoint throws.
       shouldStop: () => !!(_token && _token.cancelled),
-      // Same rule as the staged door above: a restore brings back what was there, so both
-      // import doors now agree rather than one offering checkboxes the other never did.
-      // [B-493, 2026-10-17]
-      deferCustomized: false,
+      // Single-import door: customized fonts ride the review as rows and are
+      // restored at Add to Library, checked rows only ([B-311], 2026-09-08).
+      // The bulk door calls finalizePreparedSource directly and keeps its
+      // eager restore — its commit already runs after the user confirmed.
+      // Customized common folders restore on arrival either way. [B-493]
+      deferCustomized: true,
     });
   } catch (err) {
     // A cancel arrives here as a throw, AFTER `importSource`'s own catch has already removed the

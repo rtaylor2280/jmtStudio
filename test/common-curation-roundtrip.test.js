@@ -159,7 +159,95 @@ async function roundTrip() {
   fs.rmSync(stage, { recursive: true, force: true });
 }
 
-roundTrip().catch((err) => { failures++; console.log('FAIL  round trip threw', err); })
+// ── the deferral is kind-specific ────────────────────────────────────────────────
+// A customized FONT is a row in the candidate review and waits to be chosen. A customized
+// COMMON has no such row - the review is the font candidate screen and a common folder is
+// not one of its rows - so it restores on arrival. The import door expresses that by
+// restoring with picks naming only the common records, which is what this exercises.
+//
+// THE INDICES ARE POSITIONS IN payload.customized. A filtered list that renumbered them
+// would restore a different record than the one named, so the font record sits FIRST here
+// deliberately: a renumbering bug restores the font and the assertions below catch it.
+async function kindSpecificDefer() {
+  const { root, SF } = makeLibrary();
+  makeCommon(root, SF, { customized: true });
+
+  // A customized font from the same source, placed at index 0.
+  const payload = curation.buildForSource(root, SRC, '1.8.0');
+  const fontDir = fs.mkdtempSync(path.join(os.tmpdir(), 'b493-font-'));
+  fs.writeFileSync(path.join(fontDir, 'hum.wav'), 'FONT-EDIT');
+  payload.customized.unshift({
+    entryName: 'A_Font', candidatePath: '',
+    dir: `${'.jmt-curation'}/customized/99`,
+    curation: { name: 'A_Font' }, provenance: {}, _absDir: fontDir,
+  });
+  // Re-point the common record's dir so both stage cleanly.
+  const commonIdx = payload.customized.findIndex(c => c.kind === 'common');
+  ok('fixture: the font sits before the common', commonIdx === 1, `commonIdx=${commonIdx}`);
+
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'b493-stage2-'));
+  for (const c of payload.customized) {
+    const out = path.join(stage, ...c.dir.split('/'));
+    fs.mkdirSync(out, { recursive: true });
+    for (const f of fs.readdirSync(c._absDir)) {
+      fs.copyFileSync(path.join(c._absDir, f), path.join(out, f));
+    }
+  }
+
+  const dest = makeLibrary();
+  // Exactly what the import door passes when deferring: picks naming only the commons.
+  const picks = [{ index: commonIdx }];
+  await curation.restoreCustomizedEntries(dest.root, SRC, payload, stage, picks);
+
+  const commonDirs = fs.existsSync(path.join(dest.SF, 'common'))
+    ? fs.readdirSync(path.join(dest.SF, 'common')) : [];
+  const libDirs = fs.existsSync(path.join(dest.SF, 'library'))
+    ? fs.readdirSync(path.join(dest.SF, 'library')) : [];
+  ok('the common restored on arrival', commonDirs.length === 1, JSON.stringify(commonDirs));
+  ok('and the customized FONT did not - it waits for the review',
+     libDirs.length === 0, `library: ${JSON.stringify(libDirs)}`);
+
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(dest.root, { recursive: true, force: true });
+  fs.rmSync(stage, { recursive: true, force: true });
+  fs.rmSync(fontDir, { recursive: true, force: true });
+}
+
+// ── THE FONT PATH IS UNCHANGED ───────────────────────────────────────────────────
+// The deferral filter must be a no-op for any payload without commons, which is every
+// archive written before today. Reproduces the old expression and the new one side by side
+// over the same input and requires them to agree.
+{
+  const sample = [
+    { entryName: 'One', candidatePath: '', curation: { name: 'Alpha' } },
+    { entryName: 'Two', candidatePath: 'inner', curation: {} },
+    { entryName: 'Three', candidatePath: 'a/b', curation: { name: '  ' } },
+  ];
+  const nameOf = (c) => (c.curation && typeof c.curation.name === 'string' && c.curation.name.trim())
+    ? c.curation.name.trim()
+    : (String(c.entryName || '').trim() || 'Customized font');
+  // what the import door built before [B-493]
+  const before = sample.map((c, i) => ({
+    index: i, name: nameOf(c), candidatePath: c.candidatePath == null ? '' : c.candidatePath }));
+  // what it builds now
+  const after = sample.map((c, i) => ({ c, i })).filter(({ c }) => !(c && c.kind === 'common'))
+    .map(({ c, i }) => ({
+      index: i, name: nameOf(c), candidatePath: c.candidatePath == null ? '' : c.candidatePath }));
+  ok('a payload with no commons pends exactly what it always did',
+     JSON.stringify(before) === JSON.stringify(after),
+     `before=${JSON.stringify(before)}\n      after =${JSON.stringify(after)}`);
+
+  // And with a common in the middle, the surviving font rows keep their ORIGINAL indices -
+  // the renderer sends these back as picks, so a renumbered list restores the wrong record.
+  const mixed = [sample[0], { kind: 'common', commonName: 'Pack' }, sample[1]];
+  const mixedAfter = mixed.map((c, i) => ({ c, i })).filter(({ c }) => !(c && c.kind === 'common'))
+    .map(({ i }) => i);
+  ok('a common in the middle does not renumber the font rows',
+     JSON.stringify(mixedAfter) === JSON.stringify([0, 2]), JSON.stringify(mixedAfter));
+}
+
+roundTrip().then(kindSpecificDefer)
+  .catch((err) => { failures++; console.log('FAIL  round trip threw', err); })
   .then(() => {
     console.log(failures ? `\n${failures} FAILURE(S)` : '\nall B-493 round-trip checks passed');
     process.exit(failures ? 1 : 0);

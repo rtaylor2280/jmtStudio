@@ -1775,13 +1775,34 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
   let customizedPending = null;
   if (curation && curationPayloadDir && Array.isArray(curation.customized) && curation.customized.length) {
     if (deferCustomized) {
-      customizedPending = curation.customized.map((c, i) => ({
-        index: i,
-        name: (c.curation && typeof c.curation.name === 'string' && c.curation.name.trim())
-          ? c.curation.name.trim()
-          : (String(c.entryName || '').trim() || 'Customized font'),
-        candidatePath: c.candidatePath == null ? '' : c.candidatePath,
-      }));
+      // DEFERRAL IS KIND-SPECIFIC. [B-493, 2026-10-18]
+      // A customized FONT is a row in the candidate review, chosen like every other row.
+      // A customized COMMON FOLDER is not offered and does not wait: whatever was in the
+      // common before the export comes back on arrival. The font behaviour is unchanged -
+      // the auto-restore is specific to commons, not a new rule for both.
+      // Indices are indices into `curation.customized`, so both halves here keep the
+      // ORIGINAL position: the renderer sends them back as picks, and a renumbered list
+      // would restore the wrong record.
+      const commonPicks = [];
+      curation.customized.forEach((c, i) => {
+        if (c && c.kind === 'common') commonPicks.push({ index: i });
+      });
+      if (commonPicks.length) {
+        try {
+          customizedRestored = await require('./soundFontCuration')
+            .restoreCustomizedEntries(userData, uuid, curation, curationPayloadDir, commonPicks);
+        } catch { customizedRestored = null; }
+      }
+      customizedPending = curation.customized
+        .map((c, i) => ({ c, i }))
+        .filter(({ c }) => !(c && c.kind === 'common'))
+        .map(({ c, i }) => ({
+          index: i,
+          name: (c.curation && typeof c.curation.name === 'string' && c.curation.name.trim())
+            ? c.curation.name.trim()
+            : (String(c.entryName || '').trim() || 'Customized font'),
+          candidatePath: c.candidatePath == null ? '' : c.candidatePath,
+        }));
     } else {
       try {
         customizedRestored = await require('./soundFontCuration')
