@@ -92,6 +92,11 @@ const ENTRY_FIELDS = ['name', 'tags', 'linkedStyleLibraryEntry', 'author', 'desc
 // restoring one while a copy of that entry still exists would put two rows in
 // the library under the same id. The timestamps carry no such hazard.
 const ENTRY_PROV_FIELDS = ['createdAt', 'updatedAt', 'acquisitionDate'];
+// A common folder's curation. Short because a common carries little: no tags, no linked
+// style, no author. Its group placement is a real decision the user made and is the part
+// a restore would otherwise lose. [B-493]
+const COMMON_FIELDS = ['name', 'group', 'userNotes'];
+const COMMON_PROV_FIELDS = ['createdAt'];
 
 function _pick(obj, fields) {
   const out = {};
@@ -221,6 +226,36 @@ function buildForSource(userData, uuid, appVersion, opts) {
     const prov = _pick(m, ENTRY_PROV_FIELDS);
     if (Object.keys(prov).length > 0) entryProvenance[key] = prov;
   }
+
+  // ── Customized COMMON FOLDERS ride too ([B-493]) ──
+  // A common folder is a working copy of this source exactly as a font entry is, so the
+  // same rule applies: if the user changed it, the change exists nowhere else and an export
+  // that leaves it behind is the one that loses it. Detected off the same stamp, with the
+  // same `known` requirement - a common the diff cannot judge stays on the stock path,
+  // which loses nothing that exists.
+  // MARKED WITH A KIND, and entries are left unmarked on purpose: every archive written
+  // before this carries entry records with no kind field, so absent must keep meaning
+  // entry or every existing export stops restoring.
+  try {
+    const commonMod = require('./soundFontCommon');
+    for (const c of (commonMod.listCommons(userData) || [])) {
+      const cm = c && c.meta;
+      if (!cm || cm.sourceUuid !== uuid) continue;
+      if (cm.sourceSubPath == null) continue;
+      let cust = null;
+      try { cust = commonMod.getCommonCustomization(userData, c.uuid); } catch { cust = null; }
+      if (!includeCustomized || !(cust && cust.known && cust.customized)) continue;
+      customized.push({
+        kind: 'common',
+        commonName: cm.name || c.uuid,
+        sourceSubPath: cm.sourceSubPath,
+        dir: `${PAYLOAD_DIR}/customized/${customized.length}`,
+        curation: _pick(cm, COMMON_FIELDS),
+        provenance: _pick(cm, COMMON_PROV_FIELDS),
+        _absDir: path.join(commonMod.commonRoot(userData), c.uuid, 'files'),
+      });
+    }
+  } catch { /* commons unavailable: the source's fonts still export */ }
 
   const attachments = [];
   const ids = includeAttachments && Array.isArray(sourceMeta.attachments) ? sourceMeta.attachments : [];
@@ -701,6 +736,38 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
     let isDir = false;
     try { isDir = fs.statSync(dirAbs).isDirectory(); } catch {}
     if (!isDir) continue;
+    // A COMMON FOLDER COMES BACK AS A COMMON FOLDER. [B-493]
+    // Records written before this carry no kind, so absent means entry and every archive
+    // already in the wild keeps restoring exactly as it did. Restoring a common through
+    // createEntry would put a voicepack in the font grid, which is why the export half of
+    // this must never ship without this branch.
+    if (c.kind === 'common') {
+      position++;
+      const _mineC = _picked.find((p) => p.ci === ci);
+      let rc = null;
+      try {
+        rc = await require('./soundFontCommon').createCommonFromFolder(userData, {
+          folderPath: dirAbs,
+          name: (c.curation && c.curation.name) || c.commonName || 'Customized common',
+          sourceUuid: uuid,
+          sourceSubPath: c.sourceSubPath == null ? '' : c.sourceSubPath,
+          metadata: c.curation || {},
+          provenance: c.provenance || {},
+        });
+      } catch { rc = null; }
+      if (_mineC) baseBytes += _mineC.bytes;
+      if (rc && rc.ok && rc.name) names.push(rc.name);
+      if (onProgress) {
+        try {
+          onProgress({
+            phase: 'restore-customized',
+            index: position, total: totalPicked, entryName: (rc && rc.name) || c.commonName || '',
+            bytesDone: baseBytes, totalBytes: grandBytes, currentFile: '',
+          });
+        } catch { /* a progress tick must never break a restore */ }
+      }
+      continue;
+    }
     // The sidecar's curated name wins over the folder-time entryName, same
     // precedence the candidate review gives it — unless the review form handed
     // an edited name on the pick, which outranks both (it is the name the user

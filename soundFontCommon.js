@@ -1923,6 +1923,50 @@ function recomputeCommonContentHash(userData, uuid) {
   return hash;
 }
 
+// Rebuild a common folder from a directory of files, tied to a source that already
+// exists. [B-493]
+//
+// The restore counterpart to the customized-common half of a source export. It is NOT an
+// import: the source is already in the library, so nothing is created for it here, and the
+// restored folder points at the same immutable subtree the original did.
+//
+// Collisions take the app-wide underscore suffix rather than asking, the same convention
+// the entry restore uses - an archive brought back beside a surviving copy must land, not
+// stop and wait.
+function createCommonFromFolder(userData, { folderPath, name, sourceUuid, sourceSubPath,
+                                            metadata, provenance } = {}) {
+  if (!folderPath || !fs.existsSync(folderPath)) return { ok: false, error: 'Missing folder' };
+  const base = String(name || 'Common').trim() || 'Common';
+  let finalName = base;
+  for (let n = 2; nameInUse(userData, finalName); n++) finalName = `${base}_${n}`;
+  ensureCommonRoot(userData);
+  const uuid = crypto.randomUUID();
+  const dir = path.join(commonRoot(userData), uuid);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    _linkOrCopyDirRecursive(folderPath, path.join(dir, 'files'));
+    const extra = { ...(metadata || {}) };
+    delete extra.name;
+    const meta = {
+      schemaVersion: 1,
+      uuid,
+      name: finalName,
+      // The record's own history, so a round trip leaves no trace of the delete. Falls
+      // back to now when the archive carried none.
+      createdAt: (provenance && provenance.createdAt) || new Date().toISOString(),
+      importedFrom: 'Restored from source archive',
+      ...extra,
+      ...(sourceUuid ? { sourceUuid, sourceSubPath: sourceSubPath || '' } : {}),
+    };
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
+    try { recomputeCommonContentHash(userData, uuid); } catch {}
+    return { ok: true, uuid, name: finalName };
+  } catch (err) {
+    _cleanupPartial(dir);
+    return { ok: false, error: `Restore failed: ${err.message}` };
+  }
+}
+
 // Is this common folder different from the source subtree it came from? [B-493]
 //
 // A common folder is a working copy of a source, exactly as a font entry is; the only
@@ -2083,6 +2127,7 @@ module.exports = {
   duplicateCommon,
   deleteCommon,
   getCommonCustomization,
+  createCommonFromFolder,
   setCommonGroup,
   setCommonGroupMany,
   renameCommonGroup,
