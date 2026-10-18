@@ -38441,8 +38441,20 @@ require(['vs/editor/editor.main'], function () {
         // font from the Fonts list (copying to self is meaningless).
         // sharedTracks mode has no "own" context, so it shows every font.
         const isEntryMode = !_sfLibPickDest || _sfLibPickDest.kind === 'entry';
+        // THE PICKER OPENS ON THE SOURCE BEHIND WHATEVER IT IS ADDING TO. [B-493]
+        // That was already true for a font and read as a special case; it is the rule. A
+        // common folder is a working copy of a source exactly as a font is, so it gets the
+        // same starting point - opening on an unrelated source because it sorts first makes
+        // the user navigate back to where they already were.
+        const isCommonMode = !!(_sfLibPickDest && _sfLibPickDest.kind === 'common');
         const entry = isEntryMode ? _sfAllEntries.find(e => e.name === _sfDetailOriginalName) : null;
-        const ownSourceUuid = entry?.meta?.sourceUuid || null;
+        const commonDest = isCommonMode
+          ? (_sfCommons || []).find(c => c.uuid === _sfLibPickDest.id)
+          : null;
+        const ownSourceUuid = entry?.meta?.sourceUuid || commonDest?.meta?.sourceUuid || null;
+        // Names the kind it belongs to, because the annotation sits in a list where both
+        // appear and "this font's source" on a common folder is simply wrong.
+        const ownTail = isCommonMode ? '  (this common’s source)' : '  (this font’s source)';
         const sources = Object.values(_sfAllSourcesByUuid || {}).slice().sort((a, b) => {
           const an = (a.meta?.bundleName || a.meta?.originalName || a.uuid).toLowerCase();
           const bn = (b.meta?.bundleName || b.meta?.originalName || b.uuid).toLowerCase();
@@ -38463,7 +38475,7 @@ require(['vs/editor/editor.main'], function () {
         const commonSources = sources.filter(_isCommonOnlySrc);
         const _srcOption = (s) => {
           const label = s.meta?.bundleName || s.meta?.originalName || s.uuid;
-          const tail = s.uuid === ownSourceUuid ? '  (this font’s source)' : '';
+          const tail = s.uuid === ownSourceUuid ? ownTail : '';
           return `<option value="source::${_sfEscape(s.uuid)}">${_sfEscape(label)}${tail}</option>`;
         };
         const optgroups = [];
