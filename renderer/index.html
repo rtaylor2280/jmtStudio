@@ -38913,13 +38913,25 @@ require(['vs/editor/editor.main'], function () {
         // Resolve the effective destination once. Entry mode reads the
         // open entry + current subPath; sharedTracks mode is the flat
         // singleton folder.
+        // A COMMON FOLDER IS A DESTINATION LIKE ANY OTHER. [B-493]
+        // `copyAcrossLocations` has always accepted one - `_markLocationDirty` branches on
+        // exactly `kind === 'entry' || kind === 'common'` and treats them the same - so this
+        // was a UI gap over a working capability, not a missing feature. Without the branch a
+        // common destination fell through to sharedTracks and the files landed in the wrong
+        // place entirely.
+        const isCommonMode = !!(_sfLibPickDest && _sfLibPickDest.kind === 'common');
         const effectiveDest = isEntryMode
           ? { kind: 'entry', id: _sfDetailOriginalName, subPath: _sfEntryFilesPath }
-          : { kind: 'sharedTracks' };
+          : isCommonMode
+            ? { kind: 'common', id: _sfLibPickDest.id, subPath: _sfLibPickDest.subPath || '' }
+            : { kind: 'sharedTracks' };
         // Run the rename-to-match-folder prompt once across the whole
         // staged set so the numbering stays sequential across sources.
         // sharedTracks is flat with arbitrary track names — skip the
         // prompt; the backend's collision-safe naming handles dupes.
+        // A COMMON skips it for the same reason: `_proffieVariantName` already resolves a
+        // collision into boot2.wav the way ProffieOS reads variants, and the prompt's
+        // numbering is written against an entry's files path.
         const incomingNames = _sfLibPickSelections.map(s => s.fileName);
         const destNames = isEntryMode
           ? await _sfResolvePasteRenames(incomingNames, _sfEntryFilesPath)
@@ -49326,6 +49338,15 @@ require(['vs/editor/editor.main'], function () {
             if (targetCount === 1 && (isCustomized || !resolved)) {
               mkItem('Duplicate from source…', '', () => _sfDuplicateCommon(uuid, 'source'));
             }
+          }
+          // The same door a font has: pull files in from anywhere else in the library.
+          // The destination is this common; the picker browses sources, entries and other
+          // commons exactly as it does for a font. [B-493]
+          if (targetCount === 1) {
+            mkItem('+ Add from library…', '', () => {
+              _sfSelectedCommonUuid = uuid;
+              _sfOpenLibraryPicker({ kind: 'common', id: uuid, subPath: '' });
+            });
           }
           // TWO EXPORTS, NAMED FOR WHAT THEY PRODUCE. [2026-09-22]
           //
