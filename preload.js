@@ -476,6 +476,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   classifyIncomingCommon:(params)     => ipcRenderer.invoke('common:classifyIncoming', params),
   scanIncomingCommon:    (params)     => ipcRenderer.invoke('common:scanIncoming', params),
   importCommonFromZip:   (params)     => ipcRenderer.invoke('common:importFromZip', params),
+  inspectIncomingCommonZip: (params)  => ipcRenderer.invoke('common:inspectIncomingZip', params),
+  inspectIncomingCommonFolder: (params) => ipcRenderer.invoke('common:inspectIncomingFolder', params),
   renameCommon:          (params)     => ipcRenderer.invoke('common:rename', params),
   duplicateCommon:       (params)     => ipcRenderer.invoke('common:duplicate', params),
   deleteCommon:          (params)     => ipcRenderer.invoke('common:delete', params),

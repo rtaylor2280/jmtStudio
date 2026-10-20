@@ -189,6 +189,27 @@ function _findCommonSubfolder(rootDir) {
 // Check whether a directory has at least one .wav file (recursively).
 // Used as the "is this worth wrapping as a common folder" signal when the
 // user-picked source doesn't have a recognizable "common" subfolder.
+// Every `common` folder under rootDir, in name order. A pack bundle holds one per pack under its
+// own parent folder (<Pack>/common); each becomes its own common folder from the one source.
+function _findCommonSubfolders(rootDir) {
+  const out = [];
+  if (!fs.existsSync(rootDir)) return out;
+  const stack = [rootDir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const abs = path.join(cur, e.name);
+      if (e.name.toLowerCase() === 'common') out.push(abs);
+      else stack.push(abs);
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
 function _hasAnyWav(dir) {
   const files = _walkFiles(dir);
   return files.some(f => /\.wav$/i.test(f.rel));
@@ -393,14 +414,16 @@ function _descriptionFromReadme(filesDir) {
 // picked zip; importSource treats either as a source. Returns
 // { ok, uuid, name, sourceUuid, savings } where savings carries what the
 // close-out sentence needs (archiveBytes / contentBytes / crossLinked).
+// `bundle`: the caller found several packs before importing, so `name` names the SOURCE (each
+// common folder is named from its pack) and is not checked against common folder names.
 async function _importCommonAsSource(userData, sourcePath, name, onProgress, shouldStop,
-                                     { forceNewSource = false, askOnDuplicate = false } = {}) {
+                                     { forceNewSource = false, askOnDuplicate = false, bundle = false } = {}) {
   if (!sourcePath || !fs.existsSync(sourcePath)) {
     return { ok: false, error: 'Source not found' };
   }
   const cleanName = String(name || '').trim();
   if (!cleanName) return { ok: false, error: 'Name is required' };
-  if (nameInUse(userData, cleanName)) {
+  if (!bundle && nameInUse(userData, cleanName)) {
     return { ok: false, error: `A common folder named "${cleanName}" already exists` };
   }
   const S = require('./soundFontSources');
@@ -463,7 +486,14 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
   const srcObj = S.openSource(userData, sourceUuid);
   if (!srcObj) return { ok: false, error: 'Stored source could not be opened' };
   const treeRoot = path.join(sourcesRoot_(userData), sourceUuid, 'source');
-  const contentDir = _findCommonSubfolder(treeRoot) || treeRoot;
+  const _packs = _findCommonSubfolders(treeRoot).filter((d) => _hasAnyWav(d));
+  if (_packs.length > 1) {
+    if (bundle && !imp.isDuplicate) {
+      try { S.updateSourceMeta(userData, sourceUuid, { bundleName: cleanName }); } catch {}
+    }
+    return await _importCommonPacks(userData, { imp, srcObj, sourceUuid, treeRoot, packs: _packs, sourcePath, dedupSaved });
+  }
+  const contentDir = _packs[0] || _findCommonSubfolder(treeRoot) || treeRoot;
   if (!_hasAnyWav(contentDir)) {
     // A fresh source with no wavs is useless - reclaim it rather than leaving
     // an orphan for the sweep. A REUSED (duplicate) source is someone else's
@@ -626,6 +656,102 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
 // modules require each other lazily).
 function sourcesRoot_(userData) {
   return path.join(userData, 'soundFonts', 'sources');
+}
+
+// A source holding several packs (<Pack>/common each): one common folder per pack, all from the
+// one source, each named from its parent folder and numbered _N if that name is taken. A pack the
+// archive's own curation already brought back is reported, not made twice.
+async function _importCommonPacks(userData, { imp, srcObj, sourceUuid, treeRoot, packs, sourcePath, dedupSaved }) {
+  const S = require('./soundFontSources');
+  ensureCommonRoot(userData);
+  const restored = (imp.customizedRestored && imp.customizedRestored.commons) || [];
+  const made = [];
+  let contentBytes = 0;
+  try {
+    for (const dir of packs) {
+      const subPath = path.relative(treeRoot, dir).replace(/\\/g, '/');
+      const claimed = restored.find((r) => r && String(r.sourceSubPath || '') === subPath);
+      if (claimed) { made.push({ uuid: claimed.uuid, name: claimed.name, restoredFromArchive: true }); continue; }
+      const parent = path.basename(path.dirname(dir)) || 'common';
+      const name = nextNumberedName(userData, parent);
+      const uuid = crypto.randomUUID();
+      const uuidDir = path.join(commonRoot(userData), uuid);
+      const filesDir = path.join(uuidDir, 'files');
+      try {
+        fs.mkdirSync(filesDir, { recursive: true });
+        await srcObj.extractTo(subPath, filesDir, null, { link: true });
+        const meta = {
+          schemaVersion: 1, uuid, name,
+          createdAt: new Date().toISOString(),
+          importedFrom: path.basename(sourcePath),
+          sourceUuid, sourceSubPath: subPath,
+        };
+        try { const d = _descriptionFromReadme(filesDir); if (d) meta.description = d; } catch {}
+        fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+        try { recomputeCommonContentHash(userData, uuid); } catch {}
+        contentBytes += _walkCommonContentSignals(filesDir).totalBytes || 0;
+        made.push({ uuid, name });
+      } catch (err) { _cleanupPartial(uuidDir); throw err; }
+    }
+  } catch (err) {
+    if (err && (err.name === 'ExportCancelled' || err.cancelled)) {
+      return { ok: false, cancelled: true, error: 'Import cancelled.', commons: made };
+    }
+    return { ok: false, error: `Import failed: ${err.message}`, commons: made };
+  }
+  try {
+    const _V = require('./soundFontVendors');
+    const _sm = S.readSourceMeta(path.join(sourcesRoot_(userData), sourceUuid));
+    if (!_sm || !_sm.vendor) {
+      const _det = await _V.detectVendor(srcObj, { learned: _V.learnedVendorsFrom(S.listSources(userData)) });
+      if (_det && _det.vendor) {
+        S.updateSourceMeta(userData, sourceUuid, { vendor: _det.vendor, vendorWebsite: _det.vendorWebsite || null, vendorAutoDetected: true });
+      }
+    }
+  } catch {}
+  const first = made[0] || {};
+  return {
+    ok: true, uuid: first.uuid, name: first.name, sourceUuid, commons: made,
+    blockedFiles: imp.blockedFiles || [],
+    notedFiles: imp.notedFiles || [],
+    savings: {
+      archiveBytes: imp.archiveBytes || 0,
+      contentBytes: imp.contentBytes || contentBytes,
+      crossLinked: imp.crossLinked || null,
+      dedupSaved,
+      reusedBytes: imp.isDuplicate ? contentBytes : 0,
+      reusedSource: !!imp.isDuplicate,
+    },
+  };
+}
+
+// A zip whose own top level is other zips and no audio: a package of packages, refused before
+// anything is copied or scanned. Reads only the outer central directory.
+async function inspectIncomingCommonZip(zipPath) {
+  // Opened the way every other zip in the app is: some packs (Brian Conner's among them) carry a
+  // bare `/` entry, which node-stream-zip otherwise rejects by throwing out of its read callback.
+  const zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
+  try {
+    const entries = Object.values(await zip.entries());
+    let innerZips = 0, wavs = 0;
+    const packDirs = new Set();
+    for (const e of entries) {
+      if (e.isDirectory || e.name === '/') continue;
+      if (/[.]zip$/i.test(e.name)) innerZips++;
+      else if (/[.]wav$/i.test(e.name)) {
+        wavs++;
+        // A pack is a `common` folder holding audio; its path up to and including `common`.
+        const m = e.name.match(/^(.*?(?:^|[/])common)[/]/i);
+        if (m) packDirs.add(m[1].toLowerCase());
+      }
+    }
+    return { ok: true, zipOfZips: innerZips >= 2 && wavs === 0, innerZips, packs: packDirs.size };
+  } finally { try { await zip.close(); } catch {} }
+}
+
+// The same count for a picked folder: `common` folders under it that hold audio.
+function inspectIncomingCommonFolder(folderPath) {
+  return { ok: true, packs: _findCommonSubfolders(folderPath).filter((d) => _hasAnyWav(d)).length };
 }
 
 // Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
@@ -961,6 +1087,23 @@ function _linkOrCopyDirRecursive(srcDir, destDir, blocked, relBase) {
   }
 }
 
+// Whether anything still uses a source: a font from it, or a common folder pointing at it.
+// When that cannot be read, the answer is yes, so the source is kept.
+function _sourceStillUsed(userData, sourceUuid) {
+  try {
+    if (require('./soundFontEntries').listEntriesBySourceUuid(userData, sourceUuid).length) return true;
+  } catch { return true; }
+  const root = commonRoot(userData);
+  let uuids = [];
+  try { uuids = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); }
+  catch { return true; }
+  for (const u of uuids) {
+    const m = _readMeta(path.join(root, u));
+    if (m && m.sourceUuid === sourceUuid) return true;
+  }
+  return false;
+}
+
 function deleteCommon(userData, uuid) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   const dir = path.join(commonRoot(userData), uuid);
@@ -971,14 +1114,20 @@ function deleteCommon(userData, uuid) {
   // and the manifest could never be reclaimed.
   _dropManifest();
   if (!fs.existsSync(dir)) return { ok: true, deleted: false };
+  const sourceUuid = (_readMeta(dir) || {}).sourceUuid || null;
   try {
     fs.rmSync(dir, { recursive: true, force: true });
     // The per-file manifest goes with it ([B-327]) - a manifest surviving its
     // common is the receipt-nobody-points-at mistake the source side already
-    // fixed once. The SOURCE is deliberately left alone: cleanupOrphanSources
-    // reclaims it on the next pass if nothing else references it.
+    // fixed once. So does the SOURCE when this was the last thing using it: a delete
+    // deletes, and the orphan sweep exists for backups, not to finish a delete.
     _dropManifest();
-    return { ok: true, deleted: true };
+    let sourceDeleted = false;
+    if (sourceUuid && !fs.existsSync(dir) && !_sourceStillUsed(userData, sourceUuid)) {
+      const sr = require('./soundFontSources').deleteSource(userData, sourceUuid);
+      sourceDeleted = !!(sr && sr.ok && sr.deleted);
+    }
+    return { ok: true, deleted: true, sourceDeleted };
   } catch (err) {
     // The removal may have torn the directory down before it threw.
     _dropManifest();
@@ -2300,6 +2449,8 @@ module.exports = {
   importCommonFromZip,
   classifyIncomingCommon,
   scanIncomingCommon,
+  inspectIncomingCommonZip,
+  inspectIncomingCommonFolder,
   renameCommon,
   duplicateCommon,
   deleteCommon,

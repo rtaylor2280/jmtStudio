@@ -67,14 +67,15 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     check('it cross-linked against the common\'s content',
       !!(fi.crossLinked && fi.crossLinked.savedBytes > 0), JSON.stringify(fi.crossLinked));
 
-    console.log('deleting the common leaves the source for the sweep, which then takes it');
+    console.log('deleting the last common using a source deletes the source in the same call');
     const del = C.deleteCommon(userData, r.uuid);
     check('common deleted', !!(del && del.ok));
     check('its manifest went with it',
       !fs.existsSync(path.join(userData, 'soundFonts', '.filehashes', 'commons', `${r.uuid}.json`)));
+    check('the source went with it, reported as such', del.sourceDeleted === true
+      && !fs.existsSync(path.join(S.sourcesRoot(userData), r.sourceUuid)), JSON.stringify(del));
     const sweep2 = S.cleanupOrphanSources(userData);
-    check('the now-unowned source is reclaimed', sweep2.removed.includes(r.sourceUuid),
-      JSON.stringify(sweep2));
+    check('nothing is left for the sweep', !sweep2.removed.includes(r.sourceUuid), JSON.stringify(sweep2));
   }
 
   {
@@ -93,7 +94,9 @@ const nlink = (p) => { try { return fs.statSync(p).nlink; } catch { return 0; } 
     check('duplicate shares the inode', fs.statSync(aFile).ino === fs.statSync(bFile).ino);
     // Delete the ORIGINAL; the duplicate carries the sourceUuid, so the sweep
     // must leave the source standing.
-    C.deleteCommon(userData, a.uuid);
+    const delA = C.deleteCommon(userData, a.uuid);
+    check('deleting the original leaves the source the duplicate uses', delA.sourceDeleted === false
+      && fs.existsSync(path.join(S.sourcesRoot(userData), a.sourceUuid)), JSON.stringify(delA));
     const sweep = S.cleanupOrphanSources(userData);
     check('source survives because the duplicate owns it too',
       !sweep.removed.includes(a.sourceUuid), JSON.stringify(sweep.removed));

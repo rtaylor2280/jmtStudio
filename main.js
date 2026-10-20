@@ -2896,24 +2896,35 @@ ipcMain.handle('common:nameInUse', (_, { name, excludeUuid } = {}) => {
 const _commonImportGate = require('./bulkImportGate').createGate({ exclusive: false });
 ipcMain.handle('common:importCancel', () => ({ ok: true, cancelled: _commonImportGate.cancelAll() }));
 
-ipcMain.handle('common:importFromFolder', async (_, { folderPath, name, forceNewSource, askOnDuplicate } = {}) => {
+ipcMain.handle('common:importFromFolder', async (_, { folderPath, name, forceNewSource, askOnDuplicate, bundle } = {}) => {
   const token = _commonImportGate.begin();
   try {
     return await soundFontCommon.importCommonFromFolder(
       app.getPath('userData'), folderPath, name, undefined, () => token.cancelled,
-      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate });
+      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate, bundle: !!bundle });
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   finally { _commonImportGate.end(token); }
 });
 
-ipcMain.handle('common:importFromZip', async (_, { zipPath, name, forceNewSource, askOnDuplicate, linkUrl } = {}) => {
+// A zip of zips is refused before the import's scan, which would open every inner zip.
+ipcMain.handle('common:inspectIncomingZip', async (_, { zipPath } = {}) => {
+  try { return await soundFontCommon.inspectIncomingCommonZip(zipPath); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:inspectIncomingFolder', (_, { folderPath } = {}) => {
+  try { return soundFontCommon.inspectIncomingCommonFolder(folderPath); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:importFromZip', async (_, { zipPath, name, forceNewSource, askOnDuplicate, linkUrl, bundle } = {}) => {
   const token = _commonImportGate.begin();
   try {
     const ud = app.getPath('userData');
     const r = await soundFontCommon.importCommonFromZip(
       ud, zipPath, name, undefined, () => token.cancelled,
-      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate });
+      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate, bundle: !!bundle });
     // The page the in-app browser downloaded from becomes the source's Link, when it has none.
     if (linkUrl && r && r.ok && !r.isDuplicate && r.sourceUuid) {
       try {

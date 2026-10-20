@@ -3797,6 +3797,10 @@
      comma-separated text links to match the "Included Formats" pattern;
      clicking opens a text viewer in-app or copies the file to Downloads. */
   .sf-doc-chips { display: inline; }
+  /* A row whose value is a wrapping list lines its label up with the list's first line. */
+  .sf-meta-row:has(.sf-doc-chips), .sf-entry-detail-source .src-line:has(.sf-doc-chips) { align-items: baseline; }
+  .sf-doc-more { background: none; border: none; padding: 0 0 0 4px; font: inherit; cursor: pointer; color: var(--c-text-sub); text-decoration: underline; text-underline-offset: 2px; }
+  .sf-doc-more:hover { color: var(--jmt-blue); }
   .sf-doc-chip { background: none; border: none; padding: 0; font: inherit; cursor: pointer; color: var(--jmt-blue); text-decoration: underline; text-underline-offset: 2px; }
   .sf-doc-chip:hover { opacity: 0.8; }
   .sf-doc-sep { color: var(--c-text-sub); }
@@ -27786,6 +27790,26 @@ require(['vs/editor/editor.main'], function () {
           catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         }
         if (!pick || !pick.ok) return;
+        // A ZIP OF ZIPS IS REFUSED here, before the name prompt and before the scan, which on a
+        // package of packages opens every inner zip. One zip of plain folders holding several
+        // <Pack>/common folders is fine: each pack becomes its own common folder.
+        let _packs = 0;
+        if (mode === 'zip') {
+          let _zi = null;
+          try { _zi = await window.electronAPI.inspectIncomingCommonZip({ zipPath: pick.filePath }); } catch {}
+          if (_zi && _zi.ok && _zi.zipOfZips) {
+            promptError('This zip holds other zips',
+              `It contains ${_zi.innerZips} zipped packs and no sound files of its own. `
+              + `Unzip it and import the pack you want.`);
+            return;
+          }
+          _packs = (_zi && _zi.ok && _zi.packs) || 0;
+        } else {
+          try { const _fi = await window.electronAPI.inspectIncomingCommonFolder({ folderPath: pick.filePath }); _packs = (_fi && _fi.ok && _fi.packs) || 0; } catch {}
+        }
+        // Several packs: each common folder is named from its pack, so the one name asked for is
+        // the source's. Asked plainly as that, and not checked against common folder names.
+        const _bundle = _packs > 1;
         // Number the proposed name on a collision, the same way Duplicate does
         // (_jmtNumberedName, the app-wide _N convention). Import used to offer the
         // bare folder/zip basename and then reject it, so the two paths taught
@@ -27797,7 +27821,14 @@ require(['vs/editor/editor.main'], function () {
         const defaultName = _cmnNames.some(n => n.toLowerCase() === _cmnBase.toLowerCase())
           ? _jmtNumberedName(_cmnBase, _cmnNames)
           : _cmnBase;
-        const name = await _sfPromptCommonName({ title: 'Import common folder', defaultValue: defaultName });
+        const name = _bundle
+          ? await _sfPromptText({
+              title: 'Import voicepack bundle',
+              message: `This ${mode === 'zip' ? 'zip' : 'folder'} holds ${_packs} packs. Each becomes its own common folder, named from its pack. Name the source they come from.`,
+              defaultValue: _cmnBase,
+              okText: 'Import',
+            })
+          : await _sfPromptCommonName({ title: 'Import common folder', defaultValue: defaultName });
         if (!name) return;
         // WARN BEFORE ACTING, LIKE EVERY OTHER DOOR ([B-214], 2026-09-10:
         // "the other imports stop it from importing and check then import anyway...
@@ -27809,6 +27840,9 @@ require(['vs/editor/editor.main'], function () {
         // [B-424] Declared outside the try so the slow-card gate below can read them whatever the
         // scan did. Zero means "unmeasured", which is below every threshold and therefore silent.
         let _preFiles = 0, _preBytes = 0;
+        // The progress card goes up on the name and the file check below runs inside it. A
+        // question the check raises is a confirm, which stacks above this card.
+        _sfDeleteProgress.show('Importing common folder', name);
         try {
           const _pre = await window.electronAPI.scanIncomingCommon({ srcPath: pick.filePath });
           _preFiles = (_pre && _pre.ok && Number(_pre.files)) || 0;
@@ -27843,7 +27877,7 @@ require(['vs/editor/editor.main'], function () {
               cancelText: 'Cancel',
               cancelKind: 'primary',
             });
-            if (!_go) return;
+            if (!_go) { _sfDeleteProgress.hideNow(); return; }
           }
         } catch { /* a scan we cannot run must not block the import */ }
         // [B-424] The board-card warning, from counts the scan above already produced - no second
@@ -27852,7 +27886,7 @@ require(['vs/editor/editor.main'], function () {
         // Defensive read: a scan that failed leaves these at zero, and zero payload is below any
         // threshold - so a card nobody could measure imports without a warning rather than with a
         // guessed one. Same degrade-to-safe rule the export gate follows.
-        if (await _sfWarnSlowImport(pick.filePath, { files: _preFiles, bytes: _preBytes })) return;
+        if (await _sfWarnSlowImport(pick.filePath, { files: _preFiles, bytes: _preBytes })) { _sfDeleteProgress.hideNow(); return; }
         _sfDeleteProgress.show('Importing common folder', name);
         // THE CANCEL. [B-424] It was never that this door could not be stopped -
         // the source pipeline has taken a `shouldStop` since [B-462] and nobody
@@ -27877,7 +27911,7 @@ require(['vs/editor/editor.main'], function () {
         })();
         let res;
         try {
-          const _impArgs = { name, forceNewSource, askOnDuplicate: !forceNewSource };
+          const _impArgs = { name, forceNewSource, askOnDuplicate: !forceNewSource, bundle: _bundle };
           if (mode === 'zip') res = await window.electronAPI.importCommonFromZip({ zipPath: pick.filePath, ..._impArgs, linkUrl });
           else res = await window.electronAPI.importCommonFromFolder({ folderPath: pick.filePath, ..._impArgs });
         } catch (err) {
@@ -27977,7 +28011,12 @@ require(['vs/editor/editor.main'], function () {
         // "shows NOTHING below the gate" line described a door whose ending was
         // conditional, which is the thing being fixed, not a rule to preserve.
         const sv = res.savings || null;
-        let _body = `<strong>${esc(res.name || name)}</strong> was added.`;
+        // A bundle of packs makes one common folder per pack, each named from its own folder.
+        const _many = Array.isArray(res.commons) && res.commons.length > 1;
+        let _body = _many
+          ? `<strong>${res.commons.length} common folders</strong> were added from this ${mode === 'zip' ? 'zip' : 'folder'}, one per pack:`
+            + `<ul style="margin:6px 0 0 18px;padding:0">${res.commons.map((c) => `<li>${esc(c.name)}</li>`).join('')}</ul>`
+          : `<strong>${esc(res.name || name)}</strong> was added.`;
         if (sv && sv.contentBytes > 0) {
           // REUSE IS A SAVING, because it is one. The source was already in the
           // library and the working copy hardlinks into it, so those bytes were
@@ -27998,7 +28037,7 @@ require(['vs/editor/editor.main'], function () {
               ? `added only <strong>${fmtB(_foot)}</strong> on disk`
               : `added nothing new on disk`;
             _body += `<br><br>Your ${noun} started at <strong>${fmtB(_started)}</strong>. `
-              + `JMT Studio saved you <strong>${fmtB(_shown)}</strong>, so this common folder ${addedTxt}. `
+              + `JMT Studio saved you <strong>${fmtB(_shown)}</strong>, so ${_many ? 'these common folders' : 'this common folder'} ${addedTxt}. `
               + `Identical files are stored once in your library and used in every location they appear, `
               + `so nothing is missing or renamed.`;
           } else {
@@ -28714,10 +28753,12 @@ require(['vs/editor/editor.main'], function () {
       };
       // Several common folders at once: one confirm, the fonts' bulk-delete shape. A source leaves
       // with them when no font uses it and every common folder using it is being deleted.
-      const _sfDeleteCommonsPrompt = async (uuids) => {
+      // `asSource`: the source modal's Delete source on a source backing common folders; same
+      // delete, worded as deleting that source. Resolves true when anything was deleted.
+      const _sfDeleteCommonsPrompt = async (uuids, { asSource = null } = {}) => {
         const targets = uuids.map((u) => _sfCommons.find((x) => x.uuid === u)).filter(Boolean);
-        if (!targets.length) return;
-        if (targets.length === 1) { await _sfDeleteCommonPrompt(targets[0].uuid); return; }
+        if (!targets.length) return false;
+        if (targets.length === 1 && !asSource) return await _sfDeleteCommonPrompt(targets[0].uuid);
         const picked = new Set(targets.map((c) => c.uuid));
         const names = targets.map((c) => (c.meta && c.meta.name) || c.uuid);
         const bySource = new Map();
@@ -28731,8 +28772,12 @@ require(['vs/editor/editor.main'], function () {
         }
         const sourcesToRemove = [...bySource.values()].filter((x) => x.leaves);
         const list = names.length <= 8 ? names.join(', ') : `${names.slice(0, 8).join(', ')}, and ${names.length - 8} more`;
-        let messageHtml = `Delete ${names.length} common folders?` + _sfDelDimHtml(_sfEscape(list));
-        if (sourcesToRemove.length === 1) {
+        let messageHtml = asSource
+          ? `Delete the source <strong>"${_sfEscape(asSource)}"</strong> and ${names.length === 1 ? 'its common folder' : `the ${names.length} common folders that came from it`}?` + _sfDelDimHtml(_sfEscape(list))
+          : `Delete ${names.length} common folders?` + _sfDelDimHtml(_sfEscape(list));
+        if (asSource) {
+          // The source is the thing being deleted; the line below would only restate it.
+        } else if (sourcesToRemove.length === 1) {
           messageHtml += _sfDelDimHtml(`The source "${_sfEscape(sourcesToRemove[0].label)}" will also be removed.`);
         } else if (sourcesToRemove.length > 1) {
           messageHtml += _sfDelDimHtml(`${sourcesToRemove.length} source archives will also be removed.`);
@@ -28753,7 +28798,7 @@ require(['vs/editor/editor.main'], function () {
             : _sfDelWarnHtml(`${who}. Deleting destroys your edits: the sources that stay only hold the creators' originals.`);
         }
         const res = await promptConfirm({
-          title: `Delete ${names.length} common folders`,
+          title: asSource ? 'Delete source' : `Delete ${names.length} common folders`,
           messageHtml,
           confirmText: 'Delete',
           confirmKind: 'danger',
@@ -28763,10 +28808,10 @@ require(['vs/editor/editor.main'], function () {
         });
         // Same two return shapes as the single delete: an object with a checkbox, a boolean without.
         const confirmed = sourcesToRemove.length > 0 ? !!(res && res.confirmed) : !!res;
-        if (!confirmed) return;
+        if (!confirmed) return false;
         if (sourcesToRemove.length > 0 && res && res.checked) {
           const exported = await _sfExportSourcesFlow(sourcesToRemove, { customizedKind: 'common' });
-          if (!exported) return;
+          if (!exported) return false;
         }
         const failed = [];
         for (const c of targets) {
@@ -28783,6 +28828,7 @@ require(['vs/editor/editor.main'], function () {
         _sfMultiSelectAnchor = null;
         await _sfRefreshCommons();
         if (failed.length) await _sfShowPartialFailures('Some common folders were not deleted', failed);
+        return true;
       };
       const _sfDeleteCommonPrompt = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
@@ -28806,7 +28852,7 @@ require(['vs/editor/editor.main'], function () {
         // Cancel read as Delete on exactly the branch where something is unrecoverable.
         const confirmed = built.lastUser ? !!(answer && answer.confirmed) : !!answer;
         const wantExport = built.lastUser && !!(answer && answer.checked);
-        if (!confirmed) return;
+        if (!confirmed) return false;
         if (wantExport) {
           // Reuses the existing archive export, which writes the WORKING COPY - so it
           // carries the customization, which is the half that exists nowhere else.
@@ -28814,15 +28860,16 @@ require(['vs/editor/editor.main'], function () {
           // A cancelled or failed export must not fall through into the delete: the user
           // asked for the copy first, and deleting anyway destroys the thing they asked to
           // keep. Same precondition rule the font side's export-source-first follows.
-          if (!exported) return;
+          if (!exported) return false;
         }
         const res = await window.electronAPI.deleteCommon({ uuid });
-        if (!res || !res.ok) { promptError('Delete failed', (res && res.error) || 'unknown error'); return; }
+        if (!res || !res.ok) { promptError('Delete failed', (res && res.error) || 'unknown error'); return false; }
         if (_sfSelectedCommonUuid === uuid) {
           _sfSelectedCommonUuid = null;
           await _sfSaveActiveCommon();
         }
         await _sfRefreshCommons();
+        return true;
       };
       // Right-click "Export source…" on a common folder. [B-493, 2026-10-19]
       //
@@ -38407,6 +38454,20 @@ require(['vs/editor/editor.main'], function () {
         const src = _sfAllSourcesByUuid[uuid];
         const sm = (src && src.meta) || {};
         const sourceLabel = sm.bundleName || sm.originalName || uuid;
+        // A source backing common folders: deleting it means deleting them, and the last one
+        // takes the source with it in the backend. The font path below never saw commons, so it
+        // deleted the source and left them pointing at nothing.
+        const _srcCommons = _sfCommons.filter((c) => c.meta && c.meta.sourceUuid === uuid);
+        if (_srcCommons.length && !entries.length) {
+          _sfSourceDetailEls.modal?.classList.remove('active');
+          const done = await _sfDeleteCommonsPrompt(_srcCommons.map((c) => c.uuid), { asSource: sourceLabel });
+          if (!done) { _sfSourceDetailEls.modal?.classList.add('active'); return; }
+          _sfSourceEdit = null;
+          _sfSourceOriginalUuid = null;
+          _sfSourceDirty = false;
+          try { await window.refreshSoundFontsView(); } catch {}
+          return;
+        }
         // Three shapes to match the actual scope being deleted:
         //   - 0 entries (orphaned source): just confirm the source.
         //   - 1 entry: collapse to a single sentence — listing one name when
@@ -47825,12 +47886,25 @@ require(['vs/editor/editor.main'], function () {
         };
         // Inline link styling, comma-separated — mirrors the "Included Formats"
         // line. Size goes into the title tooltip so the line stays scannable.
-        containerEl.innerHTML = docs.map(d => {
+        // A bundle can carry dozens of these, so the list shows the first few and a "+ N more"
+        // that expands it in place.
+        const LIMIT = 6;
+        const chip = (d) => {
           const sizeHint = d.size ? ` (${fmtSize(d.size)})` : '';
           const title = `${d.fileName}${sizeHint}`;
           const sizeAttr = d.size ? ` data-doc-size="${d.size}"` : '';
           return `<button class="sf-doc-chip" data-doc-path="${_sfEscape(d.fileName)}"${sizeAttr} title="${_sfEscape(title)}">${_sfEscape(d.fileName)}</button>`;
-        }).join('<span class="sf-doc-sep">, </span>');
+        };
+        const paint = (all) => {
+          const shown = all || docs.length <= LIMIT ? docs : docs.slice(0, LIMIT);
+          containerEl.innerHTML = shown.map(chip).join('<span class="sf-doc-sep">, </span>')
+            + (shown.length < docs.length
+              ? `<button type="button" class="sf-doc-more">+ ${docs.length - shown.length} more</button>`
+              : '');
+          const more = containerEl.querySelector('.sf-doc-more');
+          if (more) more.addEventListener('click', (e) => { e.stopPropagation(); paint(true); });
+        };
+        paint(false);
       };
       // In-app text viewer modal. Shows decoded text content with the filename
       // in the header; clicking outside, the × button, or Escape closes it.
