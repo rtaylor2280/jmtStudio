@@ -48,7 +48,11 @@ const insideRunner = (idx) => idx > rs && idx < re;
 // one `_sfRunExport` and asserts the count drops BELOW the floor, which stops being true the
 // moment there is slack. **A ratchet with slack cannot detect the regression it exists for**, so
 // the self-proof failing is the file telling us to tighten, not a broken test.
-const MIGRATED_MIN   = 9;   // + the primary export (door 11)          (2026-09-24)
+// 9 -> 8 on 2026-10-19 [B-493]: A DOOR STOPPED EXISTING, none came off the runner. The
+// common-as-zip door zipped the common FOLDER; a common now exports its SOURCE through
+// `_sfExportSourcesFlow`, which is already counted here. Two doors became one, so the
+// population shrank. Lowering this for any other reason is deleting the ratchet.
+const MIGRATED_MIN   = 8;   // one fewer door, same coverage           (2026-10-19)
 // The runner's OWN preflight call is filtered out below, so this counts doors only. The
 // ceiling is deliberately the measured truth with NO slack: slack is room for one more door to
 // be added the old way without anything going red.

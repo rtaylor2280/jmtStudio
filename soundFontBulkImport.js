@@ -1345,6 +1345,16 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
       });
     } catch {}
   }
+  // A modifier credit from the matched readme ("Modifications by ...") goes into the source's
+  // notes when the detected creator stands and the source has no notes yet.
+  if (vendorRes && vendorRes.vendorNote && effectiveVendor === detectedVendor) {
+    try {
+      const _sm = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(userData), sourceUuid));
+      if (!(_sm && _sm.userNotes)) {
+        soundFontSources.updateSourceMeta(userData, sourceUuid, { userNotes: vendorRes.vendorNote });
+      }
+    } catch {}
+  }
   // Source-level extras for the no-vendor case (the with-vendor write above
   // already handles website + purchased). Website + free/paid are source-of-
   // truth fields. The date/link/notes are ENTRY-level and go through createEntry

@@ -9,6 +9,7 @@ const proffie     = require('./proffieos');
 const cacheManager = require('./cacheManager');
 const coreVersions = require('./coreVersions');
 const soundFontSources = require('./soundFontSources');
+const soundFontPicture = require('./soundFontPicture');
 const soundFontVendors = require('./soundFontVendors');
 const soundFontCandidates = require('./soundFontCandidates');
 const soundFontEntries = require('./soundFontEntries');
@@ -2560,14 +2561,22 @@ ipcMain.handle('reorganize:renumber', (_, { name, subPath } = {}) => {
 });
 
 
-// Generic audio file picker — used by the entry's "+ Add" affordance.
-// Title differs from the common-folder picker so the dialog reads
-// correctly in either context.
-ipcMain.handle('dialog:selectAudioFiles', async (_, { title } = {}) => {
+// What a font or common folder holds, as the + Add dialog's default filter: sounds, the ini and
+// readme files that travel with them, and pictures. Audio-only and All files stay as choices.
+// Only what the dialog shows first; every added file is still screened by its contents.
+const PACK_FILE_FILTERS = [
+  { name: 'Sound, picture and text files', extensions: ['wav', 'ini', 'txt', 'rtf', 'md', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] },
+  { name: 'Audio (wav)', extensions: ['wav'] },
+  { name: 'All files', extensions: ['*'] },
+];
+
+// Generic file picker for "+ Add". `packFiles` gives the font's broad filter; without it, audio
+// first (Shared Tracks, which only takes music).
+ipcMain.handle('dialog:selectAudioFiles', async (_, { title, packFiles } = {}) => {
   const result = await dialog.showOpenDialog(win, {
     title: title || 'Add audio files',
     properties: ['openFile', 'multiSelections'],
-    filters: [
+    filters: packFiles ? PACK_FILE_FILTERS : [
       { name: 'Audio', extensions: ['wav'] },
       { name: 'All files', extensions: ['*'] },
     ],
@@ -2887,21 +2896,32 @@ ipcMain.handle('common:nameInUse', (_, { name, excludeUuid } = {}) => {
 const _commonImportGate = require('./bulkImportGate').createGate({ exclusive: false });
 ipcMain.handle('common:importCancel', () => ({ ok: true, cancelled: _commonImportGate.cancelAll() }));
 
-ipcMain.handle('common:importFromFolder', async (_, { folderPath, name } = {}) => {
+ipcMain.handle('common:importFromFolder', async (_, { folderPath, name, forceNewSource, askOnDuplicate } = {}) => {
   const token = _commonImportGate.begin();
   try {
     return await soundFontCommon.importCommonFromFolder(
-      app.getPath('userData'), folderPath, name, undefined, () => token.cancelled);
+      app.getPath('userData'), folderPath, name, undefined, () => token.cancelled,
+      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate });
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   finally { _commonImportGate.end(token); }
 });
 
-ipcMain.handle('common:importFromZip', async (_, { zipPath, name } = {}) => {
+ipcMain.handle('common:importFromZip', async (_, { zipPath, name, forceNewSource, askOnDuplicate, linkUrl } = {}) => {
   const token = _commonImportGate.begin();
   try {
-    return await soundFontCommon.importCommonFromZip(
-      app.getPath('userData'), zipPath, name, undefined, () => token.cancelled);
+    const ud = app.getPath('userData');
+    const r = await soundFontCommon.importCommonFromZip(
+      ud, zipPath, name, undefined, () => token.cancelled,
+      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate });
+    // The page the in-app browser downloaded from becomes the source's Link, when it has none.
+    if (linkUrl && r && r.ok && !r.isDuplicate && r.sourceUuid) {
+      try {
+        const sm = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(ud), r.sourceUuid));
+        if (!(sm && sm.linkUrl)) soundFontSources.updateSourceMeta(ud, r.sourceUuid, { linkUrl });
+      } catch {}
+    }
+    return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   finally { _commonImportGate.end(token); }
@@ -2995,6 +3015,20 @@ ipcMain.handle('common:readFileBytes', (_, { uuid, subPath } = {}) => {
     const buf = soundFontCommon.readCommonFileBytes(app.getPath('userData'), uuid, subPath);
     return { ok: true, bytes: Array.from(buf) };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
+// A picture for a common folder, a font, or a source (soundFontPicture.js holds the rule).
+ipcMain.handle('common:findPicture', async (_, { uuid } = {}) => {
+  try { return { ok: true, picture: await soundFontPicture.findCommonPicture(app.getPath('userData'), uuid) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('entries:findPicture', async (_, { name } = {}) => {
+  try { return { ok: true, picture: await soundFontPicture.findEntryPicture(app.getPath('userData'), name) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sources:findPicture', async (_, { uuid } = {}) => {
+  try { return { ok: true, picture: await soundFontPicture.findSourcePicture(app.getPath('userData'), uuid) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
 ipcMain.handle('common:folderExistsAt', (_, { destDir, targetName } = {}) => {
@@ -3135,6 +3169,11 @@ ipcMain.handle('common:resolveContentDirty', (_, { uuid } = {}) => {
 // delete (unsets group on every member). Group ORDER (drag-reorder of
 // headers in the sidecar) is persisted as a renderer preference (see
 // settings.soundFontGroupOrder), not in common meta.
+ipcMain.handle('common:setDescription', (_, { uuid, description } = {}) => {
+  try { return soundFontCommon.setCommonDescription(app.getPath('userData'), uuid, description); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('common:setGroup', (_, { uuid, groupName } = {}) => {
   try { return soundFontCommon.setCommonGroup(app.getPath('userData'), uuid, groupName); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -4680,17 +4719,12 @@ ipcMain.handle('sfBackup:applyReplace', async (event, { opId, zipPath } = {}) =>
   }
 });
 
-// Pick wav files to add into a common folder. Multi-select on by default;
-// filtered to .wav and "all files" so users can still import oddly-named
-// audio files the OS doesn't tag with .wav.
+// Pick files to add into a common folder, with the same filters as a font's + Add.
 ipcMain.handle('dialog:selectCommonFiles', async () => {
   const result = await dialog.showOpenDialog(win, {
     title: 'Add files to common folder',
     properties: ['openFile', 'multiSelections'],
-    filters: [
-      { name: 'Audio', extensions: ['wav'] },
-      { name: 'All files', extensions: ['*'] },
-    ],
+    filters: PACK_FILE_FILTERS,
   });
   if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
   return { ok: true, filePaths: result.filePaths };
@@ -4744,7 +4778,7 @@ ipcMain.handle('dialog:selectCommonSource', async (_, { mode = 'folder' } = {}) 
 // So both callers come here. Not "the two I found" — the reconciliation test below pins the
 // count, so a third sizer added later fails rather than quietly disagreeing.
 async function _sourceExportInventory(userData, uuid, opts = {}) {
-  const { includeAttachments = true, includeCustomized = true } = opts;
+  const { includeAttachments = true, includeCustomized = true, customizedKind = 'entry' } = opts;
   const source = soundFontSources.openSource(userData, uuid);
   if (!source) return null;
   const all = await source.listAll();
@@ -4757,7 +4791,7 @@ async function _sourceExportInventory(userData, uuid, opts = {}) {
   try {
     const cur = require('./soundFontCuration');
     payload = cur.buildForSource(userData, uuid, app.getVersion(),
-                                 { includeAttachments, includeCustomized });
+                                 { includeAttachments, includeCustomized, customizedKind });
     const plan = payload ? cur.planForArchive(payload) : null;
     if (plan) {
       payloadBytes = Buffer.byteLength(plan.sidecarJson, 'utf8');
@@ -4774,10 +4808,12 @@ async function _sourceExportInventory(userData, uuid, opts = {}) {
 }
 
 ipcMain.handle('sources:exportSize', async (_, { uuid, includeAttachments = true,
-                                                 includeCustomized = true } = {}) => {
+                                                 includeCustomized = true,
+                                                 customizedKind = 'entry' } = {}) => {
   try {
     const inv = await _sourceExportInventory(app.getPath('userData'), uuid,
-                                             { includeAttachments, includeCustomized });
+                                             { includeAttachments, includeCustomized,
+                                               customizedKind });
     if (!inv) return { ok: false, error: 'Source not found' };
     // `bytes` INCLUDES THE PAYLOAD, because this number becomes the bar's denominator on the
     // opening frame. Returning the tree here is what put `0 B of 80.2 MB` on screen for a job
@@ -4786,7 +4822,7 @@ ipcMain.handle('sources:exportSize', async (_, { uuid, includeAttachments = true
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format, includeAttachments = true, includeCustomized = true, confirmSlow } = {}) =>
+ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, format, includeAttachments = true, includeCustomized = true, customizedKind = 'entry', confirmSlow } = {}) =>
   _withExportCancel(async (shouldStop) => {                            // [B-005 item 4]
   try {
     const source = soundFontSources.openSource(app.getPath('userData'), uuid);
@@ -4915,7 +4951,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     try {
       curationPayload = require('./soundFontCuration')
         .buildForSource(app.getPath('userData'), uuid, app.getVersion(),
-                        { includeAttachments, includeCustomized });
+                        { includeAttachments, includeCustomized, customizedKind });
     } catch { curationPayload = null; }  // a payload we cannot build must never sink the export
     const result = await source.exportToDownloads(target,
       { format, onProgress, shouldStop, curationPayload });
@@ -4962,6 +4998,7 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
 ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], destDir, format,
                                                                 includeAttachments = true,
                                                                 includeCustomized = true,
+                                                                customizedKind = 'entry',
                                                                 confirmSlow } = {}) =>
   _withExportCancel(async (shouldStop) => {                            // [B-005 item 4]
   const userData = app.getPath('userData');
@@ -4981,7 +5018,8 @@ ipcMain.handle('sources:exportManyToDownloads', async (event, { items = [], dest
       // the same job. They did, and the gap was visible for a full second on a real export:
       // the opening frame read `0 B of 80.2 MB` and the next one `91.7 MB of 805.0 MB`.
       const _inv = await _sourceExportInventory(userData, it.uuid,
-                                                { includeAttachments, includeCustomized });
+                                                { includeAttachments, includeCustomized,
+                                                  customizedKind });
       if (!_inv) return { ok: false, error: `Source not found: ${it.uuid}` };
       const bytes = _inv.treeBytes;
       const flat = { length: _inv.treeFiles };
@@ -5321,13 +5359,36 @@ ipcMain.handle('linkImport:start', async (event, { url } = {}) => {
   }
 });
 
+// Runs in a dropbox.com page inside the Tier 2 window. Idempotent per document.
+const DROPBOX_DOWNLOAD_ONLY = `(() => {
+  if (window.__jmtDropboxAssist) return;
+  window.__jmtDropboxAssist = true;
+  try {
+    if (navigator.credentials) {
+      navigator.credentials.get = () => Promise.reject(new DOMException('Not allowed', 'NotAllowedError'));
+    }
+  } catch (e) {}
+  let queued = false;
+  const scan = () => {
+    queued = false;
+    const el = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .find((b) => /continue with download only/i.test(b.textContent || ''));
+    if (el) el.click();
+  };
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(scan);
+  }).observe(document.documentElement, { childList: true, subtree: true });
+})();`;
+
 // Tier 2: open the link in a real in-app browser window (Chromium, with a
 // persistent session so vendor logins carry over). The user clicks the vendor's
 // own Download button; we intercept the session's will-download, stream honest
 // byte progress, save to a temp file, and resolve with its path. Closing the
 // window without downloading cancels. This covers OneDrive / KSith / login-gated
 // vendors the headless peeler can't reach.
-ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => {
+ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = {}) => {
   const os = require('os');
   const fsL = require('fs');
   const pathL = require('path');
@@ -5351,6 +5412,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
     // a fully committed source: 25 MB, 129 MB, 224 MB, then 23 MB.
     let dlItem = null;
     let cancelled = false;
+    let pageUrl = null;
     // THROUGH rmWithRetry, AND THE FIRST TEST RUN PROVED WHY. [B-424] A plain
     // `rmSync(dir, { recursive: true, force: true })` removed the partial FILE and left the
     // DIRECTORY, so a cancel came back with no orphan source and an empty `jmt-linkimport-*`
@@ -5368,6 +5430,8 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
         try { destDir = fsL.mkdtempSync(pathL.join(os.tmpdir(), 'jmt-linkimport-')); }
         catch (e) { finish({ ok: false, message: String(e && e.message || e) }); return; }
       }
+      // The page the user was on when they clicked Download, reported back as the source's Link.
+      try { if (bw && !bw.isDestroyed()) pageUrl = bw.webContents.getURL() || null; } catch {}
       const name = (item.getFilename() || 'sound-font.zip').replace(/[<>:"|?*\x00-\x1f]/g, '_');
       const destPath = pathL.join(destDir, name);
       item.setSavePath(destPath);
@@ -5406,7 +5470,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
             destDir,
             onProgress: (received, total) => { const now = Date.now(); if (now - last >= 150 || (total && received >= total)) { last = now; send({ received, total }); } },
           });
-          finish(r && r.ok ? { ok: true, filePath: r.filePath, fileName: r.fileName } : { ok: false, message: (r && r.message) || 'That download could not be imported.' });
+          finish(r && r.ok ? { ok: true, filePath: r.filePath, fileName: r.fileName, pageUrl } : { ok: false, message: (r && r.message) || 'That download could not be imported.' });
         } catch (e) { finish({ ok: false, message: String(e && e.message || e) }); }
       });
     };
@@ -5461,7 +5525,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
       width: geom.width, height: geom.height,
       ...(geom.x != null && geom.y != null ? { x: geom.x, y: geom.y } : {}),
       show: !autoHidden,
-      title: 'Download your font from the creator',
+      title: (typeof title === 'string' && title) || 'Download your font from the creator',
       autoHideMenuBar: true,
       ...WINDOW_ICON,
       webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true },
@@ -5531,6 +5595,16 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden } = {}) => 
     bw.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
       try { if (popupUrl && popupUrl !== 'about:blank') bw.loadURL(popupUrl); } catch {}
       return { action: 'deny' };
+    });
+    // Dropbox shares need no account, but its Download opens a sign-in box (with a Windows
+    // passkey prompt behind it). On dropbox.com pages this window refuses the passkey request
+    // the way the prompt's Cancel would, and clicks "Or continue with download only" itself, so
+    // whatever the user chose to download goes ahead.
+    bw.webContents.on('dom-ready', () => {
+      try {
+        if (!/(^|\.)dropbox\.com$/i.test(new URL(bw.webContents.getURL()).hostname)) return;
+        bw.webContents.executeJavaScript(DROPBOX_DOWNLOAD_ONLY, true).catch(() => {});
+      } catch {}
     });
     bw.on('closed', () => { if (!gotDownload) finish({ ok: false, canceled: true }); });
     bw.loadURL(url).catch(() => {});
@@ -5846,6 +5920,36 @@ ipcMain.handle('app:getArduinoDataPath', () => {
   return systemPath;
 });
 ipcMain.handle('clipboard:read',      () => require('electron').clipboard.readText());
+// An image on the system clipboard, pasted into a font or common folder: written to a temp
+// `pasted-image.png` so it goes through the ordinary add path (screening, dedupe, dirty marking).
+ipcMain.handle('clipboard:imageToTemp', () => {
+  try {
+    const img = require('electron').clipboard.readImage();
+    if (!img || img.isEmpty()) return { ok: false, empty: true };
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'jmt-clip-'));
+    const filePath = path.join(dir, 'pasted-image.png');
+    fs.writeFileSync(filePath, img.toPNG());
+    return { ok: true, filePath };
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+// Whether the system clipboard holds an image, for a right-click menu: asks which formats are
+// present without reading the image (measured ~0.05 ms; reading a 1080p image is ~12 ms).
+ipcMain.handle('clipboard:hasImage', () => {
+  try { return require('electron').clipboard.availableFormats().some((f) => f.startsWith('image/')); }
+  catch { return false; }
+});
+ipcMain.handle('clipboard:cleanupTemp', (_, { filePath } = {}) => {
+  try {
+    const dir = path.dirname(String(filePath || ''));
+    if (path.basename(dir).startsWith('jmt-clip-') && dir.startsWith(require('os').tmpdir())) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {}
+  return { ok: true };
+});
+// A Copy inside the app replaces the system clipboard, as copying in File Explorer does, so an
+// image found there at paste time was copied after it and wins.
+ipcMain.handle('clipboard:clearForCopy', () => { try { require('electron').clipboard.clear(); } catch {} return { ok: true }; });
 
 // ── IPC: App self-update ───────────────────────────────
 const JMT_STUDIO_REPO = 'rtaylor2280/jmtStudio';

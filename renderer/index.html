@@ -158,6 +158,13 @@
     margin-bottom: 18px;
   }
 
+  /* ── Common folder picture on hover (same card as the port tip) ── */
+  .sf-common-picture-pop {
+    position: fixed; z-index: 9999; display: none; pointer-events: none;
+    background: var(--c-bg-elevated); border: 1px solid var(--c-border-heavy);
+    border-radius: 5px; padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .sf-common-picture-pop img { display: block; max-width: 180px; max-height: 180px; border-radius: 3px; }
   /* ── Port tip popover ── */
   .port-tip-popover {
     position: fixed; z-index: 9999;
@@ -1598,6 +1605,11 @@
      below confirm-style prompts (10015) and the context menu (10020). */
   #modal-sf-audio { z-index: 10012; }
   #modal-sf-audio .modal.sf-audio-modal { position: relative; width: 520px; max-width: 92vw; padding: 18px 20px; }
+  /* The pack's picture at the left, the full height of the player, as if the character is
+     speaking; the player itself is unchanged to its right. */
+  #modal-sf-audio .modal.sf-audio-modal.has-picture { display: flex; gap: 16px; align-items: stretch; width: 660px; }
+  .sf-audio-main { flex: 1; min-width: 0; }
+  .sf-audio-picture { flex: none; align-self: stretch; width: 124px; min-height: 100%; object-fit: cover; object-position: center top; border-radius: 4px; cursor: zoom-in; }
   .sf-audio-name { margin: 0 30px 12px 0; font-size: 0.88rem; color: var(--c-text); font-weight: 600; word-break: break-all; }
   .sf-audio-loading { font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; padding: 18px 0; text-align: center; }
   .sf-audio-error { font-size: 0.74rem; color: #e44; padding: 18px 0; text-align: center; }
@@ -2694,6 +2706,9 @@
      that fills all of the expanded card's remaining height. */
   .sf-common-row-files { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--c-bg); border-top: 1px solid var(--c-border-faint); overflow: hidden; }
   .sf-common-files-header { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 14px; flex-shrink: 0; }
+  /* + Add's dropdown wrapper as a flex box: as a plain block it set a text line at the sidebar's
+     font size and sat the small button on its baseline, below + Folder. */
+  .sf-common-files-header .styles-tag-filter-wrap { display: flex; }
   .sf-common-files-title { font-size: 0.64rem; font-weight: 700; color: var(--c-text-sub); letter-spacing: 0.06em; text-transform: uppercase; flex: 1; min-width: 0; }
   .sf-common-files-add-btn { font-size: 0.64rem; padding: 1px 6px; }
   .sf-common-files { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 6px; }
@@ -2935,6 +2950,11 @@
   #modal-sf-common-import-chooser .sf-import-pick-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-width: 320px; margin-left: auto; margin-right: auto; }
   #modal-sf-common-import-chooser .sf-import-pick-row button { width: 100%; }
   #modal-sf-common-import-chooser #sf-common-import-voicepack { grid-column: 1 / -1; }
+  #modal-sf-vp-link-chooser .modal { width: 500px; max-width: 95vw; }
+  #modal-sf-vp-link-chooser .sf-import-pick-row { flex-wrap: nowrap; margin-top: 16px; }
+  #modal-sf-vp-link-chooser h2 { margin: 0 0 16px; }
+  #modal-sf-vp-link-chooser .sf-voicepack-help { margin: 0; }
+  #modal-sf-vp-link-chooser .sf-voicepack-help + .sf-voicepack-help { margin-top: 16px; }
 
   /* Voicepack picker modal. Inline form layout: version toggle on top,
      language and variant dropdowns stacked with the sample/install
@@ -3573,6 +3593,14 @@
   .sf-entry-detail-body::-webkit-scrollbar-track { background: transparent; }
   .sf-entry-detail-body::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
   .sf-entry-detail-meta { font-size: 0.75rem; color: var(--c-text-muted); background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  /* A source's or font's picture, floated top-right in the top box. Rows beside it narrow to
+     clear it (each row is its own formatting context); rows below it, Notes included, keep the
+     full width. flow-root while it shows, so the float works and the box contains it; row
+     spacing moves to margins. */
+  #sf-source-meta-box.has-picture, #sf-entry-meta-box.has-picture { display: flow-root; }
+  #sf-source-meta-box.has-picture > * + *, #sf-entry-meta-box.has-picture > * + * { margin-top: 6px; }
+  #sf-source-meta-box.has-picture > .sf-source-picture + *, #sf-entry-meta-box.has-picture > .sf-source-picture + * { margin-top: 0; }
+  .sf-source-picture { float: right; width: 124px; max-height: 120px; object-fit: contain; object-position: right top; margin-left: 12px; border-radius: 3px; cursor: zoom-in; }
   .sf-meta-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .sf-meta-label { color: var(--c-text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; width: 120px; }
   .sf-meta-val { color: var(--c-text-sub); flex: 1; word-break: break-word; min-width: 0; }
@@ -3901,6 +3929,11 @@
      via subgrid — name column auto-fits the widest name in view, description
      column flexes to take remaining space, meta column sits right-aligned. */
   .sf-source-entries-list { display: grid; grid-template-columns: auto minmax(180px, auto) 1fr auto; gap: 4px 12px; margin-bottom: 10px; }
+  /* Commons carry a group as well as a description, so their list has one more column than
+     the font list. The row inherits it through subgrid either way. [B-493, 2026-10-19] */
+  .sf-source-entries-list.is-commons { grid-template-columns: auto minmax(180px, auto) 1fr auto auto; }
+  .sf-source-entry-row .ent-group { color: var(--c-text-sub); font-size: 0.72rem; white-space: nowrap; padding: 1px 7px; border: 1px solid var(--c-border-faint); border-radius: 10px; justify-self: end; }
+  .sf-source-entry-row .ent-group:empty { border-color: transparent; }
   .sf-source-entry-row { position: relative; display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 6px 32px 6px 8px; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; cursor: pointer; font-size: 0.82rem; transition: border-color 0.1s, background 0.1s; }
   .sf-source-entry-row:hover { border-color: var(--c-border-strong); background: var(--c-bg-raised); }
   /* Edit rows opt out of the subgrid alignment — they have a different shape
@@ -3941,6 +3974,10 @@
   }
   .sf-loading-pulse { animation: sf-loading-pulse 1.6s ease-in-out infinite; }
   input.sf-loading-pulse::placeholder { animation: sf-loading-pulse 1.6s ease-in-out infinite; }
+  /* A region still loading: an indeterminate bar, shown only once the load has taken 300ms, so a
+     fast region simply appears and a slow one says it is working. */
+  @keyframes sf-loading-reveal { to { visibility: visible; } }
+  .sf-region-loading { visibility: hidden; animation: sf-loading-reveal 0s linear 0.3s forwards; padding: 10px 2px; max-width: 240px; }
 
   /* Busy dots — for a button that has swapped its label to a working state ("Resetting", "Deleting",
      "Importing"). A STATIC "Resetting…" is indistinguishable from a hang: no animation implies
@@ -6207,7 +6244,8 @@
         </div>
         <ul class="sf-needs-review-reasons" id="sf-detail-needs-review-reasons"></ul>
       </div>
-      <div class="sf-entry-detail-meta">
+      <div class="sf-entry-detail-meta" id="sf-entry-meta-box">
+        <img id="sf-entry-picture" class="sf-source-picture" alt="" title="View picture" style="display:none">
         <div class="sf-meta-row">
           <span class="sf-meta-label">Acquired</span>
           <div class="sf-meta-val sf-edit-group">
@@ -6377,7 +6415,8 @@
       </div>
     </div>
     <div class="sf-entry-detail-body">
-      <div class="sf-entry-detail-meta">
+      <div class="sf-entry-detail-meta" id="sf-source-meta-box">
+        <img id="sf-source-picture" class="sf-source-picture" alt="" title="View picture" style="display:none">
         <div class="sf-meta-row">
           <span class="sf-meta-label">Acquired</span>
           <div class="sf-meta-val sf-edit-group">
@@ -6399,7 +6438,7 @@
           <span class="sf-meta-label">Storage</span>
           <span id="sf-source-optimized-val" class="sf-meta-val" style="color: var(--jmt-blue, #025192)"></span>
         </div>
-        <div class="sf-meta-row">
+        <div class="sf-meta-row" id="sf-source-tags-row">
           <span class="sf-meta-label">Tags</span>
           <div class="sf-meta-val sf-tags-edit">
             <div class="sf-tags-chips" id="sf-source-tags-chips"></div>
@@ -6437,7 +6476,7 @@
         </div>
       </div>
       <div class="sf-entry-detail-section">
-        <h3>Fonts from this source <span id="sf-source-entries-count" class="sf-review-cand-count"></span></h3>
+        <h3 id="sf-source-entries-head"><span class="sf-source-entries-head-txt">Fonts from this source</span> <span id="sf-source-entries-count" class="sf-review-cand-count"></span></h3>
         <div class="sf-source-entries-list" id="sf-source-entries-list"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from source</button>
@@ -6678,7 +6717,7 @@
     </div>
 
     <div class="sf-voicepack-more-panel" id="sf-voicepack-more-panel" style="display:none">
-      <p class="sf-voicepack-help" style="margin-top:0">Community-made voicepacks and other external sources. Download from the linked page, then use "Pick zip file…" in the import chooser to add it.</p>
+      <p class="sf-voicepack-help" style="margin-top:0">Community-made voicepacks and other external sources. Open a link in JMT Studio and your download imports automatically, or open it in your own browser.</p>
       <div class="sf-voicepack-more-item">
         <div class="sf-voicepack-more-name">Additional Voicepacks &mdash; Brian Conner (NoSloppy)</div>
         <div class="sf-voicepack-more-desc">60+ character voicepacks (Vader, Yoda, GLaDOS, K.I.T.T., HK-47, many more) plus the V2 update of the official defaults. Free, donations welcome.</div>
@@ -6687,7 +6726,7 @@
       <div class="sf-voicepack-more-item">
         <div class="sf-voicepack-more-name">Darkwolf Sabers &mdash; Sound Board Voice Packs</div>
         <div class="sf-voicepack-more-desc">Curated voicepack collection from Darkwolf Sabers, including Brian Conner's free packs plus a few Xeno/Golden Harvest options.</div>
-        <a class="sf-voicepack-more-link" href="#" data-href="https://darkwolfsabers.com/sound-board-voice-packs">darkwolfsabers.com/sound-board-voice-packs</a>
+        <a class="sf-voicepack-more-link" href="#" data-href="https://darkwolfsabers.com/sound-board-voice-packs" data-browser-only>darkwolfsabers.com/sound-board-voice-packs</a>
       </div>
     </div>
 
@@ -6709,6 +6748,23 @@
       <a href="#" data-href="https://fredrik.hubbe.net/lightsaber/sound/">fredrik.hubbe.net</a>.</span>
       JMT Studio never hosts or re-publishes the files.
     </p>
+  </div>
+</div>
+
+<!-- ── Where a More-tab link opens. In JMT Studio, the in-app browser captures the download and
+     it imports as a common folder; in the user's browser, they import the zip themselves.
+     Same chooser shape as Import Common Folder: ✕ titled Cancel, backdrop, Escape. Placed after
+     the voicepack picker so the stacked-overlay rule dims it over the picker. ── -->
+<div class="modal-overlay" id="modal-sf-vp-link-chooser">
+  <div class="modal">
+    <button class="modal-btn-close" id="sf-vp-link-close" title="Cancel">&#10005;</button>
+    <h2 id="sf-vp-link-title">Open link</h2>
+    <p class="sf-voicepack-help"><strong>In JMT Studio:</strong> click the creator&rsquo;s Download button. JMT Studio will grab it and import it as a common folder automatically.</p>
+    <p class="sf-voicepack-help"><strong>In your browser:</strong> download the zip, then add it with &ldquo;Pick zip file&hellip;&rdquo; in the import chooser.</p>
+    <div class="sf-import-pick-row">
+      <button class="modal-btn-secondary" id="sf-vp-link-external">Open in my browser</button>
+      <button class="modal-btn-primary" id="sf-vp-link-app">Open in JMT Studio</button>
+    </div>
   </div>
 </div>
 
@@ -6760,8 +6816,10 @@
      open; click-outside closes. No dirty state, no prompt — only one
      can be open at a time (opening a new one closes the previous). ── -->
 <div class="modal-overlay" id="modal-sf-audio">
-  <div class="modal sf-audio-modal">
+  <div class="modal sf-audio-modal" id="sf-audio-box">
     <button class="modal-btn-close" id="sf-audio-close" title="Close">&#10005;</button>
+    <img id="sf-audio-picture" class="sf-audio-picture" alt="" title="View picture" style="display:none">
+    <div class="sf-audio-main">
     <h3 class="sf-audio-name" id="sf-audio-name">…</h3>
     <div class="sf-audio-loading" id="sf-audio-loading">Loading…</div>
     <div class="sf-audio-error" id="sf-audio-error" style="display:none"></div>
@@ -6783,6 +6841,7 @@
         <span class="sf-audio-time"><span id="sf-audio-current">0:00</span> / <span id="sf-audio-total">0:00</span></span>
         <span class="sf-audio-meta" id="sf-audio-meta"></span>
       </div>
+    </div>
     </div>
   </div>
 </div>
@@ -10983,6 +11042,26 @@ window.showToast = showToast;
 // Foo_2_2), landing one above the highest existing _N on the root. A non-
 // numeric trailing token (Foo_v2) is left intact. `existingNames` is any
 // iterable of the names already in use (case-insensitive).
+// Show a context menu at the cursor and keep it inside the window, measured rather than guessed:
+// shown first so it has a size, then moved left/up as needed, and flipped above the cursor when
+// it does not fit below. Fixed guesses (window.innerHeight - 140 and the like) let a menu taller
+// than the guess run off the bottom.
+function _jmtPlaceMenu(menu, clientX, clientY) {
+  const pad = 4;
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  menu.style.display = 'block';
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  const x = Math.max(pad, Math.min(clientX, window.innerWidth - w - pad));
+  let y = clientY;
+  if (y + h > window.innerHeight - pad) y = clientY - h;
+  y = Math.max(pad, Math.min(y, window.innerHeight - h - pad));
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+}
+window._jmtPlaceMenu = _jmtPlaceMenu;
+
 function _jmtNumberedName(base, existingNames) {
   const taken = new Set();
   for (const s of (existingNames || [])) taken.add(String(s).toLowerCase());
@@ -12192,6 +12271,26 @@ function showBusy(text, opts) { _busyOverlay(true, text, opts); }
 function hideBusy()           { _busyOverlay(false); }
 window.showBusy = showBusy;
 window.hideBusy = hideBusy;
+
+// Wait for everything a modal shows before it appears. Under 180 ms nothing is drawn (the shared
+// progress modal's showAfter delay); past it the busy card answers the click. No minimum display:
+// the modal replaces the card at once, and a hold at a handover is the documented flash bug
+// (ui-conventions, "A minimum-display floor ... becomes a bug at this seam").
+// Resolves { cancelled } - true when the card's Cancel was pressed.
+const BUSY_DELAY_MS = 180;
+async function waitWithBusy(promises, text) {
+  let cancelled = false;
+  let shown = false;
+  const timer = setTimeout(() => {
+    shown = true;
+    showBusy(text, { onCancel: () => { cancelled = true; hideBusy(); } });
+  }, BUSY_DELAY_MS);
+  try { await Promise.all(promises); } catch {}
+  clearTimeout(timer);
+  if (shown && !cancelled) hideBusy();
+  return { cancelled };
+}
+window.waitWithBusy = waitWithBusy;
 
 // `_sdBusyProgress` WAS DELETED HERE, AND ITS ABSENCE IS THE HONEST STATE. [2026-09-23]
 //
@@ -25796,7 +25895,6 @@ require(['vs/editor/editor.main'], function () {
           e.preventDefault();
           _sfCopyCommonSelection();
         } else {
-          if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
           if (!_sfSelectedCommonUuid) return;
           e.preventDefault();
           // Paste destination: parent dir of the current anchor file (so
@@ -25808,7 +25906,11 @@ require(['vs/editor/editor.main'], function () {
             parts.pop();
             destSubPath = parts.join('/');
           }
-          _sfPasteCommonClipboard(_sfSelectedCommonUuid, destSubPath);
+          const uuid = _sfSelectedCommonUuid;
+          (async () => {
+            if (await _sfPasteImageIntoCommon(uuid, destSubPath)) return;
+            if (_sfFileClipboard && _sfFileClipboard.paths.length > 0) _sfPasteCommonClipboard(uuid, destSubPath);
+          })();
         }
       });
       // ── Delete key ───────────────────────────────────────────────────── [B-405]
@@ -27328,6 +27430,84 @@ require(['vs/editor/editor.main'], function () {
       // marker. Name kept for the existing call site; the function it
       // points to is the new meta-bar renderer.
       window._sfRenderPresetSidecarCommonRow = _sfRenderConfigCommonField;
+      // A common folder differs from its source the same way a font does, so it says so
+      // the same way: same word, same blue, same sentence. [B-493]
+      //
+      // PAINTED FROM THE STAMP ON meta WHEN THERE IS ONE, so a list of fifteen rows does
+      // not cost fifteen round trips on every render. The stamp is keyed to the content
+      // hash it came from and ignored while the folder is marked dirty (an edit since the
+      // last hash), the same test the backend applies; an absent or stale stamp just
+      // leaves the slot empty for the fill below.
+      const _sfCommonCustMarkup = (c) => {
+        const st = c && c.meta && c.meta.customization;
+        if (!st || st.v !== 1 || !c.meta.contentHash || c.meta.contentHashDirty
+            || st.forHash !== c.meta.contentHash || st.srcUuid !== c.meta.sourceUuid) return '';
+        return st.customized ? 'Customized' : '';
+      };
+      // Hovering a common folder's row shows its picture (soundFontPicture.js) beside the
+      // sidebar; a folder with none shows nothing. Answers are kept per folder until the list
+      // refreshes (_sfRefreshCommons runs after every add, rename and delete), so a picture a
+      // user drops into a folder shows on the next hover.
+      const _sfCommonPicCache = new Map();   // uuid -> url|null
+      const _sfClearCommonPicCache = () => {
+        for (const url of _sfCommonPicCache.values()) if (url) URL.revokeObjectURL(url);
+        _sfCommonPicCache.clear();
+      };
+      {
+        const pop = document.createElement('div');
+        pop.className = 'sf-common-picture-pop';
+        pop.innerHTML = '<img alt="">';
+        document.body.appendChild(pop);
+        let timer = null, overUuid = null;
+        const hide = () => { clearTimeout(timer); timer = null; overUuid = null; pop.style.display = 'none'; };
+        const pictureFor = async (uuid) => {
+          if (_sfCommonPicCache.has(uuid)) return _sfCommonPicCache.get(uuid);
+          let url = null;
+          try {
+            const r = await window.electronAPI.findCommonPicture({ uuid });
+            const pic = r && r.ok ? r.picture : null;
+            if (pic) {
+              const res = pic.kind === 'common'
+                ? await window.electronAPI.readCommonFileBytes({ uuid: pic.id, subPath: pic.subPath })
+                : await window.electronAPI.readSourceDocBytes({ uuid: pic.id, path: pic.subPath });
+              if (res && res.ok) url = URL.createObjectURL(new Blob([Uint8Array.from(res.bytes || [])], { type: _sfMimeFor(pic.subPath) }));
+            }
+          } catch {}
+          _sfCommonPicCache.set(uuid, url);
+          return url;
+        };
+        const list = document.getElementById('sf-common-list');
+        list?.addEventListener('mouseover', (e) => {
+          const head = e.target.closest('.sf-common-row-header[data-pic-uuid]');
+          if (!head) return;
+          const uuid = head.getAttribute('data-pic-uuid');
+          if (uuid === overUuid) return;
+          hide();
+          overUuid = uuid;
+          timer = setTimeout(async () => {
+            const url = await pictureFor(uuid);
+            if (overUuid !== uuid || !url || !head.isConnected) return;
+            const img = pop.firstChild;
+            const place = () => {
+              if (overUuid !== uuid) return;
+              const r = head.getBoundingClientRect();
+              const side = list.getBoundingClientRect();
+              pop.style.display = 'block';
+              const h = pop.offsetHeight;
+              pop.style.left = `${Math.round(side.right + 8)}px`;
+              pop.style.top = `${Math.round(Math.max(8, Math.min(r.top, window.innerHeight - h - 8)))}px`;
+            };
+            // A src set to the URL it already holds fires no second load.
+            if (img.getAttribute('src') === url && img.complete) place();
+            else { img.onload = place; img.src = url; }
+          }, 250);
+        });
+        list?.addEventListener('mouseout', (e) => {
+          const head = e.target.closest('.sf-common-row-header[data-pic-uuid]');
+          if (head && !head.contains(e.relatedTarget)) hide();
+        });
+        list?.addEventListener('mousedown', hide);
+      }
       const _sfRenderCommonList = async () => {
         const list = document.getElementById('sf-common-list');
         if (!list) return;
@@ -27354,28 +27534,12 @@ require(['vs/editor/editor.main'], function () {
 
         // Render one common's card. Used by both ungrouped and grouped
         // sections so the card markup stays in one place.
-        // A common folder differs from its source the same way a font does, so it says so
-        // the same way: same word, same blue, same sentence. [B-493]
-        //
-        // PAINTED FROM THE STAMP ON meta WHEN THERE IS ONE, so a list of fifteen rows does
-        // not cost fifteen round trips on every render. The stamp is keyed to the content
-        // hash it came from, so a stale one cannot be believed - an absent or stale stamp
-        // just leaves the slot empty for the fill below.
-        const _sfCommonCustMarkup = (c) => {
-          const st = c && c.meta && c.meta.customization;
-          if (!st || st.v !== 1 || !c.meta.contentHash
-              || st.forHash !== c.meta.contentHash || st.srcUuid !== c.meta.sourceUuid) return '';
-          return st.customized ? 'Customized' : '';
-        };
         const renderCard = (c) => {
           const isExpanded = c.uuid === _sfSelectedCommonUuid;
           const isStarred = c.uuid === _sfStarredCommonUuid;
           const isMultiSelected = _sfMultiSelectedCommonUuids.has(c.uuid);
           const isConfigSelected = wantsCommon && isStarred;
           const isDimmed = !isConfigSelected;
-          const headerTitle = isConfigSelected
-            ? 'Referenced by the open config'
-            : 'Not referenced by the open config';
           const starBtn = showStars
             ? `<button class="sf-common-row-star${isStarred ? ' is-starred' : ''}" data-star-uuid="${_sfEscape(c.uuid)}" title="${isStarred ? 'Default common folder' : 'Set as default'}">${isStarred ? '&#9733;' : '&#9734;'}</button>`
             : '';
@@ -27417,7 +27581,7 @@ require(['vs/editor/editor.main'], function () {
             ? `<button class="sf-common-mmain-play" data-common-mmain="${_sfEscape(c.uuid)}" title="Play mmain.wav">&#9654;</button>`
             : '';
           return `<div class="${rowClasses.join(' ')}" data-common-uuid="${_sfEscape(c.uuid)}">
-            <div class="sf-common-row-header" title="${_sfEscape(headerTitle)}">
+            <div class="sf-common-row-header" data-pic-uuid="${_sfEscape(c.uuid)}">
               <span class="sf-common-row-chevron">&#9656;</span>
               <div class="sf-common-row-main">
                 <div class="sf-common-row-name">${_sfEscape(c.meta.name || '')}</div>
@@ -27476,8 +27640,7 @@ require(['vs/editor/editor.main'], function () {
           slot.dataset.done = '1';
           if (!r || !r.known || !r.customized) continue;
           slot.textContent = 'Customized';
-          slot.title = 'This common folder differs from the source it came from. Those changes '
-            + 'are yours, and deleting it would take them with it.';
+          slot.title = 'This common folder differs from the source it came from.';
         }
       };
       const _sfRenderCommonFileTree = async () => {
@@ -27553,6 +27716,7 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.listCommons();
           _sfCommons = (r && r.ok && r.commons) || [];
         } catch { _sfCommons = []; }
+        _sfClearCommonPicCache();
         // Enforce the star invariant first — deletes, imports, and rename
         // operations all funnel through here, so normalizing here covers
         // every transition.
@@ -27612,10 +27776,15 @@ require(['vs/editor/editor.main'], function () {
           return name;
         }
       };
-      const _sfImportCommon = async (mode) => {
+      // `givenPath` skips the picker: a zip the in-app browser already downloaded, with `linkUrl`
+      // the page it came from.
+      const _sfImportCommon = async (mode, forceNewSource = false, givenPath = null, linkUrl = null) => {
         let pick;
-        try { pick = await window.electronAPI.selectCommonSource({ mode }); }
-        catch (err) { promptError('Could not open picker', err && err.message || err); return; }
+        if (givenPath) pick = { ok: true, filePath: givenPath };
+        else {
+          try { pick = await window.electronAPI.selectCommonSource({ mode }); }
+          catch (err) { promptError('Could not open picker', err && err.message || err); return; }
+        }
         if (!pick || !pick.ok) return;
         // Number the proposed name on a collision, the same way Duplicate does
         // (_jmtNumberedName, the app-wide _N convention). Import used to offer the
@@ -27708,8 +27877,9 @@ require(['vs/editor/editor.main'], function () {
         })();
         let res;
         try {
-          if (mode === 'zip') res = await window.electronAPI.importCommonFromZip({ zipPath: pick.filePath, name });
-          else res = await window.electronAPI.importCommonFromFolder({ folderPath: pick.filePath, name });
+          const _impArgs = { name, forceNewSource, askOnDuplicate: !forceNewSource };
+          if (mode === 'zip') res = await window.electronAPI.importCommonFromZip({ zipPath: pick.filePath, ..._impArgs, linkUrl });
+          else res = await window.electronAPI.importCommonFromFolder({ folderPath: pick.filePath, ..._impArgs });
         } catch (err) {
           res = { ok: false, error: String(err && err.message || err) };
         }
@@ -27722,6 +27892,50 @@ require(['vs/editor/editor.main'], function () {
           // doors already inherited from testing only the success flag.
           if (res && res.cancelled) return;
           promptError('Import failed', (res && res.error) || 'unknown error');
+          return;
+        }
+        // ── THIS ARCHIVE IS ALREADY IN THE LIBRARY ──────────────────── [B-493, 2026-10-19]
+        //
+        // THE SAME DIALOG THE FONT DOOR USES, down to the element ids: it is the same
+        // question about the same object, so a second one worded differently would just make
+        // the user ask whether it means something else here.
+        //
+        // It attaches and removes its own listeners, as `_sfHandleDuplicate` does, so the two
+        // callers can drive the same buttons without colliding.
+        //
+        // Nothing was created before this returned, so Cancel leaves the library untouched.
+        if (res.isDuplicate) {
+          await new Promise((resolve) => {
+            const els = _sfDupEls;
+            if (!els.modal) { resolve(); return; }
+            const _names = (res.existingCommons || []).map((c) => c.name).filter(Boolean);
+            // Name what they already HAVE, which is the fact that decides this. Falling back
+            // to the archive's own name keeps the sentence true when the source is on file
+            // with no common folder built from it yet.
+            if (els.name) els.name.textContent = _names.join(', ') || name;
+            els.modal.classList.add('active');
+            const cleanup = () => {
+              els.modal.classList.remove('active');
+              els.keepBtn?.removeEventListener('click', onKeep);
+              els.reimportBtn?.removeEventListener('click', onReimport);
+              els.cancelBtn?.removeEventListener('click', onCancel);
+            };
+            // Opens the SOURCE, which now lists every common folder built from it, so this
+            // answers "which one do I already have" without the dialog picking one.
+            const onKeep = async () => {
+              cleanup();
+              if (res.sourceUuid) await _sfOpenSourceDetail(res.sourceUuid);
+              resolve();
+            };
+            // A new source runs the curation payload, so this is also the answer that brings
+            // a customized copy back. The reuse path cannot: importSource returns before the
+            // payload is read.
+            const onReimport = async () => { cleanup(); await _sfImportCommon(mode, true, givenPath, linkUrl); resolve(); };
+            const onCancel = () => { cleanup(); resolve(); };
+            els.keepBtn?.addEventListener('click', onKeep);
+            els.reimportBtn?.addEventListener('click', onReimport);
+            els.cancelBtn?.addEventListener('click', onCancel);
+          });
           return;
         }
         // Newly imported becomes the selected one for the file tree pivot.
@@ -28330,9 +28544,101 @@ require(['vs/editor/editor.main'], function () {
         a.addEventListener('click', (e) => {
           e.preventDefault();
           const url = a.getAttribute('data-href');
-          if (url && window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
+          if (!url) return;
+          // data-browser-only: a page mixing packs for other boards (Xeno, Golden Harvest), where
+          // the user has to choose what to download, so nothing is imported for them.
+          if (a.classList.contains('sf-voicepack-more-link') && !a.hasAttribute('data-browser-only')) {
+            const name = a.closest('.sf-voicepack-more-item')?.querySelector('.sf-voicepack-more-name')?.textContent || '';
+            _sfVpOpenLinkChooser(url, name);
+            return;
+          }
+          if (window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
         });
       });
+
+      // A More-tab link: open it in JMT Studio's in-app browser, where the download is captured
+      // and imported as a common folder, or in the user's own browser.
+      const _sfVpOpenLinkChooser = (url, name) => {
+        const modal = document.getElementById('modal-sf-vp-link-chooser');
+        if (!modal) return;
+        const appBtn = document.getElementById('sf-vp-link-app');
+        const extBtn = document.getElementById('sf-vp-link-external');
+        const closeBtn = document.getElementById('sf-vp-link-close');
+        const titleEl = document.getElementById('sf-vp-link-title');
+        if (titleEl) titleEl.textContent = name ? `Open ${name.split(String.fromCharCode(8212))[0].trim()}` : 'Open link';
+        const cleanup = () => {
+          modal.classList.remove('active');
+          appBtn?.removeEventListener('click', onApp);
+          extBtn?.removeEventListener('click', onExt);
+          closeBtn?.removeEventListener('click', onCancel);
+          modal.removeEventListener('click', onBackdrop);
+          document.removeEventListener('keydown', onKey, true);
+        };
+        const onApp = () => { cleanup(); _sfVpBrowserImport(url); };
+        const onExt = () => { cleanup(); window.electronAPI?.openExternal?.(url); };
+        const onCancel = () => cleanup();
+        const onBackdrop = (e) => { if (e.target === modal) cleanup(); };
+        // Capture phase, so Escape closes this chooser and not the picker underneath it.
+        const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); cleanup(); } };
+        appBtn?.addEventListener('click', onApp);
+        extBtn?.addEventListener('click', onExt);
+        closeBtn?.addEventListener('click', onCancel);
+        modal.addEventListener('click', onBackdrop);
+        document.addEventListener('keydown', onKey, true);
+        modal.classList.add('active');
+      };
+
+      // The font door's tier-2 capture, pointed at the common-folder import. Closing the browser
+      // window without downloading is a cancel and says nothing.
+      const _sfVpBrowserImport = async (url) => {
+        _sfCloseVoicepackPicker();
+        const P = _sfDeleteProgress;
+        P.show('Download voicepack', '');
+        const startMs = Date.now();
+        const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
+        let label = 'Finish the download in the browser window…';
+        let detail = 'Click the creator’s Download button. JMT Studio will grab it and import it automatically.';
+        let downloading = false;
+        const paint = () => {
+          if (!downloading) P.setIndeterminate(label, detail, `${fmtDur((Date.now() - startMs) / 1000)} elapsed`);
+        };
+        paint();
+        const ticker = setInterval(paint, 1000);
+        let stopped = false;
+        P.offerCancel(async () => {
+          stopped = true;
+          try { await window.electronAPI.linkImportBrowserCancel(); } catch {}
+        });
+        const unsub = window.electronAPI.onLinkImportProgress((d) => {
+          if (!d || d.browserWillShow || d.browserShown) return;
+          if (d.total) {
+            downloading = true;
+            const pct = Math.min(100, Math.max(0, (d.received / d.total) * 100));
+            P.setProgress(pct / 100, `${_sfFormatBytes(d.received)} / ${_sfFormatBytes(d.total)} (${Math.floor(pct)}%)`);
+          } else {
+            label = 'Downloading voicepack…';
+            detail = `${_sfFormatBytes(d.received)} downloaded`;
+            paint();
+          }
+        });
+        let r;
+        try { r = await window.electronAPI.linkImportBrowser({ url, title: 'Download your voicepack from the creator' }); }
+        catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
+        clearInterval(ticker);
+        try { if (unsub) unsub(); } catch {}
+        await P.hide();
+        // A download that finished in the gap before the cancel landed is still abandoned.
+        if (stopped || (r && (r.cancelled || r.canceled))) {
+          if (r && r.ok && r.filePath) { try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {} }
+          return;
+        }
+        if (!r || !r.ok || !r.filePath) {
+          promptError('Download failed', (r && r.message) || 'That download could not be imported.');
+          return;
+        }
+        try { await _sfImportCommon('zip', false, r.filePath, r.pageUrl || url); }
+        finally { try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {} }
+      };
 
       const _sfRenameCommon = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
@@ -28360,6 +28666,9 @@ require(['vs/editor/editor.main'], function () {
         if (!res || !res.ok) { promptError('Duplicate failed', (res && res.error) || 'unknown error'); return; }
         _sfSelectedCommonUuid = res.uuid;
         await _sfRefreshCommons();
+        if (_sfSourceOriginalUuid && c.meta && c.meta.sourceUuid === _sfSourceOriginalUuid) {
+          await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+        }
       };
       // How many OTHER working copies does this common's source still have? [B-493]
       // COUNTS BOTH KINDS. A source can back fonts and commons at once, and the font side's
@@ -28403,6 +28712,78 @@ require(['vs/editor/editor.main'], function () {
         const cust = isCust ? _sfDelWarnHtml(`"${_sfEscape(name)}" is Customized. "Export first" saves your customized copy; deleting without it destroys your edits.`) : '';
         return { html: q + _sfDelDimHtml('This is the only thing using its source. The source archive will also be removed from your library.') + cust, lastUser: true, isCust };
       };
+      // Several common folders at once: one confirm, the fonts' bulk-delete shape. A source leaves
+      // with them when no font uses it and every common folder using it is being deleted.
+      const _sfDeleteCommonsPrompt = async (uuids) => {
+        const targets = uuids.map((u) => _sfCommons.find((x) => x.uuid === u)).filter(Boolean);
+        if (!targets.length) return;
+        if (targets.length === 1) { await _sfDeleteCommonPrompt(targets[0].uuid); return; }
+        const picked = new Set(targets.map((c) => c.uuid));
+        const names = targets.map((c) => (c.meta && c.meta.name) || c.uuid);
+        const bySource = new Map();
+        for (const c of targets) {
+          const su = c.meta && c.meta.sourceUuid;
+          if (!su || bySource.has(su)) continue;
+          const usedByFont = (_sfAllEntries || []).some((e) => e && e.meta && e.meta.sourceUuid === su);
+          const allCommonsPicked = _sfCommons.filter((x) => x.meta && x.meta.sourceUuid === su).every((x) => picked.has(x.uuid));
+          const sm = (_sfAllSourcesByUuid[su] || {}).meta || {};
+          bySource.set(su, { uuid: su, label: sm.bundleName || sm.originalName || 'source', leaves: !usedByFont && allCommonsPicked });
+        }
+        const sourcesToRemove = [...bySource.values()].filter((x) => x.leaves);
+        const list = names.length <= 8 ? names.join(', ') : `${names.slice(0, 8).join(', ')}, and ${names.length - 8} more`;
+        let messageHtml = `Delete ${names.length} common folders?` + _sfDelDimHtml(_sfEscape(list));
+        if (sourcesToRemove.length === 1) {
+          messageHtml += _sfDelDimHtml(`The source "${_sfEscape(sourcesToRemove[0].label)}" will also be removed.`);
+        } else if (sourcesToRemove.length > 1) {
+          messageHtml += _sfDelDimHtml(`${sourcesToRemove.length} source archives will also be removed.`);
+        }
+        const custNames = [];
+        for (const c of targets) {
+          try {
+            const cr = await window.electronAPI.commonCustomization({ uuid: c.uuid });
+            if (cr && cr.known && cr.customized) custNames.push((c.meta && c.meta.name) || c.uuid);
+          } catch {}
+        }
+        if (custNames.length) {
+          const who = custNames.length === 1
+            ? `"${_sfEscape(custNames[0])}" is Customized`
+            : `${custNames.length} of these are Customized (${_sfEscape(custNames.slice(0, 4).join(', '))}${custNames.length > 4 ? ', …' : ''})`;
+          messageHtml += sourcesToRemove.length > 0
+            ? _sfDelWarnHtml(`${who}. "Export ${sourcesToRemove.length === 1 ? 'source' : 'sources'} first" carries your customized ${custNames.length === 1 ? 'copy' : 'copies'}; deleting without it destroys your edits.`)
+            : _sfDelWarnHtml(`${who}. Deleting destroys your edits: the sources that stay only hold the creators' originals.`);
+        }
+        const res = await promptConfirm({
+          title: `Delete ${names.length} common folders`,
+          messageHtml,
+          confirmText: 'Delete',
+          confirmKind: 'danger',
+          checkbox: sourcesToRemove.length > 0
+            ? { label: sourcesToRemove.length === 1 ? 'Export source first' : 'Export sources first', confirmTextChecked: 'Export and Delete', inline: true }
+            : null,
+        });
+        // Same two return shapes as the single delete: an object with a checkbox, a boolean without.
+        const confirmed = sourcesToRemove.length > 0 ? !!(res && res.confirmed) : !!res;
+        if (!confirmed) return;
+        if (sourcesToRemove.length > 0 && res && res.checked) {
+          const exported = await _sfExportSourcesFlow(sourcesToRemove, { customizedKind: 'common' });
+          if (!exported) return;
+        }
+        const failed = [];
+        for (const c of targets) {
+          let r;
+          try { r = await window.electronAPI.deleteCommon({ uuid: c.uuid }); }
+          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+          if (!r || !r.ok) failed.push({ name: (c.meta && c.meta.name) || c.uuid, error: (r && r.error) || 'unknown error' });
+        }
+        if (_sfSelectedCommonUuid && picked.has(_sfSelectedCommonUuid)) {
+          _sfSelectedCommonUuid = null;
+          await _sfSaveActiveCommon();
+        }
+        _sfMultiSelectedCommonUuids = new Set();
+        _sfMultiSelectAnchor = null;
+        await _sfRefreshCommons();
+        if (failed.length) await _sfShowPartialFailures('Some common folders were not deleted', failed);
+      };
       const _sfDeleteCommonPrompt = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
         if (!c) return;
@@ -28443,138 +28824,45 @@ require(['vs/editor/editor.main'], function () {
         }
         await _sfRefreshCommons();
       };
-      // Right-click "Export…" — write this common's files to a user-picked
-      // destination as a "common/" subfolder. Same conflict semantics as the
-      // bulk Save flow, just scoped to one common. Cheaper UX than mixing
-      // single-common export into the main Save which is fonts-driven.
-      // Export a common OUT OF THE APP: one portable zip, named for the pack.
-      // NOT the SD-card path - that is bulk Save, and it is unchanged. This used
-      // to call exportCommonToFolder, the card exporter, so a right-click that
-      // had nothing to do with a card lost the pack's name (the card layout
-      // hardcodes "common"), wrote a sync manifest into the chosen folder, and
-      // asked an SD conflict question. The shape it writes now round-trips
-      // through our own importer. (2026-08-31, found in the B-121 dev pass.)
+      // Right-click "Export source…" on a common folder. [B-493, 2026-10-19]
+      //
+      // THE SAME SOURCE EXPORT THE FONT SIDE RUNS, called with this door's own kind. A common
+      // folder is a working copy of a source exactly as a font entry is, so exporting it means
+      // exporting that source, with the customized working copy riding along. The archive is
+      // named from the source's originalName, which is what both doors already do.
+      //
+      // `customizedKind: 'common'` is the only thing this door declares. It picks which working
+      // copies the checkbox counts and names, and rides through to the payload builder so the
+      // archive carries the same ones. A font's Export source carries no common folder.
+      //
+      // NOT THE CARD PATH. `Export common folder…` still writes a folder literally named
+      // `common` for an SD card, and bulk Save is unchanged. Those two are the card shape; this
+      // one round-trips through our own importer. (The 2026-08-31 defect was this door calling
+      // the card exporter, which lost the pack's name, wrote a sync manifest into the chosen
+      // folder and asked an SD conflict question.)
+      //
+      // RETURNS WHETHER AN ARCHIVE WAS WRITTEN, because the delete offers this as "Export
+      // first" and a cancelled export must stop the delete rather than falling through it.
       const _sfExportCommonPrompt = async (uuid) => {
         const c = _sfCommons.find(x => x.uuid === uuid);
-        if (!c) return;
-        const label = (c.meta && c.meta.name) || 'common folder';
-        // PICK FIRST, THEN show progress. The dialog is the user browsing; there
-        // is no work happening behind it, and a bar sitting at zero while they
-        // look for a folder reports progress on a job that has not started.
-        // RETURNS false WHEN NOTHING WAS WRITTEN. The delete flow offers this as
-        // "Export first", and a cancelled export must stop the delete rather than falling
-        // through it - otherwise the one action the user took to keep something is the
-        // action that loses it. [B-493]
-        let pick;
-        try { pick = await window.electronAPI.pickExportZipPath({ uuid }); }
-        catch (err) { promptError('Could not open the save dialog', String(err && err.message || err)); return false; }
-        // Cancelling is not a failure and says nothing worth reading - the user
-        // closed a dialog they opened.
-        if (!pick || pick.canceled) return false;
-        if (!pick.ok) { promptError('Export failed', pick.error || 'unknown error'); return false; }
-        // ══ ON THE SHARED RUNNER ════════════════════════════════════ [B-420, 2026-09-21]
-        //
-        // SECOND DOOR MIGRATED, and the shape Backup proved: the caller owns the picker, the
-        // runner owns everything from the destination check to the ending. What was ~95 lines of
-        // fit check, hand-rolled byte paint, 250 ms tick, delta subscription, cancel wiring,
-        // failure branch and outcome call is now the four things only this door knows.
-        //
-        // AND THE ARCHIVE TAIL MOVED UP RATHER THAN BEING LOST. This door built the
-        // "Finishing the archive…" state for the report - "progress went to 18.8 of 19.7 really
-        // fast and then sat there" - and that is not this door's problem, it is every archive's.
-        // It now lives in the shared runner, derived from `endState.kind === 'archive'`, so
-        // backup and source-as-zip get it without either of them asking.
-        //
-        // `label: 'files'` PRESERVED DELIBERATELY. It is not a description of an archive, but
-        // it is the noun the shared cancel notice has always used here ("N files finished
-        // copying"), and this migration is not the place to change wording there is already read.
-        // `title` overrides the runner's default so the modal still says what it always said.
-        // Captured so onCompleted can report what the exporter actually wrote. [B-420]
-        let _zipRes = null;
-        // Elapsed is part of the completion pattern, not an extra: every other summary in the
-        // app ends with it, and its absence here was the gap reported as "the summary doesn't
-        // say how long it took".
-        const _zipT0 = Date.now();
-        await _sfRunExport({
-          label: 'files',
-          title: 'Exporting common folder',
-          // Its summary carries the eject row now, so the toast action is redundant. [B-420]
-          summaryHasEject: true,
-          destDir: String(pick.filePath || '').replace(/[\\/][^\\/]*$/, ''),
-          endState: { kind: 'archive', path: pick.filePath },
-          // The save dialog already asked about overwriting, so step 2d is answered.
-          overwriteDecided: true,
-          // Sizes are already known from listCommons - no work to do here.
-          plan: async () => ({
-            items: [], totalBytes: (c && c.totalBytes) || 0, fileCount: (c && c.fileCount) || 0,
-          }),
-          // This door reports on the shared export delta channel, which the runner knows.
-          deltas: true,
-          onCancel: _sfExportCancelOpt.onCancel,
-          produce: async () => {
-            try {
-              _zipRes = await window.electronAPI.exportCommonAsZip({ uuid, destPath: pick.filePath });
-              return _zipRes;
-            } catch (err) {
-              _zipRes = { ok: false, error: String((err && err.message) || err) };
-              return _zipRes;
-            }
-          },
-          // *** A COMPLETION SUMMARY, WHICH THIS DOOR NEVER HAD. [B-420, the catch]
-          // "there was also no summary on it..." - right, and my migration is why it went
-          // from "nothing, plus an eject toast" to "nothing at all": deriving ending:summary
-          // from the archive kind suppressed the toast, and there was no summary to replace
-          // it with. The runner now refuses to report nothing, and this door gets the real
-          // thing rather than falling back.
-          // !! Says WHERE and HOW BIG, in that order. The path is what someone needs to go
-          // and find the file; the size is how they know it is the whole pack. Same two
-          // facts backup leads with, so the two archive doors read alike.
-          // ── The completion summary ──────────────────────────────────
-          //
-          // BROUGHT ONTO THE HOUSE PATTERN [2026-09-22]. This said "Exported to:" above a bare
-          // path and then the pack name and size on a line of its own - a label/value block the
-          // house style explicitly rejects, and it named the pack twice counting the filename in
-          // the path. The verdict on it: "even the wording on 8 looked odd... I'm talking about
-          // the pattern."
-          //
-          // The pattern, already written down beside `_sfShowExportSummary`: running prose, one
-          // subject per line, an elapsed line LAST. Each fact once; the path is an address rather
-          // than a restatement. "as a Zip archive" earns its place here where it would not on a
-          // folder export, because a zip is a different shape from the thing you exported.
-          onCompleted: async () => {
-            const r = _zipRes || {};
-            const written = (r.totalBytes != null) ? r.totalBytes : ((c && c.totalBytes) || 0);
-            const files = (c && c.fileCount) || 0;
-            const fmt = window._sfFormatBytesShort || window._sfFormatBytes || ((n) => n + " B");
-            const amount = files > 0
-              ? `${files} file${files === 1 ? '' : 's'} · ${fmt(written)}`
-              : fmt(written);
-            const lines = [];
-            lines.push(written > 0
-              ? `Exported ${label} as a Zip archive: ${amount}.`
-              : `Exported ${label} as a Zip archive.`);
-            lines.push(r.destPath || pick.filePath);
-            const secs = (Date.now() - _zipT0) / 1000;
-            lines.push(window._sfFormatDuration
-              ? `Took ${window._sfFormatDuration(secs)}.`
-              : `Took ${Math.round(secs)}s.`);
-            // [B-420] Through the shared notice so the summary CARRIES the eject button, which is what
-            // the during-export checkbox presses. A plain promptConfirm had no button, so the
-            // checkbox had nothing to click and a toast appeared instead.
-            await _sfCompletionNotice({
-              title: 'Export complete',
-              message: lines.join('\n\n'),
-              destDir: String(pick.filePath || '').replace(/[\\/][^\\/]*$/, ''),
-            });
-          },
-        });
-        // Reported from what the exporter actually returned, not from reaching the end of
-        // this function: the runner can finish having written nothing.
-        return !!(_zipRes && _zipRes.ok);
+        if (!c) return false;
+        const srcUuid = c.meta && c.meta.sourceUuid;
+        // A common with no source behind it has no source to export. It can only arise from a
+        // record written before commons carried the tie.
+        if (!srcUuid) {
+          promptError('Nothing to export',
+                      'This common folder is not linked to a source archive.');
+          return false;
+        }
+        const sm = (_sfAllSourcesByUuid[srcUuid] || {}).meta || {};
+        const label = sm.bundleName || sm.originalName
+                      || (c.meta && c.meta.name) || 'source';
+        return await _sfExportSourcesFlow([{ uuid: srcUuid, label }],
+                                          { customizedKind: 'common' });
       };
       // ── Export a common AS A FOLDER, the card shape ──────────── [2026-09-22]
       //
-      // The sibling above writes a portable ZIP named for the pack. This writes what ProffieOS
+      // The sibling above exports the SOURCE this common came from. This writes what ProffieOS
       // actually reads: a folder literally named `common`, alongside the font folders on a card.
       // Until now there was no door for it at all, which is the hole testing found: "should have
       // another option under that to Export common folder which isn't a zip but a folder called
@@ -28807,7 +29095,7 @@ require(['vs/editor/editor.main'], function () {
         _sfCommonClipboard = { sourceUuid: _sfSelectedCommonUuid, paths };
         // Mirror to the unified clipboard so a subsequent paste in an
         // entry's file browser (or another common) sees the same payload.
-        _sfFileClipboard = { kind: 'common', id: _sfSelectedCommonUuid, paths };
+        _sfFileClipboard = { kind: 'common', id: _sfSelectedCommonUuid, paths }; _sfMarkInAppCopy();
       };
       // Core copy operation. Takes explicit source + destination so it serves
       // both clipboard paste and drag-drop without re-reading globals.
@@ -31261,7 +31549,7 @@ require(['vs/editor/editor.main'], function () {
           kind: 'sharedTracks',
           id: 'sharedTracks',
           paths: [..._sfSharedTracksSelected],
-        };
+        }; _sfMarkInAppCopy();
       };
       // Paste from the unified clipboard into the shared-tracks folder.
       // Uses fileOpsCopy with sharedTracks dest; the backend handles
@@ -32269,8 +32557,11 @@ require(['vs/editor/editor.main'], function () {
         //
         // Sidecar beats detector on purpose. Both are answers to the same
         // question, and one of them is the user's own, recorded last time.
+        // Without a sidecar, a modifier credit from the matched readme ("Modifications by ...")
+        // fills Notes.
         if (_sfImportEls.notes) {
-          _sfImportEls.notes.value = _curHas('userNotes') ? _curSrc.userNotes : '';
+          _sfImportEls.notes.value = _curHas('userNotes') ? _curSrc.userNotes
+            : ((hasContentMatch && v.vendorNote) || '');
         }
         if (_cur) {
           if (_curHas('vendor') && _sfImportEls.vendor) _sfImportEls.vendor.value = _curSrc.vendor;
@@ -33996,6 +34287,78 @@ require(['vs/editor/editor.main'], function () {
       // Persists across modal closes so the user can copy in one entry and
       // paste in another (or paste into a common folder, and vice versa).
       let _sfFileClipboard = null;
+      // A Copy inside the app replaces the system clipboard (main clears it), the way a copy in
+      // File Explorer does; so an image found there at paste time was copied later, and wins.
+      const _sfMarkInAppCopy = () => { try { window.electronAPI.clipboardClearForCopy(); } catch {} };
+      // Paste an image from the system clipboard into a font or common folder, through the ordinary
+      // add path. Named after the item: the folder or font name with any ProffieOS_..._Voicepack_
+      // prefix dropped, lowercase, `_` and spaces as `-` (ProffieOS_V2_Voicepack_HAL_9000 ->
+      // hal-9000.png). A taken name gets the app's _N (hal-9000_2.png); the add path's own rule
+      // would read the trailing digits as a sound variant and make hal-9001.png.
+      // Returns the added paths, or null when there is no image.
+      const _sfPastedImageStem = (name) => String(name || '')
+        .replace(/^ProffieOS_(?:V\d+_)?Voicepack_/i, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9.]+/g, '-')
+        .replace(/^[-.]+|[-.]+$/g, '') || 'image';
+      const _sfPasteClipboardImage = async ({ kind, id, subPath }) => {
+        let tmp = null;
+        try { tmp = await window.electronAPI.clipboardImageToTemp(); } catch {}
+        if (!tmp || !tmp.ok || !tmp.filePath) return null;
+        const itemName = kind === 'common'
+          ? ((_sfCommons.find((c) => c.uuid === id) || {}).meta || {}).name
+          : id;
+        let tree = [];
+        try {
+          const lr = kind === 'common'
+            ? await window.electronAPI.listCommonFiles({ uuid: id })
+            : await window.electronAPI.listEntryFiles({ name: id });
+          tree = (lr && lr.ok && lr.files) || [];
+        } catch {}
+        let here = tree;
+        for (const seg of String(subPath || '').split('/').filter(Boolean)) {
+          const n = here.find((x) => x.isDir && x.name === seg);
+          here = (n && n.children) || [];
+        }
+        const pngStems = here.filter((x) => !x.isDir && /[.]png$/i.test(x.name)).map((x) => x.name.slice(0, -4));
+        const stem = _sfPastedImageStem(itemName);
+        const finalStem = pngStems.some((t) => t.toLowerCase() === stem) ? _jmtNumberedName(stem, pngStems) : stem;
+        let res;
+        try {
+          res = await window.electronAPI.fileOpsAddFiles({ kind, id, subPath: subPath || '', sourceFilePaths: [tmp.filePath], destNames: [`${finalStem}.png`] });
+        } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+        finally { try { await window.electronAPI.clipboardCleanupTemp({ filePath: tmp.filePath }); } catch {} }
+        if (!res || !res.ok) { promptError('Paste failed', (res && res.error) || 'unknown'); return []; }
+        if (res.refused && res.refused.length) promptError('Not added', 'The pasted image could not be added.');
+        return res.added || [];
+      };
+      const _sfClipboardHasImage = async () => {
+        try { return !!(await window.electronAPI.clipboardHasImage()); } catch { return false; }
+      };
+      // The two doors: paste the clipboard image, then show and select what landed. Each returns
+      // true when there was an image, so Ctrl+V can fall back to the in-app copy when there was not.
+      const _sfPasteImageIntoCommon = async (uuid, subPath) => {
+        const added = await _sfPasteClipboardImage({ kind: 'common', id: uuid, subPath });
+        if (!added) return false;
+        _sfCommonFilesSelected = new Set(added);
+        _sfCommonFilesAnchor = added[0] || null;
+        await _sfRefreshCommons({ preserveSelection: true });
+        return true;
+      };
+      const _sfPasteImageIntoEntry = async (subPath) => {
+        const name = _sfDetailOriginalName;
+        if (!name) return false;
+        const added = await _sfPasteClipboardImage({ kind: 'entry', id: name, subPath });
+        if (!added) return false;
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfEntryFilesSelected = new Set(added);
+        _sfEntryFilesAnchor = added[0] || null;
+        _sfRenderEntryFiles();
+        return true;
+      };
       // Pick an icon glyph per filename — folders get one branch and
       // common-extension files get hints (wavs vs config vs text) so the
       // grid reads at a glance.
@@ -34262,8 +34625,8 @@ require(['vs/editor/editor.main'], function () {
         const note = r.tracksOnly ? ' <span class="sf-cust-note">(tracks only)</span>' : '';
         el.innerHTML = 'Customized' + note;
         el.title = r.tracksOnly
-          ? 'This font has tracks the original did not include. They are yours, and deleting it would take them with it.'
-          : 'This font differs from the source it came from. Those changes are yours, and deleting it would take them with it.';
+          ? 'This font has tracks the original did not include.'
+          : 'This font differs from the source it came from.';
       };
 
       const _sfOpenEntryDetail = async (entryName, opts = {}) => {
@@ -34272,6 +34635,9 @@ require(['vs/editor/editor.main'], function () {
         _sfMarkSeen(entryName);              // (1) looked at
         const m = entry.meta || {};
         _sfDetailOriginalName = entry.name;
+        let _srcDocsPromise = null;   // the Source section's Included files, filled below
+        const _picturePromise = _sfRenderPicture({ imgId: 'sf-entry-picture', boxId: 'sf-entry-meta-box',
+          find: () => window.electronAPI.findEntryPicture({ name: entry.name }), isCurrent: () => _sfDetailOriginalName === entry.name });
         _sfDetailEdit = {
           name: entry.name,
           author: m.author || '',
@@ -34484,10 +34850,16 @@ require(['vs/editor/editor.main'], function () {
                 ? `${_sfEscape(displayName)} <span style="color:var(--c-text-dim)">(${parenBits.join(', ')})</span>`
                 : _sfEscape(displayName);
               sourceParts.push(`<div class="src-line"><span class="src-label">Name</span><span class="src-val">${nameVal}</span></div>`);
-              if (sm.vendor) {
-                const creatorVal = sm.vendorWebsite
-                  ? `${_sfEscape(sm.vendor)} &nbsp; <a href="#" class="sf-external-link" data-href="${_sfEscape(sm.vendorWebsite)}">${_sfEscape(sm.vendorWebsite)}</a>`
-                  : _sfEscape(sm.vendor);
+              // THE ROW ALWAYS APPEARS, AND SAYS "Unknown" WHEN NOBODY IS NAMED.
+              // [B-493, 2026-10-19] Suppressing it made an unattributed source look like a
+              // source with nothing to attribute. "Unknown" is a fact about what we have,
+              // and it is also the prompt to fill it in.
+              {
+                const creatorVal = sm.vendor
+                  ? (sm.vendorWebsite
+                      ? `${_sfEscape(sm.vendor)} &nbsp; <a href="#" class="sf-external-link" data-href="${_sfEscape(sm.vendorWebsite)}">${_sfEscape(sm.vendorWebsite)}</a>`
+                      : _sfEscape(sm.vendor))
+                  : '<span style="color:var(--c-text-dim)">Unknown</span>';
                 sourceParts.push(`<div class="src-line"><span class="src-label">Creator</span><span class="src-val">${creatorVal}</span></div>`);
               }
               // Source-level notes (captured in the import dialog) belong with
@@ -34536,7 +34908,7 @@ require(['vs/editor/editor.main'], function () {
             : '<div class="src-line"><span class="src-val" style="color:var(--c-text-dim)">No source information recorded.</span></div>';
           // Populate the included-files chip list now that the container exists.
           if (m.sourceUuid) {
-            (async () => {
+            _srcDocsPromise = (async () => {
               try {
                 const dr = await window.electronAPI.listSourceDocs({ uuid: m.sourceUuid });
                 const row = document.getElementById('sf-entry-src-docs-line');
@@ -34553,15 +34925,16 @@ require(['vs/editor/editor.main'], function () {
           editSrcBtn.disabled = !sourceFound;
           editSrcBtn.title = sourceFound ? '' : 'The source archive for this font is no longer in your library.';
         }
-        // Atomic visibility swap — see _sfOpenSourceDetail for rationale.
+        // SHOWN ONLY WHEN COMPLETE, as the source modal is: the picture, the source's Included
+        // files and the Customized marker [B-304] all land before it appears, with the busy card
+        // and its Cancel past ~250 ms. Then the atomic visibility swap (see _sfOpenSourceDetail).
+        const _wait = await waitWithBusy([_picturePromise, _srcDocsPromise, _sfRenderCustomized(entryName)],
+          `Opening ${entry.name}…`);
+        if (_wait.cancelled || _sfDetailOriginalName !== entryName) return;
         if (opts.swapFromModalId) {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         _sfEntryDetailEls.modal.classList.add('active');
-        // After the modal is up: the marker reads two manifests off disk, so it is
-        // not worth holding the open on. It hides itself first and only appears if
-        // the answer is a confident yes. [B-304]
-        _sfRenderCustomized(entryName);
       };
       const _sfCloseEntryDetail = () => {
         if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
@@ -35171,6 +35544,9 @@ require(['vs/editor/editor.main'], function () {
         archiveSize:     document.getElementById('sf-source-archive-size'),
         optimizedRow:    document.getElementById('sf-source-optimized-row'),
         optimizedVal:    document.getElementById('sf-source-optimized-val'),
+        tagsRow:         document.getElementById('sf-source-tags-row'),
+        entriesHeadTxt:  document.querySelector('#sf-source-entries-head .sf-source-entries-head-txt'),
+        dupBtn:          document.getElementById('btn-sf-source-duplicate'),
         tagsChips:       document.getElementById('sf-source-tags-chips'),
         tagsInput:       document.getElementById('sf-source-tags-input'),
         notesToggle:     document.getElementById('sf-source-notes-toggle'),
@@ -35194,6 +35570,33 @@ require(['vs/editor/editor.main'], function () {
       // routes a click to the in-app viewer (data-doc-scope="pop"). Add pulls
       // files from disk into the central store; Link existing attaches a file
       // already added to another source (one receipt, many sources).
+      // A picture (soundFontPicture.js) at the right of a detail modal's top box; click opens it in
+      // the viewer. `isCurrent` drops a late answer for a modal that has moved on.
+      const _sfPictureUrls = {};
+      const _sfRenderPicture = async ({ imgId, boxId, find, isCurrent }) => {
+        const img = document.getElementById(imgId);
+        const box = document.getElementById(boxId);
+        if (!img || !box) return;
+        img.style.display = 'none';
+        box.classList.remove('has-picture');
+        img.onclick = null;
+        if (_sfPictureUrls[imgId]) { URL.revokeObjectURL(_sfPictureUrls[imgId]); _sfPictureUrls[imgId] = null; }
+        let pic = null;
+        try { const r = await find(); pic = r && r.ok ? r.picture : null; } catch {}
+        if (!pic || !isCurrent()) return;
+        let res;
+        try {
+          if (pic.kind === 'common') res = await window.electronAPI.readCommonFileBytes({ uuid: pic.id, subPath: pic.subPath });
+          else if (pic.kind === 'entry') res = await window.electronAPI.readEntryDocBytes({ name: pic.id, path: pic.subPath });
+          else res = await window.electronAPI.readSourceDocBytes({ uuid: pic.id, path: pic.subPath });
+        } catch { return; }
+        if (!res || !res.ok || !isCurrent()) return;
+        _sfPictureUrls[imgId] = URL.createObjectURL(new Blob([Uint8Array.from(res.bytes || [])], { type: _sfMimeFor(pic.subPath) }));
+        img.src = _sfPictureUrls[imgId];
+        img.style.display = '';
+        box.classList.add('has-picture');
+        img.onclick = () => _sfOpenDocViewer({ kind: pic.kind, id: pic.id, subPath: pic.subPath });
+      };
       const _sfRenderSourcePop = async () => {
         const chips = _sfSourceDetailEls.popChips;
         if (!chips) return;
@@ -35849,9 +36252,111 @@ require(['vs/editor/editor.main'], function () {
           // whether it means something different here.
           slot.innerHTML = 'Customized' + (r.tracksOnly ? ' <span class="sf-cust-note">(tracks only)</span>' : '');
           slot.title = r.tracksOnly
-            ? 'This font has tracks the original did not include. They are yours, and deleting it would take them with it.'
-            : 'This font differs from the source it came from. Those changes are yours, and deleting it would take them with it.';
+            ? 'This font has tracks the original did not include.'
+            : 'This font differs from the source it came from.';
         }
+      };
+      // ── THE SAME MODAL, SHOWING WHAT THE SOURCE ACTUALLY BACKS ──── [B-493, 2026-10-19]
+      //
+      // A source's working copies are font entries or common folders. The modal is one modal
+      // and the CONTENT declares which, the same way the export's caller declares its kind.
+      //
+      // Commons mode when the source backs commons and no entries. A source backing both is
+      // not a shape that occurs - fonts and common folders are not bundled together - so it
+      // stays on the font path rather than growing a two-list layout for a case with no
+      // instances.
+      // From the sidebar's list in memory: asking the backend again sizes every common's files,
+      // which takes most of a second and would hold the modal past its open cap.
+      const _sfSourceCommons = async (uuid) =>
+        _sfCommons.filter((c) => c && c.meta && c.meta.sourceUuid === uuid);
+      // ── A COMMON'S ROW: name, description, group ────────────── [B-493, 2026-10-19]
+      //
+      // All three are the common's OWN fields, edited per row. A single control in the modal
+      // header was the wrong shape for group specifically: a font's tags are a SET, so a
+      // header control ADDS to each font, while a common's group is SINGULAR and would
+      // REPLACE each one, collapsing a separation made on purpose. Per row there is no such
+      // ambiguity, and editing several in one visit is the point.
+      //
+      // Edits are held until the modal is saved, exactly as the font rows do, so one Save
+      // commits the whole visit and Close abandons it.
+      const _sfCommonRowEdits = new Map();   // uuid -> { editing, name, description, group }
+      const _sfRenderSourceCommons = (commons) => {
+        const els = _sfSourceDetailEls;
+        if (els.entriesHeadTxt) els.entriesHeadTxt.textContent = 'Common folders from this source';
+        if (els.tagsRow) els.tagsRow.style.display = 'none';
+        // "Add more fonts" is the font picker and has no common-folder meaning. Duplicate from
+        // source does: a new common folder from the creator's original in this source.
+        if (els.addMoreBtn) els.addMoreBtn.style.display = 'none';
+        if (els.dupBtn) {
+          els.dupBtn.style.display = commons.length ? '' : 'none';
+          els.dupBtn.style.visibility = '';
+          els.dupBtn.textContent = '+ Duplicate from source';
+          els.dupBtn.dataset.commonUuid = commons.length ? commons[0].uuid : '';
+        }
+        els.entriesList.classList.add('is-commons');
+        els.entriesCount.textContent = commons.length === 0 ? '(none)' : `(${commons.length})`;
+        if (!commons.length) {
+          els.entriesList.innerHTML = '<div class="sf-source-entries-empty">No common folders have been added to your library from this source.</div>';
+          return;
+        }
+        commons.sort((a, b) => String(a.meta.name || '').localeCompare(String(b.meta.name || '')));
+        // Every group already in use, so the editor offers what exists before it invents a
+        // new one. Same job the tags datalist does for fonts.
+        const _groups = [...new Set((_sfCommons || []).map((c) => (c.meta && c.meta.group) || '')
+                                                      .filter(Boolean))].sort();
+        els.entriesList.innerHTML = commons.map((c) => {
+          const fc = c.fileCount || 0;
+          const sz = c.totalBytes || 0;
+          const meta = `${fc} file${fc === 1 ? '' : 's'} &middot; ${_sfEscape(_sfFormatBytes(sz))}`;
+          const stored = _sfCommonRowEdits.get(c.uuid);
+          const eName = stored ? stored.name : (c.meta.name || c.uuid);
+          const eDesc = stored ? stored.description : (c.meta.description || '');
+          const eGrp  = stored ? stored.group : (c.meta.group || '');
+          const u = _sfEscape(c.uuid);
+          if (stored && stored.editing) {
+            // Same shape as the font row's edit mode: cancel occupies the pencil's slot,
+            // inputs breathe, confirm closes it. No meta and no delete while editing.
+            return `<div class="sf-source-entry-row editing" data-source-common="${u}">
+              <button class="sf-source-entry-pencil" data-common-cancel="${u}" title="Discard edits for this row">&#10005;</button>
+              <input type="text" class="sf-source-entry-name-input" data-common-name-input="${u}" value="${_sfEscape(eName)}" maxlength="200" autocomplete="off">
+              <input type="text" class="sf-source-entry-desc-input" data-common-desc-input="${u}" value="${_sfEscape(eDesc)}" placeholder="Add description…" maxlength="500" autocomplete="off">
+              <input type="text" class="sf-source-entry-name-input" data-common-group-input="${u}" value="${_sfEscape(eGrp)}" list="sf-common-groups-datalist" placeholder="Group…" maxlength="100" autocomplete="off">
+              <div class="sf-source-entry-edit-actions">
+                <button class="detail-confirm" data-common-confirm="${u}" title="Lock in (saves when the modal is saved)">&#10003;</button>
+              </div>
+            </div>`;
+          }
+          const descTip = eDesc.length > 200 ? eDesc.slice(0, 200) + '…' : eDesc;
+          return `<div class="sf-source-entry-row" data-source-common="${u}">
+            <button class="sf-source-entry-pencil" data-common-edit-toggle="${u}" title="Edit name, description and group">&#9998;</button>
+            <span class="ent-name"><span class="ent-name-txt">${_sfEscape(eName)}</span><span class="ent-cust" data-cust-common="${u}">${_sfCommonCustMarkup(c)}</span></span>
+            <span class="ent-desc"${eDesc ? ` title="${_sfEscape(descTip)}"` : ''}>${_sfEscape(eDesc)}</span>
+            <span class="ent-group"${eGrp ? ` title="Group: ${_sfEscape(eGrp)}"` : ''}>${_sfEscape(eGrp)}</span>
+            <span class="ent-meta">${meta}</span>
+            <button class="sf-source-entry-delete" data-common-delete="${u}" title="Delete this common folder from your library">&times;</button>
+          </div>`;
+        }).join('');
+        // Same word, blue and tooltip as the sidebar. Painted from the stamp above; a common
+        // with no current stamp is asked, one at a time, while this source is still open.
+        const _custTitle = 'This common folder differs from the source it came from.';
+        const _custSrc = _sfSourceOriginalUuid;
+        (async () => {
+          for (const slot of els.entriesList.querySelectorAll('.ent-cust[data-cust-common]')) {
+            if (slot.textContent) { slot.title = _custTitle; slot.dataset.done = '1'; continue; }
+            let r = null;
+            try { r = await window.electronAPI.commonCustomization({ uuid: slot.dataset.custCommon }); } catch {}
+            if (_sfSourceOriginalUuid !== _custSrc || !slot.isConnected) return;
+            if (r && r.known) slot.dataset.done = '1';
+            if (r && r.known && r.customized) { slot.textContent = 'Customized'; slot.title = _custTitle; }
+          }
+        })();
+        let dl = document.getElementById('sf-common-groups-datalist');
+        if (!dl) {
+          dl = document.createElement('datalist');
+          dl.id = 'sf-common-groups-datalist';
+          document.body.appendChild(dl);
+        }
+        dl.innerHTML = _groups.map((g) => `<option value="${_sfEscape(g)}"></option>`).join('');
       };
       const _sfRenderSourceEntries = async (uuid, preloadedEntries = null) => {
         if (!_sfSourceDetailEls.entriesList) return;
@@ -35865,6 +36370,14 @@ require(['vs/editor/editor.main'], function () {
             const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid });
             entries = (r && r.ok && r.entries) || [];
           } catch {}
+        }
+        // COMMONS MODE SHORT-CIRCUITS. The candidate fetch below is the font picker's
+        // input and descends every inner zip on a bundle; a source backing commons has no
+        // use for it. [B-493]
+        if (!entries.length) {
+          const _cm = await _sfSourceCommons(uuid);
+          if (token !== _sfSourceEntriesToken) return;
+          if (_cm.length) { _sfRenderSourceCommons(_cm); return; }
         }
         // Fetch candidates once up front. Used to decide the "Add more
         // fonts" button visibility — when the source contains candidates
@@ -35942,6 +36455,21 @@ require(['vs/editor/editor.main'], function () {
       // between async data fetches.
       const _sfOpenSourceDetail = async (uuid, opts = {}) => {
         if (!uuid) return;
+        // BACK TO FONT MODE FIRST. The commons branch hides rows and buttons on the shared
+        // modal, so a font source opened after a common source would inherit them. Reset on
+        // the way in rather than on the way out: the close paths are several. [B-493]
+        {
+          const _e = _sfSourceDetailEls;
+          if (_e.entriesHeadTxt) _e.entriesHeadTxt.textContent = 'Fonts from this source';
+          if (_e.tagsRow) _e.tagsRow.style.display = '';
+          if (_e.dupBtn) { _e.dupBtn.style.display = ''; delete _e.dupBtn.dataset.commonUuid; }
+          if (_e.entriesList) _e.entriesList.classList.remove('is-commons');
+        }
+        // The layout is known before anything loads: the window already holds every common folder
+        // and font with its source, so a source backing commons and no fonts opens as one.
+        const _cmKnown = _sfCommons.filter((c) => c && c.meta && c.meta.sourceUuid === uuid);
+        const _commonsMode = _cmKnown.length > 0
+          && !_sfAllEntries.some((e) => e.meta && e.meta.sourceUuid === uuid);
         // Click-response-first model: render the modal synchronously from the
         // in-memory source meta, then fan out the per-section IPCs in parallel
         // and let each one fill its region as it lands. The old flow awaited
@@ -35970,7 +36498,9 @@ require(['vs/editor/editor.main'], function () {
         }
         const sm = src.meta || {};
         _sfSourceOriginalUuid = uuid;
-        _sfRenderSourcePop(); // fire-and-forget; fills when its IPC lands
+        const popPromise = _sfRenderSourcePop();
+        const picturePromise = _sfRenderPicture({ imgId: 'sf-source-picture', boxId: 'sf-source-meta-box',
+          find: () => window.electronAPI.findSourcePicture({ uuid }), isCurrent: () => _sfSourceOriginalUuid === uuid });
         const opToken = ++_sfSourceDetailOpToken;
         // Stub edit-state with empty entries/tags. The async entries load
         // below fills both in once they're known. Save() is disabled and the
@@ -36077,19 +36607,21 @@ require(['vs/editor/editor.main'], function () {
           _sfSourceDetailEls.creatorList.innerHTML = '<option value="Unknown"></option>'
             + optsList.filter(n => n !== 'Unknown').map(n => `<option value="${_sfEscape(n)}"></option>`).join('');
         }
-        // Skeleton placeholders for the three async-filled regions. The
-        // entries / files skeletons reuse .sf-source-entries-empty which is
-        // already styled italic-dim, matching the empty-state shape so the
-        // visual weight doesn't shift when the data lands.
+        // Placeholders for the async-filled regions: a delayed indeterminate bar
+        // (.sf-region-loading). A commons source renders its list from memory instead.
         const _entriesCountEl = _sfSourceDetailEls.entriesCount;
         if (_entriesCountEl) _entriesCountEl.textContent = '';
-        _sfSourceDetailEls.entriesList.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading fonts…</div>';
+        if (_commonsMode) _sfRenderSourceCommons(_cmKnown);
+        else _sfSourceDetailEls.entriesList.innerHTML = '<div class="sf-region-loading"><div class="sf-import-progress-track"><div class="sf-import-progress-bar indeterminate"></div></div></div>';
         const _docsRow = document.getElementById('sf-source-docs-row');
         if (_docsRow) _docsRow.style.display = 'none';
         const _filesListEl = document.getElementById('sf-source-files-list');
-        if (_filesListEl) _filesListEl.innerHTML = '<div class="sf-source-entries-empty sf-loading-pulse">Loading files…</div>';
+        if (_filesListEl) _filesListEl.innerHTML = '<div class="sf-region-loading"><div class="sf-import-progress-track"><div class="sf-import-progress-bar indeterminate"></div></div></div>';
+        const _filesCrumbEl = document.getElementById('sf-source-files-breadcrumb');
+        if (_filesCrumbEl) _filesCrumbEl.innerHTML = '';
         _sfSourceFilesTree = [];
         _sfSourceFilesPath = '';
+        _sfSourceFilesBase = '';
         _sfSourceFilesSelected = new Set();
         _sfSourceFilesAnchor = null;
         // Hide both action buttons until candidates resolve — we can't decide
@@ -36098,14 +36630,6 @@ require(['vs/editor/editor.main'], function () {
         const dupBtnEl     = document.getElementById('btn-sf-source-duplicate');
         if (addMoreBtnEl) addMoreBtnEl.style.visibility = 'hidden';
         if (dupBtnEl) dupBtnEl.style.visibility = 'hidden';
-        // Atomic visibility swap — remove the caller-specified modal's active
-        // class in the same tick we add ours, eliminating the gap that would
-        // otherwise show the card grid through the dim backdrop. The modal
-        // now activates *before* any async IPC, so the click responds.
-        if (opts.swapFromModalId) {
-          document.getElementById(opts.swapFromModalId)?.classList.remove('active');
-        }
-        _sfSourceDetailEls.modal?.classList.add('active');
         // ── Async fills, all in parallel ─────────────────────────────
         // Each one checks opToken before writing the DOM so a fast second
         // open (user clicks source A, then immediately source B) doesn't
@@ -36189,6 +36713,9 @@ require(['vs/editor/editor.main'], function () {
             // user can navigate into them. Mirrors detectCandidates' "treat
             // nested zips as bundles" architecture in the file browser.
             _sfMarkInnerZipsLazy(_sfSourceFilesTree);
+            const _fs = _sfFilesStartFor(_sfSourceFilesTree, _sfSourceNames(_sfSourceEdit), _sfChildrenAt);
+            _sfSourceFilesBase = _fs.base;
+            _sfSourceFilesPath = _fs.start;
           } catch {
             if (opToken !== _sfSourceDetailOpToken) return;
             _sfSourceFilesTree = [];
@@ -36208,11 +36735,19 @@ require(['vs/editor/editor.main'], function () {
             }
           } catch {}
         })();
-        // Intentionally NOT awaited. The function returns once the modal is
-        // visible; the in-flight promises continue to fill their regions and
-        // are self-guarded by opToken. Suppress the floating-promise lints
-        // by referencing them in a void return.
-        void entriesPromise; void docsPromise; void filesPromise;
+        // SHOWN ONLY WHEN COMPLETE. Every region loads first, so the modal never appears with
+        // rows still to arrive. When that takes more than a moment (a large bundle's first open
+        // walks its inner archives) the app's busy card says so, with a Cancel that abandons the
+        // open. The swap removes the caller's modal in the same tick ours appears, so the card
+        // grid never shows between them.
+        const _wait = await waitWithBusy([entriesPromise, docsPromise, filesPromise, popPromise, picturePromise],
+          `Opening ${_sfSourceEdit && _sfSourceEdit.bundleName ? _sfSourceEdit.bundleName : 'source'}…`);
+        if (_wait.cancelled) _sfSourceDetailOpToken++;
+        if (opToken !== _sfSourceDetailOpToken) return;
+        if (opts.swapFromModalId) {
+          document.getElementById(opts.swapFromModalId)?.classList.remove('active');
+        }
+        _sfSourceDetailEls.modal?.classList.add('active');
       };
       // dismissAll (2026-07-23): the X means "get rid of this window AND
       // whatever was under it" — it skips the return-to-entry hop and lands on
@@ -36303,6 +36838,36 @@ require(['vs/editor/editor.main'], function () {
         if (!res || !res.ok) {
           promptError('Save failed', (res && res.error) || 'unknown error');
           return false;
+        }
+        // ── PENDING COMMON ROW EDITS ───────────────────────────── [B-493, 2026-10-19]
+        // Three separate writes per row because each field already owns its own rules:
+        // rename resolves name collisions, and group and description each treat empty as
+        // "clear" rather than "store a blank". Folding them into one setter would mean
+        // re-implementing the collision walk here.
+        if (_sfCommonRowEdits.size) {
+          const failures = [];
+          for (const [u, ed] of _sfCommonRowEdits) {
+            const c = (_sfCommons || []).find((x) => x.uuid === u);
+            if (!c) continue;
+            try {
+              if (ed.name && ed.name !== (c.meta.name || '')) {
+                const r = await window.electronAPI.renameCommon({ uuid: u, newName: ed.name });
+                if (!r || !r.ok) failures.push(`${c.meta.name}: ${(r && r.error) || 'rename failed'}`);
+              }
+              if (ed.description !== (c.meta.description || '')) {
+                const r = await window.electronAPI.setCommonDescription({ uuid: u, description: ed.description });
+                if (!r || !r.ok) failures.push(`${c.meta.name}: ${(r && r.error) || 'description failed'}`);
+              }
+              if (ed.group !== (c.meta.group || '')) {
+                const r = await window.electronAPI.setCommonGroup({ uuid: u, groupName: ed.group });
+                if (!r || !r.ok) failures.push(`${c.meta.name}: ${(r && r.error) || 'group failed'}`);
+              }
+            } catch (err) { failures.push(`${c.meta.name}: ${String(err && err.message || err)}`); }
+          }
+          _sfCommonRowEdits.clear();
+          // The sidebar is the home of every one of these fields, so it has to be told.
+          try { await _sfRefreshCommons(); } catch {}
+          if (failures.length) await _sfShowPartialFailures('Some common folders were not updated', failures);
         }
         // Bulk-tag delta: compare the working tag set against the snapshot
         // taken on open. Tags removed from here are removed from every entry;
@@ -36729,6 +37294,111 @@ require(['vs/editor/editor.main'], function () {
           if (name) _sfCancelEntryRowEdit(name);
           return;
         }
+        // ── A COMMON ROW'S INLINE EDIT ─────────────────────────── [B-493, 2026-10-19]
+        // Held in `_sfCommonRowEdits` until the modal is saved, the same contract the font
+        // rows have: ✓ locks the row in, Save commits the visit, Close abandons it.
+        const cEdit = e.target.closest('[data-common-edit-toggle]');
+        if (cEdit) {
+          e.stopPropagation();
+          const u = cEdit.getAttribute('data-common-edit-toggle');
+          const c = (_sfCommons || []).find((x) => x.uuid === u);
+          if (!c) return;
+          const prev = _sfCommonRowEdits.get(u);
+          _sfCommonRowEdits.set(u, {
+            editing: true,
+            name: prev ? prev.name : (c.meta.name || ''),
+            description: prev ? prev.description : (c.meta.description || ''),
+            group: prev ? prev.group : (c.meta.group || ''),
+          });
+          await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+          return;
+        }
+        // Read the three inputs off the row rather than tracking keystrokes: the values are
+        // in the DOM already, and a per-field listener is three more places to lose one.
+        const cConfirm = e.target.closest('[data-common-confirm]');
+        const cCancel = e.target.closest('[data-common-cancel]');
+        if (cConfirm || cCancel) {
+          e.stopPropagation();
+          const u = (cConfirm || cCancel).getAttribute(cConfirm ? 'data-common-confirm' : 'data-common-cancel');
+          if (!u) return;
+          if (cCancel) {
+            _sfCommonRowEdits.delete(u);
+          } else {
+            const row = (cConfirm).closest('.sf-source-entry-row');
+            const val = (sel) => (row?.querySelector(sel)?.value ?? '').trim();
+            const c = (_sfCommons || []).find((x) => x.uuid === u);
+            const next = {
+              editing: false,
+              name: val(`[data-common-name-input="${CSS.escape(u)}"]`),
+              description: val(`[data-common-desc-input="${CSS.escape(u)}"]`),
+              group: val(`[data-common-group-input="${CSS.escape(u)}"]`),
+            };
+            // An empty name is not an edit, it is a mistake. Keep what was there rather
+            // than writing a nameless common on Save.
+            if (!next.name) next.name = (c && c.meta.name) || '';
+            // Nothing actually changed: drop the pending edit so Save has no work and the
+            // dirty flag is not raised by opening and closing a pencil.
+            const same = c && next.name === (c.meta.name || '')
+                           && next.description === (c.meta.description || '')
+                           && next.group === (c.meta.group || '');
+            if (same) _sfCommonRowEdits.delete(u);
+            else _sfCommonRowEdits.set(u, next);
+          }
+          if (_sfCommonRowEdits.size) _sfMarkSourceDirty?.();
+          await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+          return;
+        }
+        // A click inside a row being edited must not navigate away from it.
+        if (e.target.closest('.sf-source-entry-row.editing')) return;
+        // ── COMMON FOLDER ROWS ─────────────────────────────────── [B-493, 2026-10-19]
+        // The delete goes through the SAME prompt the row menu uses, so the orphan warning
+        // and the "Export first" offer come with it. A bare deleteCommon here would be a
+        // second door past a guard that exists because the source leaves with the folder.
+        const cdel = e.target.closest('[data-common-delete]');
+        if (cdel) {
+          e.stopPropagation();
+          const cu = cdel.getAttribute('data-common-delete');
+          if (!cu) return;
+          const _srcBefore = _sfSourceOriginalUuid;
+          await _sfDeleteCommonPrompt(cu);
+          // The source may have gone with the last common using it, in which case there is
+          // no modal to return to. Same branch the font delete above takes.
+          if (_srcBefore && _sfAllSourcesByUuid[_srcBefore]) await _sfRenderSourceEntries(_srcBefore);
+          else await _sfCloseSourceDetail();
+          return;
+        }
+        // A common has no detail modal to swap to - its detail surface is the sidebar panel -
+        // so this closes and lands you on it, expanded. Same three-way unsaved prompt as the
+        // font row, because navigating away from unsaved source edits is the same question
+        // whichever kind you are going to.
+        const crow = e.target.closest('[data-source-common]');
+        if (crow) {
+          const cu = crow.getAttribute('data-source-common');
+          if (!cu) return;
+          if (_sfSourceDirty) {
+            const choice = await promptUnsaved('Unsaved source edits. Save before going to this common folder?');
+            if (choice === 'cancel') return;
+            if (choice === 'save') {
+              const saved = await _sfSaveSourceDetail({ closeAfter: false });
+              if (!saved) return;
+            }
+          }
+          _sfSourceDetailReturnToEntry = null;
+          _sfSourceEdit = null;
+          _sfSourceOriginalUuid = null;
+          _sfSourceDirty = false;
+          await _sfCloseSourceDetail();
+          _sfSelectedCommonUuid = cu;
+          await _sfSaveActiveCommon();
+          await _sfRenderCommonList();
+          // The sidebar holds every common, so an expanded row below the fold reads as
+          // nothing having happened.
+          try {
+            document.querySelector(`.sf-common-row[data-common-uuid="${CSS.escape(cu)}"]`)
+              ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } catch {}
+          return;
+        }
         const del = e.target.closest('[data-entry-delete]');
         if (del) {
           e.stopPropagation();
@@ -36837,6 +37507,34 @@ require(['vs/editor/editor.main'], function () {
       // Right-click context menu on source-detail entry rows. Lives on
       // the entries list itself so it survives re-renders. Same DOM
       // (preset-ctx-menu) every other SF context menu reuses.
+      _sfSourceDetailEls.entriesList?.addEventListener('contextmenu', (e) => {
+        const crow = e.target.closest('.sf-source-entry-row[data-source-common]');
+        if (!crow || crow.classList.contains('editing')) return;
+        const cu = crow.getAttribute('data-source-common');
+        if (!cu) return;
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        const mkItem = (text, cls, fn) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+          d.textContent = text;
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        const mkSep = () => { const sp = document.createElement('div'); sp.className = 'preset-ctx-separator'; menu.appendChild(sp); };
+        menu.innerHTML = '';
+        mkItem('Edit', '', () => crow.querySelector(`[data-common-edit-toggle="${CSS.escape(cu)}"]`)?.click());
+        mkSep();
+        mkItem('Duplicate', '', () => _sfDuplicateCommon(cu));
+        // Same rule as the font row: from source only when it would differ, or before we know.
+        const cust = crow.querySelector('.ent-cust[data-cust-common]');
+        const isCustomized = !!(cust && cust.textContent.trim());
+        if (isCustomized || !(cust && cust.dataset.done)) mkItem('Duplicate from source', '', () => _sfDuplicateCommon(cu, 'source'));
+        mkSep();
+        mkItem('× Delete', 'danger', () => crow.querySelector(`[data-common-delete="${CSS.escape(cu)}"]`)?.click());
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
+      });
       _sfSourceDetailEls.entriesList?.addEventListener('contextmenu', (e) => {
         const row = e.target.closest('.sf-source-entry-row[data-entry-name]');
         if (!row) return;
@@ -37199,8 +37897,13 @@ require(['vs/editor/editor.main'], function () {
       // "Duplicate fonts from this source" — same review flow but
       // duplicate mode (every font selectable, none checked by default,
       // _copy suffix on suggested names).
-      document.getElementById('btn-sf-source-duplicate')?.addEventListener('click', async () => {
+      document.getElementById('btn-sf-source-duplicate')?.addEventListener('click', async (ev) => {
         if (!_sfSourceOriginalUuid) return;
+        const _cu = ev.currentTarget.dataset.commonUuid;
+        if (_cu && _sfSourceDetailEls.entriesList?.classList.contains('is-commons')) {
+          await _sfDuplicateCommon(_cu, 'source');
+          return;
+        }
         if (_sfSourceDirty) {
           if (!await _promptDiscard('Unsaved source edits. Discard them and continue?')) return;
         }
@@ -37231,9 +37934,18 @@ require(['vs/editor/editor.main'], function () {
       // already sums bytes and files across the list, so the destination fit check needs no
       // work for the many case. The summary did not: it read `exported[0]`, which was invisible
       // because the only other plural caller suppresses the summary entirely.
-      const _sfExportSourcesFlow = async (sources) => {
+      // ONE FLOW, AND THE CALLER DECLARES ITS OWN KIND. [B-493, 2026-10-19]
+      // `customizedKind` is 'entry' for the font doors and 'common' for a common folder's
+      // Export source. It picks which working copies the checkbox counts and names, and it
+      // rides through to the payload builder so the archive carries the same ones. Nothing
+      // else about the export differs between the two doors.
+      const _sfExportSourcesFlow = async (sources, { customizedKind = 'entry' } = {}) => {
+        const _isCommonDoor = customizedKind === 'common';
         const list = (Array.isArray(sources) ? sources : []).filter((s) => s && s.uuid);
-        if (!list.length) return;
+        // RETURNS WHETHER AN ARCHIVE WAS WRITTEN. A common folder's delete offers this as
+        // "Export first" and must not fall through into the delete when the export was
+        // cancelled or failed. The font doors ignore the value. [B-493, 2026-10-19]
+        if (!list.length) return false;
         const many = list.length > 1;
         const uuid = list[0].uuid;
         const label = many ? `${list.length} sources` : (list[0].label || 'source');
@@ -37364,22 +38076,43 @@ require(['vs/editor/editor.main'], function () {
         // disclosure: which of your fonts ride along.
         // Read off the same stamp the source detail's Customized column uses,
         // so this list and that column can never disagree.
+        // READ THE KIND THIS DOOR SPEAKS FOR. A font door counts customized font entries of
+        // these sources; a common folder's door counts customized commons of them. Each uses
+        // the stamp its own side maintains, so the box and that side's Customized marker
+        // cannot disagree. [B-493]
         let _custNames = [];
         try {
-          for (const s of list) {
-            const _er = await window.electronAPI.listEntriesBySource({ sourceUuid: s.uuid });
-            for (const _e of ((_er && _er.ok && _er.entries) || [])) {
+          if (_isCommonDoor) {
+            const _uuids = new Set(list.map((s) => s.uuid));
+            const _cl = await window.electronAPI.listCommons();
+            for (const _c of ((_cl && _cl.ok && _cl.commons) || [])) {
+              if (!_c || !_c.meta || !_uuids.has(_c.meta.sourceUuid)) continue;
               try {
-                const _cr = await window.electronAPI.entryCustomization({ name: _e.name });
-                if (_cr && _cr.ok && _cr.known && _cr.customized) _custNames.push(_e.name);
+                const _cr = await window.electronAPI.commonCustomization({ uuid: _c.uuid });
+                if (_cr && _cr.ok && _cr.known && _cr.customized) {
+                  _custNames.push(_c.meta.name || _c.uuid);
+                }
               } catch {}
+            }
+          } else {
+            for (const s of list) {
+              const _er = await window.electronAPI.listEntriesBySource({ sourceUuid: s.uuid });
+              for (const _e of ((_er && _er.ok && _er.entries) || [])) {
+                try {
+                  const _cr = await window.electronAPI.entryCustomization({ name: _e.name });
+                  if (_cr && _cr.ok && _cr.known && _cr.customized) _custNames.push(_e.name);
+                } catch {}
+              }
             }
           }
         } catch {}
+        const _custNoun = _isCommonDoor
+          ? (_custNames.length === 1 ? 'customized common folder' : 'customized common folders')
+          : (_custNames.length === 1 ? 'customized font' : 'customized fonts');
         const _custBox = _custNames.length ? {
           label: _custNames.length === 1
-            ? 'Include customized font with zip archive'
-            : `Include ${_custNames.length} customized fonts with zip archive`,
+            ? `Include ${_custNoun} with zip archive`
+            : `Include ${_custNames.length} ${_custNoun} with zip archive`,
           hint: _custNames.join(', '),
           checked: true,
         } : null;
@@ -37410,14 +38143,14 @@ require(['vs/editor/editor.main'], function () {
         const includeAttachments = !!(_attBox && res && typeof res === 'object' && res.checked);
         const includeCustomized = !!(_custBox && res && typeof res === 'object'
           && (_box2 ? res.checked2 : res.checked));
-        if (choice !== 'confirm' && choice !== 'middle') { return; }
+        if (choice !== 'confirm' && choice !== 'middle') { return false; }
         const format = choice === 'middle' ? 'folder' : 'zip';
 
         // 2) Where to?
         const pick = await window.electronAPI.pickExportDir({
           title: many ? `Export ${list.length} sources to…` : `Export "${label}" to…`,
         });
-        if (!pick || !pick.ok) { return; }
+        if (!pick || !pick.ok) { return false; }
 
         // 3) Export with live progress in the import-convention layout: section +
         // metric above the bar (one metric per section), current file below,
@@ -37425,7 +38158,8 @@ require(['vs/editor/editor.main'], function () {
         // A LIST OF ONE. The door takes 1..N now and treats them identically, which is the
         // point - this caller is not a special case any more, it is the N=1 case. [2026-09-23]
         const r = await _sfRunSourceExport({ sources: list, destDir: pick.destDir,
-                                             format, includeAttachments, includeCustomized });
+                                             format, includeAttachments, includeCustomized,
+                                             customizedKind });
         await _sfDeleteProgress.hide();
 
         // 4) Outcome. Errors keep the existing dialog. Success shows an in-modal
@@ -37454,10 +38188,10 @@ require(['vs/editor/editor.main'], function () {
         // THE FORMAT-SPECIFIC WORDING SURVIVES, in the place that draws endings: main reports
         // `partialRemoved` when the rollback removed what had landed, and the shared notice says
         // "The item that was still being written was removed…" off exactly that.
-        if (r && r.canceled) return;
+        if (r && r.canceled) return false;
         if (!r || !r.ok) {
           _sfExportFailed((r && r.error) || 'unknown error');
-          return;
+          return false;
         }
         // READ THE RECORD, NOT THE ROOT. [B-420, 2026-09-23: "shows 'undefined'"]
         //
@@ -37596,7 +38330,9 @@ require(['vs/editor/editor.main'], function () {
           const _impState = await _sfImpoundRefusals(_found, 'source', uuid);
           await _sfShowProgramRefusal({ refused: _found, kind: 'source', id: uuid,
             state: _impState, prefixHtml: lines.join('<br><br>') });
-          return;
+          // The archive was written; only the ending differs. A delete waiting on this
+          // export may proceed. [B-493]
+          return true;
         }
         // THE EJECT ROW GOES ON THIS SUMMARY, AND FORGETTING IT IS A REPEAT. [B-420]
         // Reported, 2026-09-23, exporting a source to F:: "I'm missing the eject. I saw the check
@@ -37650,6 +38386,7 @@ require(['vs/editor/editor.main'], function () {
         }
         await _showP;
         _sfRemoveEjectRow();
+        return true;
       };
       window._sfExportSourcesFlow = _sfExportSourcesFlow;
 
@@ -37816,7 +38553,7 @@ require(['vs/editor/editor.main'], function () {
           kind: 'entry',
           id: _sfDetailOriginalName,
           paths: Array.from(_sfEntryFilesSelected),
-        };
+        }; _sfMarkInAppCopy();
       };
       // Paste the clipboard's files into the current entry at the current
       // breadcrumb path. Source can be any kind (entry or common).
@@ -38186,7 +38923,7 @@ require(['vs/editor/editor.main'], function () {
       const _sfAddEntryFiles = async () => {
         if (!_sfDetailOriginalName) return;
         let pick;
-        try { pick = await window.electronAPI.selectAudioFiles({ title: 'Add files to entry' }); }
+        try { pick = await window.electronAPI.selectAudioFiles({ title: 'Add files to entry', packFiles: true }); }
         catch (err) { promptError('Could not open picker', err && err.message || err); return; }
         if (!pick || !pick.ok || !pick.filePaths?.length) return;
         // Same rename-to-match-folder prompt as Paste and the library
@@ -38309,6 +39046,7 @@ require(['vs/editor/editor.main'], function () {
       let _sfLibPickActive = null;       // { kind: 'source'|'entry', id }
       let _sfLibPickTree = [];           // tree for the active target
       let _sfLibPickPath = '';           // breadcrumb path inside the active target
+      let _sfLibPickBase = '';           // highest level the breadcrumb reaches (_sfFilesStartFor)
       // Hash-based duplicate detection. _sfLibPickDestHashes is the set
       // of sha256s in the destination entry. _sfLibPickHashCache maps
       // "kind::id::subPath" → sha256 (or null while pending, undefined
@@ -38503,9 +39241,11 @@ require(['vs/editor/editor.main'], function () {
         // music a user has already gathered, which is exactly what someone is looking for
         // when they open this picker on a font. Hidden when it is the destination, because
         // copying a folder into itself is the one case with nothing to offer.
+        // First and ungrouped: there is only ever one, so a group heading would just repeat it,
+        // and at the bottom it sat below every source in the library.
         const isTracksDest = !!(_sfLibPickDest && _sfLibPickDest.kind === 'sharedTracks');
         if (!isTracksDest) {
-          optgroups.push(`<optgroup label="Shared Tracks"><option value="sharedTracks::${_SF_TRACKS_ID}">Shared Tracks</option></optgroup>`);
+          optgroups.unshift(`<option value="sharedTracks::${_SF_TRACKS_ID}">Shared Tracks</option>`);
         }
         sel.innerHTML = optgroups.join('');
         // Default to the entry's own source when available, otherwise
@@ -38532,6 +39272,7 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfLibPickActive = { kind, id };
         _sfLibPickPath = '';
+        _sfLibPickBase = '';
         _sfLibPickTree = [];
         if (_sfLibPickEls.tree) _sfLibPickEls.tree.innerHTML = `<div class="sf-libpick-tree-empty">Loading…</div>`;
         try {
@@ -38550,6 +39291,11 @@ require(['vs/editor/editor.main'], function () {
               .map(f => ({ name: f.name, isDir: false, size: f.size }));
           }
         } catch { _sfLibPickTree = []; }
+        const _names = kind === 'source' ? _sfSourceNames(_sfAllSourcesByUuid[id] && _sfAllSourcesByUuid[id].meta)
+          : kind === 'entry' ? [id] : [];
+        const _fs = _sfFilesStartFor(_sfLibPickTree, _names, _sfLibPickChildrenAt);
+        _sfLibPickBase = _fs.base;
+        _sfLibPickPath = _fs.start;
         _sfRenderLibPickTree();
       };
       // Collect file subPaths visible in the current tree render that
@@ -38650,10 +39396,12 @@ require(['vs/editor/editor.main'], function () {
         // Breadcrumb: target label + path segments.
         const t = _sfLibPickActive;
         const opt = t ? _sfLibPickEls.target?.querySelector(`option[value="${CSS.escape(`${t.kind}::${t.id}`)}"]`) : null;
-        const rootLabel = _sfLibPickStripOwnTail(opt?.textContent || 'Files');
-        const segs = _sfLibPickPath.split('/').filter(Boolean);
-        const crumbs = [`<span class="sf-libpick-crumb-item${segs.length === 0 ? ' current' : ''}" data-crumb="">${_sfEscape(rootLabel)}</span>`];
-        let acc = '';
+        const base = _sfLibPickBase;
+        const rootLabel = (base && base.split('/').pop()) || _sfLibPickStripOwnTail(opt?.textContent || 'Files');
+        const rel = base && _sfLibPickPath.startsWith(base) ? _sfLibPickPath.slice(base.length) : _sfLibPickPath;
+        const segs = rel.split('/').filter(Boolean);
+        const crumbs = [`<span class="sf-libpick-crumb-item${segs.length === 0 ? ' current' : ''}" data-crumb="${_sfEscape(base)}">${_sfEscape(rootLabel)}</span>`];
+        let acc = base;
         for (let i = 0; i < segs.length; i++) {
           acc = acc ? `${acc}/${segs[i]}` : segs[i];
           const isLast = i === segs.length - 1;
@@ -39514,6 +40262,12 @@ require(['vs/editor/editor.main'], function () {
         _sfAudioLoop = false;
         const loopBtn = document.getElementById('sf-audio-loop');
         if (loopBtn) loopBtn.setAttribute('aria-pressed', 'false');
+        const _find = kind === 'common' ? () => window.electronAPI.findCommonPicture({ uuid: id })
+          : kind === 'entry' ? () => window.electronAPI.findEntryPicture({ name: id })
+          : kind === 'source' ? () => window.electronAPI.findSourcePicture({ uuid: id })
+          : async () => null;
+        _sfRenderPicture({ imgId: 'sf-audio-picture', boxId: 'sf-audio-box', find: _find,
+          isCurrent: () => token === _sfAudioOpenToken });
         modal.classList.add('active');
         try {
           const bytes = await _sfAudioReadBytes({ kind, id, subPath });
@@ -40371,13 +41125,13 @@ require(['vs/editor/editor.main'], function () {
           _sfOpenAudioPlayer({ kind, id, subPath, label: _leaf });
           return true;
         }
-        if (_sfIsTextReadable(subPath)) {
+        if (_sfIsTextReadable(subPath) || _sfImageExt.test(subPath)) {
           _sfOpenDocViewer({ kind, id, subPath, size });
           return true;
         }
         // Everything else: say what it is instead of doing nothing.
         promptError('Cannot open this here',
-          `"${_shown}" is not audio or text, so it cannot be previewed in the app.
+          `"${_shown}" is not audio, text or an image, so it cannot be previewed in the app.
 
 `
           + `Right-click it and choose Export to save a copy you can open elsewhere.`);
@@ -40410,6 +41164,11 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         const bytes = Uint8Array.from(res.bytes || []);
+        if (_sfImageExt.test(fileName)) {
+          const blobUrl = URL.createObjectURL(new Blob([bytes], { type: _sfMimeFor(fileName) }));
+          _sfShowDocViewer(fileName, size || bytes.length, '', { kind: 'image', blobUrl });
+          return;
+        }
         const raw = _sfDecodeBytes(bytes);
         const text = /\.rtf$/i.test(fileName) ? _sfStripRtf(raw) : raw;
         _sfShowDocViewer(fileName, size || bytes.length, text);
@@ -40962,13 +41721,14 @@ require(['vs/editor/editor.main'], function () {
       // Right-click menu on the entry file list — Copy / Paste / Rename
       // / New Folder / Delete. Reuses the preset-ctx-menu DOM (same
       // visual language the SF and preset views use).
-      document.addEventListener('contextmenu', (e) => {
+      document.addEventListener('contextmenu', async (e) => {
         if (!e.target.closest('#sf-entry-files-browser')) return;
         const fileRow = e.target.closest('[data-file-path]');
         const dirRow = e.target.closest('[data-dir-path]');
         e.preventDefault();
         const menu = document.getElementById('preset-ctx-menu');
         if (!menu) return;
+        const hasImage = await _sfClipboardHasImage();
         const mkItem = (text, cls, fn) => {
           const d = document.createElement('div');
           d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
@@ -41106,11 +41866,12 @@ require(['vs/editor/editor.main'], function () {
             _sfEntryFilesPath = dirSubPath || prev;
             await _sfPasteIntoEntry();
           });
-          if (clipboardCount > 0) mkSep();
+          if (hasImage) mkItem(`Paste image into ${dirRow.querySelector('.sf-entry-files-row-name')?.textContent || 'folder'}`, '', () => _sfPasteImageIntoEntry(dirSubPath));
+          if (clipboardCount > 0 || hasImage) mkSep();
           // Folder-level Copy / Export — clipboard carries the folder
           // path; paste handlers walk the destination recursively.
           mkItem('Copy folder', '', () => {
-            _sfFileClipboard = { kind: 'entry', id: _sfDetailOriginalName, paths: [dirSubPath] };
+            _sfFileClipboard = { kind: 'entry', id: _sfDetailOriginalName, paths: [dirSubPath] }; _sfMarkInAppCopy();
           });
           mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [dirSubPath], isDir: true }));
           mkSep();
@@ -41120,7 +41881,8 @@ require(['vs/editor/editor.main'], function () {
           mkItem('× Delete folder', 'danger', () => _sfDeleteEntryFolderPrompt(dirSubPath));
         } else {
           if (clipboardCount > 0) mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteIntoEntry());
-          if (clipboardCount > 0) mkSep();
+          if (hasImage) mkItem('Paste image here', '', () => _sfPasteImageIntoEntry(_sfEntryFilesPath));
+          if (clipboardCount > 0 || hasImage) mkSep();
           mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
           mkSep();
           // Renumber files in the current folder — closes gaps in
@@ -41129,11 +41891,7 @@ require(['vs/editor/editor.main'], function () {
           mkItem('Renumber files', '', () => _sfRenumberCurrentFolder());
         }
         if (!menu.children.length) return;
-        const x = Math.min(e.clientX, window.innerWidth - 200);
-        const y = Math.min(e.clientY, window.innerHeight - 160);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       // Ctrl/Cmd+C and Ctrl/Cmd+V scoped to the entry detail modal —
       // gated to: modal active, no other modal stacked, focus not in a
@@ -41154,9 +41912,11 @@ require(['vs/editor/editor.main'], function () {
           e.preventDefault();
           _sfCopyEntryFilesSelection();
         } else {
-          if (!_sfFileClipboard || _sfFileClipboard.paths.length === 0) return;
           e.preventDefault();
-          _sfPasteIntoEntry();
+          (async () => {
+            if (await _sfPasteImageIntoEntry(_sfEntryFilesPath)) return;
+            if (_sfFileClipboard && _sfFileClipboard.paths.length > 0) _sfPasteIntoEntry();
+          })();
         }
       });
       // Drag-drop within the entry modal — drag files (multi if multi
@@ -41273,17 +42033,44 @@ require(['vs/editor/editor.main'], function () {
       // _sfFileClipboard (kind: 'source').
       let _sfSourceFilesTree = [];
       let _sfSourceFilesPath = '';
+      // Where the browser starts and the highest it goes. Normally the source's top level; when
+      // that holds nothing but one folder with the source's own name, that folder instead, since
+      // the extra level carries nothing and nothing in a source is editable.
+      let _sfSourceFilesBase = '';
+      // Shared by every read-only file browser (source modal, library picker). `names` are the
+      // item's own names. Returns { base, start }: base is the same-name lone folder (else ''),
+      // start goes on past any further level that holds a single folder and nothing else, the
+      // way a click into it would. The levels between base and start stay in the breadcrumb.
+      const _sfFilesStartFor = (tree, names, childrenAt) => {
+        const lc = names.filter(Boolean).map((n) => String(n).toLowerCase());
+        const lone = (kids) => kids.length === 1 && kids[0].isDir && !kids[0].isInnerZip;
+        const base = Array.isArray(tree) && lone(tree) && lc.includes(String(tree[0].name).toLowerCase())
+          ? tree[0].path : '';
+        let start = base;
+        for (;;) {
+          const kids = childrenAt(tree, start);
+          if (!lone(kids)) break;
+          start = kids[0].path;
+        }
+        return { base, start };
+      };
+      const _sfSourceNames = (m) =>
+        [m && m.bundleName, m && String(m.originalName || '').replace(/\.zip$/i, '')];
       let _sfSourceFilesSelected = new Set();
       let _sfSourceFilesAnchor = null;
       const _sfRenderSourceFiles = () => {
         const list = document.getElementById('sf-source-files-list');
         const crumbEl = document.getElementById('sf-source-files-breadcrumb');
         if (!list || !crumbEl) return;
-        const segs = _sfSourceFilesPath.split('/').filter(Boolean);
-        const rootLabel = (_sfSourceEdit && _sfSourceEdit.bundleName) || 'Files';
+        const base = _sfSourceFilesBase;
+        const rel = base && _sfSourceFilesPath.startsWith(base)
+          ? _sfSourceFilesPath.slice(base.length) : _sfSourceFilesPath;
+        const segs = rel.split('/').filter(Boolean);
+        const rootLabel = (base && base.split('/').pop())
+          || (_sfSourceEdit && _sfSourceEdit.bundleName) || 'Files';
         const rootIsCurrent = segs.length === 0;
-        const crumbs = [`<span class="sf-entry-files-crumb${rootIsCurrent ? ' current' : ''}" data-crumb-path="">${_sfEscape(rootLabel)}</span>`];
-        let acc = '';
+        const crumbs = [`<span class="sf-entry-files-crumb${rootIsCurrent ? ' current' : ''}" data-crumb-path="${_sfEscape(base)}">${_sfEscape(rootLabel)}</span>`];
+        let acc = base;
         for (let i = 0; i < segs.length; i++) {
           acc = acc ? `${acc}/${segs[i]}` : segs[i];
           const isLast = i === segs.length - 1;
@@ -41389,7 +42176,7 @@ require(['vs/editor/editor.main'], function () {
           kind: 'source',
           id: _sfSourceOriginalUuid,
           paths: Array.from(_sfSourceFilesSelected),
-        };
+        }; _sfMarkInAppCopy();
       };
       // Context menu: Copy only. Sources are immutable so paste/move/
       // delete/rename/new-folder aren't on the menu. Reuses the same
@@ -41444,7 +42231,7 @@ require(['vs/editor/editor.main'], function () {
           const dirNode = _sfFindNodeAtPath(_sfSourceFilesTree, dirSubPath);
           const isInnerZipNode = !!(dirNode && dirNode.isInnerZip);
           mkItem('Copy folder', '', () => {
-            _sfFileClipboard = { kind: 'source', id: _sfSourceOriginalUuid, paths: [dirSubPath] };
+            _sfFileClipboard = { kind: 'source', id: _sfSourceOriginalUuid, paths: [dirSubPath] }; _sfMarkInAppCopy();
           });
           mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'source', id: _sfSourceOriginalUuid, subPaths: [dirSubPath], isDir: true }));
           if (isInnerZipNode) {
@@ -41477,7 +42264,7 @@ require(['vs/editor/editor.main'], function () {
       // Backspace + mouse-back for up-one navigation, same gating as the
       // entry browser (no text input focus, modal active, path not root).
       const _sfSourceFilesGoUp = () => {
-        if (!_sfSourceFilesPath) return false;
+        if (!_sfSourceFilesPath || _sfSourceFilesPath === _sfSourceFilesBase) return false;
         const parts = _sfSourceFilesPath.split('/').filter(Boolean);
         parts.pop();
         _sfSourceFilesPath = parts.join('/');
@@ -41805,8 +42592,12 @@ require(['vs/editor/editor.main'], function () {
       // `blockedDelete` IS DECLARED BY THE CALLER, never inferred here. Only a caller knows the
       // export is a precondition of a delete, and that is what earns the extra sentence when it
       // does not complete.
+      // `customizedKind` NAMES THE CALLER'S OWN KIND, and is the only thing the two Export
+      // source doors differ by: a font's carries customized font entries, a common's carries
+      // the customized common folder. [B-493, 2026-10-19]
       const _sfRunSourceExport = async ({ sources, destDir, format, blockedDelete = false,
-                                          includeAttachments = true, includeCustomized = true }) => {
+                                          includeAttachments = true, includeCustomized = true,
+                                          customizedKind = 'entry' }) => {
         const list = (Array.isArray(sources) ? sources : [sources]).filter((s) => s && s.uuid);
         if (!list.length) return { ok: false, error: 'No sources to export' };
         const many = list.length > 1;
@@ -41815,7 +42606,7 @@ require(['vs/editor/editor.main'], function () {
 
         const _call = (confirmSlow) => window.electronAPI.exportManySourcesToDownloads({
           items: list.map((s) => ({ uuid: s.uuid, label: s.label })),
-          destDir, format, includeAttachments, includeCustomized, confirmSlow,
+          destDir, format, includeAttachments, includeCustomized, customizedKind, confirmSlow,
         });
 
         const _run = await _sfRunExport({
@@ -41852,7 +42643,7 @@ require(['vs/editor/editor.main'], function () {
             let bytes = 0, files = 0;
             for (const s of list) {
               try {
-                const sz = await _sfSourceExportSize({ uuid: s.uuid });
+                const sz = await _sfSourceExportSize({ uuid: s.uuid, customizedKind });
                 if (sz && sz.ok) { bytes += (sz.bytes || 0); files += (sz.files || 0); }
               } catch { /* an unsizable source leaves the total short, which reads as "cannot
                            measure" downstream rather than as a smaller job */ }
@@ -47102,7 +47893,7 @@ require(['vs/editor/editor.main'], function () {
         // Hide any SF modals currently open so the viewer is the only thing
         // on screen. They get restored on close.
         _sfDocViewerStashedModalIds = [];
-        const candidates = ['modal-sf-entry-detail', 'modal-sf-source-detail', 'modal-sf-reorganize'];
+        const candidates = ['modal-sf-entry-detail', 'modal-sf-source-detail', 'modal-sf-reorganize', 'modal-sf-audio'];
         for (const id of candidates) {
           const el = document.getElementById(id);
           if (el && el.classList.contains('active')) {
@@ -49331,7 +50122,7 @@ require(['vs/editor/editor.main'], function () {
       // order is most-specific to least: file row → dir row → common row.
       // Otherwise a right-click on a file would also match the outer common
       // row and we'd race two menus.
-      document.getElementById('sf-common-list')?.addEventListener('contextmenu', (e) => {
+      document.getElementById('sf-common-list')?.addEventListener('contextmenu', async (e) => {
         const fileRow = e.target.closest('[data-tree-file]');
         const dirRow = e.target.closest('[data-tree-dir]');
         const commonRow = e.target.closest('[data-common-uuid]');
@@ -49340,6 +50131,7 @@ require(['vs/editor/editor.main'], function () {
         e.preventDefault();
         const menu = document.getElementById('preset-ctx-menu');
         if (!menu) return;
+        const hasImage = (fileRow || dirRow || commonRow) ? await _sfClipboardHasImage() : false;
         const mkItem = (text, cls, fn) => {
           const d = document.createElement('div');
           d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
@@ -49386,6 +50178,11 @@ require(['vs/editor/editor.main'], function () {
             const dirLabel = parentDir ? `"${parts[parts.length - 1]}"` : 'root';
             mkItem(`Paste into ${dirLabel} (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, parentDir));
           }
+          if (hasImage) {
+            const parts = subPath.split('/'); parts.pop();
+            const parentDir = parts.join('/');
+            mkItem(`Paste image into ${parentDir ? `"${parts[parts.length - 1]}"` : 'root'}`, '', () => _sfPasteImageIntoCommon(_sfSelectedCommonUuid, parentDir));
+          }
           mkSep();
           if (count === 1) mkItem('Rename…', '', () => _sfRenameCommonFile([..._sfCommonFilesSelected][0]));
           mkItem(count > 1 ? `↗ Export… (${count})` : '↗ Export…', '', () => _sfExportFiles({ kind: 'common', id: _sfSelectedCommonUuid, subPaths: [..._sfCommonFilesSelected] }));
@@ -49397,10 +50194,11 @@ require(['vs/editor/editor.main'], function () {
           if (clipboardCount > 0) {
             // Same destination-naming as the file-row paste above.
             mkItem(`Paste into "${subPath.split('/').pop()}" (${clipboardCount})`, '', () => _sfPasteCommonClipboard(_sfSelectedCommonUuid, subPath));
-            mkSep();
           }
+          if (hasImage) mkItem(`Paste image into "${subPath.split('/').pop()}"`, '', () => _sfPasteImageIntoCommon(_sfSelectedCommonUuid, subPath));
+          if (clipboardCount > 0 || hasImage) mkSep();
           mkItem('Copy folder', '', () => {
-            _sfFileClipboard = { kind: 'common', id: _sfSelectedCommonUuid, paths: [subPath] };
+            _sfFileClipboard = { kind: 'common', id: _sfSelectedCommonUuid, paths: [subPath] }; _sfMarkInAppCopy();
             _sfCommonClipboard = { sourceUuid: _sfSelectedCommonUuid, paths: [subPath] };
           });
           mkItem('↗ Export folder…', '', () => _sfExportFiles({ kind: 'common', id: _sfSelectedCommonUuid, subPaths: [subPath], isDir: true }));
@@ -49444,10 +50242,19 @@ require(['vs/editor/editor.main'], function () {
 
           // Right-click on a common's header row. If we have a clipboard and
           // this card is the (or another) common, offer Paste-to-root.
+          // On a selection, Paste goes into every selected folder and says how many.
+          const _sfx = (k) => (k === 1 ? '' : ` (${k})`);
           if (clipboardCount > 0) {
-            mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteCommonClipboard(uuid, ''));
-            mkSep();
+            mkItem(targetCount === 1 ? `Paste here (${clipboardCount})` : `Paste ${clipboardCount} into each${_sfx(targetCount)}`, '', async () => {
+              for (const u of targetUuids) await _sfPasteCommonClipboard(u, '');
+            });
           }
+          if (hasImage) {
+            mkItem(`Paste image here${_sfx(targetCount)}`, '', async () => {
+              for (const u of targetUuids) await _sfPasteImageIntoCommon(u, '');
+            });
+          }
+          if (clipboardCount > 0 || hasImage) mkSep();
           // Group / add-to-group / ungroup section.
           if (showNewGroup) {
             mkItem(targetCount === 1 ? 'New group…' : `New group from selected (${targetCount})…`, '',
@@ -49474,8 +50281,10 @@ require(['vs/editor/editor.main'], function () {
           }
           if (showNewGroup || addToCandidates.length > 0 || inAnyGroupCount > 0) mkSep();
 
-          mkItem('Rename…', '', () => _sfRenameCommon(uuid));
-          mkItem('Duplicate…', '', () => _sfDuplicateCommon(uuid));
+          if (targetCount === 1) {
+            mkItem('Rename…', '', () => _sfRenameCommon(uuid));
+            mkItem('Duplicate…', '', () => _sfDuplicateCommon(uuid));
+          }
           // "Duplicate from source" only earns a slot when the two would DIFFER. On an
           // unmodified common the copy and the source version are the same bytes, so
           // offering both is a choice with one outcome. [B-493]
@@ -49511,16 +50320,41 @@ require(['vs/editor/editor.main'], function () {
           // The folder is literally named `common`, because that is what ProffieOS looks for.
           // The pack's own name is not in the result, which is why the menu item says "common
           // folder" rather than the pack name.
-          mkItem('Export as archive…', '', () => _sfExportCommonPrompt(uuid));
-          mkItem('Export common folder…', '', () => _sfExportCommonFolderPrompt(uuid));
+          // `Export source…` IS THE FONT SIDE'S WORD, and this door now does the font side's
+          // job: it exports the source this common came from, carrying the customized common.
+          // It used to say "Export as archive…" and zip the common folder. [B-493, 2026-10-19]
+          // `Edit source…` IS THE FONT SIDE'S OWN BUTTON, reached from the font detail panel.
+          // A common folder has no detail modal to put it on, so it lives on the row menu.
+          // Sits with `Export source…` because both act on the source rather than the
+          // working copy. [B-493, 2026-10-19]
+          if (targetCount === 1) {
+            const _srcU = (_sfCommons.find((c) => c.uuid === uuid) || {}).meta?.sourceUuid;
+            if (_srcU) mkItem('Edit source…', '', () => _sfOpenSourceDetail(_srcU));
+          }
+          if (targetCount === 1) {
+            mkItem('Export source…', '', () => _sfExportCommonPrompt(uuid));
+          } else {
+            // Counts SOURCES, as the font menu does: commons sharing a source are one archive.
+            const _srcSeen = new Map();
+            for (const c of targetCommons) {
+              const su = c.meta && c.meta.sourceUuid;
+              if (!su || _srcSeen.has(su)) continue;
+              const sm = (_sfAllSourcesByUuid[su] || {}).meta || {};
+              _srcSeen.set(su, { uuid: su, label: sm.bundleName || sm.originalName || 'source' });
+            }
+            const _srcList = [..._srcSeen.values()];
+            if (_srcList.length) {
+              mkItem(`Export source${_sfx(_srcList.length)}…`, '', () => _sfExportSourcesFlow(_srcList, { customizedKind: 'common' }));
+            }
+          }
+          // Every export of a common folder is named `common`, so several cannot share a destination.
+          mkItem('Export common folder…', targetCount === 1 ? '' : 'disabled', () => {
+            if (targetCount === 1) _sfExportCommonFolderPrompt(uuid);
+          });
           mkSep();
-          mkItem('× Delete', 'danger', () => _sfDeleteCommonPrompt(uuid));
+          mkItem(`× Delete${_sfx(targetCount)}`, 'danger', () => _sfDeleteCommonsPrompt(targetUuids));
         }
-        const x = Math.min(e.clientX, window.innerWidth - 180);
-        const y = Math.min(e.clientY, window.innerHeight - 140);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       // Double-click on a text-readable file row → open in the shared SF
       // doc-viewer modal. Mirrors the entry/source included-files flow so

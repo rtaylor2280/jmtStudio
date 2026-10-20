@@ -42,7 +42,10 @@ const doors = [...code.matchAll(/_sfRunExport\(\{/g)].map((m) => {
   };
 });
 
-const EXPECTED_DOORS = 9;
+// 9 -> 8 on 2026-10-19 [B-493]: the common-as-zip door was removed, not re-shaped. A common
+// folder now exports its SOURCE through the same door the font side uses, which is already in
+// this register. Every remaining door's ending declaration is unchanged.
+const EXPECTED_DOORS = 8;
 ok(`there are ${EXPECTED_DOORS} export doors`, doors.length === EXPECTED_DOORS,
    `found ${doors.length}. A new door must declare its ending and whether its caller draws a `
    + 'summary, or it silently inherits the toast default and can end twice.');

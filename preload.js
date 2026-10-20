@@ -488,6 +488,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyCommonFiles:       (params)     => ipcRenderer.invoke('common:copyFiles', params),
   moveCommonFiles:       (params)     => ipcRenderer.invoke('common:moveFiles', params),
   readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
+  findCommonPicture:     (params)     => ipcRenderer.invoke('common:findPicture', params),
+  findEntryPicture:      (params)     => ipcRenderer.invoke('entries:findPicture', params),
+  findSourcePicture:     (params)     => ipcRenderer.invoke('sources:findPicture', params),
   commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
   commonMatchesAt:       (params)     => ipcRenderer.invoke('common:matchesAt', params),
   writeCommonMarker:     (params)     => ipcRenderer.invoke('common:writeMarker', params),
@@ -496,6 +499,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
   resolveCommonContentDirty: (params) => ipcRenderer.invoke('common:resolveContentDirty', params),
   setCommonGroup:        (params)     => ipcRenderer.invoke('common:setGroup', params),
+  setCommonDescription:  (params)     => ipcRenderer.invoke('common:setDescription', params),
   setCommonGroupMany:    (params)     => ipcRenderer.invoke('common:setGroupMany', params),
   renameCommonGroup:     (params)     => ipcRenderer.invoke('common:renameGroup', params),
   deleteCommonGroup:     (params)     => ipcRenderer.invoke('common:deleteGroup', params),
@@ -565,5 +569,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectSoundFontSource: (params) => ipcRenderer.invoke('dialog:selectSoundFontSource', params),
 
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
+  clipboardImageToTemp: (params) => ipcRenderer.invoke('clipboard:imageToTemp', params),
+  clipboardCleanupTemp: (params) => ipcRenderer.invoke('clipboard:cleanupTemp', params),
+  clipboardClearForCopy: () => ipcRenderer.invoke('clipboard:clearForCopy'),
+  clipboardHasImage: () => ipcRenderer.invoke('clipboard:hasImage'),
 
 });

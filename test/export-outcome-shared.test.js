@@ -123,14 +123,22 @@ ok('the font-card quick export reaches the shared ending through the runner',
      return /exportEntryToFolder/.test(H.slice(start, k));
    })(),
    'this is the door that said Exported as "Techno_2" on a cancel');
-// RE-ANCHORED 2026-09-21 [B-420]: this door migrated onto the shared runner, so it no longer
-// calls `_sfExportOutcome` itself — `_sfRunExport` does, for every door, which is a stronger
-// guarantee than this door remembering to. The rule under test is unchanged: a cancel here must
-// not be silence, which is what it was before the shared ending existed.
-ok('the common-as-zip door reaches the shared ending through the runner',
-   /title: 'Exporting common folder',[\s\S]{0,900}?exportCommonAsZip/.test(H)
-   && /await _sfRunExport\(\{[\s\S]{0,400}?title: 'Exporting common folder'/.test(H),
-   'this door said nothing at all on a cancel');
+// RE-ANCHORED 2026-10-19 [B-493]: THE DOOR THIS CHECKED NO LONGER EXISTS. It zipped the common
+// FOLDER and had its own `_sfRunExport` call; a common now exports its SOURCE by calling
+// `_sfExportSourcesFlow`, which reaches the shared ending through the font side's own door.
+// The rule under test is unchanged and is now carried one level up: a cancel here must not be
+// silence, which is what it was before the shared ending existed. So what is pinned is the
+// ROUTING - give this door a bespoke export path again and it gets a bespoke ending again.
+{
+  const i = H.indexOf('const _sfExportCommonPrompt = async (uuid) => {');
+  const body = i > 0 ? H.slice(i, i + 1600) : '';
+  ok('a common folder exports through the shared source-export flow',
+     /_sfExportSourcesFlow\(/.test(body) && /customizedKind: 'common'/.test(body),
+     'this door said nothing at all on a cancel when it had an export path of its own');
+  ok('and it does not run an export of its own',
+     !/_sfRunExport\(\{/.test(body),
+     'a second export path here means a second ending, which is what the shared runner removed');
+}
 // RE-ANCHORED 2026-09-22 when tracks migrated, the third door to need this. It no longer
 // calls `_sfExportOutcome` itself; the runner does, behind the contract guard.
 //

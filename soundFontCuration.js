@@ -92,10 +92,10 @@ const ENTRY_FIELDS = ['name', 'tags', 'linkedStyleLibraryEntry', 'author', 'desc
 // restoring one while a copy of that entry still exists would put two rows in
 // the library under the same id. The timestamps carry no such hazard.
 const ENTRY_PROV_FIELDS = ['createdAt', 'updatedAt', 'acquisitionDate'];
-// A common folder's curation. Short because a common carries little: no tags, no linked
-// style, no author. Its group placement is a real decision the user made and is the part
-// a restore would otherwise lose. [B-493]
-const COMMON_FIELDS = ['name', 'group', 'userNotes'];
+// A common folder's curation. Short because a common carries little: no tags and no linked
+// style. Its description and its group placement are decisions the user made, and are what a
+// restore would otherwise lose. [B-493]
+const COMMON_FIELDS = ['name', 'description', 'group', 'userNotes'];
 const COMMON_PROV_FIELDS = ['createdAt'];
 
 function _pick(obj, fields) {
@@ -128,6 +128,15 @@ function buildForSource(userData, uuid, appVersion, opts) {
   // on direct export and automatic on delete with export first"): a parameter
   // of the export, defaulting to carry.
   const includeCustomized = !(opts && opts.includeCustomized === false);
+  // Which KIND of working copy rides, declared by the caller. [B-493, 2026-10-19]
+  //
+  // One source export, two doors. A font's Export source carries customized font entries;
+  // a common's carries the customized common folder. Everything else about the archive is
+  // the same, so this is the only thing a door declares.
+  //
+  // Defaults to 'entry', which is what every existing caller means and what this module did
+  // before a common could export at all.
+  const customizedKind = (opts && opts.customizedKind) === 'common' ? 'common' : 'entry';
   const sources = require('./soundFontSources');
   const entriesMod = require('./soundFontEntries');
   const attachMod = require('./soundFontAttachments');
@@ -147,6 +156,9 @@ function buildForSource(userData, uuid, appVersion, opts) {
   const entries = {};
   const entryProvenance = {};
   const importedPaths = [];
+  // The commons analogue: source subtrees whose STOCK working copy was there at export time
+  // and must therefore be rebuilt on import, even when a customized copy rides too. [B-493]
+  const importedSubPaths = [];
   const customized = [];
   let entryList = [];
   try { entryList = entriesMod.listEntries(userData) || []; } catch { entryList = []; }
@@ -169,7 +181,8 @@ function buildForSource(userData, uuid, appVersion, opts) {
     // loses nothing that exists.
     let _cust = null;
     try { _cust = entriesMod.getEntryCustomization(userData, e.name); } catch { _cust = null; }
-    const _rides = includeCustomized && !!(_cust && _cust.known && _cust.customized);
+    const _rides = includeCustomized && customizedKind === 'entry'
+                   && !!(_cust && _cust.known && _cust.customized);
     if (_rides) {
       customized.push({
         entryName: e.name,
@@ -227,7 +240,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
     if (Object.keys(prov).length > 0) entryProvenance[key] = prov;
   }
 
-  // ── Customized COMMON FOLDERS ride too ([B-493]) ──
+  // ── The customized COMMON FOLDER rides, when a common's door asked ([B-493]) ──
   // A common folder is a working copy of this source exactly as a font entry is, so the
   // same rule applies: if the user changed it, the change exists nowhere else and an export
   // that leaves it behind is the one that loses it. Detected off the same stamp, with the
@@ -236,26 +249,37 @@ function buildForSource(userData, uuid, appVersion, opts) {
   // MARKED WITH A KIND, and entries are left unmarked on purpose: every archive written
   // before this carries entry records with no kind field, so absent must keep meaning
   // entry or every existing export stops restoring.
-  try {
-    const commonMod = require('./soundFontCommon');
-    for (const c of (commonMod.listCommons(userData) || [])) {
-      const cm = c && c.meta;
-      if (!cm || cm.sourceUuid !== uuid) continue;
-      if (cm.sourceSubPath == null) continue;
-      let cust = null;
-      try { cust = commonMod.getCommonCustomization(userData, c.uuid); } catch { cust = null; }
-      if (!includeCustomized || !(cust && cust.known && cust.customized)) continue;
-      customized.push({
-        kind: 'common',
-        commonName: cm.name || c.uuid,
-        sourceSubPath: cm.sourceSubPath,
-        dir: `${PAYLOAD_DIR}/customized/${customized.length}`,
-        curation: _pick(cm, COMMON_FIELDS),
-        provenance: _pick(cm, COMMON_PROV_FIELDS),
-        _absDir: path.join(commonMod.commonRoot(userData), c.uuid, 'files'),
-      });
-    }
-  } catch { /* commons unavailable: the source's fonts still export */ }
+  // RUNS ONLY FOR `customizedKind: 'common'`. A font's Export source carries no common.
+  if (includeCustomized && customizedKind === 'common') {
+    try {
+      const commonMod = require('./soundFontCommon');
+      for (const c of (commonMod.listCommons(userData) || [])) {
+        const cm = c && c.meta;
+        if (!cm || cm.sourceUuid !== uuid) continue;
+        if (cm.sourceSubPath == null) continue;
+        let cust = null;
+        try { cust = commonMod.getCommonCustomization(userData, c.uuid); } catch { cust = null; }
+        if (!(cust && cust.known && cust.customized)) {
+          // A STOCK COPY STILL CLAIMS ITS SUBTREE, which is the both-copies case and the
+          // same rule `importedPaths` applies to a font candidate: customized alone means
+          // the vendor copy stays out, customized BESIDE a stock copy means both come back.
+          // A common the diff cannot judge counts as stock, which is the branch that loses
+          // nothing that exists. [B-493, 2026-10-19]
+          if (!importedSubPaths.includes(cm.sourceSubPath)) importedSubPaths.push(cm.sourceSubPath);
+          continue;
+        }
+        customized.push({
+          kind: 'common',
+          commonName: cm.name || c.uuid,
+          sourceSubPath: cm.sourceSubPath,
+          dir: `${PAYLOAD_DIR}/customized/${customized.length}`,
+          curation: _pick(cm, COMMON_FIELDS),
+          provenance: _pick(cm, COMMON_PROV_FIELDS),
+          _absDir: path.join(commonMod.commonRoot(userData), c.uuid, 'files'),
+        });
+      }
+    } catch { /* commons unavailable: the rest of the payload still builds */ }
+  }
 
   const attachments = [];
   const ids = includeAttachments && Array.isArray(sourceMeta.attachments) ? sourceMeta.attachments : [];
@@ -350,6 +374,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
     entries,
     entryProvenance,
     importedPaths,
+    importedSubPaths,
     attachments,
     customized,
     provenance,
@@ -695,6 +720,8 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
   if (!payloadRootDir) return none;
   const entriesMod = require('./soundFontEntries');
   const names = [];
+  // The restored COMMON FOLDERS, with the source subtree each one came from. [B-493]
+  const commons = [];
   const pickByIndex = Array.isArray(picks)
     ? new Map(picks.map(p => [Number(p.index), p])) : null;
 
@@ -756,7 +783,25 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
         });
       } catch { rc = null; }
       if (_mineC) baseBytes += _mineC.bytes;
-      if (rc && rc.ok && rc.name) names.push(rc.name);
+      if (rc && rc.ok && rc.name) {
+        names.push(rc.name);
+        // REPORT THE SUBTREE THIS CLAIMED. [B-493, 2026-10-19]
+        // The import door builds a stock working copy out of the source's own subtree. When
+        // a customized copy of that same subtree came back from the payload, the stock one
+        // must not also be built - one working copy was exported, one comes back. The door
+        // reads this list to know which subtrees are already claimed, the same way the font
+        // side's `importedPaths` leaves a riding entry's candidate unchecked.
+        //
+        // A CLAIM MEANS THE SUBTREE IS FULLY ACCOUNTED FOR. When a STOCK copy was there at
+        // export time too, it is not: both were exported and both come back, so the subtree
+        // is left unclaimed and the door builds the stock one beside this.
+        const _sub = c.sourceSubPath == null ? '' : c.sourceSubPath;
+        const _alsoStock = Array.isArray(payload.importedSubPaths)
+                           && payload.importedSubPaths.includes(_sub);
+        if (!_alsoStock) {
+          commons.push({ kind: 'common', uuid: rc.uuid, name: rc.name, sourceSubPath: _sub });
+        }
+      }
       if (onProgress) {
         try {
           onProgress({
@@ -826,7 +871,7 @@ async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir,
     }
     names.push(r.name);
   }
-  return { ok: true, restored: names.length, names };
+  return { ok: true, restored: names.length, names, commons };
 }
 
 // The entry half. Returned as a metadata object for createEntry, which already

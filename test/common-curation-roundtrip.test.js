@@ -1,8 +1,12 @@
-// A customized common folder rides a source export and comes back as a common.   [B-493]
+// A customized common folder rides a COMMON'S source export and comes back as a common. [B-493]
 //
 // The round trip is the test, not the export. An archive that carries a customized common
 // and restores it as a FONT is worse than one that never carried it: the promise is kept
 // at the moment it matters and broken at the moment it is relied on.
+//
+// WHICH KIND RIDES IS THE CALLER'S, so every build here names `customizedKind: 'common'` the
+// way a common folder's Export source does. The default is 'entry', and the block below pins
+// that a font's Export source carries no common at all. (2026-10-19)
 //
 // Everything runs against temporary trees. Nothing reads or writes a real library.
 'use strict';
@@ -41,15 +45,16 @@ function makeLibrary() {
   return { root, SF };
 }
 
-function makeCommon(root, SF, { customized }) {
-  const uuid = 'bbbbbbbb-0000-1111-2222-333333333333';
+function makeCommon(root, SF, { customized, uuid: forced }) {
+  const uuid = forced || 'bbbbbbbb-0000-1111-2222-333333333333';
   const dir = path.join(SF, 'common', uuid, 'files');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'hum.wav'), customized ? 'MY-EDIT' : 'vendor-hum');
   fs.writeFileSync(path.join(dir, 'boot.wav'), 'vendor-boot');
   if (customized) fs.writeFileSync(path.join(dir, 'mine.wav'), 'MY-FILE');
   fs.writeFileSync(path.join(SF, 'common', uuid, 'meta.json'), JSON.stringify({
-    schemaVersion: 1, uuid, name: 'Voicepack', group: 'Clone Wars',
+    schemaVersion: 1, uuid, name: customized ? 'Voicepack' : 'Voicepack Stock',
+    group: 'Clone Wars',
     createdAt: '2026-01-02T03:04:05.000Z',
     sourceUuid: SRC, sourceSubPath: 'common',
   }, null, 2));
@@ -60,7 +65,7 @@ function makeCommon(root, SF, { customized }) {
 {
   const { root, SF } = makeLibrary();
   makeCommon(root, SF, { customized: true });
-  const payload = curation.buildForSource(root, SRC, '1.8.0');
+  const payload = curation.buildForSource(root, SRC, '1.8.0', { customizedKind: 'common' });
   const commons = (payload.customized || []).filter(c => c.kind === 'common');
   ok('a customized common rides the source export', commons.length === 1,
      JSON.stringify((payload.customized || []).map(c => c.kind || 'entry')));
@@ -74,18 +79,60 @@ function makeCommon(root, SF, { customized }) {
 {
   const { root, SF } = makeLibrary();
   makeCommon(root, SF, { customized: false });
-  const payload = curation.buildForSource(root, SRC, '1.8.0');
+  const payload = curation.buildForSource(root, SRC, '1.8.0', { customizedKind: 'common' });
   ok('an UNTOUCHED common is not carried', (payload.customized || [])
      .filter(c => c.kind === 'common').length === 0,
      'the vendor subtree is already in the archive; a second identical copy is waste');
   fs.rmSync(root, { recursive: true, force: true });
 }
+// ── A FONT'S EXPORT SOURCE CARRIES NO COMMON, WHICHEVER WAY IT IS ASKED ──────────
+// The same customized common that rides above must not ride a font door's export. Both
+// spellings are pinned: the default, and 'entry' stated outright. Fonts and common folders
+// are not bundled together, so a font export has no business carrying one.
 {
   const { root, SF } = makeLibrary();
   makeCommon(root, SF, { customized: true });
-  const payload = curation.buildForSource(root, SRC, '1.8.0', { includeCustomized: false });
+  for (const [how, opts] of [['by default', undefined], ["with customizedKind 'entry'", { customizedKind: 'entry' }]]) {
+    const payload = curation.buildForSource(root, SRC, '1.8.0', opts);
+    ok(`a font's source export carries no common ${how}`,
+       ((payload && payload.customized) || []).filter(c => c.kind === 'common').length === 0,
+       JSON.stringify(((payload && payload.customized) || []).map(c => c.kind || 'entry')));
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+}
+{
+  const { root, SF } = makeLibrary();
+  makeCommon(root, SF, { customized: true });
+  const payload = curation.buildForSource(root, SRC, '1.8.0',
+                                          { customizedKind: 'common', includeCustomized: false });
   ok('and includeCustomized:false still means no', (payload.customized || [])
      .filter(c => c.kind === 'common').length === 0);
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+// ── THE EXPORT RECORDS THAT A STOCK COPY WAS THERE TOO ───────────────────────────
+// The commons analogue of `importedPaths`, and the half the consumer test cannot prove: it
+// hand-builds a sidecar, so it asserts what this file BELIEVES the export writes. This is
+// the check that the export actually writes it.
+//
+// The rule is the font side's: customized alone means the vendor copy stays out; customized
+// BESIDE a stock copy means both come back, because both were there.
+{
+  const { root, SF } = makeLibrary();
+  makeCommon(root, SF, { customized: true });
+  const alone = curation.buildForSource(root, SRC, '1.8.0', { customizedKind: 'common' });
+  ok('a customized common ALONE claims its subtree',
+     (alone.importedSubPaths || []).length === 0,
+     JSON.stringify(alone.importedSubPaths));
+
+  makeCommon(root, SF, { customized: false, uuid: 'cccccccc-0000-1111-2222-333333333333' });
+  const both = curation.buildForSource(root, SRC, '1.8.0', { customizedKind: 'common' });
+  ok('a STOCK copy beside it puts the subtree back on the imported list',
+     (both.importedSubPaths || []).includes('common'),
+     JSON.stringify(both.importedSubPaths));
+  ok('and the customized copy still rides',
+     (both.customized || []).filter(c => c.kind === 'common').length === 1,
+     JSON.stringify((both.customized || []).map(c => c.kind || 'entry')));
   fs.rmSync(root, { recursive: true, force: true });
 }
 
@@ -93,7 +140,7 @@ function makeCommon(root, SF, { customized }) {
 {
   const { root, SF } = makeLibrary();
   makeCommon(root, SF, { customized: true });
-  const payload = curation.buildForSource(root, SRC, '1.8.0');
+  const payload = curation.buildForSource(root, SRC, '1.8.0', { customizedKind: 'common' });
   const plan = curation.planForArchive(payload);
   const mine = plan.entries.filter(e => /\/customized\/\d+\/mine\.wav$/.test(e.name));
   ok('the customized common\'s files are planned into the archive', mine.length === 1,
@@ -106,7 +153,7 @@ function makeCommon(root, SF, { customized }) {
 async function roundTrip() {
   const { root, SF } = makeLibrary();
   makeCommon(root, SF, { customized: true });
-  const payload = curation.buildForSource(root, SRC, '1.8.0');
+  const payload = curation.buildForSource(root, SRC, '1.8.0', { customizedKind: 'common' });
 
   // Stage the payload the way an unpacked archive presents it.
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'b493-stage-'));
@@ -143,6 +190,17 @@ async function roundTrip() {
     ok('and still tied to the same source', m.sourceUuid === SRC && m.sourceSubPath === 'common');
   }
 
+  // ── THE RESTORE NAMES THE SUBTREE IT CLAIMED ──────────────────────────────────
+  // The import door builds a stock working copy out of the source's own subtree, and it has
+  // no other way to know this one is already back. Without this report the door builds a
+  // second copy, so ONE exported common returns as TWO - the stock and the customized - which
+  // is exactly what the font side prevents by leaving a riding entry's candidate unchecked.
+  ok('the restore reports which subtree it claimed',
+     Array.isArray(r.commons) && r.commons.length === 1
+     && r.commons[0].sourceSubPath === 'common'
+     && !!r.commons[0].uuid && !!r.commons[0].name,
+     JSON.stringify(r.commons));
+
   // A SECOND restore must not collide - it lands beside the first.
   const r2 = await curation.restoreCustomizedEntries(dest.root, SRC, payload, stage);
   const after = fs.readdirSync(path.join(dest.SF, 'common'));
@@ -173,7 +231,7 @@ async function kindSpecificDefer() {
   makeCommon(root, SF, { customized: true });
 
   // A customized font from the same source, placed at index 0.
-  const payload = curation.buildForSource(root, SRC, '1.8.0');
+  const payload = curation.buildForSource(root, SRC, '1.8.0', { customizedKind: 'common' });
   const fontDir = fs.mkdtempSync(path.join(os.tmpdir(), 'b493-font-'));
   fs.writeFileSync(path.join(fontDir, 'hum.wav'), 'FONT-EDIT');
   payload.customized.unshift({

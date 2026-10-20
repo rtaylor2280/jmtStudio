@@ -63,9 +63,11 @@ function _walkFiles(dir) {
   return out;
 }
 
-// List every common folder on disk with a rollup of file count + total bytes
-// so the side panel can render meaningful per-row meta without each row
-// having to re-walk its own files.
+// List every common folder on disk with its file count + total bytes for the side panel.
+// The count and size come from the meta's content stamp (contentFileCount / contentTotalBytes,
+// written with the content hash and marked dirty by every edit path); only a common whose stamp
+// is missing or dirty is walked. Walking every file of every common took ~600 ms on a real
+// library of 21; the stamps take ~17 ms.
 function listCommons(userData) {
   const root = commonRoot(userData);
   if (!fs.existsSync(root)) return [];
@@ -75,19 +77,26 @@ function listCommons(userData) {
     const dir = path.join(root, entry.name);
     const meta = _readMeta(dir);
     if (!meta) continue;
-    const files = _walkFiles(path.join(dir, 'files'));
-    const totalBytes = files.reduce((s, f) => s + f.size, 0);
-    // mmain.wav is the Proffie-convention "main voice" — a common
-    // folder that ships one is auditionable via a quick-play affordance
-    // in the side panel. Cheap check: walk already happened, just look
-    // for the relative path. Case-insensitive in case a maker shipped
-    // MMain.wav or similar.
-    const hasMmain = files.some(f => String(f.rel).toLowerCase() === 'mmain.wav');
+    let fileCount, totalBytes;
+    if (!meta.contentHashDirty && typeof meta.contentFileCount === 'number'
+        && typeof meta.contentTotalBytes === 'number') {
+      fileCount = meta.contentFileCount;
+      totalBytes = meta.contentTotalBytes;
+    } else {
+      const files = _walkFiles(path.join(dir, 'files'));
+      fileCount = files.length;
+      totalBytes = files.reduce((s, f) => s + f.size, 0);
+    }
+    // mmain.wav is the Proffie-convention "main voice" — a common folder that ships one at its
+    // top level is auditionable from the side panel. Case-insensitive (MMain.wav and the like).
+    let top = [];
+    try { top = fs.readdirSync(path.join(dir, 'files')); } catch {}
+    const hasMmain = top.some((n) => n.toLowerCase() === 'mmain.wav');
     // The declared voice pack version, straight from this pack's own
     // voicepack.ini. null when there is no ini, which ProffieOS treats as
     // version 1 — so absence is a real answer, not missing data.
     const voicepackVersion = _readVoicePackVersion(path.join(dir, 'files'));
-    out.push({ uuid: entry.name, meta, fileCount: files.length, totalBytes, hasMmain, voicepackVersion });
+    out.push({ uuid: entry.name, meta, fileCount, totalBytes, hasMmain, voicepackVersion });
   }
   out.sort((a, b) => (a.meta.name || '').localeCompare(b.meta.name || ''));
   return out;
@@ -322,6 +331,51 @@ function writeCommonReadme(userData, uuid, destDir) {
     return { ok: false, error: err.message };
   }
 }
+// The one-line description out of a pack's own readme. [B-493, 2026-10-19]
+//
+// Shape, consistent across every pack that ships one:
+//
+//     <PackName> - <Creator> <year>
+//     <blank>
+//     <description>
+//     <blank>
+//     <support url>
+//
+// So: skip the credit line, take the first non-empty line after it, and stop at a URL. A
+// pack whose readme does not look like this returns null and the description stays empty,
+// which is the same outcome as having no readme at all.
+//
+// Reads only the first 4 KB. These files are a few hundred bytes; anything far larger is
+// not the file this is looking for.
+function _descriptionFromReadme(filesDir) {
+  let raw = null;
+  for (const name of fs.readdirSync(filesDir)) {
+    if (!/^a_readme\.txt$/i.test(name)) continue;
+    try {
+      const fd = fs.openSync(path.join(filesDir, name), 'r');
+      const buf = Buffer.alloc(4096);
+      const n = fs.readSync(fd, buf, 0, 4096, 0);
+      fs.closeSync(fd);
+      raw = buf.slice(0, n).toString('utf8');
+    } catch { raw = null; }
+    break;
+  }
+  if (!raw) return null;
+  const rows = raw.split(/\r?\n/).map((l) => l.trim());
+  // The credit line is the first non-empty one, and it is the line being skipped rather
+  // than parsed: the creator reaches the source through the vendor table.
+  let k = 0;
+  while (k < rows.length && !rows[k]) k++;
+  if (k >= rows.length) return null;
+  k++;
+  while (k < rows.length && !rows[k]) k++;
+  if (k >= rows.length) return null;
+  const line = rows[k];
+  if (!line || /^https?:\/\//i.test(line)) return null;
+  return line.slice(0, 500);
+}
+
+
 
 // ── Source-backed common import ([B-327], 2026-09-07) ─────────────────────
 // A common is the same two-layer pair a font is: an immutable SOURCE stored
@@ -339,7 +393,8 @@ function writeCommonReadme(userData, uuid, destDir) {
 // picked zip; importSource treats either as a source. Returns
 // { ok, uuid, name, sourceUuid, savings } where savings carries what the
 // close-out sentence needs (archiveBytes / contentBytes / crossLinked).
-async function _importCommonAsSource(userData, sourcePath, name, onProgress, shouldStop) {
+async function _importCommonAsSource(userData, sourcePath, name, onProgress, shouldStop,
+                                     { forceNewSource = false, askOnDuplicate = false } = {}) {
   if (!sourcePath || !fs.existsSync(sourcePath)) {
     return { ok: false, error: 'Source not found' };
   }
@@ -361,8 +416,34 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
     userData, sourcePath, originalName: path.basename(sourcePath), metadata: {},
     onProgress: typeof onProgress === 'function' ? onProgress : undefined,
     shouldStop: typeof shouldStop === 'function' ? shouldStop : null,
+    forceNewSource: !!forceNewSource,
   });
   if (!imp || !imp.ok) return { ok: false, error: (imp && imp.error) || 'Source import failed' };
+  // ── THIS ARCHIVE IS ALREADY IN THE LIBRARY ──────────────────── [B-493, 2026-10-19]
+  //
+  // OPT-IN, AND THE DEFAULT IS UNCHANGED ON PURPOSE. Importing the same pack twice under a
+  // different name is a supported operation: the second copy hardlinks into the source
+  // already on disk, so the whole content comes back as saved bytes. Refusing to build it
+  // would break that, which is what test/common-import-reused-savings.test.js asserts.
+  //
+  // So the DOOR keeps building, and a caller that has a user to ask opts in. Only the UI
+  // passes this; every programmatic caller keeps the behaviour it had.
+  //
+  // NOTHING HAS BEEN CREATED YET at this point - the dedup short-circuits before any source
+  // directory is written and the working copy is built below - so there is nothing to undo.
+  //
+  // AND THE CUSTOMIZED COPY CANNOT COME BACK ON THIS PATH: importSource returns early on a
+  // duplicate, before the curation payload is ever read. Re-importing as a NEW source is what
+  // restores it, which is why that answer has to be offered rather than assumed.
+  if (imp.isDuplicate && askOnDuplicate && !forceNewSource) {
+    let existingCommons = [];
+    try {
+      existingCommons = listCommons(userData)
+        .filter((c) => c && c.meta && c.meta.sourceUuid === imp.uuid)
+        .map((c) => ({ uuid: c.uuid, name: c.meta.name || c.uuid }));
+    } catch {}
+    return { ok: true, isDuplicate: true, sourceUuid: imp.uuid, existingCommons };
+  }
   const sourceUuid = imp.uuid;
   // A duplicate archive is not an error here: the same zip may already be in
   // the library (even as a font source). Commons and fonts sharing one source
@@ -391,6 +472,36 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
     return { ok: false, error: 'No .wav files found in the picked source' };
   }
   const subPath = path.relative(treeRoot, contentDir).replace(/\\/g, '/');
+  // ── THE ARCHIVE ALREADY BROUGHT THIS SUBTREE BACK ───────────────────── [B-493, 2026-10-19]
+  //
+  // A source archive carrying a customized common has already restored it by the time we get
+  // here, pointing at this same subtree. Building a stock copy of it as well returns TWO
+  // working copies for the one that was exported.
+  //
+  // THE CHOICE IS STILL BEING MADE, IT IS JUST NOT SHOWN. The font side asks this on the
+  // candidate review: a customized entry that rides the payload leaves the vendor's candidate
+  // UNCHECKED, so only the customized copy comes in. A common folder has no row on that
+  // screen, so the same answer is applied here instead of being offered.
+  const _claimed = ((imp.customizedRestored && imp.customizedRestored.commons) || [])
+    .find((r) => r && String(r.sourceSubPath || '') === subPath);
+  if (_claimed) {
+    const _cdir = path.join(commonRoot(userData), _claimed.uuid, 'files');
+    const _csig = _walkCommonContentSignals(_cdir);
+    return {
+      ok: true, uuid: _claimed.uuid, name: _claimed.name, sourceUuid,
+      restoredFromArchive: true,
+      blockedFiles: imp.blockedFiles || [],
+      notedFiles: imp.notedFiles || [],
+      savings: {
+        archiveBytes: imp.archiveBytes || 0,
+        contentBytes: imp.contentBytes || _csig.totalBytes || 0,
+        crossLinked: imp.crossLinked || null,
+        dedupSaved,
+        reusedBytes: imp.isDuplicate ? _csig.totalBytes : 0,
+        reusedSource: !!imp.isDuplicate,
+      },
+    };
+  }
   ensureCommonRoot(userData);
   const uuid = crypto.randomUUID();
   const uuidDir = path.join(commonRoot(userData), uuid);
@@ -415,14 +526,61 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
       // compare/reset knows its baseline.
       sourceSubPath: subPath,
     };
+    // ── WHAT THE PACK'S OWN README SAYS ──────────────────────── [B-493, 2026-10-19]
+    //
+    // NoSloppy's packs ship `a_ReadMe.txt` in a fixed shape, and two of its lines are fields
+    // this app has somewhere to put:
+    //
+    //     <PackName> - <Creator> <year>
+    //     <blank>
+    //     <one-line description>
+    //
+    // The CREATOR half goes to the source through the vendor table, which is the mechanism
+    // that already exists for it. The DESCRIPTION has no other home, so it is read here and
+    // seeded onto the working copy.
+    //
+    // SEEDED, NEVER OVERWRITTEN: an import only fills a description that is empty, so a
+    // re-import can never clobber something the user typed.
+    try {
+      const _desc = _descriptionFromReadme(filesDir);
+      if (_desc && !meta.description) meta.description = _desc;
+    } catch { /* a readme we cannot parse is not a failed import */ }
+
     fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
     try { recomputeCommonContentHash(userData, uuid); } catch {}
+    // ── WHO MADE IT ─────────────────────────────────────────── [B-493, 2026-10-19]
+    //
+    // The font doors run vendor detection on a just-imported source; this one never did,
+    // which is why every common folder in the library shows no creator. Same call, same
+    // table, same write the bulk importer makes.
+    //
+    // ONLY FILLS A BLANK. A reused source may already carry a vendor the user typed, and
+    // an auto-detected guess must not outrank it. Detection is also re-runnable at any
+    // time from the source detail, so losing a guess here costs nothing.
+    try {
+      const _V = require('./soundFontVendors');
+      const _sm = S.readSourceMeta(path.join(sourcesRoot_(userData), sourceUuid));
+      if (!_sm || !_sm.vendor) {
+        const _so = S.openSource(userData, sourceUuid);
+        if (_so) {
+          const _det = await _V.detectVendor(_so, { learned: _V.learnedVendorsFrom(S.listSources(userData)) });
+          if (_det && _det.vendor) {
+            S.updateSourceMeta(userData, sourceUuid, {
+              vendor: _det.vendor,
+              vendorWebsite: _det.vendorWebsite || null,
+              vendorAutoDetected: true,
+            });
+          }
+        }
+      }
+    } catch { /* an undetected creator is a blank field, never a failed import */ }
     // THE SPACE IS ALWAYS KNOWABLE, EVEN WHEN importSource REPORTS NO BYTES.
     // A reused source short-circuits early and returns only
     // { ok, isDuplicate, uuid, hash, format } - no contentBytes - so savings came
     // back all zeros and the summary's space sentence was gated off entirely. The
     // door then said nothing but "X was added". Measuring the working copy makes
     // the number independent of which path inside importSource ran. [B-424]
+
     const _sig = _walkCommonContentSignals(filesDir);
     return {
       ok: true, uuid, name: cleanName, sourceUuid,
@@ -474,15 +632,17 @@ function sourcesRoot_(userData) {
 // `shouldStop` is OPTIONAL and last, so the bulk import runner - which shares
 // this function and is already dev-tested - calls it unchanged and keeps its own
 // cancel. [B-424]
-async function importCommonFromFolder(userData, folderPath, name, onProgress, shouldStop) {
-  return await _importCommonAsSource(userData, folderPath, name, onProgress, shouldStop);
+async function importCommonFromFolder(userData, folderPath, name, onProgress, shouldStop,
+                                      opts = {}) {
+  return await _importCommonAsSource(userData, folderPath, name, onProgress, shouldStop, opts);
 }
 
 // Import a common folder from a zip file. The zip IS the source now - its
 // bytes are the provenance identity, so no temp extraction happens outside
 // the source pipeline.
-async function importCommonFromZip(userData, zipPath, name, onProgress, shouldStop) {
-  return await _importCommonAsSource(userData, zipPath, name, onProgress, shouldStop);
+async function importCommonFromZip(userData, zipPath, name, onProgress, shouldStop,
+                                   opts = {}) {
+  return await _importCommonAsSource(userData, zipPath, name, onProgress, shouldStop, opts);
 }
 
 // Answer "do I already have this pack?" by CONTENT, not name. ([B-340])
@@ -620,6 +780,23 @@ function setCommonGroup(userData, uuid, groupName) {
   if (!meta) return { ok: false, error: 'Common folder not found' };
   if (clean) meta.group = clean;
   else delete meta.group;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true };
+}
+
+// A common folder's own description, the same field a font entry carries. [B-493, 2026-10-19]
+// Empty clears it rather than storing a blank string, matching setCommonGroup: absent and
+// empty mean the same thing to every reader, and only one of them survives a round trip.
+function setCommonDescription(userData, uuid, description) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const clean = String(description || '').trim();
+  const dir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  if (clean) meta.description = clean;
+  else delete meta.description;
   try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
   catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
   return { ok: true };
@@ -2130,6 +2307,7 @@ module.exports = {
   createCommonFromFolder,
   setCommonGroup,
   setCommonGroupMany,
+  setCommonDescription,
   renameCommonGroup,
   deleteCommonGroup,
   listCommonFiles,

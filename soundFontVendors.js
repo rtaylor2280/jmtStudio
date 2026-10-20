@@ -28,6 +28,40 @@ const vendors = [
       },
     ],
   },
+  // NoSloppy's voicepacks - the common folders, not fonts. [B-493, 2026-10-19]
+  //
+  // Every pack carries `a_ReadMe.txt` whose first line is `<PackName> - NoSloppy <year>`, so
+  // the content match is the HANDLE rather than the filename: KSith co-credits one of them
+  // (`KSith / NoSloppy 2024`) and a filename-only match would claim packs from other makers
+  // who use the same `a_` convention.
+  //
+  // THE DISPLAY NAME MATCHES WHAT THE APP ALREADY SHOWS. The voicepack panel uses this exact
+  // form in two places, and the ProffieOS prop headers use the name half of it on its own.
+  // A different form here would read as a second creator.
+  //
+  // Free, and CC BY 4.0, so the attribution is a licence term rather than a courtesy.
+  {
+    id: 'nosloppy',
+    displayName: 'Brian Conner (NoSloppy)',
+    website: 'https://www.buymeacoffee.com/BrianConner',
+    purchasedDefault: false,
+    patterns: [
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)a_ReadMe\.txt$/i,
+        contentMatch: /NoSloppy/i,
+      },
+      // The plain language packs (English A/E/F, the ones Download Voicepack installs) ship no
+      // a_ReadMe.txt, only `LICENSE.txt` opening "Edit Mode Menu Prompts Copyright (c) 2021
+      // Brian Conner". Anchored on the copyright line, so the "Modifications by Brian Conner"
+      // credit in the Thexter default fonts' readmes never matches.
+      {
+        type: 'readmeContent',
+        fileMatch: /(^|\/)LICENSE\.txt$/i,
+        contentMatch: /Copyright\s*(?:\(c\)|©)\s*\d{4}\s+Brian\s+Conner/i,
+      },
+    ],
+  },
   {
     id: 'kyberphonic',
     displayName: 'Kyberphonic',
@@ -296,11 +330,13 @@ const vendors = [
         // "Smoothswing sound font for ProffieOS by Thexter." — anchored on
         // "font [for OS] by Thexter" so the algorithm-credit phrasing
         // ("algorithm developed by Thexter") never matches. The four
-        // Thexter default fonts also carry "Modifications by Brian Conner";
-        // that's a modifier, not the author, and this pattern ignores it.
+        // Thexter default fonts also carry "Modifications by Brian Conner 2022:";
+        // that's a modifier, not the author. The creator stays Thexter and the
+        // modifier line is returned as `vendorNote` for the source's notes.
         type: 'readmeContent',
         fileMatch: /(^|\/)(read[\s_-]?me)[^/]*\.(txt|rtf|md)$/i,
         contentMatch: /\bfont\s+(?:for\s+[A-Za-z0-9]+\s+)?by\s+Thexter\b/i,
+        noteMatch: /^[ \t]*Modifications by Brian Conner\b[^\r\n]*/im,
       },
     ],
   },
@@ -771,6 +807,7 @@ async function detectVendor(source, opts = {}) {
       if (pattern.type === 'readmeContent') {
         const hit = await _findReadmeMatch(source, entries, pattern);
         if (hit) {
+          const noteHit = pattern.noteMatch && hit.matchedContent.match(pattern.noteMatch);
           return {
             vendorId: vendor.id,
             vendor: vendor.displayName,
@@ -780,6 +817,8 @@ async function detectVendor(source, opts = {}) {
             purchasedDefault: vendor.purchasedDefault,
             matchedFile: hit.matchedFile,
             matchType: 'readmeContent',
+            // A credit line from the matched file, for the source's notes ("Modifications by ...").
+            vendorNote: noteHit ? noteHit[0].trim().replace(/:$/, '') : null,
           };
         }
       } else if (pattern.type === 'structuralSiblings') {
