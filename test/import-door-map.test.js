@@ -91,6 +91,8 @@ const NOT_INWARD = [
   // token because stopping an Electron download means calling `cancel()` on that object, which a
   // flag cannot reach. And the register caught it on the first run again, same as sources:importCancel.
   'linkImport:browserCancel',
+  // `sources:measureImport` [B-514] reads the sizes an import added, for its closing sentence.
+  'sources:measureImport',
   'bulkImport:pickRoot', 'bulkImport:scan', 'bulkImport:analyze', 'bulkImport:cancel',
   'bulkImport:discardPrepared', 'bulkImport:enrichGuided', 'bulkImport:enrichCancel',
   'bulkImport:readCandidateFile', 'bulkImport:matchGuided',

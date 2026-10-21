@@ -289,6 +289,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreCustomized:     (params)     => ipcRenderer.invoke('sources:restoreCustomized', params),
   discardCustomized:     (params)     => ipcRenderer.invoke('sources:discardCustomized', params),
   matchSourceCandidates: (params)     => ipcRenderer.invoke('sources:matchCandidates', params),
+  measureSourceImport:   (params)     => ipcRenderer.invoke('sources:measureImport', params),
   ensureSourceManifest:  (params)     => ipcRenderer.invoke('sources:ensureManifest', params),
   bulkImportPickRoot:    ()           => ipcRenderer.invoke('bulkImport:pickRoot'),
   bulkImportScan:        (params)     => ipcRenderer.invoke('bulkImport:scan', params),

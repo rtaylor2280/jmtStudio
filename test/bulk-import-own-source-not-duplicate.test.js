@@ -89,6 +89,10 @@ function zipDir(dir, dest) {
   const reasons = (butcher && butcher.reviewReasons) || [];
   check('BUTCHER IS NOT A CLOSE MATCH TO ITS OWN CUSTOMIZED COPY', !reasons.includes('close_match'), JSON.stringify(reasons));
   check('nor "already in your library"', !reasons.includes('already_in_library'), JSON.stringify(reasons));
+  // [B-514] The customized copy's edit is new data, so it counts on disk in the closing sentence.
+  const editBytes = fs.statSync(path.join(E.entriesRoot(ud2), 'Revan', 'hum.wav')).size;
+  check("the customized font's edit is counted on disk", (run.summary.imported[0].madeOwnBytes || 0) >= editBytes,
+    JSON.stringify({ own: run.summary.imported[0].madeOwnBytes, editBytes }));
 
   console.log('a source where only the customized copy was kept');
   {

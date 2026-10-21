@@ -453,6 +453,28 @@ function scanForBulkImport({ rootDir }) {
 //   3. On success, detect candidates and create entries for every
 //      candidate; mark each entry needsReview when required fields can't
 //      be populated.
+// [B-514] A common folder's share of the closing size sentence, in the same terms as a font
+// source's: the source as stored, what was made from it, and what that cost on disk. A source the
+// library already held was counted when it arrived, so only the new common folder counts then.
+async function _commonSizes(userData, result) {
+  const sv = (result && result.savings) || {};
+  const saved = ((sv.crossLinked && sv.crossLinked.savedBytes) || 0) + (sv.dedupSaved || 0) + (sv.reusedBytes || 0);
+  const out = { sourceBytes: 0, madeBytes: 0, madeOwnBytes: 0,
+    footprint: Math.max(0, (sv.contentBytes || 0) - saved), archiveBytes: sv.reusedSource ? 0 : (sv.archiveBytes || 0) };
+  if (!result || !result.sourceUuid) return out;
+  try {
+    const size = require('./soundFontLibrarySize');
+    const ids = (Array.isArray(result.commons) && result.commons.length ? result.commons : [result])
+      .map((c) => c && c.uuid).filter(Boolean);
+    const p = size.sourcePaths(userData, result.sourceUuid, sv.reusedSource ? ids : null);
+    if (!sv.reusedSource) out.sourceBytes = await size.apparentBytes(p.source);
+    const m = await size.measurePaths(p.made);
+    out.madeBytes = m.apparent;
+    out.madeOwnBytes = m.unshared + (sv.reusedSource ? 0 : await size.apparentBytes(p.records));
+  } catch {}
+  return out;
+}
+
 async function runBulkImport({ plan, userData }, callbacks = {}) {
   const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
   const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
@@ -491,6 +513,9 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
           crossFiles: result.crossFiles || 0,
           contentBytes: result.contentBytes || 0,
           archiveBytes: result.archiveBytes || 0,
+          sourceBytes: result.sourceBytes || 0,
+          madeBytes: result.madeBytes || 0,
+          madeOwnBytes: result.madeOwnBytes || 0,
         });
       } else {
         summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
@@ -539,7 +564,8 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
       const result = await soundFontCommon.importCommonFromFolder(userData, c.absPath, importName,
         (p) => onProgress({ stage: 'common-progress', commonIdx: i, totalCommons: commons.length, label: c.name, sub: p }));
       if (result && result.ok) {
-        summary.commonsImported.push({ src: c.relPath || c.absPath, uuid: result.uuid, name: result.name });
+        summary.commonsImported.push({ src: c.relPath || c.absPath, uuid: result.uuid, name: result.name,
+          ...(await _commonSizes(userData, result)) });
       } else if (result && /already exists/i.test(result.error || '')) {
         // Belt only: the classify + rename above should make this unreachable.
         summary.commonsSkipped.push({ src: c.relPath || c.absPath, reason: 'already-in-library' });
@@ -588,11 +614,19 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
         // [B-400] addFiles is async now - the await is not cosmetic. Without it `result` is a
         // Promise, `result.ok` is undefined, and every track lands in tracksFailed while the
         // files themselves copy perfectly. A silent miscount, not a crash.
+        // Measured before and after, so the tracks folder's own index counts with the tracks.
+        const _sizeMod = require('./soundFontLibrarySize');
+        const _tracksDir = soundFontSharedTracks.sharedTracksRoot(userData);
+        const _tracksBefore = await _sizeMod.apparentBytes([_tracksDir]);
         const result = await soundFontSharedTracks.addFiles(userData, wavPaths, (p) => {
           onProgress({ stage: 'tracks-progress', done: p.done, total: p.total, label: p.name });
         });
         if (result && result.ok) {
           summary.tracksAdded = (result.added || []).length;
+          // [B-514] The closing size sentence counts tracks too: what arrived, and what was new.
+          const _grew = Math.max(0, (await _sizeMod.apparentBytes([_tracksDir])) - _tracksBefore);
+          summary.tracksBytes = _grew;
+          summary.tracksNewBytes = Math.max(0, _grew - (result.addedBytes || 0)) + (result.newBytes || 0);
           // addFiles' skipped is per-file (Invalid filename, copy error,
           // etc.). It does NOT skip on duplicate name — uniqueName
           // suffix-numbers instead. So skipped here is genuine failure.
@@ -1464,6 +1498,22 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
     await soundFontSources.ensureSourceManifest(userData, sourceUuid, optForward);
     dedupHere = await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
   } catch {}
+  // LINKED AGAINST THE LIBRARY AS IT STANDS NOW, so each source shares what the sources added
+  // before it in this same run. Analyze already linked every source against the library, but
+  // before anything in the run was added: the batch's other sources were still staged and not
+  // part of the library, so two sources shipping the same files were both stored in full.
+  // Measured 2026-10-21 after a 129-source run: 1.75 GiB, 1.23 of it one pair (Dagen and Cere,
+  // 72 shared wavs). The hashes are the ones analyze took; only a file that matches is read again,
+  // to confirm its bytes before it is replaced. Before the fonts are made, so they link to the
+  // shared copy.
+  let crossHere = null;
+  try {
+    const mf = await soundFontSources.ensureSourceManifest(userData, sourceUuid);
+    if (mf && Array.isArray(mf.records)) {
+      crossHere = await soundFontSources.linkAgainstLibrary(userData,
+        path.join(soundFontSources.sourcesRoot(userData), sourceUuid, 'source'), mf.records);
+    }
+  } catch {}
   // Per-source stat tallies aggregated into the bulk summary so the
   // completion screen can show fonts-vs-sources granularity.
   // versionsSkippedHere counts how many alternate-version candidates we
@@ -1721,11 +1771,28 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
       }
     }
   } catch {}
+  // The import message's sizes, by the footer's own ruler (soundFontLibrarySize): the source as
+  // stored, and everything this source now holds in the library. Measured, not derived from the
+  // counters above, so the message and the footer cannot disagree.
+  // `madeOwnBytes` is what the source's footprint cannot see: what the made fonts hold beyond the
+  // source (a customized font's edits, each font's records), and the source's own records.
+  let sourceBytes = 0, madeBytes = 0, madeOwnBytes = 0;
+  try {
+    const _size = require('./soundFontLibrarySize');
+    const _p = _size.sourcePaths(userData, sourceUuid);
+    sourceBytes = await _size.apparentBytes(_p.source);
+    const _m = await _size.measurePaths(_p.made);
+    madeBytes = _m.apparent;
+    madeOwnBytes = _m.unshared + await _size.apparentBytes(_p.records);
+  } catch {}
   return {
     ok: true,
     sourceUuid,
     entries,
     bundleName,
+    sourceBytes,
+    madeBytes,
+    madeOwnBytes,
     multiCandidate: candidates.length >= 2,
     versionsSkipped: versionsSkippedHere,
     variantsEmitted: variantsEmittedHere,
@@ -1742,10 +1809,13 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
     dedupSaved: (dedupHere && dedupHere.deduped && dedupHere.savedBytes) || 0,
     dedupFiles: (dedupHere && dedupHere.deduped)
       ? Math.max(0, (dedupHere.originalFiles || 0) - (dedupHere.uniqueFiles || 0)) : 0,
-    crossSaved: (importRes && importRes.crossLinked && importRes.crossLinked.savedBytes)
-      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.savedBytes) || 0,
-    crossFiles: (importRes && importRes.crossLinked && importRes.crossLinked.linkedFiles)
-      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.linkedFiles) || 0,
+    // What analyze linked, plus what linking at commit found among this run's earlier sources.
+    crossSaved: ((importRes && importRes.crossLinked && importRes.crossLinked.savedBytes)
+      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.savedBytes) || 0)
+      + ((crossHere && crossHere.savedBytes) || 0),
+    crossFiles: ((importRes && importRes.crossLinked && importRes.crossLinked.linkedFiles)
+      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.linkedFiles) || 0)
+      + ((crossHere && crossHere.linkedFiles) || 0),
     // The savings sentence's anchor, per source (2026-09-07). The commit path's
     // finalizePreparedSource result carries neither figure, so both fall back to
     // the prepare result: fileSize there is the same logical content total

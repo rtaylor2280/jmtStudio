@@ -1763,6 +1763,19 @@ async function exportBackup({
         const abs = path.join(_soundFontsRoot(userData), rel);
         try { buf = fs.readFileSync(abs); }
         catch { continue; }
+        // The library meta rides WITHOUT its `size` stamp. [B-514] That is the footer's last
+        // measurement of the disk, true of this disk at this moment and of nothing a restore
+        // produces: a restore links more than the library did (measured 2026-10-21: 13.44 GB
+        // carried, 11.71 GB restored), and a carried stamp shows the old figure until the next walk.
+        if (rel === '_jmt_library_meta.json') {
+          try {
+            const m = JSON.parse(buf.toString('utf8'));
+            if (m && typeof m === 'object' && 'size' in m) {
+              delete m.size;
+              buf = Buffer.from(JSON.stringify(m, null, 2));
+            }
+          } catch { /* not JSON we understand: carry it as it is */ }
+        }
         await _appendStored(buf, abs, rel);
       }
     }
@@ -3039,13 +3052,19 @@ async function surveyMerge({ userData, zipPath }) {
     const curCommon  = new Map();
     const sfRoot = _soundFontsRoot(userData);
 
-    const readBucket = (bucketName, target, getMeta) => {
+    // YIELDS BETWEEN ITEMS. The survey runs on the main process, and on a full library it walked
+    // every file and checked every item in one unbroken run: measured 2026-10-21 at 31.8 s with
+    // the window reported Not Responding. One item at a time with a yield between is the same work
+    // with the app still answering.
+    const _yieldNow = () => new Promise((r) => setImmediate(r));
+    const readBucket = async (bucketName, target, getMeta) => {
       const root = path.join(sfRoot, bucketName);
       if (!fs.existsSync(root)) return;
       let dirs;
       try { dirs = fs.readdirSync(root, { withFileTypes: true }); }
       catch { return; }
       for (const d of dirs) {
+        await _yieldNow();
         if (!d.isDirectory()) continue;
         const dirPath = path.join(root, d.name);
         let fileCount = 0, totalBytes = 0;
@@ -3072,13 +3091,13 @@ async function surveyMerge({ userData, zipPath }) {
         target.set(d.name, { fileCount, totalBytes, ...extra });
       }
     };
-    readBucket('sources', curSources, (dirPath) => {
+    await readBucket('sources', curSources, (dirPath) => {
       try {
         const meta = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
         return { hash: meta.hash || null, name: meta.bundleName || meta.originalName || '' };
       } catch { return { hash: null, name: '' }; }
     });
-    readBucket('library', curLibrary, (dirPath) => {
+    await readBucket('library', curLibrary, (dirPath) => {
       try {
         const meta = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
         const parsed = readLibraryMeta(meta, '');
@@ -3090,7 +3109,7 @@ async function surveyMerge({ userData, zipPath }) {
         };
       } catch { return { identity: null, legacyIdentity: null, name: '', meta: {} }; }
     });
-    readBucket('common', curCommon, (dirPath) => {
+    await readBucket('common', curCommon, (dirPath) => {
       try {
         const meta = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
         return { displayName: meta.name || '' };
@@ -3103,6 +3122,13 @@ async function surveyMerge({ userData, zipPath }) {
     // and falls through to the legacy proxy when absent for backward
     // compat with older backup files.
     const sourceManifestHashes = (manifestHashes && manifestHashes.sources) || null;
+    // The classifiers below are synchronous and ask liveHashOf as they go. Every item they can ask
+    // about is hashed here first, one at a time with a yield between, so they only read the cache.
+    if (manifestHashes) {
+      for (const [bucket, cur] of [['sources', curSources], ['library', curLibrary], ['common', curCommon]]) {
+        for (const id of cur.keys()) { liveHashOf(bucket, id); await _yieldNow(); }
+      }
+    }
     const classifySources = () => {
       const out = { identical: [], conflict: [], add: [], currentOnly: [] };
       const matched = new Set();

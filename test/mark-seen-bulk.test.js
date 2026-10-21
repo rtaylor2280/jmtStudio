@@ -63,11 +63,15 @@ function ok(name, cond, extra) {
   const chip = html.slice(html.indexOf("const markAllBtn = document.getElementById('btn-sf-mark-all-seen')"),
                           html.indexOf("const markAllBtn = document.getElementById('btn-sf-mark-all-seen')") + 600);
   ok('the chip control hides when nothing is New',
-     /markAllBtn\.style\.display = newCount > 0 \? '' : 'none';/.test(chip), chip);
+     /markAllBtn\.style\.display = \(newCount > 0 && _sfSelectedNames\.size === 0\) \? '' : 'none';/.test(chip), chip);
+  // Ruled 2026-10-21: the library-wide "Clear New" never shows beside a selection - with any font selected the
+  // selection's own "Clear New (N)" is the one on offer. Both places that draw the toolbar agree.
+  ok('and it yields to any selection in the selection bar too',
+     /mab\.style\.display = \(n === 0 && Number\(mab\.dataset\.count \|\| 0\) > 0\) \? '' : 'none';/.test(html));
   // The label references the BADGE, not the mechanism. "seen" is not a clear opposite of
   // "NEW" and quietly claims the user looked at something. A real words for the gap:
   // "no way to clear the new tag". seenAt stays the field name in code. [B-297]
-  ok('and it names the count, referencing the badge', /Clear all New \(\$\{newCount\}\)/.test(chip), chip);
+  ok('and it names the count, referencing the badge', /`Clear New \(\$\{newCount\}\)`/.test(chip), chip);
 
   const sel = html.slice(html.indexOf("const seenBtn = document.getElementById('btn-sf-bulk-mark-seen')"),
                          html.indexOf("const seenBtn = document.getElementById('btn-sf-bulk-mark-seen')") + 700);

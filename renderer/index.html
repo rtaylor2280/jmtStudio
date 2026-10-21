@@ -5116,7 +5116,7 @@
              LABEL REFERENCES THE BADGE, not the mechanism. "seen" is not a clear opposite of
              "NEW" - the badge says NEW, so the action says New. His own report of the gap used the
              natural verb: "no way to clear the new tag". seenAt stays the field name in code. -->
-        <button id="btn-sf-mark-all-seen" class="btn-neutral" style="display:none">Clear all New</button>
+        <button id="btn-sf-mark-all-seen" class="btn-neutral" style="display:none">Clear New</button>
         <button id="btn-sf-clear-selection" class="btn-neutral" style="display:none" title="Deselect all">Clear selection</button>
         <button id="btn-sf-bulk-tag" class="btn-neutral" style="display:none" title="Edit tags shared across the selected fonts">Tags</button>
         <!-- [B-297] The narrow half of "clear NEW in bulk": these twelve, not all 191.
@@ -5149,7 +5149,7 @@
           </div>
         </div>
         <div class="ui-divider"></div>
-        <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root, the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks Folder</button>
+        <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root, the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks</button>
         <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font into your library. Bulk-import many at once is offered inside.">&#43; Import Sound Font</button>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
@@ -7035,7 +7035,7 @@
      in one pass. Existing tags on each entry are preserved; new tags are
      merged in case-insensitively. ── -->
 <div class="modal-overlay" id="modal-sf-bulk-tag">
-  <div class="modal">
+  <div class="modal" style="max-width:600px">
     <h2 id="sf-bulk-tag-title">Add tags</h2>
     <p class="sf-import-hint">Press Enter or comma to stage each tag. Existing tags will appear as suggestions.</p>
     <div class="sf-tags-edit" style="margin-top: 8px">
@@ -8793,6 +8793,31 @@ window._sfSourceExportSize = _sfSourceExportSize;
 // recorded in ui-conventions.md under "How a cancel is wired".
 const SAVINGS_BRAG_MIN_RATIO = 0.10;
 const SAVINGS_BRAG_MIN_BYTES = 5 * 1024 * 1024;
+
+// ── The size sentence every import message ends with, defined ONCE ── [B-514]
+// In the footer's own terms, so the two never disagree: `totalBytes` is every name the import
+// added to the library ("of files"), `onDiskBytes` what it really costs, and the saving is the
+// difference. The compressed size rides in parentheses because it is the one number the user can
+// check against their own folder, and it is left out when nothing came in compressed. "In your
+// library" rather than "as fonts": one wording for a font, many fonts or common folders, with no
+// plural to get wrong.
+// NO EM DASHES IN USER-FACING COPY.
+function _sfImportSizeSentence({ totalBytes = 0, compressedBytes = 0, onDiskBytes = 0, noun = 'Your source files total' } = {}) {
+  if (!(totalBytes > 0)) return '';
+  const fmt = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
+  const disk = Math.max(0, Math.min(onDiskBytes, totalBytes));
+  const saved = totalBytes - disk;
+  const zipped = compressedBytes > 0 && compressedBytes < totalBytes ? ` (${fmt(compressedBytes)} compressed)` : '';
+  // The facts always show; the CLAIM waits for the gate, and the claim is three things: "only",
+  // the saving, and the sentence explaining where the rest went.
+  const brag = saved >= SAVINGS_BRAG_MIN_BYTES && saved / totalBytes >= SAVINGS_BRAG_MIN_RATIO;
+  const facts = `${noun} <strong>${fmt(totalBytes)}</strong> in your library${zipped}, stored in `
+    + `${brag ? 'only ' : ''}<strong>${fmt(disk)}</strong> on disk.`;
+  if (!brag) return facts;
+  return `${facts} JMT Studio saved you <strong>${fmt(saved)}</strong>. `
+    + `Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`;
+}
+window._sfImportSizeSentence = _sfImportSizeSentence;
 
 const _sfExportCancelOpt = { onCancel: () => window.electronAPI.exportCancel() };
 window._sfExportCancelOpt = _sfExportCancelOpt;
@@ -18199,48 +18224,31 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       text += parts.join(', ');
     }
     text += '.';
-    // ── What JMT Studio saved, said the close-out's way (2026-09-07) ────
-    // Same sentence shape as the single-import close-out, pluralized:
-    // "Your source files started at X. JMT Studio saved you Y, so these
-    // fonts added only Z on disk." The noun is "source files" because a
-    // batch mixes zips and folders, and "downloads" implies the internet.
-    // The old two-fact split (duplicates inside bundles vs files the
-    // library already had) stays in the RECORDS, where it keeps the number
-    // reconcilable; the copy says one outcome with a checkable anchor:
-    // started minus saved equals added.
-    //
-    // Anchors are per-source (a zip anchors on its own file size, a folder
-    // on its content) and the footprint is clamped per-source, so one zip
-    // that expanded more than it shared cannot eat a sibling's saving.
-    // NO EM DASHES IN USER-FACING COPY.
-    // Same brag gate as the close-out: 10% of the start AND 5 MB, or
-    // silence. Constants mirror SAVINGS_BRAG_MIN_* beside the close-out copy.
-    // Defined HERE. The identically-named helper further up lives inside the
-    // progress callback, which is a different scope — reaching for it from this
-    // builder is a ReferenceError that blanks the whole summary.
-    const _fmtSaved = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
-    let _bulkStarted = 0, _bulkFootprint = 0, _bulkSavedAny = 0;
-    for (const imp of sum.imported) {
-      const _c = imp.contentBytes || 0;
-      const _s = (imp.dedupSaved || 0) + (imp.crossSaved || 0);
-      _bulkStarted += (imp.archiveBytes || 0) > 0 ? imp.archiveBytes : _c;
-      _bulkFootprint += Math.max(0, _c - _s);
-      _bulkSavedAny += _s;
+    // ── What JMT Studio saved, in the footer's terms ([B-514], 2026-10-21) ────
+    // Was "Your source files started at X", X being the zips as they sat on the drive, beside a
+    // footer counting every name unpacked: two true numbers that read as a contradiction.
+    // [B-514] The footer's terms: everything the import added, measured; its real cost; and the
+    // zips' own size beside it, counted only when at least one source arrived compressed.
+    // Fonts, common folders and tracks all count: everything the run brought in. `madeOwnBytes` is
+    // what a made font holds beyond its source (a customized font's edits), which the source's
+    // footprint cannot see.
+    let _bulkTotal = 0, _bulkFootprint = 0, _bulkCompressed = 0, _bulkAnyZip = false;
+    for (const imp of [...sum.imported, ...(sum.commonsImported || [])]) {
+      const _foot = typeof imp.footprint === 'number' ? imp.footprint
+        : Math.max(0, (imp.contentBytes || 0) - (imp.dedupSaved || 0) - (imp.crossSaved || 0));
+      _bulkTotal += (imp.sourceBytes || 0) + (imp.madeBytes || 0);
+      _bulkFootprint += _foot + (imp.madeOwnBytes || 0);
+      if ((imp.archiveBytes || 0) > 0) { _bulkAnyZip = true; _bulkCompressed += imp.archiveBytes; }
+      else _bulkCompressed += imp.sourceBytes || 0;
     }
-    const _bulkShownSaved = Math.max(0, _bulkStarted - _bulkFootprint);
-    const _bulkBrag = _bulkSavedAny > 0 && _bulkStarted > 0
-      && _bulkShownSaved >= 5 * 1024 * 1024
-      && (_bulkShownSaved / _bulkStarted) >= 0.10;
-    if (_bulkBrag) {
-      // Singular says "source", not "source file": the one source may be a
-      // folder, and bare "source" is true of both shapes.
-      const _srcPlural = sourceCount === 1 ? 'source' : 'source files';
-      const _fontsNoun = fontCount === 1 ? 'this font' : 'these fonts';
-      const _addedTxt = _bulkFootprint > 0
-        ? `added only <strong>${_fmtSaved(_bulkFootprint)}</strong> on disk`
-        : `added nothing new on disk`;
-      text += `<br><br>Your ${_srcPlural} started at <strong>${_fmtSaved(_bulkStarted)}</strong>. JMT Studio saved you <strong>${_fmtSaved(_bulkShownSaved)}</strong>, so ${_fontsNoun} ${_addedTxt}. Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`;
-    }
+    _bulkTotal += sum.tracksBytes || 0;
+    _bulkFootprint += sum.tracksNewBytes || 0;
+    _bulkCompressed += sum.tracksBytes || 0;
+    const _bulkSize = _sfImportSizeSentence({
+      totalBytes: _bulkTotal, onDiskBytes: _bulkFootprint,
+      compressedBytes: _bulkAnyZip ? _bulkCompressed : 0,
+    });
+    if (_bulkSize) text += `<br><br>${_bulkSize}`;
     // Reassurance only, never delete-guidance (2026-09-07). The bulk root is
     // THEIR folder, and the scan silently ignores whatever does not match the
     // pattern - artwork, readmes, receipts never enter the plan - so "this
@@ -18273,8 +18281,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // `wantsEject()` - this dialog has its own box, and reading the export one would be a
     // guarantee about a surface that was never shown.
     // Guarded through `window`: these are consts in a different scope, and an unguarded call
-    // here is a ReferenceError that blanks the whole summary. Same reason `_fmtSaved` above
-    // guards `window._sfFormatBytes`.
+    // here is a ReferenceError that blanks the whole summary.
     // THE CALL MOVED TO AFTER `showPhase('summary')` at the end of this function — it reads
     // `shownPhase` and this point is too early for it to be true. [B-462]
     if (sum.failed.length) {
@@ -21484,7 +21491,8 @@ function _renderActiveFilterChips() {
     + `<button class="styles-active-filter-remove" title="Remove effect filter">&#10005;</button>`
     + `</span>`
   ).join('');
-  const clearAll = totalActive > 1
+  // Shown with any active filter, the same as the Sound Fonts bar (2026-10-21).
+  const clearAll = totalActive >= 1
     ? `<button class="styles-active-filter-clear" id="styles-clear-all-filters">Clear all</button>` : '';
   strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${fxChips}${clearAll}`;
   // The search chip is built as DOM rather than interpolated into the innerHTML
@@ -25897,10 +25905,14 @@ require(['vs/editor/editor.main'], function () {
         const names = cards.map(c => c.getAttribute('data-font'));
         const toIdx = names.indexOf(name);
         if (toIdx < 0) return;
-        let fromIdx = _sfGridAnchor ? names.indexOf(_sfGridAnchor) : -1;
+        // [B-477] The anchor counts only while something is still selected. Every way of clearing
+        // the selection leaves it empty, and an anchor that outlived its selection ranged from a
+        // card picked long before - often the far side of the grid. With nothing selected, a
+        // Shift+click selects the card clicked and makes it the anchor.
+        let fromIdx = (_sfGridAnchor && _sfSelectedNames.size > 0) ? names.indexOf(_sfGridAnchor) : -1;
         // A stale anchor (filtered away, renamed, deleted) collapses to the
         // clicked card rather than selecting from the top of the grid.
-        if (fromIdx < 0) fromIdx = toIdx;
+        if (fromIdx < 0) { fromIdx = toIdx; _sfGridAnchor = name; }
         const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
         for (let i = lo; i <= hi; i++) if (names[i]) _sfSelectedNames.add(names[i]);
       };
@@ -26361,10 +26373,15 @@ require(['vs/editor/editor.main'], function () {
         }
         // [B-297] The exit appears only while there is something to clear, and it names
         // the count so nobody has to guess how wide "all" is.
+        // NEVER BESIDE A SELECTION (ruled 2026-10-21): with any font selected the selection's own
+        // "Clear New (N)" is the one on offer, so the two never show together - which is why both
+        // carry the same label, the count saying how wide it reaches. The count rides the button so
+        // the selection bar can bring it back the moment the selection empties.
         const markAllBtn = document.getElementById('btn-sf-mark-all-seen');
         if (markAllBtn) {
-          markAllBtn.style.display = newCount > 0 ? '' : 'none';
-          markAllBtn.textContent = `Clear all New (${newCount})`;
+          markAllBtn.dataset.count = String(newCount);
+          markAllBtn.style.display = (newCount > 0 && _sfSelectedNames.size === 0) ? '' : 'none';
+          markAllBtn.textContent = `Clear New (${newCount})`;
           markAllBtn.title = `Clear the New badge on all ${newCount} font${newCount === 1 ? '' : 's'}`;
         }
         // In-use filter button: visible only when at least one entry is
@@ -28090,28 +28107,23 @@ require(['vs/editor/editor.main'], function () {
           // full content size as a cost the user never paid.
           const _saved = ((sv.crossLinked && sv.crossLinked.savedBytes) || 0)
             + (sv.dedupSaved || 0) + (sv.reusedBytes || 0);
-          const _started = sv.archiveBytes > 0 ? sv.archiveBytes : sv.contentBytes;
           const _foot = Math.max(0, sv.contentBytes - _saved);
-          const _shown = Math.max(0, _started - _foot);
-          const _brag = _saved > 0 && _started > 0
-            && _shown >= SAVINGS_BRAG_MIN_BYTES && (_shown / _started) >= SAVINGS_BRAG_MIN_RATIO;
-          if (_brag) {
-            // The full sentence already states the space it took, so it is not
-            // repeated above it.
-            const noun = mode === 'zip' ? 'zip' : 'folder';
-            const addedTxt = _foot > 0
-              ? `added only <strong>${fmtB(_foot)}</strong> on disk`
-              : `added nothing new on disk`;
-            _body += `<br><br>Your ${noun} started at <strong>${fmtB(_started)}</strong>. `
-              + `JMT Studio saved you <strong>${fmtB(_shown)}</strong>, so ${_many ? 'these common folders' : 'this common folder'} ${addedTxt}. `
-              + `Identical files are stored once in your library and used in every location they appear, `
-              + `so nothing is missing or renamed.`;
-          } else {
-            // Below the gate: the space, with no saving claimed. "JMT Studio saved
-            // you 1 MB" is what the gate exists to prevent; stating what the import
-            // actually occupies is not that, and is owed either way.
-            _body += ` It uses <strong>${fmtB(_foot > 0 ? _foot : sv.contentBytes)}</strong> on disk.`;
-          }
+          // [B-514] The footer's terms, the same sentence every import door ends with. A reused
+          // source was already counted in the library, so only the new common folders are.
+          const _madeIds = (Array.isArray(res.commons) && res.commons.length ? res.commons : [res])
+            .map((c) => c && c.uuid).filter(Boolean);
+          let _sz = null;
+          try {
+            _sz = res.sourceUuid ? await window.electronAPI.measureSourceImport({
+              uuid: res.sourceUuid, only: sv.reusedSource ? _madeIds : null,
+            }) : null;
+          } catch {}
+          const _line = _sz && _sz.ok ? _sfImportSizeSentence({
+            totalBytes: (_sz.sourceBytes || 0) + (_sz.madeBytes || 0),
+            onDiskBytes: _foot + (_sz.madeOwnBytes || 0),
+            compressedBytes: sv.reusedSource ? 0 : (sv.archiveBytes || 0),
+          }) : '';
+          if (_line) _body += `<br><br>${_line}`;
         }
         // THE EJECT RIDES THIS SUMMARY, INLINE, AND THERE IS NO TOAST ANY MORE.
         // Built into the message body because that is the only injection point
@@ -29141,8 +29153,8 @@ require(['vs/editor/editor.main'], function () {
         await _sfShowNotAdded(res.refused);
         await _sfRefreshCommons();
         // [B-424] The other half of `ejectSource`. Fires the eject immediately when the checkbox
-        // was ticked, otherwise offers it as a toast action. Returns early for a non-removable
-        // source, so an ordinary folder import stays silent.
+        // was ticked, otherwise offers it as a toast action. A source that is not removable gets
+        // the same toast with Show in place of Eject - this door always ends in a toast, by design.
         // AFTER the refresh, so the list behind the toast is already correct.
         const _n = pick.filePaths.length;
         await _sfOfferEjectInToast(_ejSrc, `Added ${_n} file${_n === 1 ? '' : 's'}`, 'from');
@@ -29428,6 +29440,11 @@ require(['vs/editor/editor.main'], function () {
         const allBtn = document.getElementById('btn-sf-select-all');
         const inUseBtn = document.getElementById('btn-sf-select-in-use');
         const n = _sfSelectedNames.size;
+        // The library-wide "Clear New" yields to any selection; see the grid render, which sets its count.
+        {
+          const mab = document.getElementById('btn-sf-mark-all-seen');
+          if (mab) mab.style.display = (n === 0 && Number(mab.dataset.count || 0) > 0) ? '' : 'none';
+        }
         const visibleCount = _sfLastMatchingNames.length;
         const visibleInUseCount = _sfLastMatchingNames.filter(name => _sfLastInUseFonts.has(name)).length;
         // Action buttons appear only when there's something to act on.
@@ -29729,7 +29746,9 @@ require(['vs/editor/editor.main'], function () {
         const namesChip = _sfActiveFilterNames.size
           ? `<span class="styles-active-filter-chip sf-active-filter-names" data-names="1">${_sfEscape(_sfActiveFilterNamesLabel || `${_sfActiveFilterNames.size} fonts`)}<button class="styles-active-filter-remove" data-filter-remove-names="1" title="Remove">&#10005;</button></span>`
           : '';
-        const clearAll = total >= 2
+        // Shown with ANY active filter (2026-10-21): with only one it was hidden behind that chip's
+        // small x, the harder target of the two.
+        const clearAll = total >= 1
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
         // [B-305] CAUGHT IN TESTING, AND IT WAS THE HEADLINE: "this implies filtered to all
@@ -30510,6 +30529,12 @@ require(['vs/editor/editor.main'], function () {
           _sfUpdateBulkActionBar();
           // Also clear the missing/legend bars since they reflect the grid.
           _sfRenderMissingBarAndLegend(new Set());
+          // THE COUNT AND THE FILTER BADGES TOO. The grid render writes them, so skipping it here
+          // leaves the last library's count and badges over an empty one. With no entries the
+          // render paints no cards and zeroes every count; the empty-state card stays the only
+          // thing in the grid area.
+          _sfRenderGrid();
+          if (cardsEl) cardsEl.innerHTML = '';
         } else {
           if (layerNoFonts) layerNoFonts.style.display = 'none';
           _sfRenderGrid();
@@ -31648,11 +31673,7 @@ require(['vs/editor/editor.main'], function () {
           if (clipboardCount > 0) mkItem(`Paste here (${clipboardCount})`, '', () => _sfPasteIntoSharedTracks());
         }
         if (!menu.children.length) return;
-        const x = Math.min(e.clientX, window.innerWidth - 200);
-        const y = Math.min(e.clientY, window.innerHeight - 160);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       // Copy → unified clipboard, kind=sharedTracks so paste handlers
       // (in entry / common folders) read the right source.
@@ -32012,7 +32033,7 @@ require(['vs/editor/editor.main'], function () {
         // The percent is saved against the apparent total, so it sits beside the on-disk figure.
         const lines = figure.saved > 0 ? [
           `Fonts with identical audio share one copy, so your library only takes up`,
-          `${_sfFormatBytes(figure.onDisk)} on the drive, saving ${pct}%. Your file manager counts each`,
+          `${_sfFormatBytes(figure.onDisk)} on disk, saving ${pct}%. Your file manager counts each`,
           `one separately and reports the full ${_sfFormatBytes(figure.apparent)} (${counts}).`,
         ] : [
           `Your library holds ${_sfFormatBytes(figure.apparent)} (${counts}).`,
@@ -33637,6 +33658,9 @@ require(['vs/editor/editor.main'], function () {
         const closeoutCrossLinked = (_sfImport && _sfImport.crossLinked) || null;
         const closeoutContentBytes = (_sfImport && _sfImport.contentBytes) || 0;
         const closeoutArchiveBytes = (_sfImport && _sfImport.archiveBytes) || 0;
+        // [B-514] The close-out only follows a fresh import, so everything the source now holds is
+        // what this import added. Measured in main with the footer's own ruler.
+        const closeoutUuid = (_sfImport && _sfImport.uuid) || null;
         // Customized fonts restored at this commit ([B-311] rescope). They had
         // checkbox rows this time, but the close-out still names them: the
         // names may have been suffixed by the collision backstop, and this is
@@ -33676,55 +33700,24 @@ require(['vs/editor/editor.main'], function () {
               ? `<strong>${esc(picks[0].name)}</strong> was added to your library.`
               : `<strong>${successCount} fonts</strong> were added to your library.`);
           }
-          // ── WHAT JMT STUDIO DID FOR THEM, anchored on a number they can check ──
-          // One outcome, JMT Studio as the actor (2026-09-06/07): "Your download
-          // started at X. JMT Studio saved you Y, so this font added only Z."
-          // Started minus saved equals added, on purpose. The anchor is the
-          // number the user can SEE: the picked file's size for a zip or link
-          // import (what Downloads showed them), the folder's content for a
-          // folder import. Anchoring a zip on its compressed size UNDERSTATES
-          // the saving, deliberately (2026-09-07): the real win vs keeping
-          // zip + unzipped copy + kept folders is bigger, but a claim the user
-          // can reconcile beats a bigger one they cannot.
-          //
-          // The closing sentence answers the question the numbers raise ("where
-          // did the rest go") without teaching the mechanism. "In your library"
-          // widens the claim to the whole collection, which is the point: the
-          // more they keep, the more sharing there is to find.
-          //
-          // NO EM DASHES IN USER-FACING COPY.
-          // THE BRAG GATE (2026-09-07): savings are only mentioned when they
-          // clear 10% of the start AND 5 MB. "JMT Studio saved you 1 MB" reads
-          // as the app not knowing when a number is impressive, which spends
-          // the trust the big number needs. Below the gate: silence, which is
-          // also what a negative "saving" (a zip that expanded more than it
-          // shared) correctly falls into.
-          // The footprint depends on IMPORT ORDER, and is honest about that.
-          // Dagen came first and pays 1.28 GB; Cere came second and pays 17 MB.
-          // Reversed, the numbers swap. It reports what this font costs you now,
-          // which is the actionable figure, not a property of the font.
+          // ── WHAT JMT STUDIO DID FOR THEM, in the footer's terms ([B-514], 2026-10-21) ──
+          // Was anchored on the zip as it sat on the drive ("Your zip started at X"), which the
+          // footer, counting every name unpacked, then appeared to contradict. Now one sentence
+          // for every import: what it added as fonts, the compressed size beside it, the real
+          // cost on disk, and the difference as the saving.
+          // The footprint depends on IMPORT ORDER, and is honest about that: it reports what
+          // this font costs you now, which is the actionable figure, not a property of the font.
           const _savedTotal = ((optRes && optRes.deduped && optRes.savedBytes) || 0)
             + ((closeoutCrossLinked && closeoutCrossLinked.savedBytes) || 0);
-          const _startedBytes = closeoutArchiveBytes > 0 ? closeoutArchiveBytes : closeoutContentBytes;
           const _footprint = Math.max(0, closeoutContentBytes - _savedTotal);
-          const _shownSaved = Math.max(0, _startedBytes - _footprint);
-          const _bragSavings = closeoutContentBytes > 0 && _savedTotal > 0 && _startedBytes > 0
-            && _shownSaved >= SAVINGS_BRAG_MIN_BYTES
-            && (_shownSaved / _startedBytes) >= SAVINGS_BRAG_MIN_RATIO;
-          if (_bragSavings) {
-            // Vocabulary (2026-09-07): "download" implies the internet, so only
-            // a link import gets it. A picked zip is a "zip", a picked folder a
-            // "folder". One noun per close-out, or the sentences argue - the
-            // delete-the-original line below uses the same three-way split.
-            const _srcNoun = (closeoutSrc && closeoutSrc.fromLink) ? 'download'
-              : (closeoutSrc && closeoutSrc.sourcePath && !/\.zip$/i.test(closeoutSrc.sourcePath))
-                ? 'folder' : 'zip';
-            const _whatNoun = successCount === 1 ? 'this font' : 'this font package';
-            const _addedTxt = _footprint > 0
-              ? `added only <strong>${fmtB(_footprint)}</strong> on disk`
-              : `added nothing new on disk`;
-            parts.push(`Your ${_srcNoun} started at <strong>${fmtB(_startedBytes)}</strong>. JMT Studio saved you <strong>${fmtB(_shownSaved)}</strong>, so ${_whatNoun} ${_addedTxt}. Identical files are stored once in your library and used in every location they appear, so nothing is missing or renamed.`);
-          }
+          let _sizes = null;
+          try { _sizes = closeoutUuid ? await window.electronAPI.measureSourceImport({ uuid: closeoutUuid }) : null; } catch {}
+          const _sizeLine = _sizes && _sizes.ok ? _sfImportSizeSentence({
+            totalBytes: (_sizes.sourceBytes || 0) + (_sizes.madeBytes || 0),
+            onDiskBytes: _footprint + (_sizes.madeOwnBytes || 0),
+            compressedBytes: closeoutArchiveBytes,
+          }) : '';
+          if (_sizeLine) parts.push(_sizeLine);
           // Restored customized fonts, named ([B-311]). "This zip" is safe as
           // the noun: a sidecar only ever arrives inside a zip export.
           // "also" only when a stock sentence came first; a customized-only
@@ -37954,11 +37947,7 @@ require(['vs/editor/editor.main'], function () {
         mkItem('× Delete', 'danger', () => {
           row.querySelector(`[data-entry-delete="${CSS.escape(name)}"]`)?.click();
         });
-        const x = Math.min(e.clientX, window.innerWidth - 220);
-        const y = Math.min(e.clientY, window.innerHeight - 180);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       // "Add more fonts from this source" reuses the import review flow.
       // "Add from folder…" — pick a folder on disk and put it through the SAME
@@ -38152,11 +38141,10 @@ require(['vs/editor/editor.main'], function () {
         // door reported nothing, and a bare eject toast was the wrong shape for it.
         //
         // SAME SENTENCE, SAME GATE, SAME ORDER AS THE OTHER CLOSE-OUTS - not a new one. The
-        // savings line is the house string, the brag gate is the same 10% AND 5 MB (below it,
-        // silence: "JMT Studio saved you 1 MB" reads as an app that cannot tell when a number is
-        // impressive), and the eject toast goes LAST so it never lands over the dialog.
-        // `archiveBytes` is 0 for a folder, so `started` falls back to content bytes - the
-        // same fallback the font close-out already makes.
+        // savings line is _sfImportSizeSentence, the brag gate is the same 10% AND 5 MB (below it,
+        // the space with no saving claimed: "JMT Studio saved you 1 MB" reads as an app that
+        // cannot tell when a number is impressive), and the eject goes LAST so it never lands over
+        // the dialog.
         {
           const sv = res.savings || null;
           const fmtB = (n) => (window._sfFormatBytes ? window._sfFormatBytes(n) : `${n} B`);
@@ -38186,18 +38174,20 @@ require(['vs/editor/editor.main'], function () {
           }
           if (sv && sv.contentBytes > 0) {
             const _saved = ((sv.crossLinked && sv.crossLinked.savedBytes) || 0) + (sv.dedupSaved || 0);
-            const _started = sv.archiveBytes > 0 ? sv.archiveBytes : sv.contentBytes;
             const _foot = Math.max(0, sv.contentBytes - _saved);
-            const _shown = Math.max(0, _started - _foot);
-            if (_saved > 0 && _started > 0
-                && _shown >= 5 * 1024 * 1024 && (_shown / _started) >= 0.10) {
-              parts.push(`Your folder started at <strong>${fmtB(_started)}</strong>. JMT Studio saved you `
-                + `<strong>${fmtB(_shown)}</strong>, so this font ${_foot > 0
-                  ? `added only <strong>${fmtB(_foot)}</strong> on disk`
-                  : 'added nothing new on disk'}. `
-                + `Identical files are stored once in your library and used in every location they appear, `
-                + `so nothing is missing or renamed.`);
-            }
+            // [B-514] The same sentence every import door ends with. Only the new font is new
+            // here; its source was already in the library.
+            let _sz = null;
+            try {
+              _sz = anchorMeta.sourceUuid ? await window.electronAPI.measureSourceImport({
+                uuid: anchorMeta.sourceUuid, only: [_nm],
+              }) : null;
+            } catch {}
+            const _line = _sz && _sz.ok ? _sfImportSizeSentence({
+              totalBytes: _sz.madeBytes || 0, onDiskBytes: _foot,
+              noun: 'Your folder totals',
+            }) : '';
+            if (_line) parts.push(_line);
           }
           // THE EJECT GOES IN THE SUMMARY, NOT IN A TOAST. Ruled 2026-10-04: *"there is
           // always a summery. there is never a toast on a file import. the brag is dynamic
@@ -40108,11 +40098,7 @@ require(['vs/editor/editor.main'], function () {
             _sfExportFiles({ kind: t.kind, id: t.id, subPaths: [dirSub], isDir: true });
           });
           menu.appendChild(item);
-          const x = Math.min(e.clientX, window.innerWidth - 200);
-          const y = Math.min(e.clientY, window.innerHeight - 100);
-          menu.style.left = x + 'px';
-          menu.style.top = y + 'px';
-          menu.style.display = 'block';
+          _jmtPlaceMenu(menu, e.clientX, e.clientY);
           return;
         }
         const row = e.target.closest('[data-file-row]');
@@ -40141,11 +40127,7 @@ require(['vs/editor/editor.main'], function () {
           mkSep();
         }
         mkItem('↗ Export…', () => _sfExportFiles({ kind: t.kind, id: t.id, subPaths: [p] }));
-        const x = Math.min(e.clientX, window.innerWidth - 200);
-        const y = Math.min(e.clientY, window.innerHeight - 100);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       // Add — group selections by source target, batch one fileOps:copy
       // per group. Destination is the entry's CURRENT breadcrumb path
@@ -41878,11 +41860,7 @@ require(['vs/editor/editor.main'], function () {
           mkSep();
         }
         mkItem('↗ Export…', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [p] }));
-        const x = Math.min(e.clientX, window.innerWidth - 200);
-        const y = Math.min(e.clientY, window.innerHeight - 100);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       // Keyboard reorder — ↑/↓ moves selected row; Home/End jumps to
       // first/last numbered slot. Anchors the focus to the list so the
@@ -42608,11 +42586,7 @@ require(['vs/editor/editor.main'], function () {
           }
         }
         if (!menu.children.length) return;
-        const x = Math.min(e.clientX, window.innerWidth - 200);
-        const y = Math.min(e.clientY, window.innerHeight - 160);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       // Ctrl/Cmd+C scoped to the source detail modal. Mirrors the entry
       // shortcut shape; Ctrl+V is intentionally absent since pasting into
@@ -44393,20 +44367,25 @@ require(['vs/editor/editor.main'], function () {
         if (selectedEntries.length === 0) return [];
         const firstTags = Array.isArray(selectedEntries[0].meta?.tags)
           ? selectedEntries[0].meta.tags : [];
-        return firstTags.filter(t => {
+        const shared = firstTags.filter(t => {
           const lc = String(t).toLowerCase();
+          if (lc === 'free') return false;   // the word is the free setting, never a tag; see below
           return selectedEntries.every(e => {
             const et = Array.isArray(e.meta?.tags) ? e.meta.tags : [];
             return et.some(x => String(x).toLowerCase() === lc);
           });
         });
+        // "free" is the reserved word for the free setting, the same as in the font window: shown
+        // as its chip when every selected font is free, set by typing it, cleared by removing it.
+        if (selectedEntries.every(e => e.meta && e.meta.purchased === false)) shared.unshift('free');
+        return shared;
       };
       const _sfBulkTagRenderChips = () => {
         const wrap = document.getElementById('sf-bulk-tag-chips');
         const applyBtn = document.getElementById('sf-bulk-tag-apply');
         if (wrap) {
           wrap.innerHTML = _sfBulkTagWorking.map((t, i) =>
-            `<span class="sf-tag-chip">${_sfEscape(t)}<button class="sf-tag-chip-remove" data-bulk-tag-i="${i}" title="Remove">&times;</button></span>`
+            `<span class="sf-tag-chip${t.toLowerCase() === 'free' ? ' free' : ''}">${_sfEscape(t)}<button class="sf-tag-chip-remove" data-bulk-tag-i="${i}" title="Remove">&times;</button></span>`
           ).join('');
         }
         // Enabled when the working set differs from the initial set, in
@@ -44467,20 +44446,27 @@ require(['vs/editor/editor.main'], function () {
           _sfDeleteProgress.show(`Updating tags (${i + 1} of ${names.length})`, name, i / names.length);
           const entry = _sfAllEntries.find(e => e.name === name);
           const existing = Array.isArray(entry?.meta?.tags) ? entry.meta.tags.slice() : [];
-          // Apply removes (case-insensitive), then merge in adds where missing.
-          const kept = existing.filter(t => !removedLc.has(String(t).toLowerCase()));
+          // Apply removes (case-insensitive), then merge in adds where missing. The word "free" is
+          // never kept as a tag - it is the free setting - so one already stored as a plain tag is
+          // dropped here too.
+          const kept = existing.filter(t => !removedLc.has(String(t).toLowerCase()) && String(t).toLowerCase() !== 'free');
           const keptLc = new Set(kept.map(t => String(t).toLowerCase()));
           const finalTags = kept.slice();
           for (const t of added) {
-            if (!keptLc.has(t.toLowerCase())) finalTags.push(t);
+            if (t.toLowerCase() !== 'free' && !keptLc.has(t.toLowerCase())) finalTags.push(t);
           }
-          const changed = finalTags.length !== existing.length
+          const updates = {};
+          const tagsChanged = finalTags.length !== existing.length
             || finalTags.some((t, i) => t !== existing[i]);
-          if (!changed) continue;
+          if (tagsChanged) updates.tags = finalTags;
+          // The free setting lives on the font's source, as in the font window.
+          if (added.some(t => t.toLowerCase() === 'free') && entry?.meta?.purchased !== false) updates.purchased = false;
+          if (removedLc.has('free') && entry?.meta?.purchased === false) updates.purchased = true;
+          if (!Object.keys(updates).length) continue;
           try {
             const er = await window.electronAPI.updateEntryMeta({
               currentName: name,
-              updates: { tags: finalTags },
+              updates,
             });
             if (!er || !er.ok) failures.push({ name, error: (er && er.error) || 'unknown error' });
           } catch (err) {
@@ -48564,20 +48550,43 @@ require(['vs/editor/editor.main'], function () {
       // Which of these fonts are Customized ([B-341])? Asked at delete time,
       // the one moment the answer matters most. Reads the same stamp the
       // Customized marker renders from, so the dialog and the screen agree.
+      // READ OFF THE STAMP, NOT ASKED ONE BY ONE. One backend call per name held the delete
+      // dialog back for seconds on a large selection while the window still took clicks. The
+      // answer is already on each font's meta (the card's Customized marker paints from it), valid
+      // under the same test the backend applies. Only a font with no valid stamp is asked, and
+      // those together.
       const _sfCustomizedAmong = async (names) => {
+        const byName = new Map((_sfAllEntries || []).map((e) => [e.name, e]));
+        const known = (m) => {
+          const st = m && m.customization;
+          return !!(st && st.v === 4 && m.contentHash && !m.contentHashDirty
+            && st.forHash === m.contentHash && st.srcUuid === m.sourceUuid);
+        };
         const out = [];
+        const ask = [];
         for (const n of names) {
-          try {
-            const r = await window.electronAPI.entryCustomization({ name: n });
-            if (r && r.known && r.customized) out.push(n);
-          } catch {}
+          const m = byName.get(n) && byName.get(n).meta;
+          if (known(m)) { if (m.customization.customized) out.push(n); }
+          else ask.push(n);
         }
-        return out;
+        const answers = await Promise.all(ask.map((n) =>
+          window.electronAPI.entryCustomization({ name: n }).catch(() => null)));
+        answers.forEach((r, i) => { if (r && r.known && r.customized) out.push(ask[i]); });
+        // In the order given, so the dialog names them the way the selection reads.
+        return names.filter((n) => out.includes(n));
       };
       // Card click delegation — the grid re-renders on refresh, so we listen
       // on the container once. Tag chips on cards toggle the filter; the
       // × in the corner deletes the font; clicks anywhere else on the card
       // open the entry detail.
+      // [B-477] SHIFT ON A CARD IS A RANGE, NEVER A TEXT SELECTION. The browser extends its text
+      // selection on MOUSEDOWN, before the click handler below can prevent anything, so a
+      // Shift+click painted the selection highlight from wherever text was last clicked - across
+      // the toolbar, the filters and every card between. Stopped at mousedown; Ctrl too, since
+      // Ctrl+Shift ranges as well.
+      document.getElementById('sf-cards')?.addEventListener('mousedown', (e) => {
+        if ((e.shiftKey || e.ctrlKey || e.metaKey) && e.target.closest('.sf-card')) e.preventDefault();
+      });
       document.getElementById('sf-cards')?.addEventListener('click', async (e) => {
         // Ctrl/Cmd-click on a card toggles selection regardless of what was
         // clicked within it (body, link, chip, delete glyph, etc.). The
@@ -49328,6 +49337,7 @@ require(['vs/editor/editor.main'], function () {
           _sfSelectedNames.clear();
           _sfBulkIncludeTracks = null;        // [B-287], same reset the toolbar's Clear does
           _sfSelectedNames.add(fontName);
+          _sfGridAnchor = fontName;           // [B-477] a selecting click sets the range anchor
           try { _sfRenderGrid(); } catch {}
         }
         const _sel = Array.from(_sfSelectedNames);
@@ -49498,7 +49508,7 @@ require(['vs/editor/editor.main'], function () {
 
           if (_newOnes.length) {
             mkItem(`Clear New${_sfx(_newOnes.length)}`, null, async () => {
-              // One write path, the same helper the toolbar's "Clear all New" uses.
+              // One write path, the same helper the toolbar's library-wide "Clear New" uses.
               if (_newOnes.length > 1 && typeof _sfMarkSeenBulk === 'function') {
                 await _sfMarkSeenBulk(_newOnes, 'New');
                 return;
@@ -49532,6 +49542,13 @@ require(['vs/editor/editor.main'], function () {
         // Bulk duplicate already exists there, naming, collision handling and all; a second
         // copy here would be a mechanism to keep in agreement forever, and the two would drift
         // the first time one of them learned something.
+        // Tags, for one font or the whole selection: the toolbar's Tags window, opened from here.
+        // It already edits the tags the selection shares (remove one from all, add one to all),
+        // and the menu has already made the right-clicked card the selection, so delegating to
+        // the button is the whole feature, same as Duplicate below.
+        mkItem(`Tags${_sfx(_n)}…`, null, () => {
+          document.getElementById('btn-sf-bulk-tag')?.click();
+        });
         mkItem(`Duplicate${_sfx(_n)}`, null, async () => {
           if (_many) {
             document.getElementById('btn-sf-bulk-duplicate')?.click();
@@ -49953,13 +49970,8 @@ require(['vs/editor/editor.main'], function () {
             if (sub) { sub.style.display = 'none'; sub.innerHTML = ''; }
           });
         });
-        // Position the main menu, clamped to viewport.
-        const menuWidth = 240;
-        const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
-        const y = Math.min(e.clientY, window.innerHeight - 80);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        // Position the main menu inside the window, by its real size (see _jmtPlaceMenu).
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
         // Outside-click dismissal. document mousedown clears both menus
         // unless the click landed inside either of them.
         const onOutside = (ev) => {
@@ -51820,6 +51832,35 @@ require(['vs/editor/editor.main'], function () {
         };
       };
 
+      // How a restore ends, for every ending of both doors.
+      // The dialog opens FIRST, over the progress window; then the progress window closes and the
+      // library refreshes underneath while the user reads. The backdrop never drops, so the
+      // half-drawn library is never on screen alone - the order the font import close-out uses.
+      // `open` returns the dialog's promise; this resolves when the user closes it.
+      const _sfRestoreEnding = async (els, open, { refresh = false } = {}) => {
+        const done = open();
+        els.modal.classList.remove('active');
+        // Reset for the next time export reuses this window, now that it is out of sight.
+        if (els.title) els.title.textContent = 'Exporting Sound Font library…';
+        if (refresh) { try { await window.refreshSoundFontsView(); } catch {} }
+        return done;
+      };
+      // Fills the merge summary's size line from the footer's next fresh walk. Returns the
+      // unsubscribe, for when the dialog closes before the walk lands.
+      const _sfFillRestoreSize = () => {
+        let off = null;
+        try {
+          off = window.electronAPI.onSoundFontsSizeUpdated?.((fig) => {
+            const el = document.querySelector('.sf-restore-size');
+            if (el && fig && typeof fig.apparent === 'number') {
+              el.textContent = `Your library now totals ${_sfFormatBytes(fig.apparent)} of files, `
+                + `${_sfFormatBytes(fig.onDisk)} on disk.`;
+            }
+            if (off) { off(); off = null; }
+          }) || null;
+        } catch { off = null; }
+        return () => { if (off) { off(); off = null; } };
+      };
       const _sfRunMergeImport = async (zipPath, observed, preSurvey = null) => {
         // The caller (_sfOpenImportBackup) already surveys upfront for
         // the choice modal's delta line, so when it routes here it can
@@ -52309,30 +52350,31 @@ require(['vs/editor/editor.main'], function () {
         try { off && off(); } catch {}
         els.cancel.removeEventListener('click', onCancel);
         els.bar.classList.remove('indeterminate');
-        els.modal.classList.remove('active');
         window._sfBackupBusy = false;
-        if (els.title) els.title.textContent = 'Exporting Sound Font library…';
+        // THE PROGRESS WINDOW STAYS UP UNTIL THE ENDING IS OVER IT. Closing it before the dialog
+        // opens leaves the library bare behind no dialog while it refreshes. _sfRestoreEnding opens
+        // the dialog, then closes this window and refreshes underneath, the same order the font
+        // import close-out uses.
         if (result && result.cancelled) {
-          await promptConfirm({
+          await _sfRestoreEnding(els, () => promptConfirm({
             title: 'Merge cancelled',
             message: 'Items already written in this run were rolled back. Your library is in the state it was before the merge.',
             confirmText: 'OK',
             confirmKind: 'primary',
             hideCancel: true,
-          });
+          }));
           return;
         }
         if (!result || !result.ok) {
-          await promptConfirm({
+          await _sfRestoreEnding(els, () => promptConfirm({
             title: 'Merge failed',
             message: `Some items could not be merged.\n${(result && result.error) || 'Unknown error.'}\nItems already written in this run were rolled back.`,
             confirmText: 'OK',
             confirmKind: 'danger',
             hideCancel: true,
-          });
+          }));
           return;
         }
-        try { await window.refreshSoundFontsView(); } catch {}
         // Granular breakdown comes from result.counts when the backend
         // provides it; falls back to a generic "merged" line for older
         // backends. Built as separate lines so each category reads clean
@@ -52347,22 +52389,34 @@ require(['vs/editor/editor.main'], function () {
         // per finding against paths that do not exist, and report the failures as the news.
         // _sfShowNotAdded is the dialog built for exactly this direction ([B-370]).
         const _mergeRefused = (result && result.refused) || [];
-        const _mergeMsg = _sfBuildMergeCompleteMessage(result.counts, finalElapsedSec);
-        if (_mergeRefused.length) { await _sfShowNotAdded(_mergeRefused, _mergeMsg); return; }
+        // [B-514] The library's new size, in the footer's terms. A merge leaves a mix of what was
+        // there and what came in, so the backup's own totals would be wrong; the line opens
+        // "measuring" and is filled by the footer's walk, which the refresh below starts.
+        const _mergeMsg = _sfBuildMergeCompleteMessage(result.counts, finalElapsedSec)
+          + '<br><span class="sf-restore-size">Measuring the library…</span>';
+        const _mergeSizeOff = _sfFillRestoreSize();
+        if (_mergeRefused.length) {
+          await _sfRestoreEnding(els, () => _sfShowNotAdded(_mergeRefused, _mergeMsg), { refresh: true });
+          if (_mergeSizeOff) _mergeSizeOff();
+          return;
+        }
         // The eject rides on this summary, and nowhere else on this door. Row built before the
         // dialog, wired after it renders — the same order the export summaries and door 14 use,
         // because the row goes into the shared confirm's button bar and has to be placed into live
         // DOM rather than baked into the message.
         const _bkRow = _sfBackupEjectRowHtml();
-        const _donePromise = promptConfirm({
-          title: 'Merge complete',
-          messageHtml: _mergeMsg + _bkRow,
-          confirmText: 'OK',
-          confirmKind: 'primary',
-          hideCancel: true,
-        });
-        _sfWireBackupEjectRow();
-        await _donePromise;
+        await _sfRestoreEnding(els, () => {
+          const d = promptConfirm({
+            title: 'Merge complete',
+            messageHtml: _mergeMsg + _bkRow,
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          _sfWireBackupEjectRow();
+          return d;
+        }, { refresh: true });
+        if (_mergeSizeOff) _mergeSizeOff();
       };
 
       // Replace-import run — extracts the backup zip on top of a wiped
@@ -52457,51 +52511,58 @@ require(['vs/editor/editor.main'], function () {
         try { off && off(); } catch {}
         els.cancel.removeEventListener('click', onCancel);
         els.bar.classList.remove('indeterminate');
-        els.modal.classList.remove('active');
         window._sfBackupBusy = false;
-        // Reset title for the next time the modal is reused by export.
-        if (els.title) els.title.textContent = 'Exporting Sound Font library…';
+        // The progress window closes UNDER the ending, never before it - see the merge branch.
         if (result && result.cancelled) {
-          await promptConfirm({
+          await _sfRestoreEnding(els, () => promptConfirm({
             title: 'Import cancelled',
             message: 'Original library restored. No changes kept.',
             confirmText: 'OK',
             confirmKind: 'primary',
             hideCancel: true,
-          });
+          }));
           return;
         }
         if (!result || !result.ok) {
-          await promptConfirm({
+          await _sfRestoreEnding(els, () => promptConfirm({
             title: 'Import failed',
             message: `The backup could not be restored.\n${(result && result.error) || 'Unknown error.'}\nYour original library was restored.`,
             confirmText: 'OK',
             confirmKind: 'danger',
             hideCancel: true,
-          });
+          }));
           return;
         }
-        // Refresh the SF view so the new library renders. Force-clearing
-        // any stale in-memory selection / pivot the prior library left
-        // behind happens inside refreshSoundFontsView.
-        try { await window.refreshSoundFontsView(); } catch {}
         // [B-401] BOTH DOORS. The entry was found because only one had ever been walked
         // through; fixing one and not the other reproduces it exactly.
         const _replRefused = (result && result.refused) || [];
-        const _replMsg = _sfBuildReplaceCompleteMessage(result.counts || observed.counts, finalElapsedSec);
-        if (_replRefused.length) { await _sfShowNotAdded(_replRefused, _replMsg); return; }
+        // [B-514] The size, in the footer's terms, MEASURED rather than read off the backup: a
+        // restore links identical files the library held apart, so the library it leaves is
+        // smaller on disk than the one exported (measured 2026-10-21: 13.45 GB exported, 11.71 GB
+        // restored). Same line and same fill as the merge door.
+        const _replMsg = _sfBuildReplaceCompleteMessage(result.counts || observed.counts, finalElapsedSec)
+          + '<br><span class="sf-restore-size">Measuring the library…</span>';
+        const _replSizeOff = _sfFillRestoreSize();
+        if (_replRefused.length) {
+          await _sfRestoreEnding(els, () => _sfShowNotAdded(_replRefused, _replMsg), { refresh: true });
+          if (_replSizeOff) _replSizeOff();
+          return;
+        }
         // [B-401] again: BOTH DOORS. Replace gets the eject row on exactly the same terms as merge,
         // because fixing one branch and not the other is the entry that bug already produced once.
         const _bkRowR = _sfBackupEjectRowHtml();
-        const _replPromise = promptConfirm({
-          title: 'Import complete',
-          messageHtml: _replMsg + _bkRowR,
-          confirmText: 'OK',
-          confirmKind: 'primary',
-          hideCancel: true,
-        });
-        _sfWireBackupEjectRow();
-        await _replPromise;
+        await _sfRestoreEnding(els, () => {
+          const d = promptConfirm({
+            title: 'Import complete',
+            messageHtml: _replMsg + _bkRowR,
+            confirmText: 'OK',
+            confirmKind: 'primary',
+            hideCancel: true,
+          });
+          _sfWireBackupEjectRow();
+          return d;
+        }, { refresh: true });
+        if (_replSizeOff) _replSizeOff();
       };
       document.getElementById('btn-sf-export-backup')?.addEventListener('click', _sfOpenExportBackup);
       // Import-backup — validation phase. Picks a zip, validates the manifest,
@@ -53014,12 +53075,8 @@ require(['vs/editor/editor.main'], function () {
           });
           menu.appendChild(item);
         }
-        // Position the menu near the cursor, respecting viewport edges.
-        const x = Math.min(e.clientX, window.innerWidth - 220);
-        const y = Math.min(e.clientY, window.innerHeight - 80);
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
-        menu.style.display = 'block';
+        // Position the menu near the cursor, inside the window, by its real size.
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
       });
       document.getElementById('sf-bulk-tag-cancel')?.addEventListener('click', _sfBulkTagClose);
       document.getElementById('sf-bulk-tag-apply')?.addEventListener('click', _sfBulkTagApply);
@@ -53046,7 +53103,8 @@ require(['vs/editor/editor.main'], function () {
           if (!raw) return;
           // The fourth and last door a tag can be typed through (2026-10-08). All four share
           // one canonicaliser; a door left out is a door that reintroduces a second spelling.
-          const _tag = window._sfCanonicalTag ? window._sfCanonicalTag(raw) : raw;
+          const _tag = /^free$/i.test(raw) ? 'free'   // the free setting, as in the font window
+            : (window._sfCanonicalTag ? window._sfCanonicalTag(raw) : raw);
           const exists = _tag && _sfBulkTagWorking.some(t => t.toLowerCase() === _tag.toLowerCase());
           if (_tag && !exists) {
             _sfBulkTagWorking.push(_tag);
@@ -54609,11 +54667,7 @@ require(['vs/editor/editor.main'], function () {
 
       mkItem(`× Delete${total > 1 ? ` (${total})` : ''}`, 'danger', _batchDelete);
 
-      const x = Math.min(e.clientX, window.innerWidth - 170);
-      const y = Math.min(e.clientY, window.innerHeight - 160);
-      menu.style.left = x + 'px';
-      menu.style.top  = y + 'px';
-      menu.style.display = 'block';
+      _jmtPlaceMenu(menu, e.clientX, e.clientY);
     }
 
     function _hidePresetContextMenu() {
@@ -62083,11 +62137,7 @@ function _getFreshFieldRange(fieldName) {
       };
       mkItem('⧉ Duplicate', '',       () => _duplicatePresetBank(arrayIndex));
       mkItem('× Delete',    'danger', () => _deletePresetBank(arrayIndex));
-      const x = Math.min(e.clientX, window.innerWidth - 170);
-      const y = Math.min(e.clientY, window.innerHeight - 80);
-      menu.style.left = x + 'px';
-      menu.style.top  = y + 'px';
-      menu.style.display = 'block';
+      _jmtPlaceMenu(menu, e.clientX, e.clientY);
     }
 
     // Duplicate a preset bank — copies the entire `Preset NAME[] = { … };` block,

@@ -5783,6 +5783,28 @@ ipcMain.handle('sources:ensureManifest', async (event, { uuid } = {}) => {
 // manifests, and match each candidate. Returns only candidates with something
 // worth saying — a have-it verdict, or a variant at/above the display bar —
 // with the plain-language label prebuilt.
+// [B-514] What an import added, by the footer's own ruler: the source as stored, and what was made
+// from it (fonts, common folders). `only` narrows the made half to names or uuids an import just
+// created, for a door that added to a source already in the library.
+ipcMain.handle('sources:measureImport', async (_event, { uuid, only = null } = {}) => {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  try {
+    const size = require('./soundFontLibrarySize');
+    const p = size.sourcePaths(app.getPath('userData'), uuid, only);
+    const m = await size.measurePaths(p.made);
+    // `madeOwnBytes`: what the source's footprint cannot see - the made fonts' own bytes (a
+    // customized font's edits, their records) and, for a new source, its own records.
+    return {
+      ok: true,
+      sourceBytes: only ? 0 : await size.apparentBytes(p.source),
+      madeBytes: m.apparent,
+      madeOwnBytes: m.unshared + (only ? 0 : await size.apparentBytes(p.records)),
+    };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:matchCandidates', async (_event, { uuid, candidates } = {}) => {
   if (!uuid || !Array.isArray(candidates)) return { ok: false, error: 'Missing uuid/candidates' };
   try {

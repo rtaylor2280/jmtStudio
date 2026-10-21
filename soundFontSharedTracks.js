@@ -119,6 +119,7 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
   }
   const root = sharedTracksRoot(userData);
   const added = [];
+  let addedBytes = 0, newBytes = 0;
   const skipped = [];
   const refusedIn = [];
   // Tracks you ALREADY HAVE, by content. Reported separately from `skipped`,
@@ -271,11 +272,12 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
         duplicates.push({ src, have: _hits[0].name || '' });
         continue;
       }
-      let _linked = false;
+      let _linked = false, _held = false;
       try {
         if (_CI && _ciIndex) {
           const r = _CI.ingestFile({ index: _ciIndex, srcAbs: _tmpAbs, destAbs: _destAbs });
           _linked = !!(r && r.ok);
+          _held = !!(r && r.linked);   // the library already held these bytes elsewhere
         }
       } catch { _linked = false; }
       // Either ingest placed the file (link or copy) and the temp is now redundant, or nothing
@@ -289,6 +291,12 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       // that contains the same track twice writes it once.
       if (_index) { try { _index = hashIndex.ensureIndex(userData); } catch {} }
       added.push(dest);
+      // [B-514] For the closing size sentence: a track whose bytes the library held cost nothing.
+      try {
+        const _sz = fs.statSync(_destAbs).size;
+        addedBytes += _sz;
+        if (!_held) newBytes += _sz;
+      } catch {}
     } catch (err) {
       skipped.push({ src, reason: String(err && err.message || err) });
     }
@@ -304,7 +312,7 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
   // `canceled` travels with the result rather than being an error: a stop the user asked for
   // is an outcome, and reporting it as a failure is what [B-005] item 4 had to undo on the
   // export side. Everything already copied is reported as added, because it was.
-  return { ok: true, canceled: _stopped, added, skipped, duplicates, refused: refusedIn };
+  return { ok: true, canceled: _stopped, added, skipped, duplicates, refused: refusedIn, addedBytes, newBytes };
 }
 
 function renameFile(userData, oldName, newName) {

@@ -157,7 +157,82 @@ async function refresh(userData, opts = {}) {
   return figure;
 }
 
+// The `apparent` rule for PART of the library: every path's logical size under these paths.
+// Unlike onDisk, apparent IS decomposable - it never dedupes - so what one import adds here is
+// exactly what it adds to the footer's "of files". The import messages use it for that reason.
+async function apparentBytes(paths) {
+  return (await measurePaths(paths)).apparent;
+}
+
+// `apparent`, plus `unshared`: the bytes of files no other name holds (one link). Under the folders
+// an import made, that is what the import really wrote beyond its source - a customized font's
+// edits - since everything else there is a second name for the source's bytes.
+async function measurePaths(paths) {
+  let total = 0, unshared = 0;
+  const walk = async (dir) => {
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { await walk(p); continue; }
+      if (!e.isFile()) continue;
+      try {
+        const st = await fsp.stat(p);
+        total += st.size;
+        if (st.nlink === 1) unshared += st.size;
+      } catch {}
+    }
+    await _breathe();
+  };
+  for (const d of paths || []) {
+    if (!d) continue;
+    let st;
+    try { st = await fsp.stat(d); } catch { continue; }
+    if (st.isFile()) {                           // a font's hash record sits beside the folders
+      total += st.size;
+      if (st.nlink === 1) unshared += st.size;
+    } else if (st.isDirectory()) await walk(d);
+  }
+  return { apparent: total, unshared };
+}
+
+// What one source holds in the library, split the way the import messages say it: the source
+// itself (its folder and hash record), and what was made from it - fonts in library/ and common
+// folders in common/, each with its hash record. `only` narrows the made half to the names (fonts)
+// and uuids (common folders) an import just created, so adding to a source already in the library
+// counts only what was added.
+function sourcePaths(userData, uuid, only = null) {
+  const root = soundFontsRoot(userData);
+  const source = [
+    path.join(root, 'sources', uuid),
+    path.join(root, '.filehashes', 'sources', `${uuid}.json`),
+  ];
+  const made = [];
+  const want = only ? new Set(only) : null;
+  const scan = (bucket, hashDir, key, idOf) => {
+    let names = [];
+    try { names = fs.readdirSync(path.join(root, bucket)); } catch {}
+    for (const n of names) {
+      let m = null;
+      try { m = JSON.parse(fs.readFileSync(path.join(root, bucket, n, 'meta.json'), 'utf8')); } catch { continue; }
+      if (!m || m.sourceUuid !== uuid) continue;
+      if (want && !want.has(n) && !want.has(m[key])) continue;
+      made.push(path.join(root, bucket, n));
+      const id = idOf(m, n);
+      if (id) made.push(path.join(root, '.filehashes', hashDir, `${id}.json`));
+    }
+  };
+  scan('library', 'entries', 'entryUuid', (m) => m.entryUuid);
+  scan('common', 'commons', 'uuid', (m, n) => m.uuid || n);
+  // The source's own records, beside its content: real bytes on disk that no footprint counts.
+  const records = [
+    path.join(root, 'sources', uuid, 'meta.json'),
+    path.join(root, '.filehashes', 'sources', `${uuid}.json`),
+  ];
+  return { source, made, records };
+}
+
 module.exports = {
   SCHEMA, soundFontsRoot, metaPath,
-  read, compute, refresh,
+  read, compute, refresh, apparentBytes, measurePaths, sourcePaths,
 };

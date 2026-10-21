@@ -77,14 +77,15 @@ function handlerBody(channel) {
 
   // PRESENCE IS NOT EXECUTION. Reading the field and never acting on it is the same
   // silence wearing a variable name.
-  ok('merge SHOWS it and skips the plain completion',
-     /if \(_mergeRefused\.length\) \{ await _sfShowNotAdded\(_mergeRefused, _mergeMsg\); return; \}/.test(html));
-  ok('replace SHOWS it and skips the plain completion',
-     /if \(_replRefused\.length\) \{ await _sfShowNotAdded\(_replRefused, _replMsg\); return; \}/.test(html));
+  // The dialog opens through _sfRestoreEnding (2026-10-21), which shows it over the progress
+  // window before closing that window; the branch still returns before the plain completion.
+  const shows = (k) => new RegExp(String.raw`if \(_${k}Refused\.length\) \{\s*await _sfRestoreEnding\(els, \(\) => _sfShowNotAdded\(_${k}Refused, _${k}Msg\)[^;]*;[^}]*?return;\s*\}`);
+  ok('merge SHOWS it and skips the plain completion', shows('merge').test(html));
+  ok('replace SHOWS it and skips the plain completion', shows('repl').test(html));
 
   // BOTH DOORS. This entry exists because only one had been walked through.
   ok('neither door is left unwired',
-     (html.match(/await _sfShowNotAdded\(_(merge|repl)Refused, _(merge|repl)Msg\);/g) || []).length === 2);
+     (html.match(/_sfShowNotAdded\(_(merge|repl)Refused, _(merge|repl)Msg\)/g) || []).length === 2);
 }
 
 // ── the RIGHT dialog, for the right reason ─────────────────────────────────

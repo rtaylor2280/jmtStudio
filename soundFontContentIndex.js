@@ -348,10 +348,15 @@ function buildIndex(userData) {
 // findExisting(index, hash) -> absolute path we have PROVEN holds this content,
 // or null. This is the only function that may return a link target, and it
 // re-hashes before it does.
-function findExisting(index, hash) {
+// `notUnder` skips every candidate inside that folder. A caller linking a tree that is ALREADY in
+// the index (a source just added, linked against what came before it) needs a copy from somewhere
+// else: the first verified candidate is otherwise its own file, which it is already sharing with.
+function findExisting(index, hash, { notUnder = null } = {}) {
   if (!index || !hash) return null;
+  const _prefix = notUnder ? path.resolve(notUnder) + path.sep : null;
+  const _mine = (abs) => !!_prefix && path.resolve(abs).startsWith(_prefix);
   const already = index.verified.get(hash);
-  if (already) {
+  if (already && !_mine(already)) {
     // Still there? A file can be deleted mid-operation by another path.
     if (fs.existsSync(already)) return already;
     index.verified.delete(hash);
@@ -359,6 +364,7 @@ function findExisting(index, hash) {
   const candidates = index.byHash.get(hash);
   if (!candidates || !candidates.length) return null;
   for (const abs of candidates) {
+    if (_mine(abs)) continue;
     let actual = null;
     try {
       if (!fs.existsSync(abs)) continue;

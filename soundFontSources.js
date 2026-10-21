@@ -974,6 +974,23 @@ function findByProvenance(userData, provenance) {
 // vendor overrides, etc.) before committing entries. Refuses to touch
 // immutable fields like uuid, hash, originalName, format, importedAt.
 const _SOURCE_META_IMMUTABLE = new Set(['schemaVersion', 'uuid', 'hash', 'format', 'originalName', 'importedAt', 'fileSize']);
+// The website of a creator the app knows: the built-in creators first, then creators already in
+// this library with a website, matched on name without case. `exceptUuid` keeps a source from
+// answering for itself.
+function _knownVendorWebsite(userData, name, exceptUuid) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!key) return null;
+  try {
+    const V = require('./soundFontVendors');
+    const builtIn = (V.vendors || []).find((v) => String(v.displayName || '').toLowerCase() === key);
+    if (builtIn && builtIn.website) return builtIn.website;
+    const learned = V.learnedVendorsFrom(listSources(userData).filter((x) => x && x.uuid !== exceptUuid))
+      .find((v) => String(v.name || '').toLowerCase() === key);
+    if (learned && learned.website) return learned.website;
+  } catch {}
+  return null;
+}
+
 function updateSourceMeta(userData, uuid, updates) {
   if (!uuid) return { ok: false, error: 'Missing uuid' };
   if (!updates || typeof updates !== 'object') return { ok: false, error: 'Missing updates' };
@@ -983,9 +1000,18 @@ function updateSourceMeta(userData, uuid, updates) {
   let meta;
   try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
   catch (err) { return { ok: false, error: `Cannot read meta: ${err.message}` }; }
+  const _prevVendor = meta.vendor || '';
   for (const key of Object.keys(updates)) {
     if (_SOURCE_META_IMMUTABLE.has(key)) continue;
     meta[key] = updates[key];
+  }
+  // A creator the app knows brings its website when the creator CHANGES and the source is left with
+  // no website. Here, where every way of setting a creator ends (the font window, the source window,
+  // an import), so the rule exists once. Keyed on the change, not on an empty field: a website the
+  // user clears while keeping the creator stays cleared.
+  if (updates.vendor && updates.vendor !== _prevVendor && !meta.vendorWebsite) {
+    const site = _knownVendorWebsite(userData, updates.vendor, uuid);
+    if (site) meta.vendorWebsite = site;
   }
   try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
   catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
@@ -1137,7 +1163,9 @@ async function _linkAgainstLibrary(userData, destDir, records, onProgress) {
     const abs = path.join(destDir, r.relPath.replace(/\//g, path.sep));
     // findExisting re-hashes the candidate: the index narrows the search, it
     // never authorises the link.
-    const existing = CI.findExisting(index, r.fileHash);
+    // Never a copy inside this same tree: once the source is in the index (linking at commit),
+    // its own file is a candidate, and linking to it changes nothing.
+    const existing = CI.findExisting(index, r.fileHash, { notUnder: destDir });
     if (!existing) continue;
     let st, existSt;
     try { st = fs.statSync(abs); existSt = fs.statSync(existing); } catch { continue; }
@@ -3374,6 +3402,7 @@ module.exports = {
   removeSourceManifest,
   findOrphanManifests,
   dedupeSource,
+  linkAgainstLibrary: _linkAgainstLibrary,
   isNoisePath: _isNoisePath,
   zipFolderToFile,
   walkFolderSorted,
