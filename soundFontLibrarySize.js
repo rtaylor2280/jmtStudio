@@ -152,9 +152,20 @@ async function refresh(userData, opts = {}) {
   const figure = await compute(userData, opts);
   if (!figure) return null;                       // stopped: leave the old figure in place
   const m = _readMeta(userData);
+  // The last re-link result rides the figure so the footer can say what it freed; a fresh walk
+  // keeps it.
+  if (m.size && m.size.relinked) figure.relinked = m.size.relinked;
   m.size = figure;
   _writeMeta(userData, m);
   return figure;
+}
+
+// [B-501] Records what the re-link sweep freed, on the stamped figure.
+function stampRelink(userData, info) {
+  const m = _readMeta(userData);
+  if (!m.size) return false;
+  m.size.relinked = info;
+  return _writeMeta(userData, m);
 }
 
 // The `apparent` rule for PART of the library: every path's logical size under these paths.
@@ -234,5 +245,5 @@ function sourcePaths(userData, uuid, only = null) {
 
 module.exports = {
   SCHEMA, soundFontsRoot, metaPath,
-  read, compute, refresh, apparentBytes, measurePaths, sourcePaths,
+  read, compute, refresh, stampRelink, apparentBytes, measurePaths, sourcePaths,
 };

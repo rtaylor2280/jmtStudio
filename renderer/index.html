@@ -32042,6 +32042,14 @@ require(['vs/editor/editor.main'], function () {
         ] : [
           `Your library holds ${_sfFormatBytes(figure.apparent)} (${counts}).`,
         ];
+        // [B-501] What the re-link sweep last freed, said once here rather than in a popup.
+        const rl = figure.relinked;
+        if (rl && rl.bytes > 0) {
+          let when = '';
+          try { when = new Date(rl.at).toLocaleDateString(); } catch {}
+          lines.push('', `Re-linked ${rl.files.toLocaleString()} identical file${rl.files === 1 ? '' : 's'}`
+            + `${when ? ` on ${when}` : ''}, freeing ${_sfFormatBytes(rl.bytes)}.`);
+        }
         el.title = lines.join('\n');
       };
       // Ask for the figure. Returns the last one instantly; the fresh one arrives on the event

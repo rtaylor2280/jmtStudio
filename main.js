@@ -1739,14 +1739,41 @@ ipcMain.handle('soundFonts:create', () => {
 // read-only background walk when the user is already looking at this panel, next to the entry,
 // source and common listings that refresh beside it.
 let _sfSizeWalk = null;        // in-flight walk, so repeated refreshes do not stack
+let _sfRelinkSweptKey = null;   // [B-501] the library (file count : on disk) the last finished sweep saw
+// Anything that writes the library is running: an import of any kind, an export, a backup or a
+// restore. The re-link sweep never runs beside one.
+const _sfLibraryBusy = () =>
+  [_bulkGate, _enrichGate, _attachGate, _exportGate, _commonImportGate, _linkImportGate, _importGate]
+    .some((g) => g && g.liveCount() > 0) || _sfBackupOps.size > 0;
 ipcMain.handle('soundFonts:size', (event) => {
   try {
     const userData = app.getPath('userData');
     const known = soundFontLibrarySize.read(userData);
     if (!_sfSizeWalk) {
       _sfSizeWalk = soundFontLibrarySize.refresh(userData)
-        .then((figure) => {
+        .then(async (figure) => {
           if (figure) { try { event.sender.send('soundFonts:sizeUpdated', figure); } catch {} }
+          // [B-501] The re-link sweep rides the same walk: once it lands, and only while nothing
+          // that writes the library is running, identical files held as separate copies are
+          // pointed at one stored copy. It stops between files the moment such an operation
+          // starts, and re-measures only when it changed something.
+          // Only when the library changed since the last sweep finished: a full pass reads every
+          // file's identity (17 s on a 183-font library), and an unchanged library has nothing new.
+          const key = figure ? `${figure.files}:${figure.onDisk}` : null;
+          if (!key || key === _sfRelinkSweptKey || _sfLibraryBusy()) return;
+          const r = await require('./soundFontRelink').relinkLibrary(userData, { shouldStop: _sfLibraryBusy });
+          if (r && !r.stopped) _sfRelinkSweptKey = key;
+          if (!r || !r.relinked) return;
+          await soundFontLibrarySize.refresh(userData);
+          if (r.savedBytes > 0) {
+            soundFontLibrarySize.stampRelink(userData,
+              { at: new Date().toISOString(), files: r.relinked, bytes: r.savedBytes });
+          }
+          const after = soundFontLibrarySize.read(userData);
+          if (after) {
+            _sfRelinkSweptKey = `${after.files}:${after.onDisk}`;   // its own re-link is not a change to sweep again
+            try { event.sender.send('soundFonts:sizeUpdated', after); } catch {}
+          }
         })
         .catch(() => {})
         .then(() => { _sfSizeWalk = null; });
