@@ -272,6 +272,18 @@ app.whenReady().then(() => {
       console.log(`[startup] cleared ${sw.swept} abandoned attachment staging folder(s)`);
     }
   } catch {}
+  // A receipt no source holds goes, as it would have when its source was deleted. At startup no
+  // import or restore is in flight, so nothing being linked can be caught half way.
+  try {
+    const pu = soundFontAttachments.pruneUnlinkedAttachments(app.getPath('userData'));
+    if (pu && pu.removed.length) console.log(`[startup] removed ${pu.removed.length} receipt(s) no source holds`);
+  } catch {}
+  // The same for the pool: a pooled file nothing uses any more, left by a delete that did not
+  // release it (deleting a common folder did not, before 2026-10-20).
+  try {
+    const pr = require('./soundFontContentIndex').releasePoolOrphans(app.getPath('userData'));
+    if (pr && pr.removed) console.log(`[startup] released ${pr.removed} pooled file(s) nothing uses`);
+  } catch {}
   // [B-364] Same lifecycle, same reasoning: a program pulled out of the library is held
   // only long enough for the user to say whether they want a copy. If they said yes it
   // was released and deleted already; if they closed the app instead, it dies here.

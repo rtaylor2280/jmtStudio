@@ -426,6 +426,29 @@ function pruneDanglingLinks(userData) {
   return { ok: true, pruned, sources: touched };
 }
 
+// A receipt goes with its source (ruled 2026-10-20: a deleted source's receipt is deleted). Deleting
+// a source already releases what it held; this removes what NO source holds,
+// which a restore brings in (a merge carries every attachment in the archive) and an older build
+// left behind - a proof of purchase from 10-08 survived a wiped library this way. A source's own
+// picture is a holder like any other link. Run after a restore and once at startup.
+function pruneUnlinkedAttachments(userData) {
+  let ids = [];
+  try {
+    ids = fs.readdirSync(attachmentsRoot(userData), { withFileTypes: true })
+      .filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch { return { ok: true, removed: [] }; }
+  const held = new Set();
+  let dirs = [];
+  try { dirs = fs.readdirSync(sourcesRoot(userData)); } catch {}
+  for (const u of dirs) for (const id of linkedIds(readSourceMeta(userData, u))) held.add(id);
+  const removed = [];
+  for (const id of ids) {
+    if (held.has(id)) continue;
+    try { fs.rmSync(path.join(attachmentsRoot(userData), id), { recursive: true, force: true }); removed.push(id); } catch {}
+  }
+  return { ok: true, removed };
+}
+
 // ── The streaming twin of addAttachmentToSources ──────────────── [B-475, 2026-10-06]
 // Same contract, same return shape, one read instead of two, and it can report progress and be
 // cancelled.
@@ -497,7 +520,7 @@ function sourcePicture(userData, uuid) {
 
 module.exports = {
   linkedIds, isPictureAttachmentDir, setSourcePicture, setSourcePictureSync, clearSourcePicture, sourcePicture,
-  pruneDanglingLinks, sweepStaging,
+  pruneDanglingLinks, pruneUnlinkedAttachments, sweepStaging,
   addAttachments, listAttachments, attachmentFilePath, unlinkAttachment,
   listAllAttachments, linkAttachments, readAttachment,
   sourcesForAttachment, linkAttachmentToSources, addAttachmentToSources,

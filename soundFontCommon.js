@@ -1122,6 +1122,10 @@ function deleteCommon(userData, uuid) {
     // fixed once. So does the SOURCE when this was the last thing using it: a delete
     // deletes, and the orphan sweep exists for backups, not to finish a delete.
     _dropManifest();
+    // A pooled file this folder was the last user of goes too, as when a font is deleted
+    // ([B-316]): after the folder, since the link count only falls once its name is gone. An
+    // image pasted into a common folder lived on in the pool after the folder was deleted.
+    try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
     let sourceDeleted = false;
     if (sourceUuid && !fs.existsSync(dir) && !_sourceStillUsed(userData, sourceUuid)) {
       const sr = require('./soundFontSources').deleteSource(userData, sourceUuid);

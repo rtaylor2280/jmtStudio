@@ -2827,6 +2827,10 @@ async function applyReplace({
     try { fs.rmSync(snapshotPath, { recursive: true, force: true }); } catch {}
   }
 
+  // A receipt no restored source holds is not kept: a receipt goes with its source. Before the
+  // tally, so the completion does not count what is about to go.
+  try { require('./soundFontAttachments').pruneUnlinkedAttachments(userData); } catch {}
+
   // Tally what landed in the fresh library so the renderer's completion
   // modal can stamp "Restored N sources, M fonts, P common folders." The
   // bucket dirs are authoritative — counts whatever's actually on disk
@@ -3982,7 +3986,10 @@ async function applyMerge({
         rollbackLog.push(() => {
           for (const p of attCreated) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} }
         });
-        counts.attachments.added = attCreated.filter((p) => !_isPictureDir(p)).length;
+        // Every attachment rode along; the ones no source in the library holds go now, before
+        // they are counted, because a receipt goes with its source.
+        try { require('./soundFontAttachments').pruneUnlinkedAttachments(userData); } catch {}
+        counts.attachments.added = attCreated.filter((p) => fs.existsSync(p) && !_isPictureDir(p)).length;
       } else {
         await emitBucketSkip('Attachments');
       }

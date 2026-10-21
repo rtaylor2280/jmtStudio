@@ -1,11 +1,10 @@
 /**
  * A backup holds no library folders, stores each file once, and restores exactly  [B-498]
  *
- * The zip used to be the library tree itself, so every name a shared file had on disk was written
- * out in full (2.2 GB of library made a 4.9 GB zip), and unzipped by hand it looked like a folder
- * of fonts that could be copied to a card. Now every file's bytes are a numbered object under
- * store/, paths.json maps each library path to its object, and a plainly named file at the top
- * says what the zip is.
+ * A zip that is the library tree writes every name a shared file has on disk out in full (2.2 GB
+ * of library made a 4.9 GB zip), and unzipped by hand it looks like a folder of fonts that could
+ * be copied to a card. So every file's bytes are a numbered object under store/, paths.json maps
+ * each library path to its object, and a plainly named file at the top says what the zip is.
  *
  * What has to hold, each checked on a real export and a real restore:
  *   - the raw zip carries no library path at all, only the manifest, the instruction file, the
@@ -135,8 +134,8 @@ const rawPaths = async (dest) => {
      /on [A-Z][a-z]+ \d{1,2}, \d{4}\./.test(text) && !/T\d\d:\d\d/.test(text), text.split('\n').pop() || text);
 
   // Font_B's hum is a second name for Font_A's: stored once, so the bar must not count it twice.
-  // (Not "ends exactly at its total": the export stamps each meta.json after the size was taken,
-  // so those arrive a few hundred bytes heavier than counted. That predates this format.)
+  // Not that the bar ends exactly at its total: the export stamps each meta.json after the size was
+  // taken, so those arrive a few hundred bytes heavier than counted.
   const withTotal = ticks.filter((t) => t.totalBytes);
   const last = withTotal[withTotal.length - 1];
   const onDisk = wav(1).length + wav(2).length;
