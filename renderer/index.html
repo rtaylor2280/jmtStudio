@@ -49636,6 +49636,9 @@ require(['vs/editor/editor.main'], function () {
           const _srcList = Array.from(_srcSeen.values());
           // An item that would do nothing is not rendered, per ui-components.md. A font with no
           // source behind it has nothing to export.
+          // Edit source… straight from the card, skipping the font page, when the selection
+          // comes from one source. As on the common folder menu, it sits with Export source….
+          if (_srcList.length === 1) mkItem('Edit source…', '', () => _sfOpenSourceDetail(_srcList[0].uuid));
           if (_srcList.length) {
             const _n = _srcList.length;
             mkItem(_n === 1 ? '↗ Export source…' : `↗ Export source (${_n})…`, null, async () => {
