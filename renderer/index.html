@@ -37280,6 +37280,10 @@ require(['vs/editor/editor.main'], function () {
         // abort the rest — collect them and surface at the end.
         const entryEditFailures = [];
         if (_sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size > 0) {
+          // Names first and all together, so one font can take a name another gives up in the same
+          // save (a swap, or a reuse). Descriptions follow, each under the font's name after that.
+          const renames = [];
+          const descs = [];
           for (const [origName, pending] of _sfSourceEdit.entryEdits) {
             // If the row is still in edit mode, prefer the current live input
             // values over the pending state — they might be newer than the
@@ -37298,16 +37302,26 @@ require(['vs/editor/editor.main'], function () {
             const origMeta = (cached && cached.meta) || {};
             const nameChanged = cleanName && cleanName !== origName;
             const descChanged = cleanDesc !== (origMeta.description || '');
-            if (!nameChanged && !descChanged) continue;
+            if (nameChanged) renames.push({ from: origName, to: cleanName });
+            if (descChanged) descs.push({ origName, description: cleanDesc });
+          }
+          const nowNamed = new Map();
+          if (renames.length) {
             try {
-              const er = await window.electronAPI.updateEntryMeta({
-                currentName: origName,
-                newName: nameChanged ? cleanName : undefined,
-                updates: descChanged ? { description: cleanDesc } : {},
-              });
-              if (!er || !er.ok) entryEditFailures.push({ name: origName, error: (er && er.error) || 'unknown error' });
+              const rr = await window.electronAPI.renameEntries({ renames });
+              for (const r of (rr && rr.renamed) || []) nowNamed.set(r.from, r.to);
+              for (const f of (rr && rr.failures) || []) entryEditFailures.push({ name: f.from, error: f.error || 'unknown error' });
             } catch (err) {
-              entryEditFailures.push({ name: origName, error: String(err && err.message || err) });
+              for (const r of renames) entryEditFailures.push({ name: r.from, error: String(err && err.message || err) });
+            }
+          }
+          for (const d of descs) {
+            const name = nowNamed.get(d.origName) || d.origName;
+            try {
+              const er = await window.electronAPI.updateEntryMeta({ currentName: name, updates: { description: d.description } });
+              if (!er || !er.ok) entryEditFailures.push({ name, error: (er && er.error) || 'unknown error' });
+            } catch (err) {
+              entryEditFailures.push({ name, error: String(err && err.message || err) });
             }
           }
         }

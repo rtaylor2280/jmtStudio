@@ -272,6 +272,12 @@ app.whenReady().then(() => {
       console.log(`[startup] cleared ${sw.swept} abandoned attachment staging folder(s)`);
     }
   } catch {}
+  // A batch of font renames caught between its two moves by a kill is finished, so no font is left
+  // under a temporary name.
+  try {
+    const fr = soundFontEntries.finishInterruptedRenames(app.getPath('userData'));
+    if (fr && fr.finished) console.log(`[startup] finished ${fr.finished} interrupted font rename(s)`);
+  } catch {}
   // A receipt no source holds goes, as it would have when its source was deleted. At startup no
   // import or restore is in flight, so nothing being linked can be caught half way.
   try {
@@ -2317,6 +2323,14 @@ ipcMain.handle('entries:updateMeta', (_, { currentName, newName, updates } = {})
     });
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:renameMany', (_, { renames } = {}) => {
+  try {
+    return soundFontEntries.renameEntries(app.getPath('userData'), renames);
+  } catch (err) {
+    return { ok: false, renamed: [], failures: [{ from: '', error: String(err && err.message || err) }] };
   }
 });
 

@@ -366,6 +366,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createEntry:           (params)     => ipcRenderer.invoke('entries:create', params),
   duplicateEntry:        (params)     => ipcRenderer.invoke('entries:duplicate', params),
   updateEntryMeta:       (params)     => ipcRenderer.invoke('entries:updateMeta', params),
+  renameEntries:         (params)     => ipcRenderer.invoke('entries:renameMany', params),
   deleteEntry:           (params)     => ipcRenderer.invoke('entries:delete', params),
   markEntrySeen:         (params)     => ipcRenderer.invoke('entries:markSeen', params),
   markEntryNew:          (params)     => ipcRenderer.invoke('entries:markNew', params),

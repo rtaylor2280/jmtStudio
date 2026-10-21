@@ -839,6 +839,117 @@ function _projectSourceFieldsOntoEntry(entryMeta, sourceMeta) {
   entryMeta.vendorAutoDetected = sourceMeta.vendorAutoDetected === true;
 }
 
+// RENAMES ARE CHECKED AND APPLIED AS A SET, so a name another font is giving up in the same save is
+// free to take. Renaming one at a time refused a swap (Cal_Blue <-> Cal_Cyan), reusing a name the
+// next row frees, and even a change of capitalisation, which on a case-insensitive drive "collides"
+// with the font's own folder (2026-10-21).
+const RENAME_TMP_RE = /^(.+)\.jmt-rename-\d+$/;
+
+// Validates a batch of { from, to } against the library and against itself. Nothing is renamed.
+// Returns { ok, plan: [{ from, to }] (no-ops dropped), errors: [{ from, error, existing? }] }.
+function _planRenames(root, renames) {
+  const plan = [];
+  const errors = [];
+  for (const r of renames || []) {
+    const from = String((r && r.from) || '');
+    const to = _sanitizeEntryName(r && r.to);
+    if (!from) continue;
+    if (!to) { errors.push({ from, error: 'Invalid new name' }); continue; }
+    if (to === from) continue;
+    if (!fs.existsSync(path.join(root, from))) { errors.push({ from, error: `Entry not found: ${from}` }); continue; }
+    plan.push({ from, to });
+  }
+  // Compared without case: on Windows and macOS two names that differ only in case are one folder.
+  const present = new Set();
+  try { for (const n of fs.readdirSync(root)) present.add(n.toLowerCase()); } catch {}
+  const leaving = new Set(plan.map((p) => p.from.toLowerCase()));
+  const taken = new Map();
+  for (const p of plan) {
+    const lc = p.to.toLowerCase();
+    if (taken.has(lc)) {
+      errors.push({ from: p.from, error: `"${taken.get(lc)}" and "${p.from}" would both be named "${p.to}"` });
+      continue;
+    }
+    taken.set(lc, p.from);
+    if (present.has(lc) && !leaving.has(lc)) errors.push({ from: p.from, error: `An entry named "${p.to}" already exists`, existing: true });
+  }
+  return { ok: errors.length === 0, plan, errors };
+}
+
+// Every folder first moves to a temporary name carrying its final name, then all move to their final
+// names, so no step ever lands on a name still in use. A failure before any final move puts every
+// folder back. Interrupted between the two (a killed app), finishInterruptedRenames completes it.
+function _applyRenames(root, plan) {
+  const stamp = Date.now();
+  const moved = [];
+  for (const p of plan) {
+    const tmp = `${p.to}.jmt-rename-${stamp}`;
+    try {
+      fs.renameSync(path.join(root, p.from), path.join(root, tmp));
+      moved.push({ ...p, tmp });
+    } catch (err) {
+      for (const m of moved.reverse()) { try { fs.renameSync(path.join(root, m.tmp), path.join(root, m.from)); } catch {} }
+      return { renamed: [], failures: plan.map((q) => ({ from: q.from, error: q === p ? err.message : 'not renamed: another font in this save could not be' })) };
+    }
+  }
+  const renamed = [];
+  const failures = [];
+  for (const m of moved) {
+    try {
+      fs.renameSync(path.join(root, m.tmp), path.join(root, m.to));
+      renamed.push({ from: m.from, to: m.to });
+    } catch (err) {
+      try { fs.renameSync(path.join(root, m.tmp), path.join(root, m.from)); } catch {}
+      failures.push({ from: m.from, error: err.message });
+    }
+  }
+  return { renamed, failures };
+}
+
+function _stampEntryName(dir, name) {
+  const metaPath = path.join(dir, 'meta.json');
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  meta.name = name;
+  meta.updatedAt = new Date().toISOString();
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+}
+
+// Renames several fonts as one operation. Validated as a whole first: if any rename is refused,
+// none happens. Returns { ok, renamed: [{ from, to }], failures: [{ from, error, existing? }] }.
+function renameEntries(userData, renames) {
+  const root = entriesRoot(userData);
+  const planned = _planRenames(root, renames);
+  if (!planned.ok) return { ok: false, renamed: [], failures: planned.errors };
+  const done = _applyRenames(root, planned.plan);
+  for (const r of done.renamed) {
+    try { _stampEntryName(path.join(root, r.to), r.to); }
+    catch (err) { done.failures.push({ from: r.from, error: `Renamed, but its record could not be updated: ${err.message}` }); }
+  }
+  return { ok: done.failures.length === 0, renamed: done.renamed, failures: done.failures };
+}
+
+// Startup: a folder still under a temporary rename name was caught between the two moves. It goes to
+// the name it was headed for when that is free; otherwise it stays, listed under the temporary name,
+// for the user to rename (nothing is lost either way).
+function finishInterruptedRenames(userData) {
+  const root = entriesRoot(userData);
+  let finished = 0;
+  let names;
+  try { names = fs.readdirSync(root); } catch { return { finished }; }
+  const present = new Set(names.map((n) => n.toLowerCase()));
+  for (const n of names) {
+    const m = RENAME_TMP_RE.exec(n);
+    if (!m || present.has(m[1].toLowerCase())) continue;
+    try {
+      fs.renameSync(path.join(root, n), path.join(root, m[1]));
+      present.add(m[1].toLowerCase());
+      try { _stampEntryName(path.join(root, m[1]), m[1]); } catch {}
+      finished++;
+    } catch {}
+  }
+  return { finished };
+}
+
 function updateEntryMeta({ userData, currentName, newName, updates }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!currentName) return { ok: false, error: 'Missing currentName' };
@@ -849,11 +960,10 @@ function updateEntryMeta({ userData, currentName, newName, updates }) {
   const curDir = path.join(root, currentName);
   if (!fs.existsSync(curDir)) return { ok: false, error: `Entry not found: ${currentName}` };
 
-  // Rename target collision check.
+  // Rename target collision check, by the same rule as a batch of one.
   if (isRename) {
-    if (!sanitizedNew) return { ok: false, error: 'Invalid new name' };
-    const newDir = path.join(root, sanitizedNew);
-    if (fs.existsSync(newDir)) return { ok: false, error: `An entry named "${sanitizedNew}" already exists`, existing: true };
+    const plan = _planRenames(root, [{ from: currentName, to: sanitizedNew }]);
+    if (!plan.ok) return { ok: false, error: plan.errors[0].error, existing: plan.errors[0].existing };
   }
 
   // Read current meta.
@@ -893,15 +1003,11 @@ function updateEntryMeta({ userData, currentName, newName, updates }) {
   let finalDir = curDir;
   let finalName = currentName;
   if (isRename) {
-    const newDir = path.join(root, sanitizedNew);
-    try {
-      fs.renameSync(curDir, newDir);
-      finalDir = newDir;
-      finalName = sanitizedNew;
-      meta.name = finalName;
-    } catch (err) {
-      return { ok: false, error: `Rename failed: ${err.message}` };
-    }
+    const done = _applyRenames(root, [{ from: currentName, to: sanitizedNew }]);
+    if (done.failures.length) return { ok: false, error: `Rename failed: ${done.failures[0].error}` };
+    finalDir = path.join(root, sanitizedNew);
+    finalName = sanitizedNew;
+    meta.name = finalName;
   }
   meta.updatedAt = new Date().toISOString();
 
@@ -2697,6 +2803,8 @@ module.exports = {
   createEntry,
   duplicateEntry,
   updateEntryMeta,
+  renameEntries,
+  finishInterruptedRenames,
   deleteEntry,
   listEntriesBySourceUuid,
   listEntryDocs,
