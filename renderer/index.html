@@ -28469,9 +28469,10 @@ require(['vs/editor/editor.main'], function () {
         // instructions; the user does the download + uses 'Pick .zip
         // file…' to bring it back into JMT Studio.
         const entry = _sfVpCatalog?.[_sfVpSelectedVersion]?.find(e => e.id === entryId);
-        // [B-494] A voicepack with no direct link (V2 English F and G) opens the creator's folder in
-        // the in-app browser, the same as the More tab's links, so the download is caught and
-        // imported instead of being left for the user to carry back by hand.
+        // [B-494] A voicepack with no direct link opens the creator's folder in the in-app browser,
+        // the same as the More tab's links, so the download is caught and imported instead of being
+        // left for the user to carry back by hand. Every catalog entry has a direct link today, so
+        // this is the fallback for one added without.
         if (entry && entry.installType === 'external') {
           if (entry.installUrl) await _sfVpBrowserImport(entry.installUrl, entry.baseName);
           return;

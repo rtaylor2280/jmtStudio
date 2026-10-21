@@ -7,8 +7,7 @@
 //   V2 — in-app download from per-variant Dropbox URLs. (This comment
 //        used to say "preview-only, install via external link"; that was
 //        true before the per-variant tokens landed and is not any more.
-//        English F and G are the only externals left, since they have no
-//        token — see installType below.) The V2 mmain.wav is byte-identical to V1's
+//        Every V2 variant has a token now; see installType below.) The V2 mmain.wav is byte-identical to V1's
 //        for every variant that exists in both (19 of 20), so the
 //        V2 sample reuses V1's sibling sample URL — no bundle fetch
 //        needed. English G is the one V2-only variant; its sample
@@ -20,8 +19,8 @@
 // mirror that goes stale the moment the user updates a pack, and a 435MB
 // download for someone who wants one ~10MB variant. Per-variant Dropbox
 // links avoid both: the user pulls the one variant they want, from the user,
-// always current. English F and G have no per-variant link yet and still
-// redirect to the folder for a manual download + "Pick .zip file…" import.
+// always current. A variant without a per-variant link would open the folder in the in-app
+// browser instead; none is without one today.
 //
 // Attribution: all voicepacks are by Brian Conner (NoSloppy), released
 // under CC BY 4.0. Surfaced in the picker modal footer.
@@ -46,9 +45,9 @@ const V1_VARIANTS = {
 
 // V2 catalog entries. Each variant has its own Dropbox direct-download
 // URL (token unique per file, can't be constructed — sourced manually
-// from the folder UI). 17 of 20 variants have URLs hardcoded here;
-// English F and G fall back to external install (browser redirect to
-// Brian's folder) until those URLs are added. ChineseA is named without
+// from the folder UI). Every variant has its URL hardcoded here; one added
+// without a token falls back to an external install (the folder, opened in
+// the in-app browser). ChineseA is named without
 // the language/variant underscore — Brian's not strictly consistent on
 // naming, so we keep baseName explicit per entry.
 //
@@ -112,8 +111,8 @@ function _buildV2Catalog() {
       variant: meta.variant,
       baseName: meta.baseName,
     };
-    // Install: direct Dropbox URL if we have the token; external
-    // browser-redirect fallback if not (English F and G currently).
+    // Install: direct Dropbox URL if we have the token; the folder, in the
+    // in-app browser, if not (no current variant lacks one).
     if (meta.token) {
       entry.installType = 'in-app';
       entry.zipUrl = _dbxUrl(meta.token, meta.baseName);
