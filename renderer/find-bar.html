@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Find</title>
+<style>
+  /* The find bar docked to the in-app browser window. Colours are the app's dark tokens. */
+  :root {
+    --jmt-blue: #025192; --c-bg-card: #222222; --c-border-heavy: #3a3a3a;
+    --c-text: #cccccc; --c-text-muted: #888888; --c-bad: #e5534b;
+  }
+  html, body { margin: 0; height: 100%; background: var(--c-bg-card); color: var(--c-text);
+    font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
+  body { display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box;
+    border: 1px solid var(--c-border-heavy); border-radius: 6px; }
+  input { flex: 1; min-width: 0; background: #111111; color: var(--c-text); border: 1px solid var(--c-border-heavy);
+    border-radius: 4px; padding: 4px 6px; font: inherit; outline: none; }
+  input:focus { border-color: var(--jmt-blue); }
+  input.none { border-color: var(--c-bad); }
+  #count { color: var(--c-text-muted); min-width: 52px; text-align: right; white-space: nowrap; }
+  button { background: transparent; color: var(--c-text); border: 1px solid transparent; border-radius: 4px;
+    width: 24px; height: 24px; padding: 0; font: inherit; cursor: pointer; line-height: 1; }
+  button:hover { border-color: var(--c-border-heavy); }
+  #thread { width: auto; padding: 0 8px; white-space: nowrap; border-color: var(--c-border-heavy); }
+  #thread[hidden] { display: none; }
+</style>
+</head>
+<body>
+  <input id="q" type="text" placeholder="Find in page" autocomplete="off" spellcheck="false">
+  <span id="count"></span>
+  <button id="prev" title="Previous (Shift+Enter)">&#9650;</button>
+  <button id="next" title="Next (Enter)">&#9660;</button>
+  <button id="thread" hidden title="Search every post in this thread with the forum's own search">Whole thread</button>
+  <button id="close" title="Close (Esc)">&#10005;</button>
+<script>
+  const q = document.getElementById('q');
+  const count = document.getElementById('count');
+  // `fresh` starts a new search (typing); without it the search moves to the next or previous match.
+  const run = (forward, fresh) => window.findBar.query({ text: q.value, forward, fresh });
+  q.addEventListener('input', () => run(true, true));
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); run(!e.shiftKey, false); }
+    else if (e.key === 'Escape') { e.preventDefault(); window.findBar.close(); }
+    else if (e.key === 'F3') { e.preventDefault(); run(!e.shiftKey, false); }
+  });
+  document.getElementById('prev').addEventListener('click', () => { run(false, false); q.focus(); });
+  document.getElementById('next').addEventListener('click', () => { run(true, false); q.focus(); });
+  document.getElementById('close').addEventListener('click', () => window.findBar.close());
+  // A forum thread only keeps the posts near the scroll position in the page, so find-in-page cannot
+  // reach the rest. On a Discourse thread this hands the words to the forum's own search for it.
+  const thread = document.getElementById('thread');
+  thread.addEventListener('click', () => { if (q.value) window.findBar.searchThread(q.value); });
+  window.findBar.onContext(({ thread: isThread }) => { thread.hidden = !isThread; });
+  window.findBar.onResult(({ active, matches }) => {
+    if (!q.value) { count.textContent = ''; q.classList.remove('none'); return; }
+    count.textContent = matches ? `${active} of ${matches}` : 'No matches';
+    q.classList.toggle('none', !matches);
+  });
+  // Re-opening the bar focuses it and selects what was typed, so a new search can be typed over it.
+  window.findBar.onFocus(() => { q.focus(); q.select(); });
+  q.focus();
+</script>
+</body>
+</html>

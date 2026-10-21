@@ -5463,6 +5463,105 @@ const DROPBOX_DOWNLOAD_ONLY = `(() => {
 // byte progress, save to a temp file, and resolve with its path. Closing the
 // window without downloading cancels. This covers OneDrive / KSith / login-gated
 // vendors the headless peeler can't reach.
+// ── Find in page, for the in-app browser ──────────────────────────────────────────────────────
+// Ctrl+F opens a small find bar docked to the window's top-right corner; Enter / Shift+Enter step
+// through matches, Esc closes it and clears the highlights. It is a child window of its own, so it
+// never touches the creator's page, and Chromium's find-in-page does the searching.
+const _findBars = new Map();   // find bar webContents id -> { bar, page }
+function _attachFindBar(page) {
+  let bar = null;
+  const W = 480, H = 40;
+  const place = () => {
+    if (!bar || bar.isDestroyed() || page.isDestroyed()) return;
+    const b = page.getContentBounds();
+    bar.setBounds({ x: b.x + b.width - W - 16, y: b.y + 8, width: W, height: H });
+  };
+  const open = () => {
+    if (bar && !bar.isDestroyed()) { bar.show(); bar.focus(); bar.webContents.send('findbar:focus'); return; }
+    bar = new BrowserWindow({
+      parent: page, frame: false, resizable: false, movable: false, minimizable: false,
+      maximizable: false, skipTaskbar: true, show: false, width: W, height: H,
+      backgroundColor: '#222222', ...WINDOW_ICON,
+      webPreferences: { preload: path.join(__dirname, 'findBarPreload.js'), sandbox: true, contextIsolation: true },
+    });
+    const id = bar.webContents.id;
+    _findBars.set(id, { bar, page });
+    bar.loadFile(path.join(__dirname, 'renderer', 'find-bar.html'));
+    bar.once('ready-to-show', () => {
+      place(); bar.show(); bar.focus();
+      const ctx = _findBarContext.get(page.webContents.id);
+      if (ctx) ctx();
+    });
+    bar.on('closed', () => {
+      _findBars.delete(id);
+      bar = null;
+      try { if (!page.isDestroyed()) page.webContents.stopFindInPage('clearSelection'); } catch {}
+    });
+  };
+  page.on('move', place);
+  page.on('resize', place);
+  page.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    if ((input.control || input.meta) && String(input.key).toLowerCase() === 'f') { e.preventDefault(); open(); }
+    else if (input.key === 'Escape' && bar && !bar.isDestroyed()) { e.preventDefault(); bar.close(); }
+  });
+  page.webContents.on('found-in-page', (_e, r) => {
+    if (bar && !bar.isDestroyed()) bar.webContents.send('findbar:result', { active: r.activeMatchOrdinal, matches: r.matches });
+  });
+  // Is the page a Discourse thread? The URL has to carry a topic id AND the page has to say it is
+  // Discourse (its generator meta tag), so another site's /t/123 path never offers the button.
+  const tellContext = async () => {
+    if (!bar || bar.isDestroyed() || page.isDestroyed()) return;
+    let thread = false;
+    try {
+      if (_discourseTopicId(page.webContents.getURL())) {
+        const gen = await page.webContents.executeJavaScript(
+          "(document.querySelector('meta[name=generator]') || {}).content || ''", true);
+        thread = /discourse/i.test(String(gen));
+      }
+    } catch { thread = false; }
+    if (bar && !bar.isDestroyed()) bar.webContents.send('findbar:context', { thread });
+  };
+  page.webContents.on('did-navigate', tellContext);
+  page.webContents.on('did-navigate-in-page', tellContext);
+  page.webContents.on('did-finish-load', tellContext);
+  _findBarContext.set(page.webContents.id, tellContext);
+}
+// The topic id in a Discourse thread URL: /t/<slug>/<id>[/<post>] or /t/<id>.
+function _discourseTopicId(url) {
+  try {
+    const m = new URL(url).pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/\d+)?\/?$/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+const _findBarContext = new Map();   // page webContents id -> re-check whether it is a thread
+ipcMain.on('findbar:query', (e, { text, forward = true, fresh = true } = {}) => {
+  const f = _findBars.get(e.sender.id);
+  if (!f || f.page.isDestroyed()) return;
+  if (!text) {
+    f.page.webContents.stopFindInPage('clearSelection');
+    e.sender.send('findbar:result', { active: 0, matches: 0 });
+    return;
+  }
+  // Electron's `findNext` means "begin a new search session", so a fresh search passes true.
+  f.page.webContents.findInPage(String(text), { forward, findNext: !!fresh });
+});
+// "Whole thread": the forum's own search, limited to this thread, shown in the same window. Its
+// results list every matching post; clicking one goes to that post.
+ipcMain.on('findbar:thread', (e, { text } = {}) => {
+  const f = _findBars.get(e.sender.id);
+  if (!f || f.page.isDestroyed() || !text) return;
+  const url = f.page.webContents.getURL();
+  const id = _discourseTopicId(url);
+  if (!id) return;
+  const origin = new URL(url).origin;
+  f.page.webContents.loadURL(`${origin}/search?q=${encodeURIComponent(`${text} topic:${id}`)}`);
+});
+ipcMain.on('findbar:close', (e) => {
+  const f = _findBars.get(e.sender.id);
+  if (f && !f.bar.isDestroyed()) f.bar.close();
+});
+
 ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = {}) => {
   const os = require('os');
   const fsL = require('fs');
@@ -5605,6 +5704,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
       ...WINDOW_ICON,
       webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true },
     });
+    _attachFindBar(bw);
     // Auto-hidden mode: we already have the vendor's session cookies, so try to
     // let the download fire with no window at all. If instead a PAGE finishes
     // loading (a login screen, or a page that needs a click) and no download has

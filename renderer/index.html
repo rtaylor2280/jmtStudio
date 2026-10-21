@@ -28469,11 +28469,11 @@ require(['vs/editor/editor.main'], function () {
         // instructions; the user does the download + uses 'Pick .zip
         // file…' to bring it back into JMT Studio.
         const entry = _sfVpCatalog?.[_sfVpSelectedVersion]?.find(e => e.id === entryId);
+        // [B-494] A voicepack with no direct link (V2 English F and G) opens the creator's folder in
+        // the in-app browser, the same as the More tab's links, so the download is caught and
+        // imported instead of being left for the user to carry back by hand.
         if (entry && entry.installType === 'external') {
-          if (entry.installUrl && window.electronAPI?.openExternal) {
-            window.electronAPI.openExternal(entry.installUrl);
-          }
-          _sfVpSetStatus(`Your browser opened the source folder. Download "${entry.baseName}.zip" from there, then close this window and use "Pick zip file…" in the import chooser to add it.`, 'success');
+          if (entry.installUrl) await _sfVpBrowserImport(entry.installUrl, entry.baseName);
           return;
         }
         _sfVpStopSample();
@@ -28707,14 +28707,17 @@ require(['vs/editor/editor.main'], function () {
 
       // The font door's tier-2 capture, pointed at the common-folder import. Closing the browser
       // window without downloading is a cancel and says nothing.
-      const _sfVpBrowserImport = async (url) => {
+      // `fileHint` names the zip to pick when the link opens a folder of several.
+      const _sfVpBrowserImport = async (url, fileHint = null) => {
         _sfCloseVoicepackPicker();
         const P = _sfDeleteProgress;
         P.show('Download voicepack', '');
         const startMs = Date.now();
         const fmtDur = (sec) => (window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`);
         let label = 'Finish the download in the browser window…';
-        let detail = 'Click the creator’s Download button. JMT Studio will grab it and import it automatically.';
+        let detail = fileHint
+          ? `Open "${fileHint}.zip" in the folder and click its Download button. JMT Studio will grab it and import it automatically.`
+          : 'Click the creator’s Download button. JMT Studio will grab it and import it automatically.';
         let downloading = false;
         const paint = () => {
           if (!downloading) P.setIndeterminate(label, detail, `${fmtDur((Date.now() - startMs) / 1000)} elapsed`);
