@@ -33584,16 +33584,26 @@ require(['vs/editor/editor.main'], function () {
           // source name and the font name are essentially the same thing,
           // so auto-tagging would be noise.
           const isBundle = (_sfImport.candidates || []).length >= 2;
-          const tags = (isBundle && userBundle) ? [userBundle] : [];
+          // A font exported from JMT Studio carries its own tags, description and creator. The
+          // review shows none of those, so the user made no decision about them here, and a blank
+          // sent in their place would erase them.
+          const _curPick = (!isAddMore && _sfImport.curation && _sfImport.curation.entries)
+            ? (_sfImport.curation.entries[(pick.candidate && pick.candidate.path) || ''] || {}) : {};
+          const _curPickTags = Array.isArray(_curPick.tags) && _curPick.tags.length ? _curPick.tags : null;
+          const tags = _curPickTags ? _curPickTags.slice() : ((isBundle && userBundle) ? [userBundle] : []);
+          // The creator field is seeded from the carried source creator, so it still holding that
+          // value means the user left it alone, and the font's own carried creator stands.
+          const _curSrcVendor = (_sfImport.curation && _sfImport.curation.source && _sfImport.curation.source.vendor) || null;
+          const pickAuthor = (_curPick.author && entryAuthor === _curSrcVendor) ? _curPick.author : entryAuthor;
           const res = await window.electronAPI.createEntry({
             sourceUuid: _sfImport.uuid,
             candidate: pick.candidate,
             name: pick.name,
             metadata: {
-              author: entryAuthor,
+              author: pickAuthor,
               purchased,
               acquisitionDate: purchaseDate,
-              description: '',
+              description: _curPick.description || '',
               tags,
               demoUrl: pick.demoUrl || '',
             },

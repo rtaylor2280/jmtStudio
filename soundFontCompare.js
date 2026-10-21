@@ -347,7 +347,7 @@ function buildLibraryIndex(userData) {
     if (!mf || !Array.isArray(mf.records)) { unmatchable++; continue; }
     const sets = setsFromRecords(mf.records);
     if (sets.core.size === 0) { unmatchable++; continue; }
-    index.push({ name: d.name, sets });
+    index.push({ name: d.name, sets, sourceUuid: (meta && meta.sourceUuid) || null });
   }
   return { index, unmatchable };
 }

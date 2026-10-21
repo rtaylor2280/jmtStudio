@@ -1313,7 +1313,17 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   const _guidedNotes   = src.guidedNotes   && String(src.guidedNotes).trim();
   const _guidedDate    = src.guidedAcquisitionDate && String(src.guidedAcquisitionDate).trim();
   const vendorFromUser = !!_guidedVendor;
-  let effectiveVendor = vendorFromUser ? _guidedVendor : detectedVendor;
+  // A source exported from JMT Studio carries the user's own answers in its curation sidecar,
+  // already written onto the source meta by the import above. Those were decided by a person, so
+  // they outrank detection; only what the user types in this review outranks them.
+  let _carried = null;
+  try {
+    const _sm = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(userData), sourceUuid));
+    _carried = (_sm && _sm.curation) || null;
+  } catch {}
+  const _carriedSource = (_carried && _carried.source) || {};
+  const _carriedVendor = !vendorFromUser && _carriedSource.vendor ? String(_carriedSource.vendor) : null;
+  let effectiveVendor = vendorFromUser ? _guidedVendor : (_carriedVendor || detectedVendor);
   // An UNDETECTED creator stays empty on every path, SD card included, so it hits
   // creator_empty -> Needs review. "Undetected" (we couldn't find it) and "Unknown"
   // (a real, deliberately-anonymous creator) are different answers: we never auto-stamp
@@ -1325,7 +1335,8 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // vendor site, but only when the (auto-detected or user-confirmed) vendor
   // still matches what we detected — a different typed vendor gets no guess.
   const detectedVendorWebsite = (!vendorFromUser || _guidedVendor === detectedVendor) ? detectedWebsite : null;
-  const effectiveWebsite = _guidedWebsite || detectedVendorWebsite;
+  const effectiveWebsite = _guidedWebsite
+    || (_carriedVendor ? (_carriedSource.vendorWebsite || null) : detectedVendorWebsite);
   // purchased default order of precedence:
   //   1. Vendor's purchasedDefault when the detector knows (paid-only/free-only)
   //   2. "free" in the source filename
@@ -1336,7 +1347,9 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   else purchasedDefault = true;
   // The guided Free-content checkbox (sent on every guided-path source)
   // overrides the default; quick import sends none and keeps the default.
-  const purchased = (typeof src.guidedFree === 'boolean') ? !src.guidedFree : purchasedDefault;
+  const purchased = (typeof src.guidedFree === 'boolean') ? !src.guidedFree
+    : (typeof _carriedSource.purchased === 'boolean') ? _carriedSource.purchased
+    : purchasedDefault;
   // Persist vendor info onto the source meta (source of truth; projected onto
   // entries at read time). For structural matches we still apply the value AND
   // mark needsReview so the user can verify.
@@ -1345,7 +1358,7 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
       soundFontSources.updateSourceMeta(userData, sourceUuid, {
         vendor: effectiveVendor,
         vendorWebsite: effectiveWebsite,
-        vendorAutoDetected: !vendorFromUser,
+        vendorAutoDetected: !vendorFromUser && !_carriedVendor,
         purchased,
       });
     } catch {}
@@ -1394,9 +1407,22 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // Alternate versions (older V1 when V2 also shipped) stay in the source
   // and surface in the source-detail picker for manual import — the user
   // explicitly opts in, rather than getting both versions auto-installed.
-  const candidates = allCandidates.filter(c => !c.alternateVersion);
-  const alternatesSkipped = allCandidates.length - candidates.length;
-  if (candidates.length === 0) {
+  // An export records which of its fonts the user had (`importedPaths`): a customized font's
+  // original is left off, because the customized copy rode the export instead and the source
+  // import has already restored it. When the list is there it IS the pick, the same set the
+  // single review shows checked, so the version rule above does not apply.
+  const _carriedPaths = (_carried && Array.isArray(_carried.importedPaths)) ? new Set(_carried.importedPaths) : null;
+  const candidates = _carriedPaths
+    ? allCandidates.filter(c => _carriedPaths.has(c.path || ''))
+    : allCandidates.filter(c => !c.alternateVersion);
+  const alternatesSkipped = _carriedPaths ? 0 : allCandidates.length - candidates.length;
+  // A source whose only font was customized has nothing left to take, and it is not empty: its
+  // restored fonts hold it.
+  let _restoredHere = 0;
+  if (candidates.length === 0 && _carriedPaths) {
+    try { _restoredHere = soundFontEntries.listEntriesBySourceUuid(userData, sourceUuid).length; } catch {}
+  }
+  if (candidates.length === 0 && !_restoredHere) {
     // Source imported but no fonts found inside. Delete the source so the
     // orphan cleanup doesn't have to and the user can re-pick later.
     try { soundFontSources.deleteSource(userData, sourceUuid); } catch {}
@@ -1487,6 +1513,12 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
         if (nm) { proposedName = cleanSuggestedName(nm) || nm; nameRecoveredFromDocx = true; }
       } catch { /* leave the fallback name */ }
     }
+    // The name the user gave this font, if its export carried one. Only a name typed in this
+    // review outranks it.
+    const _carriedBlock = (_carried && _carried.entries && _carried.entries[cand.path || '']) || null;
+    const _carriedName = _carriedBlock && typeof _carriedBlock.name === 'string' ? _carriedBlock.name.trim() : '';
+    const _useCarriedName = !!_carriedName && !(src.guidedName && candidates.length === 1);
+    if (_useCarriedName) proposedName = _carriedName;
     const reviewReasons = [];
     // Bundle prepend for ambiguous candidate names. Two triggers:
     //   1. Variants (cand.isVariant): the detector emitted multiple
@@ -1502,7 +1534,7 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
     //      like JURASSIC / ULTRON / STARGATE (Mountain Sabers Free
     //      Pack). Length <= 4 catches the acronyms (longest Star
     //      Wars film code is ROTJ at 4) without over-firing.
-    if (bundleName && candidates.length >= 2) {
+    if (bundleName && candidates.length >= 2 && !_useCarriedName) {
       const isVariant = !!cand.isVariant;
       const isShortAcronym = proposedName.length <= 4
         || /^[vV]?\d+(\.\d+)*$/.test(proposedName);
@@ -1562,27 +1594,45 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
         skipped: cand.skippedVersions.map(s => s.version),
       };
     }
+    // This font's own block from the carried curation: the user's saved creator, link, tags and
+    // notes. Order is what we derived < what was carried < what the user typed in this review.
+    let carriedEntry = {};
+    try {
+      carriedEntry = (_carried && require('./soundFontCuration').entryCurationFor(_carried, cand.path || '')) || {};
+    } catch {}
+    const _carriedTags = Array.isArray(carriedEntry.tags) && carriedEntry.tags.length ? carriedEntry.tags : null;
+    if (_carriedTags) {
+      const shared = tags.filter(t => !_carriedTags.includes(t) && !(bundleName && t === bundleName));
+      tags.length = 0;
+      tags.push(..._carriedTags, ...shared);
+    }
     const meta = {
       tags,
-      author: effectiveVendor || '',
-      purchased,
-      description: initialDescription,
+      author: (vendorFromUser ? _guidedVendor : (carriedEntry.author || effectiveVendor)) || '',
+      purchased: (typeof src.guidedFree !== 'boolean' && typeof carriedEntry.purchased === 'boolean')
+        ? carriedEntry.purchased : purchased,
+      description: carriedEntry.description || initialDescription,
       // Entry-level guided Details: link is the entry's demoUrl; notes are
       // userNotes. Acquisition date is a source-of-truth field (source.
       // purchaseDate), written directly to the source meta above so the
       // read-time projection can't clobber it with the folder's file date.
-      demoUrl: _guidedLink || undefined,
-      userNotes: _guidedNotes || undefined,
+      demoUrl: _guidedLink || carriedEntry.demoUrl || undefined,
+      userNotes: _guidedNotes || carriedEntry.userNotes || undefined,
+      linkedStyleLibraryEntry: carriedEntry.linkedStyleLibraryEntry || undefined,
       // Other fields default through createEntry's existing logic
       // (acquisitionDate falls back to sourceFileDate -> importedAt).
     };
+    // createEntry lays its own copy of the carried block UNDER what it is given, so a key present
+    // here with nothing in it would erase a carried value. Send only what holds something.
+    for (const k of Object.keys(meta)) if (meta[k] === undefined) delete meta[k];
     // creator_unknown_no_website was meant to flag manually-typed
     // vendors that aren't in our known list. In bulk we never type
     // manually — vendors are either auto-detected (in which case a
     // null website is intentional, like Orlando Dove who distributes
     // via YouTube only) or absent entirely. So only creator_empty
     // matters as a review trigger here.
-    if (!effectiveVendor) reviewReasons.push('creator_empty');
+    // Judged on the creator the font will actually show: its own, else its source's.
+    if (!meta.author && !effectiveVendor) reviewReasons.push('creator_empty');
     if (versionInfo) reviewReasons.push('multiple_versions_in_source');
     // Low-confidence name flag for QUICK import. The scan fell back to a
     // generic folder name (BankNN, a numbered sibling series) with no readme
@@ -1638,7 +1688,9 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
       if (mf && Array.isArray(mf.records)) {
         const { index } = compare.buildLibraryIndex(userData);
         const ownNames = new Set(created.map(e => e.name.toLowerCase()));
-        const others = index.filter(e => !ownNames.has(e.name.toLowerCase()));
+        // Nothing from this same source either: a customized font that rode the export is
+        // restored before this runs, and it is the user's own copy of this font, not a duplicate.
+        const others = index.filter(e => !ownNames.has(e.name.toLowerCase()) && e.sourceUuid !== sourceUuid);
         for (const ent of created) {
           if (!others.length) break;
           const m = compare.matchCandidateAgainstLibrary(mf.records, ent.candidatePath, others);
