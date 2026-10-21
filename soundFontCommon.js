@@ -2342,7 +2342,9 @@ function getCommonCustomization(userData, uuid) {
   // srcUuid is part of the key because re-pointing a common at a different source changes
   // the comparison even when its own bytes did not.
   const st = meta.customization;
-  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 1
+  // v2: a picture at the top of the folder no longer counts ([B-511]); the renderer reads the
+  // same number when it paints the sidebar from the stamp.
+  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 2
       && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
     return { ok: true, known: true, customized: !!st.customized,
              added: st.added | 0, removed: st.removed | 0, changed: st.changed | 0, cached: true };
@@ -2353,7 +2355,7 @@ function getCommonCustomization(userData, uuid) {
     try {
       const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
       m.customization = {
-        v: 1,
+        v: 2,
         customized: res.customized, added: res.added, removed: res.removed, changed: res.changed,
         forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,
         at: new Date().toISOString(),

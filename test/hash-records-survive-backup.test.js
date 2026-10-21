@@ -174,8 +174,7 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
   const dest = path.join(ud, 'out.zip');
   const r = await backup.exportBackup({ userData: ud, destPath: dest, appVersion: 'test' });
 
-  const StreamZip = require('node-stream-zip');
-  const zip = new StreamZip.async({ file: dest, skipEntryNameValidation: true });
+  const zip = await backup.openBackupZip(dest, { skipEntryNameValidation: true });   // the paths, not the stored objects
   const names = Object.keys(await zip.entries());
   const carried = names.filter(n => n.startsWith('.filehashes/') && !n.endsWith('/'));
   ok('THE ARCHIVE CONTAINS THE RECORDS — the line that did not exist',
@@ -314,10 +313,18 @@ const countIn = (dir) => { try { return fs.readdirSync(dir).length; } catch { re
     const ar = archiver('zip', { zlib: { level: 0 } });
     const done = new Promise((res, rej) => { out.on('close', res); out.on('error', rej); ar.on('error', rej); });
     ar.pipe(out);
+    // The records are rows in the paths file; dropping the rows drops them from the archive.
     for (const k of Object.keys(ents)) {
       const e = ents[k];
-      if (e.isDirectory || e.name.startsWith('.filehashes/')) continue;
-      ar.append(await zin.entryData(e.name), { name: e.name });
+      if (e.isDirectory) continue;
+      let data = await zin.entryData(e.name);
+      if (e.name === backup.PATHS_FILE) {
+        const idx = JSON.parse(data.toString('utf8'));
+        for (const p of Object.keys(idx.files)) if (p.startsWith('.filehashes/')) delete idx.files[p];
+        idx.dirs = idx.dirs.filter((d) => d !== '.filehashes' && !d.startsWith('.filehashes/'));
+        data = Buffer.from(JSON.stringify(idx));
+      }
+      ar.append(data, { name: e.name });
     }
     await ar.finalize(); await done; await zin.close();
   }

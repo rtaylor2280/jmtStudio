@@ -49,12 +49,11 @@ function wav(size, seed) {
   return b;
 }
 
-function entriesOf(zipPath) {
-  const StreamZip = require(path.join(__dirname, '..', 'node_modules', 'node-stream-zip'));
-  const z = new StreamZip.async({ file: zipPath });
-  return z.entries()
-    .then(e => Object.keys(e).map(n => n.replace(/\\/g, '/')))
-    .finally(() => z.close());
+// Read the way the app reads it: the zip stores numbered objects, the paths are the library's.
+async function entriesOf(zipPath) {
+  const z = await backup.openBackupZip(zipPath, {});
+  try { return Object.keys(await z.entries()).map(n => n.replace(/\\/g, '/')); }
+  finally { await z.close(); }
 }
 
 (async () => {

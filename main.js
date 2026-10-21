@@ -18,6 +18,13 @@ const soundFontBackup = require('./soundFontBackup');
 const soundFontBulkImport = require('./soundFontBulkImport');
 // [B-398] Main-thread stall probe. Inert unless userData/.stall-probe exists.
 const stallProbe = require('./stallProbe');
+// Every IPC handler carries its channel as a probe label, so a freeze is named by the call that
+// held the loop instead of "(idle - nothing marked)". Wrapped here, before any handler registers;
+// markAsync checks whether the probe is armed at call time, so with it off this is a passthrough.
+{
+  const _handle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => _handle(channel, stallProbe.markAsync(`ipc:${channel}`, fn));
+}
 const soundFontFileOps = require('./soundFontFileOps');
 const soundFontReorganize = require('./soundFontReorganize');
 const soundFontVoicepack = require('./soundFontVoicepack');
@@ -3037,8 +3044,51 @@ ipcMain.handle('entries:findPicture', async (_, { name } = {}) => {
   try { return { ok: true, picture: await soundFontPicture.findEntryPicture(app.getPath('userData'), name) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
-ipcMain.handle('sources:findPicture', async (_, { uuid } = {}) => {
-  try { return { ok: true, picture: await soundFontPicture.findSourcePicture(app.getPath('userData'), uuid) }; }
+// [B-511] Choose a picture file, for the Picture rows that put one in a font's own folder.
+ipcMain.handle('dialog:selectPicture', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Choose an image',
+    defaultPath: app.getPath('pictures'),
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+  });
+  if (!r.filePaths || !r.filePaths.length) return { ok: false, cancelled: true };
+  return { ok: true, filePath: r.filePaths[0] };
+});
+// [B-511] A source's own picture. Set from a chosen file, or from a given one (the temp file a
+// paste writes); kept in the attachments store, so the download itself is never touched.
+ipcMain.handle('sources:setPicture', async (_, { uuid, filePath } = {}) => {
+  try {
+    let p = filePath;
+    if (!p) {
+      const r = await dialog.showOpenDialog(win, {
+        title: 'Choose an image for this source',
+        defaultPath: app.getPath('pictures'),
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+      });
+      if (!r.filePaths || !r.filePaths.length) return { ok: false, cancelled: true };
+      p = r.filePaths[0];
+    }
+    return await soundFontAttachments.setSourcePicture(app.getPath('userData'), uuid, p);
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sources:clearPicture', (_, { uuid } = {}) => {
+  try { return soundFontAttachments.clearSourcePicture(app.getPath('userData'), uuid); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sources:ownPicture', (_, { uuid } = {}) => {
+  try {
+    // `single`: the one item built from this source, when there is exactly one. The source
+    // window's Image row then acts on that item, which is what the source shows. [B-511]
+    const items = soundFontPicture.sourceItems(app.getPath('userData'), uuid);
+    const single = items.length === 1 ? { kind: items[0].kind, id: items[0].id, label: items[0].label } : null;
+    return { ok: true, picture: soundFontAttachments.sourcePicture(app.getPath('userData'), uuid), single };
+  }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('sources:findPicture', async (_, { uuid, seed } = {}) => {
+  try { return { ok: true, picture: await soundFontPicture.findSourcePicture(app.getPath('userData'), uuid, { seed }) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -4596,7 +4646,9 @@ ipcMain.handle('sfBackup:export', async (event, { opId, destPath, skipPaths = []
         try { event.sender.send('sfBackup:progress', { opId, ...p }); } catch {}
       },
     });
-    return { ok: true, destPath: result.destPath, manifest: result.manifest, refused: result.refused || [],
+    let zipBytes = 0;   // the backup file's own size, for the completion message [B-498]
+    try { zipBytes = fs.statSync(result.destPath).size; } catch {}
+    return { ok: true, destPath: result.destPath, manifest: result.manifest, refused: result.refused || [], zipBytes,
              // SEPARATE FROM `refused`, and that separation is the point: a refusal is a program
              // this app removes from the library, while a skipped file is the user's own data
              // left exactly where it is. Same list shape, opposite consequence.

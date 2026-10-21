@@ -124,8 +124,7 @@ function wav(size, seed) {
       userData, destPath: destPath2, appVersion: '0.0.0-test', skipPaths: [victimTrack],
     });
 
-    const StreamZipA = require(path.join(__dirname, '..', 'node_modules', 'node-stream-zip'));
-    const z2 = new StreamZipA.async({ file: destPath2 });
+    const z2 = await backup.openBackupZip(destPath2, {});
     let man = null;
     let entryNames = [];
     try {
@@ -155,8 +154,7 @@ function wav(size, seed) {
   // ── And it really is absent from the archive ──────────────────────────────────────
   // Reading the zip rather than trusting the return value: `skipped` is this module's own
   // account of what it did, and the archive is the fact.
-  const StreamZip = require(path.join(__dirname, '..', 'node_modules', 'node-stream-zip'));
-  const zip = new StreamZip.async({ file: destPath });
+  const zip = await backup.openBackupZip(destPath, {});
   let names = [];
   try { names = Object.keys(await zip.entries()); } finally { await zip.close(); }
 
@@ -184,8 +182,7 @@ function wav(size, seed) {
       skipPaths: [path.join(libFont, 'hum.wav')],
     });
 
-    const StreamZipB = require(path.join(__dirname, '..', 'node_modules', 'node-stream-zip'));
-    const z3 = new StreamZipB.async({ file: destPath3 });
+    const z3 = await backup.openBackupZip(destPath3, {});
     let names3 = [];
     let man3 = null;
     try {

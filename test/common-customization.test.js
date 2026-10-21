@@ -57,6 +57,19 @@ const rec = (relPath, fileHash) => ({ relPath, fileHash, size: 1 });
      'unknown and unchanged must not collapse: one shows nothing, the other shows a verdict');
 
   ok('a missing manifest answers UNKNOWN', !fh.diffAgainstSource(null, src, 'common').known);
+
+  // [B-511] A picture at the item's top is a label, not a change to the sounds.
+  d = fh.diffAgainstSource([rec('a.wav', 'h1'), rec('b.wav', 'h2'), rec('hal-9000.png', 'p1')], src, 'common');
+  ok('a picture added at the top is not a customization', d.known && d.added === 0, JSON.stringify(d));
+  const srcPic = [...src, rec('common/a_Hero.jpg', 'p2')];
+  d = fh.diffAgainstSource([rec('a.wav', 'h1'), rec('b.wav', 'h2')], srcPic, 'common');
+  ok('nor is removing the creator\'s picture', d.known && d.removed === 0, JSON.stringify(d));
+  d = fh.diffAgainstSource([rec('a.wav', 'h1'), rec('b.wav', 'h2'), rec('a_Hero.jpg', 'OTHER')], srcPic, 'common');
+  ok('nor is swapping it for another', d.known && d.changed === 0, JSON.stringify(d));
+  d = fh.diffAgainstSource([rec('a.wav', 'h1'), rec('b.wav', 'h2'), rec('art/cover.png', 'p3')], src, 'common');
+  ok('an image deeper in the folder is still content', d.added === 1 && d.addedKeys[0] === 'art/cover.png', JSON.stringify(d));
+  d = fh.diffAgainstSource([rec('a.wav', 'h1'), rec('b.wav', 'h2'), rec('c.wav', 'h3'), rec('hal-9000.png', 'p1')], src, 'common');
+  ok('and a real change beside a picture still counts', d.added === 1 && d.addedKeys[0] === 'c.wav', JSON.stringify(d));
 }
 
 // ── the temp-file exclusion, against real files on disk ───────────────────────────
@@ -142,7 +155,7 @@ const rec = (relPath, fileHash) => ({ relPath, fileHash, size: 1 });
   r = common.getCommonCustomization(root, UUID);
   const stamped = JSON.parse(fs.readFileSync(path.join(cDir, 'meta.json'), 'utf8')).customization;
   ok('the answer is stamped onto the common',
-     !!stamped && stamped.v === 1 && stamped.srcUuid === SRC && !!stamped.forHash,
+     !!stamped && stamped.v === 2 && stamped.srcUuid === SRC && !!stamped.forHash,
      JSON.stringify(stamped));
   ok('and a repeat read comes back cached with the same verdict',
      r.cached === true && r.customized === false, JSON.stringify(r));

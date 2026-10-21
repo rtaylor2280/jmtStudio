@@ -1031,6 +1031,8 @@ function deleteSource(userData, uuid) {
     try {
       const att = require('./soundFontAttachments');
       const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+      // The source's own picture first, so the unlinks below see it gone. [B-511]
+      try { att.clearSourcePicture(userData, uuid); } catch {}
       for (const id of (Array.isArray(meta.attachments) ? meta.attachments : [])) {
         try { att.unlinkAttachment(userData, uuid, id); } catch {}
       }

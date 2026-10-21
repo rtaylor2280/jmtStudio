@@ -2349,7 +2349,8 @@ function getEntryCustomization(userData, entryName) {
   // get the tag, because their valid cache short-circuits the writer that
   // adds it. The bump makes every pre-tag stamp recompute once on its next
   // open and backfill the tag. Bump on any future change to what
-  // "customized" means or carries.
+  // "customized" means or carries. v4: a picture at the top of the folder no
+  // longer counts ([B-511]).
   const st = meta.customization;
   // `hasCustomizedTag` RIDES BOTH RETURN PATHS. [2026-10-08] It is the TAG AS IT IS ON DISK,
   // which the open detail modal needs so its chips can be kept in step. It used to infer that
@@ -2359,7 +2360,7 @@ function getEntryCustomization(userData, entryName) {
   // written to meta.json and the open modal's TAGS row stayed empty, intermittently.
   const _tagOnDisk = (m) => (Array.isArray(m && m.tags) ? m.tags : [])
     .some(t => String(t).toLowerCase() === 'customized');
-  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 3
+  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 4
       && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
     return { ok: true, known: true, customized: !!st.customized, added: st.added|0,
              removed: st.removed|0, changed: st.changed|0, tracksOnly: !!st.tracksOnly, cached: true,
@@ -2373,7 +2374,7 @@ function getEntryCustomization(userData, entryName) {
       const p = path.join(entriesRoot(userData), entryName, 'meta.json');
       const m = JSON.parse(fs.readFileSync(p, 'utf8'));
       m.customization = {
-        v: 3, // stamp version, see the cache check above ([B-342]/[B-346])
+        v: 4, // stamp version, see the cache check above ([B-342]/[B-346])
         customized: res.customized, tracksOnly: !!res.tracksOnly,
         added: res.added, removed: res.removed, changed: res.changed,
         forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,

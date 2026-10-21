@@ -31,6 +31,22 @@ function writeSourceMeta(userData, uuid, meta) {
   fs.writeFileSync(sourceMetaPath(userData, uuid), JSON.stringify(meta, null, 2));
 }
 
+// [B-511] A source's own picture is stored here too, because the store sits outside every source
+// folder and the source's fingerprint never sees it. It is linked by its own field, `picture`, and
+// its attachment.json says `role: 'picture'`, so it is never listed or counted as proof of
+// purchase. It is still a reference: every id a source holds is in linkedIds, and that is what
+// garbage collection counts.
+const PICTURE_RX = /\.(png|jpe?g|gif|webp|bmp)$/i;
+function linkedIds(meta) {
+  const ids = (meta && Array.isArray(meta.attachments)) ? meta.attachments.slice() : [];
+  if (meta && meta.picture && !ids.includes(meta.picture)) ids.push(meta.picture);
+  return ids;
+}
+function isPictureAttachmentDir(dirAbs) {
+  try { return JSON.parse(fs.readFileSync(path.join(dirAbs, 'attachment.json'), 'utf8')).role === 'picture'; }
+  catch { return false; }
+}
+
 // "SMALL" WAS AN ASSUMPTION AND IT IS WRONG. [B-475, 2026-10-06]
 // This comment used to read "Attachments are small (receipts, PDFs, screenshots), so buffer-hash
 // is fine", and the whole freeze follows from that one word. The proof-of-purchase picker applies
@@ -65,7 +81,7 @@ function hashFile(abs) {
 //
 // Returns { ok, id } · { ok:false, blocked:true, error } · { ok:false, cancelled:true }.
 async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
-  const { onProgress, shouldStop } = opts;
+  const { onProgress, shouldStop, role } = opts;
   if (!srcAbsPath) return { ok: false, error: 'no file' };
 
   const v = require('./sdCardDetect').checkExecutableFile(srcAbsPath, path.basename(srcAbsPath));
@@ -159,7 +175,7 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
     let size = 0;
     try { size = fs.statSync(stagedFile).size; } catch {}
     fs.writeFileSync(path.join(staging, 'attachment.json'), JSON.stringify(
-      { id, name, size, label: label || '', addedAt: new Date().toISOString() }, null, 2));
+      { id, name, size, label: label || '', ...(role ? { role } : {}), addedAt: new Date().toISOString() }, null, 2));
     // THE RENAME IS THE COMMIT, and nothing before it is visible to the store. A reader
     // walking attachments/ sees either nothing or a complete attachment, never a half-copied one.
     fs.renameSync(staging, dir);
@@ -194,7 +210,7 @@ function sweepStaging(userData) {
 // the font importer is. Refused rather than stripped, because an attachment IS
 // the one file the user asked for: there is nothing left to store if it goes.
 // Returns { ok:false, blocked } so the caller can say which file and why.
-function storeFile(userData, srcAbsPath, label) {
+function storeFile(userData, srcAbsPath, label, role) {
   // THROWS rather than returning a verdict, because this function RETURNS AN ID
   // and both callers assign it straight into one. An object here would land in the
   // attachment list as though it were an id. Both callers already sit in a try/catch,
@@ -216,7 +232,7 @@ function storeFile(userData, srcAbsPath, label) {
     fs.mkdirSync(dir, { recursive: true });
     fs.copyFileSync(srcAbsPath, path.join(dir, name));
     let size = 0; try { size = fs.statSync(path.join(dir, name)).size; } catch {}
-    fs.writeFileSync(jp, JSON.stringify({ id, name, size, label: label || '', addedAt: new Date().toISOString() }, null, 2));
+    fs.writeFileSync(jp, JSON.stringify({ id, name, size, label: label || '', ...(role ? { role } : {}), addedAt: new Date().toISOString() }, null, 2));
   } else if (label != null) {
     try { const info = JSON.parse(fs.readFileSync(jp, 'utf8')); info.label = label || ''; fs.writeFileSync(jp, JSON.stringify(info, null, 2)); } catch {}
   }
@@ -250,7 +266,7 @@ function refCount(userData, id) {
   let dirs; try { dirs = fs.readdirSync(sourcesRoot(userData)); } catch { return 0; }
   for (const u of dirs) {
     const m = readSourceMeta(userData, u);
-    if (m && Array.isArray(m.attachments) && m.attachments.includes(id)) n++;
+    if (m && linkedIds(m).includes(id)) n++;
   }
   return n;
 }
@@ -300,7 +316,10 @@ function removeAttachmentEverywhere(userData, id) {
       writeSourceMeta(userData, u, m);
     }
   }
-  try { fs.rmSync(path.join(attachmentsRoot(userData), id), { recursive: true, force: true }); } catch {}
+  // The same bytes can also be some source's picture, which this does not remove.
+  if (refCount(userData, id) === 0) {
+    try { fs.rmSync(path.join(attachmentsRoot(userData), id), { recursive: true, force: true }); } catch {}
+  }
   return { ok: true };
 }
 
@@ -312,7 +331,7 @@ function listAllAttachments(userData) {
   const out = [];
   for (const id of ids) {
     const info = attachmentInfo(userData, id);
-    if (info) out.push({ ...info, usedBy: refCount(userData, id) });
+    if (info && info.role !== 'picture') out.push({ ...info, usedBy: refCount(userData, id) });
   }
   return out;
 }
@@ -393,12 +412,15 @@ function pruneDanglingLinks(userData) {
   let pruned = 0, touched = 0;
   for (const u of dirs) {
     const m = readSourceMeta(userData, u);
-    if (!m || !Array.isArray(m.attachments) || m.attachments.length === 0) continue;
-    const kept = m.attachments.filter(id => fs.existsSync(path.join(attachmentsRoot(userData), id)));
-    if (kept.length === m.attachments.length) continue;
-    pruned += m.attachments.length - kept.length;
+    if (!m) continue;
+    const pictureGone = !!m.picture && !fs.existsSync(path.join(attachmentsRoot(userData), m.picture));
+    const list = Array.isArray(m.attachments) ? m.attachments : [];
+    const kept = list.filter(id => fs.existsSync(path.join(attachmentsRoot(userData), id)));
+    if (kept.length === list.length && !pictureGone) continue;
+    pruned += list.length - kept.length + (pictureGone ? 1 : 0);
     touched++;
-    m.attachments = kept;
+    if (list.length) m.attachments = kept;
+    if (pictureGone) delete m.picture;
     try { writeSourceMeta(userData, u, m); } catch {}
   }
   return { ok: true, pruned, sources: touched };
@@ -415,7 +437,66 @@ async function addAttachmentToSourcesStreaming(userData, { filePath, label, uuid
   return { ok: true, id: r.id, deduped: !!r.deduped };
 }
 
+// [B-511] Set, replace or clear a source's own picture. The previous picture's bytes go when
+// nothing else holds them, the same refcount rule as a proof of purchase.
+function _releaseIfUnused(userData, id) {
+  if (id && refCount(userData, id) === 0) {
+    try { fs.rmSync(path.join(attachmentsRoot(userData), id), { recursive: true, force: true }); } catch {}
+  }
+}
+async function setSourcePicture(userData, uuid, filePath) {
+  const meta = readSourceMeta(userData, uuid);
+  if (!meta) return { ok: false, error: 'source not found' };
+  if (!PICTURE_RX.test(String(filePath || ''))) {
+    return { ok: false, error: 'That is not an image. Use a PNG, JPG, GIF, WebP or BMP file.' };
+  }
+  // The store commits by renaming into its root, which has to exist first.
+  try { fs.mkdirSync(attachmentsRoot(userData), { recursive: true }); } catch {}
+  const r = await storeFileStreaming(userData, filePath, null, { role: 'picture' });
+  if (!r.ok) return r;
+  const prior = meta.picture;
+  meta.picture = r.id;
+  writeSourceMeta(userData, uuid, meta);
+  if (prior && prior !== r.id) _releaseIfUnused(userData, prior);
+  return { ok: true, id: r.id };
+}
+// The synchronous twin, for a caller that is synchronous itself: a source export's picture coming
+// back on import. Pictures are small; the streaming store is for receipts of any size.
+function setSourcePictureSync(userData, uuid, filePath) {
+  const meta = readSourceMeta(userData, uuid);
+  if (!meta) return { ok: false, error: 'source not found' };
+  if (!PICTURE_RX.test(String(filePath || ''))) return { ok: false, error: 'not an image' };
+  try { fs.mkdirSync(attachmentsRoot(userData), { recursive: true }); } catch {}
+  let id;
+  try { id = storeFile(userData, filePath, null, 'picture'); }
+  catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+  const prior = meta.picture;
+  meta.picture = id;
+  writeSourceMeta(userData, uuid, meta);
+  if (prior && prior !== id) _releaseIfUnused(userData, prior);
+  return { ok: true, id };
+}
+function clearSourcePicture(userData, uuid) {
+  const meta = readSourceMeta(userData, uuid);
+  if (!meta) return { ok: false, error: 'source not found' };
+  const prior = meta.picture;
+  if (!prior) return { ok: true };
+  delete meta.picture;
+  writeSourceMeta(userData, uuid, meta);
+  _releaseIfUnused(userData, prior);
+  return { ok: true };
+}
+// The picture the user set on a source, as { id, name }, or null.
+function sourcePicture(userData, uuid) {
+  const meta = readSourceMeta(userData, uuid);
+  if (!meta || !meta.picture) return null;
+  const info = attachmentInfo(userData, meta.picture);
+  if (!info || !attachmentFilePath(userData, meta.picture)) return null;
+  return { id: meta.picture, name: info.name };
+}
+
 module.exports = {
+  linkedIds, isPictureAttachmentDir, setSourcePicture, setSourcePictureSync, clearSourcePicture, sourcePicture,
   pruneDanglingLinks, sweepStaging,
   addAttachments, listAttachments, attachmentFilePath, unlinkAttachment,
   listAllAttachments, linkAttachments, readAttachment,

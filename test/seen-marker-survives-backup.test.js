@@ -68,8 +68,8 @@ function buildLibrary(ud, { fonts = 2 } = {}) {
 }
 
 const zipNames = async (dest) => {
-  const StreamZip = require('node-stream-zip');
-  const zip = new StreamZip.async({ file: dest, skipEntryNameValidation: true });
+  // Read the way the app reads it: the zip stores numbered objects, the paths are the library's.
+  const zip = await backup.openBackupZip(dest, { skipEntryNameValidation: true });
   try { return Object.keys(await zip.entries()); }
   finally { await zip.close(); }
 };

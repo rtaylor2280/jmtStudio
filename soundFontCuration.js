@@ -98,6 +98,15 @@ const ENTRY_PROV_FIELDS = ['createdAt', 'updatedAt', 'acquisitionDate'];
 const COMMON_FIELDS = ['name', 'description', 'group', 'userNotes'];
 const COMMON_PROV_FIELDS = ['createdAt'];
 
+// [B-511] A picture in an item's own folder is not customization, but it exists nowhere else, so an
+// item carrying one rides a source export as a customized one does, and comes back with it.
+function _hasOwnPicture(dir) {
+  try {
+    const names = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name);
+    return !!require('./soundFontPicture').pickPicture(names);
+  } catch { return false; }
+}
+
 function _pick(obj, fields) {
   const out = {};
   if (!obj) return out;
@@ -182,7 +191,8 @@ function buildForSource(userData, uuid, appVersion, opts) {
     let _cust = null;
     try { _cust = entriesMod.getEntryCustomization(userData, e.name); } catch { _cust = null; }
     const _rides = includeCustomized && customizedKind === 'entry'
-                   && !!(_cust && _cust.known && _cust.customized);
+                   && (!!(_cust && _cust.known && _cust.customized)
+                       || _hasOwnPicture(path.join(entriesMod.entriesRoot(userData), e.name)));
     if (_rides) {
       customized.push({
         entryName: e.name,
@@ -259,7 +269,8 @@ function buildForSource(userData, uuid, appVersion, opts) {
         if (cm.sourceSubPath == null) continue;
         let cust = null;
         try { cust = commonMod.getCommonCustomization(userData, c.uuid); } catch { cust = null; }
-        if (!(cust && cust.known && cust.customized)) {
+        const _filesDir = path.join(commonMod.commonRoot(userData), c.uuid, 'files');
+        if (!(cust && cust.known && cust.customized) && !_hasOwnPicture(_filesDir)) {
           // A STOCK COPY STILL CLAIMS ITS SUBTREE, which is the both-copies case and the
           // same rule `importedPaths` applies to a font candidate: customized alone means
           // the vendor copy stays out, customized BESIDE a stock copy means both come back.
@@ -300,6 +311,15 @@ function buildForSource(userData, uuid, appVersion, opts) {
       _abs: abs,
     });
   }
+
+  // [B-511] The source's own picture rides along ALWAYS, like the creator and the other details.
+  // Only proof of purchase is the user's to include or leave out.
+  let picture = null;
+  try {
+    const own = attachMod.sourcePicture(userData, uuid);
+    const abs = own && attachMod.attachmentFilePath(userData, own.id);
+    if (abs) picture = { name: own.name, file: `${PAYLOAD_DIR}/picture/${own.name}`, _abs: abs };
+  } catch { picture = null; }
 
   // ── PROVENANCE ──────────────────────────────────────────────────────────
   // the user's bar, 2026-09-03: "it should for me be identical to what it was
@@ -362,7 +382,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
   // and no provenance: taking 3 of 6 fonts is a choice the restore must honour.
   const hasPartial = importedPaths.length > 0;
   if (!hasSource && !hasEntries && attachments.length === 0 && !hasProv && !hasPartial
-      && customized.length === 0) return null;
+      && customized.length === 0 && !picture) return null;
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -378,6 +398,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
     attachments,
     customized,
     provenance,
+    ...(picture ? { picture } : {}),
   };
 }
 
@@ -454,6 +475,7 @@ function _cleanSidecar(payload, carriedCustomized, reclaimedPaths) {
   return {
     ...payload,
     attachments: (payload.attachments || []).map(({ _abs, ...rest }) => rest),
+    ...(payload.picture ? { picture: (({ _abs, ...rest }) => rest)(payload.picture) } : {}),
     customized: carriedCustomized.map(({ _absDir, ...rest }) => rest),
     ...(reclaimedPaths.length ? {
       importedPaths: [...(payload.importedPaths || []), ...reclaimedPaths],
@@ -480,6 +502,10 @@ function planForArchive(payload) {
     try { if (!fs.statSync(a._abs).isFile()) continue; } catch { continue; }
     entries.push({ name: a.file, absPath: a._abs });
     attachmentsWritten++;
+  }
+  if (payload.picture && payload.picture._abs) {
+    try { if (fs.statSync(payload.picture._abs).isFile()) entries.push({ name: payload.picture.file, absPath: payload.picture._abs }); }
+    catch { /* a picture that cannot be read must not fail the export */ }
   }
   const carriedCustomized = [];
   const reclaimedPaths = [];
@@ -534,6 +560,11 @@ function writeIntoTree(treeDir, payload) {
   // customized version is not in the archive, so the vendor's copy at that path
   // is the only restorable one again and must come back checked, exactly as if
   // the include box had been unticked for that font.
+  if (payload.picture && payload.picture._abs) {
+    const dest = path.join(treeDir, ...payload.picture.file.split('/'));
+    try { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(payload.picture._abs, dest); }
+    catch { /* a picture that cannot be read must not fail the export */ }
+  }
   const reclaimedPaths = [];
   for (const c of (payload.customized || [])) {
     if (!c._absDir || !c.dir) continue;
@@ -678,7 +709,15 @@ function applySourceCuration(userData, uuid, payload, attDir) {
       } catch {}
     }
   }
-  return { ok: true, applied, attachments: attached };
+  // [B-511] The picture comes back as the source's own, not as proof of purchase.
+  let picture = false;
+  if (attDir && payload.picture && payload.picture.file) {
+    const abs = path.join(attDir, ...String(payload.picture.file).split('/'));
+    if (fs.existsSync(abs)) {
+      try { picture = !!(attachMod.setSourcePictureSync(userData, uuid, abs) || {}).ok; } catch {}
+    }
+  }
+  return { ok: true, applied, attachments: attached, picture };
 }
 
 // Recreate the customized fonts that rode the export ([B-311]). Runs at

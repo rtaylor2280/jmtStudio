@@ -405,6 +405,10 @@ function readFileHashManifest(filePath) {
 // Returns { known, added, removed, changed, addedKeys, removedKeys, changedKeys }.
 // `known: false` means the comparison could not be made and a caller must show NOTHING:
 // an item wrongly flagged as the user's own work is worse than an unflagged one.
+// [B-511] A picture in the item's own folder is not a change to the item: it is how a user
+// labels a font or common folder, and the sounds are what "customized" is about. So an image at
+// the item's top level is left out on both sides; one deeper in is still content.
+const _PICTURE_AT_TOP_RX = /^[^/]+\.(png|jpe?g|gif|webp|bmp)$/i;
 function diffAgainstSource(liveRecords, sourceRecords, subPath) {
   const none = { known: false, added: 0, removed: 0, changed: 0,
                  addedKeys: [], removedKeys: [], changedKeys: [] };
@@ -416,13 +420,14 @@ function diffAgainstSource(liveRecords, sourceRecords, subPath) {
     if (!r || r.fileHash === '<empty>') continue;
     const rp = String(r.relPath || '');
     if (pfx && !rp.startsWith(pfx)) continue;
+    if (_PICTURE_AT_TOP_RX.test(rp.slice(pfx.length))) continue;
     src.set(rp.slice(pfx.length), r.fileHash);
   }
   // No records under that path at all: the manifest predates this source's shape, or the
   // subtree is not a plain one. Cannot tell, which is not the same as unchanged.
   if (src.size === 0) return none;
   const live = new Map(liveRecords
-    .filter((r) => r && r.fileHash !== '<empty>')
+    .filter((r) => r && r.fileHash !== '<empty>' && !_PICTURE_AT_TOP_RX.test(String(r.relPath || '')))
     .map((r) => [String(r.relPath || ''), r.fileHash]));
   const addedKeys = [], removedKeys = [], changedKeys = [];
   for (const [k, h] of live) {

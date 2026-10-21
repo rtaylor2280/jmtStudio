@@ -3830,8 +3830,12 @@
   .sf-doc-viewer-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
   /* Proof of Purchase row: chips like Included Files, plus inline add/link. */
   .sf-pop-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  /* An empty name slot takes no room, or the flex gap before it indents "+ Add". */
+  .sf-pop-val > .sf-doc-chips:empty { display: none; }
   .sf-pop-actions { display: inline-flex; gap: 10px; }
-  .sf-pop-action { background: none; border: none; padding: 0; font: inherit; font-size: 0.82rem; color: var(--jmt-blue); cursor: pointer; }
+  /* The row's own size, so the actions sit level with the chips beside them (a larger size read as
+     misaligned even on a shared baseline). */
+  .sf-pop-action { background: none; border: none; padding: 0; font: inherit; color: var(--jmt-blue); cursor: pointer; }
   .sf-pop-action:hover { opacity: 0.8; }
   /* Link-existing picker: checkbox list of stored attachments. */
   #modal-sf-pop-link .modal { width: 520px; max-width: 96vw; max-height: min(80vh, 560px); display: flex; flex-direction: column; }
@@ -4384,6 +4388,16 @@
     100% { box-shadow: 0 0 0 0 rgba(228, 68, 68, 0); }
   }
   .sf-url-paste-invalid { animation: sfUrlPasteInvalid 3s ease-out 1; }
+  /* The same cue on an Image row's Paste [B-511]: the word itself turns red with the glow and fades
+     back to blue on the glow's clock, rather than snapping back when the class comes off. */
+  @keyframes sfPasteWordInvalid {
+    0%, 40% { color: rgb(228, 68, 68); }
+    100%    { color: var(--jmt-blue); }
+  }
+  .sf-pop-action.sf-url-paste-invalid {
+    animation: sfUrlPasteInvalid 3s ease-out 1, sfPasteWordInvalid 3s ease-out 1;
+    border-radius: 3px;
+  }
   .detail-confirm { font-size: 0.72rem; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: #4a4; opacity: 0.7; flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
   .detail-confirm:hover { opacity: 1; background: rgba(40,160,40,0.12); }
   #btn-detail-url-confirm { color: #4a4; opacity: 0.7; }
@@ -6249,7 +6263,7 @@
         <ul class="sf-needs-review-reasons" id="sf-detail-needs-review-reasons"></ul>
       </div>
       <div class="sf-entry-detail-meta" id="sf-entry-meta-box">
-        <img id="sf-entry-picture" class="sf-source-picture" alt="" title="View picture" style="display:none">
+        <img id="sf-entry-picture" class="sf-source-picture" alt="" title="View image" style="display:none">
         <div class="sf-meta-row">
           <span class="sf-meta-label">Acquired</span>
           <div class="sf-meta-val sf-edit-group">
@@ -6302,6 +6316,17 @@
         <div class="sf-meta-row" id="sf-detail-docs-row" style="display:none">
           <span class="sf-meta-label">Included Files</span>
           <div class="sf-meta-val sf-doc-chips" id="sf-detail-docs-chips" data-doc-scope="entry"></div>
+        </div>
+        <!-- ── Image ── [B-511] the name of the image the font shows; its own lives in its folder. -->
+        <div class="sf-meta-row" id="sf-entry-picture-row">
+          <span class="sf-meta-label">Image</span>
+          <div class="sf-meta-val sf-pop-val">
+            <span class="sf-doc-chips" id="sf-entry-picture-chip" style="display:none"></span>
+            <span class="sf-pop-actions">
+              <button class="sf-pop-action" id="btn-sf-entry-picture-add" type="button" title="Choose an image for this font from your computer">+ Add</button>
+              <button class="sf-pop-action" id="btn-sf-entry-picture-paste" type="button" title="Use the image on your clipboard">Paste</button>
+            </span>
+          </div>
         </div>
         <div class="sf-meta-row" id="sf-detail-notes-row">
           <span class="sf-meta-label">Notes</span>
@@ -6420,7 +6445,7 @@
     </div>
     <div class="sf-entry-detail-body">
       <div class="sf-entry-detail-meta" id="sf-source-meta-box">
-        <img id="sf-source-picture" class="sf-source-picture" alt="" title="View picture" style="display:none">
+        <img id="sf-source-picture" class="sf-source-picture" alt="" title="View image" style="display:none">
         <div class="sf-meta-row">
           <span class="sf-meta-label">Acquired</span>
           <div class="sf-meta-val sf-edit-group">
@@ -6464,6 +6489,19 @@
             <span class="sf-pop-actions">
               <button class="sf-pop-action" id="btn-sf-source-add-pop" type="button" title="Add a receipt or proof-of-purchase file from your computer">+ Add</button>
               <button class="sf-pop-action" id="btn-sf-source-link-pop" type="button" title="Link a proof-of-purchase file you already added to another source">Link existing…</button>
+            </span>
+          </div>
+        </div>
+        <!-- ── Picture ── [B-511] the source's own picture, set like the link and proof of
+             purchase. Kept in the attachments store beside the source's details, so the
+             download itself is never touched. -->
+        <div class="sf-meta-row" id="sf-source-picture-row">
+          <span class="sf-meta-label">Image</span>
+          <div class="sf-meta-val sf-pop-val">
+            <span class="sf-doc-chips" id="sf-source-picture-chip" style="display:none"></span>
+            <span class="sf-pop-actions">
+              <button class="sf-pop-action" id="btn-sf-source-picture-add" type="button" title="Choose an image for this source from your computer">+ Add</button>
+              <button class="sf-pop-action" id="btn-sf-source-picture-paste" type="button" title="Use the image on your clipboard">Paste</button>
             </span>
           </div>
         </div>
@@ -6822,7 +6860,7 @@
 <div class="modal-overlay" id="modal-sf-audio">
   <div class="modal sf-audio-modal" id="sf-audio-box">
     <button class="modal-btn-close" id="sf-audio-close" title="Close">&#10005;</button>
-    <img id="sf-audio-picture" class="sf-audio-picture" alt="" title="View picture" style="display:none">
+    <img id="sf-audio-picture" class="sf-audio-picture" alt="" title="View image" style="display:none">
     <div class="sf-audio-main">
     <h3 class="sf-audio-name" id="sf-audio-name">…</h3>
     <div class="sf-audio-loading" id="sf-audio-loading">Loading…</div>
@@ -27442,76 +27480,105 @@ require(['vs/editor/editor.main'], function () {
       // hash it came from and ignored while the folder is marked dirty (an edit since the
       // last hash), the same test the backend applies; an absent or stale stamp just
       // leaves the slot empty for the fill below.
-      const _sfCommonCustMarkup = (c) => {
+      // Whether the stamp answers at all. A stamped "not customized" paints nothing, so the marker's
+      // text cannot tell it from "never asked"; this does, and the fill skips both kinds of answer.
+      // Without it every clean folder was asked again on every paint: 120 main-process calls in a
+      // minute measured on a 22-folder library, 2.7 s of work that changed nothing.
+      const _sfCommonCustKnown = (c) => {
         const st = c && c.meta && c.meta.customization;
-        if (!st || st.v !== 1 || !c.meta.contentHash || c.meta.contentHashDirty
-            || st.forHash !== c.meta.contentHash || st.srcUuid !== c.meta.sourceUuid) return '';
-        return st.customized ? 'Customized' : '';
+        return !!(st && st.v === 2 && c.meta.contentHash && !c.meta.contentHashDirty
+          && st.forHash === c.meta.contentHash && st.srcUuid === c.meta.sourceUuid);
       };
-      // Hovering a common folder's row shows its picture (soundFontPicture.js) beside the
-      // sidebar; a folder with none shows nothing. Answers are kept per folder until the list
-      // refreshes (_sfRefreshCommons runs after every add, rename and delete), so a picture a
-      // user drops into a folder shows on the next hover.
-      const _sfCommonPicCache = new Map();   // uuid -> url|null
-      const _sfClearCommonPicCache = () => {
-        for (const url of _sfCommonPicCache.values()) if (url) URL.revokeObjectURL(url);
-        _sfCommonPicCache.clear();
+      const _sfCommonCustMarkup = (c) => {
+        if (!_sfCommonCustKnown(c)) return '';
+        return c.meta.customization.customized ? 'Customized' : '';
       };
-      {
+      // [B-511] The bytes behind a found image, whichever of the four kinds it is.
+      const _sfReadPictureBytes = async (pic) => {
+        if (pic.kind === 'common') return window.electronAPI.readCommonFileBytes({ uuid: pic.id, subPath: pic.subPath });
+        if (pic.kind === 'entry') return window.electronAPI.readEntryDocBytes({ name: pic.id, path: pic.subPath });
+        if (pic.kind === 'attachment') return window.electronAPI.readAttachment({ id: pic.id });
+        return window.electronAPI.readSourceDocBytes({ uuid: pic.id, path: pic.subPath });
+      };
+      // One hover card for an image, shared by every surface that shows one on hover: the common
+      // folder rows here, and the font name in Config Manager's preset rows. Looked up fresh on
+      // every hover (a few small reads) so an image just added shows on the very next one. Shows
+      // after 250 ms, nothing when there is no image. While it is up the anchor's own tooltip is
+      // held back, since the image says more; it comes back when the card goes.
+      const _sfImageCard = (() => {
         const pop = document.createElement('div');
         pop.className = 'sf-common-picture-pop';
         pop.innerHTML = '<img alt="">';
         document.body.appendChild(pop);
-        let timer = null, overUuid = null;
-        const hide = () => { clearTimeout(timer); timer = null; overUuid = null; pop.style.display = 'none'; };
-        const pictureFor = async (uuid) => {
-          if (_sfCommonPicCache.has(uuid)) return _sfCommonPicCache.get(uuid);
-          let url = null;
-          try {
-            const r = await window.electronAPI.findCommonPicture({ uuid });
-            const pic = r && r.ok ? r.picture : null;
-            if (pic) {
-              const res = pic.kind === 'common'
-                ? await window.electronAPI.readCommonFileBytes({ uuid: pic.id, subPath: pic.subPath })
-                : await window.electronAPI.readSourceDocBytes({ uuid: pic.id, path: pic.subPath });
-              if (res && res.ok) url = URL.createObjectURL(new Blob([Uint8Array.from(res.bytes || [])], { type: _sfMimeFor(pic.subPath) }));
-            }
-          } catch {}
-          _sfCommonPicCache.set(uuid, url);
-          return url;
+        let timer = null, over = null, url = null, heldTitle = null;
+        const hide = () => {
+          clearTimeout(timer); timer = null;
+          if (over && heldTitle !== null) over.title = heldTitle;
+          over = null; heldTitle = null;
+          pop.style.display = 'none';
         };
-        const list = document.getElementById('sf-common-list');
-        list?.addEventListener('mouseover', (e) => {
-          const head = e.target.closest('.sf-common-row-header[data-pic-uuid]');
-          if (!head) return;
-          const uuid = head.getAttribute('data-pic-uuid');
-          if (uuid === overUuid) return;
+        // `beside` is the element whose right edge the card sits against (the sidebar for a list).
+        const show = (anchor, find, beside) => {
+          if (anchor === over) return;
           hide();
-          overUuid = uuid;
+          over = anchor;
           timer = setTimeout(async () => {
-            const url = await pictureFor(uuid);
-            if (overUuid !== uuid || !url || !head.isConnected) return;
+            let next = null;
+            try {
+              const r = await find();
+              const pic = r && r.ok ? r.picture : null;
+              if (pic) {
+                const res = await _sfReadPictureBytes(pic);
+                if (res && res.ok) next = URL.createObjectURL(new Blob([Uint8Array.from(res.bytes || [])], { type: _sfMimeFor(pic.subPath) }));
+              }
+            } catch {}
+            if (over !== anchor || !next || !anchor.isConnected) { if (next) URL.revokeObjectURL(next); return; }
+            if (url) URL.revokeObjectURL(url);
+            url = next;
             const img = pop.firstChild;
-            const place = () => {
-              if (overUuid !== uuid) return;
-              const r = head.getBoundingClientRect();
-              const side = list.getBoundingClientRect();
+            img.onload = () => {
+              if (over !== anchor) return;
+              heldTitle = anchor.getAttribute('title') || '';
+              anchor.title = '';
+              const r = anchor.getBoundingClientRect();
+              const side = (beside || anchor).getBoundingClientRect();
               pop.style.display = 'block';
               const h = pop.offsetHeight;
               pop.style.left = `${Math.round(side.right + 8)}px`;
               pop.style.top = `${Math.round(Math.max(8, Math.min(r.top, window.innerHeight - h - 8)))}px`;
             };
-            // A src set to the URL it already holds fires no second load.
-            if (img.getAttribute('src') === url && img.complete) place();
-            else { img.onload = place; img.src = url; }
+            img.src = url;
           }, 250);
+        };
+        return { show, hide, isOver: (el) => over === el };
+      })();
+      {
+        const list = document.getElementById('sf-common-list');
+        list?.addEventListener('mouseover', (e) => {
+          const head = e.target.closest('.sf-common-row-header[data-pic-uuid]');
+          if (!head) return;
+          const uuid = head.getAttribute('data-pic-uuid');
+          _sfImageCard.show(head, () => window.electronAPI.findCommonPicture({ uuid }), list);
         });
         list?.addEventListener('mouseout', (e) => {
           const head = e.target.closest('.sf-common-row-header[data-pic-uuid]');
-          if (head && !head.contains(e.relatedTarget)) hide();
+          if (head && !head.contains(e.relatedTarget)) _sfImageCard.hide();
         });
-        list?.addEventListener('mousedown', hide);
+        list?.addEventListener('mousedown', () => _sfImageCard.hide());
       }
+      // For Config Manager, whose code cannot see this scope: hovering `el` shows the image of the
+      // library font named by getName(), when there is one. A name not in the library shows nothing.
+      window._jmtAttachFontImageHover = (el, getName, beside) => {
+        if (!el) return;
+        el.addEventListener('mouseenter', () => {
+          const name = String(getName() || '').trim();
+          if (!name || document.activeElement === el) return;
+          _sfImageCard.show(el, () => window.electronAPI.findEntryPicture({ name }), beside && beside());
+        });
+        el.addEventListener('mouseleave', () => { if (_sfImageCard.isOver(el)) _sfImageCard.hide(); });
+        el.addEventListener('mousedown', () => _sfImageCard.hide());
+        el.addEventListener('keydown', () => _sfImageCard.hide());
+      };
       const _sfRenderCommonList = async () => {
         const list = document.getElementById('sf-common-list');
         if (!list) return;
@@ -27589,7 +27656,7 @@ require(['vs/editor/editor.main'], function () {
               <span class="sf-common-row-chevron">&#9656;</span>
               <div class="sf-common-row-main">
                 <div class="sf-common-row-name">${_sfEscape(c.meta.name || '')}</div>
-                <div class="sf-common-row-meta">${mmainBtn}${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}<span class="sf-common-cust" data-cust-uuid="${_sfEscape(c.uuid)}">${_sfCommonCustMarkup(c)}</span></div>
+                <div class="sf-common-row-meta">${mmainBtn}${c.fileCount} file${c.fileCount === 1 ? '' : 's'} &middot; ${_sfFmtBytes(c.totalBytes)}<span class="sf-common-cust" data-cust-uuid="${_sfEscape(c.uuid)}"${_sfCommonCustKnown(c) ? ' data-done="1"' : ''}>${_sfCommonCustMarkup(c)}</span></div>
               </div>
               ${starBtn}
             </div>
@@ -27720,7 +27787,6 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.listCommons();
           _sfCommons = (r && r.ok && r.commons) || [];
         } catch { _sfCommons = []; }
-        _sfClearCommonPicCache();
         // Enforce the star invariant first — deletes, imports, and rename
         // operations all funnel through here, so normalizing here covers
         // every transition.
@@ -34348,10 +34414,10 @@ require(['vs/editor/editor.main'], function () {
         .toLowerCase()
         .replace(/[^a-z0-9.]+/g, '-')
         .replace(/^[-.]+|[-.]+$/g, '') || 'image';
-      const _sfPasteClipboardImage = async ({ kind, id, subPath }) => {
-        let tmp = null;
-        try { tmp = await window.electronAPI.clipboardImageToTemp(); } catch {}
-        if (!tmp || !tmp.ok || !tmp.filePath) return null;
+      // [B-511] One add path for a pasted image and a chosen one: named after the item, keeping the
+      // chosen file's own extension. Returns the added paths ([] on failure, reported).
+      const _sfAddImageToItem = async ({ kind, id, subPath, filePath }) => {
+        const ext = ((String(filePath).match(/[.][^.\\/]+$/) || ['.png'])[0]).toLowerCase();
         const itemName = kind === 'common'
           ? ((_sfCommons.find((c) => c.uuid === id) || {}).meta || {}).name
           : id;
@@ -34367,21 +34433,28 @@ require(['vs/editor/editor.main'], function () {
           const n = here.find((x) => x.isDir && x.name === seg);
           here = (n && n.children) || [];
         }
-        const pngStems = here.filter((x) => !x.isDir && /[.]png$/i.test(x.name)).map((x) => x.name.slice(0, -4));
+        const sameExt = here.filter((x) => !x.isDir && x.name.toLowerCase().endsWith(ext)).map((x) => x.name.slice(0, -ext.length));
         const stem = _sfPastedImageStem(itemName);
-        const finalStem = pngStems.some((t) => t.toLowerCase() === stem) ? _jmtNumberedName(stem, pngStems) : stem;
+        const finalStem = sameExt.some((t) => t.toLowerCase() === stem) ? _jmtNumberedName(stem, sameExt) : stem;
         let res;
         try {
-          res = await window.electronAPI.fileOpsAddFiles({ kind, id, subPath: subPath || '', sourceFilePaths: [tmp.filePath], destNames: [`${finalStem}.png`] });
+          res = await window.electronAPI.fileOpsAddFiles({ kind, id, subPath: subPath || '', sourceFilePaths: [filePath], destNames: [`${finalStem}${ext}`] });
         } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
-        finally { try { await window.electronAPI.clipboardCleanupTemp({ filePath: tmp.filePath }); } catch {} }
-        if (!res || !res.ok) { promptError('Paste failed', (res && res.error) || 'unknown'); return []; }
-        if (res.refused && res.refused.length) promptError('Not added', 'The pasted image could not be added.');
+        if (!res || !res.ok) { promptError('Could not add the image', (res && res.error) || 'unknown'); return []; }
+        if (res.refused && res.refused.length) promptError('Not added', 'The image could not be added.');
         return res.added || [];
+      };
+      const _sfPasteClipboardImage = async ({ kind, id, subPath }) => {
+        let tmp = null;
+        try { tmp = await window.electronAPI.clipboardImageToTemp(); } catch {}
+        if (!tmp || !tmp.ok || !tmp.filePath) return null;
+        try { return await _sfAddImageToItem({ kind, id, subPath, filePath: tmp.filePath }); }
+        finally { try { await window.electronAPI.clipboardCleanupTemp({ filePath: tmp.filePath }); } catch {} }
       };
       const _sfClipboardHasImage = async () => {
         try { return !!(await window.electronAPI.clipboardHasImage()); } catch { return false; }
       };
+
       // The two doors: paste the clipboard image, then show and select what landed. Each returns
       // true when there was an image, so Ctrl+V can fall back to the in-app copy when there was not.
       const _sfPasteImageIntoCommon = async (uuid, subPath) => {
@@ -34406,6 +34479,125 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderEntryFiles();
         return true;
       };
+      // ── Image row ── [B-511] Shows the name of the image the item displays, wherever it comes
+      // from (its own folder, the download, its source); clicking opens it, and the viewer offers
+      // Remove when the image is one that can be removed. + Add becomes Replace once there is one of
+      // the item's own. Paste is always there; with no image on the clipboard the word flashes red.
+      let _sfEntryOwnPicture = null;
+      // The chip for the image a row's item shows. Hidden when there is none, so the actions start
+      // where the row's text does.
+      const _sfRenderImageChip = (chipEl, pic, onRemove) => {
+        chipEl.style.display = pic ? '' : 'none';
+        if (!pic) { chipEl.innerHTML = ''; return; }
+        const file = String(pic.subPath || '').split('/').pop();
+        chipEl.innerHTML = `<button class="sf-doc-chip" type="button" title="View ${_sfEscape(file)}">${_sfEscape(file)}</button>`;
+        chipEl.querySelector('button').onclick = () => _sfOpenDocViewer({ kind: pic.kind, id: pic.id, subPath: pic.subPath,
+          remove: onRemove ? { label: 'Remove image', run: onRemove } : null });
+      };
+      // With no image on the clipboard the Paste word flashes red, the link field's paste cue.
+      const _sfPasteImageVia = async (setFromFile, btn) => {
+        let tmp = null;
+        try { tmp = await window.electronAPI.clipboardImageToTemp(); } catch {}
+        if (!tmp || !tmp.ok) {
+          if (btn) {
+            btn.classList.remove('sf-url-paste-invalid');
+            void btn.offsetWidth;   // restart the animation on a second click
+            btn.classList.add('sf-url-paste-invalid');
+            setTimeout(() => btn.classList.remove('sf-url-paste-invalid'), 3000);
+          }
+          return;
+        }
+        try { await setFromFile(tmp.filePath); }
+        finally { try { await window.electronAPI.clipboardCleanupTemp({ filePath: tmp.filePath }); } catch {} }
+      };
+      const _sfRenderEntryPictureRow = async () => {
+        const name = _sfDetailOriginalName;
+        const chip = document.getElementById('sf-entry-picture-chip');
+        const add = document.getElementById('btn-sf-entry-picture-add');
+        if (!name || !chip || !add) return;
+        let pic = null;
+        try { const r = await window.electronAPI.findEntryPicture({ name }); pic = r && r.ok ? r.picture : null; } catch {}
+        if (_sfDetailOriginalName !== name) return;
+        // Named only when the image is in the font's own folder. One that came in the download is
+        // the creator's, which belongs to the source, so the row offers + Add as if there were none.
+        const own = pic && pic.origin === 'own' ? pic : null;
+        _sfEntryOwnPicture = own;
+        _sfRenderImageChip(chip, own, own ? _sfRemoveEntryPicture : null);
+        add.textContent = own ? 'Replace' : '+ Add';
+        add.title = own ? 'Choose a different image for this font'
+          : pic ? "Give this font its own image. The source's image stays as it is."
+          : 'Choose an image for this font from your computer';
+      };
+      // Run from the viewer. Returns true when the image went, so the viewer closes.
+      const _sfRemoveEntryPicture = async () => {
+        const name = _sfDetailOriginalName;
+        const own = _sfEntryOwnPicture;
+        if (!name || !own) return false;
+        const go = await promptConfirm({
+          title: 'Remove image',
+          message: `Delete ${own.subPath} from this font's folder?`,
+          confirmText: 'Remove', confirmKind: 'danger', cancelText: 'Cancel',
+        });
+        if (!go) return false;
+        let r;
+        try { r = await window.electronAPI.fileOpsDelete({ kind: 'entry', id: name, subPaths: [own.subPath] }); }
+        catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+        if (!r || !r.ok) { promptError('Could not remove the image', (r && r.error) || 'unknown error'); return false; }
+        await _sfAfterEntryPictureChange();
+        return true;
+      };
+      const _sfAfterEntryPictureChange = async () => {
+        const name = _sfDetailOriginalName;
+        if (!name) return;
+        try {
+          const fr = await window.electronAPI.listEntryFiles({ name });
+          _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+        } catch {}
+        _sfRenderEntryFiles();
+        _sfRenderEntryPictureRow();
+        _sfRenderPicture({ imgId: 'sf-entry-picture', boxId: 'sf-entry-meta-box',
+          find: () => window.electronAPI.findEntryPicture({ name }), isCurrent: () => _sfDetailOriginalName === name });
+        // Included Files leaves out the font's own image, so it changes with it.
+        try {
+          const [dr, pr] = await Promise.all([window.electronAPI.listEntryDocs({ name }), window.electronAPI.findEntryPicture({ name })]);
+          if (_sfDetailOriginalName !== name) return;
+          const ownImage = pr && pr.ok && pr.picture && pr.picture.origin === 'own' ? pr.picture.subPath : null;
+          _sfRenderDocChips(document.getElementById('sf-detail-docs-chips'), document.getElementById('sf-detail-docs-row'),
+            ((dr && dr.ok && dr.docs) || []).filter((d) => d.fileName !== ownImage));
+        } catch {}
+      };
+      // Put an image in a font's or common folder's own folder, replacing the one there. Adds the new
+      // one first, so a failure leaves the old; then removes the old and gives the new one the plain
+      // name if the old one was holding it. Returns whether anything changed.
+      const _sfReplaceItemImage = async ({ kind, id, oldSubPath, filePath }) => {
+        const added = await _sfAddImageToItem({ kind, id, subPath: '', filePath });
+        if (!added || !added.length) return false;
+        if (oldSubPath && oldSubPath !== added[0]) {
+          try { await window.electronAPI.fileOpsDelete({ kind, id, subPaths: [oldSubPath] }); } catch {}
+          const itemName = kind === 'common' ? (((_sfCommons.find((c) => c.uuid === id) || {}).meta || {}).name) : id;
+          const ext = (added[0].match(/[.][^.]+$/) || [''])[0];
+          const plain = `${_sfPastedImageStem(itemName)}${ext.toLowerCase()}`;
+          if (added[0] !== plain && oldSubPath.toLowerCase() === plain) {
+            try { await window.electronAPI.fileOpsRename({ kind, id, subPath: added[0], newName: plain }); } catch {}
+          }
+        }
+        return true;
+      };
+      const _sfSetEntryPicture = async (filePath) => {
+        const name = _sfDetailOriginalName;
+        if (!name || !filePath) return;
+        const old = _sfEntryOwnPicture;
+        if (await _sfReplaceItemImage({ kind: 'entry', id: name, oldSubPath: old && old.subPath, filePath })) {
+          await _sfAfterEntryPictureChange();
+        }
+      };
+      document.getElementById('btn-sf-entry-picture-add')?.addEventListener('click', async () => {
+        let s = null;
+        try { s = await window.electronAPI.selectPicture(); } catch {}
+        if (s && s.ok) await _sfSetEntryPicture(s.filePath);
+      });
+      document.getElementById('btn-sf-entry-picture-paste')?.addEventListener('click', (e) => _sfPasteImageVia(_sfSetEntryPicture, e.currentTarget));
+
       // Pick an icon glyph per filename — folders get one branch and
       // common-extension files get hints (wavs vs config vs text) so the
       // grid reads at a glance.
@@ -34797,8 +34989,11 @@ require(['vs/editor/editor.main'], function () {
           const docsRow = document.getElementById('sf-detail-docs-row');
           const docsContainer = document.getElementById('sf-detail-docs-chips');
           if (docsContainer) docsContainer.setAttribute('data-doc-key', entry.name);
-          const dr = await window.electronAPI.listEntryDocs({ name: entry.name });
-          _sfRenderDocChips(docsContainer, docsRow, (dr && dr.ok && dr.docs) || []);
+          // The font's own image is the Image row's, so it is not listed here as well. [B-511]
+          const [dr, pr] = await Promise.all([window.electronAPI.listEntryDocs({ name: entry.name }),
+                                              window.electronAPI.findEntryPicture({ name: entry.name })]);
+          const ownImage = pr && pr.ok && pr.picture && pr.picture.origin === 'own' ? pr.picture.subPath : null;
+          _sfRenderDocChips(docsContainer, docsRow, ((dr && dr.ok && dr.docs) || []).filter((d) => d.fileName !== ownImage));
         } catch {}
 
         // Files browser — full on-disk tree (every wav + every doc + every
@@ -34975,7 +35170,7 @@ require(['vs/editor/editor.main'], function () {
         // SHOWN ONLY WHEN COMPLETE, as the source modal is: the picture, the source's Included
         // files and the Customized marker [B-304] all land before it appears, with the busy card
         // and its Cancel past ~250 ms. Then the atomic visibility swap (see _sfOpenSourceDetail).
-        const _wait = await waitWithBusy([_picturePromise, _srcDocsPromise, _sfRenderCustomized(entryName)],
+        const _wait = await waitWithBusy([_picturePromise, _srcDocsPromise, _sfRenderCustomized(entryName), _sfRenderEntryPictureRow()],
           `Opening ${entry.name}…`);
         if (_wait.cancelled || _sfDetailOriginalName !== entryName) return;
         if (opts.swapFromModalId) {
@@ -35632,11 +35827,7 @@ require(['vs/editor/editor.main'], function () {
         try { const r = await find(); pic = r && r.ok ? r.picture : null; } catch {}
         if (!pic || !isCurrent()) return;
         let res;
-        try {
-          if (pic.kind === 'common') res = await window.electronAPI.readCommonFileBytes({ uuid: pic.id, subPath: pic.subPath });
-          else if (pic.kind === 'entry') res = await window.electronAPI.readEntryDocBytes({ name: pic.id, path: pic.subPath });
-          else res = await window.electronAPI.readSourceDocBytes({ uuid: pic.id, path: pic.subPath });
-        } catch { return; }
+        try { res = await _sfReadPictureBytes(pic); } catch { return; }
         if (!res || !res.ok || !isCurrent()) return;
         _sfPictureUrls[imgId] = URL.createObjectURL(new Blob([Uint8Array.from(res.bytes || [])], { type: _sfMimeFor(pic.subPath) }));
         img.src = _sfPictureUrls[imgId];
@@ -35664,6 +35855,108 @@ require(['vs/editor/editor.main'], function () {
       };
       _sfSourceDetailEls.addPopBtn?.addEventListener('click', () => _sfOpenPopAdd());
       _sfSourceDetailEls.linkPopBtn?.addEventListener('click', () => _sfOpenPopLink());
+
+      // ── Image ── [B-511] The source's image, the same row as a font's: the name of the image it
+      // shows, + Add (Replace once it has one that can be replaced) and Paste; the viewer removes.
+      // ONE FOR ONE: a source with exactly one font or common folder shows that item's own image, so
+      // here the row acts on the item, writing into its folder; every surface then shows the same
+      // image. A bundle's row sets the source's own image. An image already set on the source on
+      // purpose shows first either way, and is the one Replace and Remove act on.
+      let _sfSourceRowState = { single: null, shown: null, removable: null };
+      // A bundle with no image of its own borrows one from its items: a different one each time the
+      // window opens, the same one everywhere in it until it closes.
+      let _sfSourceImageSeed = null;
+      const _sfRenderSourcePictureRow = async () => {
+        const uuid = _sfSourceOriginalUuid;
+        const chip = document.getElementById('sf-source-picture-chip');
+        const add = document.getElementById('btn-sf-source-picture-add');
+        if (!chip || !add) return;
+        let own = null;
+        let shown = null;
+        let single = null;
+        try {
+          const [r, f] = await Promise.all([window.electronAPI.getSourceOwnPicture({ uuid }), window.electronAPI.findSourcePicture({ uuid, seed: _sfSourceImageSeed })]);
+          own = r && r.ok ? r.picture : null;
+          single = r && r.ok ? r.single : null;
+          shown = f && f.ok ? f.picture : null;
+        } catch {}
+        if (_sfSourceOriginalUuid !== uuid) return;
+        const itemOwn = single && shown && shown.origin === 'own' && shown.kind === single.kind && shown.id === single.id ? shown : null;
+        const removable = own ? 'source' : itemOwn ? 'item' : null;
+        // Named only when the image is the source's: set on it, its one item's own, or anything from
+        // the download. One borrowed from a bundle font's own folder is not, so the row offers + Add.
+        const named = shown && (shown.origin === 'own' || shown.origin === 'creator') ? shown : null;
+        _sfSourceRowState = { single, shown, removable };
+        _sfRenderImageChip(chip, named, removable ? _sfRemoveSourcePicture : null);
+        add.textContent = named ? 'Replace' : '+ Add';
+        add.title = single ? `Choose an image for ${single.label}, which is what this source shows`
+          : 'Choose an image for this source from your computer';
+      };
+      const _sfAfterSourcePictureChange = () => {
+        const uuid = _sfSourceOriginalUuid;
+        _sfRenderSourcePictureRow();
+        _sfRenderPicture({ imgId: 'sf-source-picture', boxId: 'sf-source-meta-box',
+          find: () => window.electronAPI.findSourcePicture({ uuid, seed: _sfSourceImageSeed }), isCurrent: () => _sfSourceOriginalUuid === uuid });
+        // Fonts and common folders fall back to this image, so the sidebar's hover answers are stale.
+        if (typeof _sfRefreshCommons === 'function') { try { _sfRefreshCommons(); } catch {} }
+      };
+      const _sfSetSourcePicture = async (filePath) => {
+        const uuid = _sfSourceOriginalUuid;
+        if (!uuid) return;
+        const { single, shown, removable } = _sfSourceRowState;
+        if (single) {
+          let fp = filePath;
+          if (!fp) {
+            let s = null;
+            try { s = await window.electronAPI.selectPicture(); } catch {}
+            if (!s || !s.ok) return;
+            fp = s.filePath;
+          }
+          const oldSubPath = removable === 'item' ? shown.subPath : null;
+          if (!(await _sfReplaceItemImage({ kind: single.kind, id: single.id, oldSubPath, filePath: fp }))) return;
+          // The item's image is now the source's; one set on the source earlier would hide it.
+          if (removable === 'source') { try { await window.electronAPI.clearSourcePicture({ uuid }); } catch {} }
+          _sfAfterSourcePictureChange();
+          return;
+        }
+        let r;
+        try { r = await window.electronAPI.setSourcePicture({ uuid, filePath }); }
+        catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+        if (r && r.cancelled) return;
+        if (!r || !r.ok) { promptError('Could not set the image', (r && r.error) || 'unknown error'); return; }
+        _sfAfterSourcePictureChange();
+      };
+      // Run from the viewer. Returns true when the image went, so the viewer closes.
+      const _sfRemoveSourcePicture = async () => {
+        const uuid = _sfSourceOriginalUuid;
+        const { single, shown, removable } = _sfSourceRowState;
+        if (!uuid || !removable) return false;
+        let r;
+        if (removable === 'item') {
+          const go = await promptConfirm({
+            title: 'Remove image',
+            message: `Delete ${shown.subPath} from ${single.label}'s folder?`,
+            confirmText: 'Remove', confirmKind: 'danger', cancelText: 'Cancel',
+          });
+          if (!go) return false;
+          try { r = await window.electronAPI.fileOpsDelete({ kind: single.kind, id: single.id, subPaths: [shown.subPath] }); }
+          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+        } else {
+          const go = await promptConfirm({
+            title: 'Remove image',
+            message: "Remove this source's image?",
+            confirmText: 'Remove', confirmKind: 'danger', cancelText: 'Cancel',
+          });
+          if (!go) return false;
+          try { r = await window.electronAPI.clearSourcePicture({ uuid }); }
+          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+        }
+        if (!r || !r.ok) { promptError('Could not remove the image', (r && r.error) || 'unknown error'); return false; }
+        _sfAfterSourcePictureChange();
+        return true;
+      };
+      document.getElementById('btn-sf-source-picture-add')?.addEventListener('click', () => _sfSetSourcePicture());
+      document.getElementById('btn-sf-source-picture-paste')?.addEventListener('click', (e) => _sfPasteImageVia(_sfSetSourcePicture, e.currentTarget));
 
       // The same chips, on the import review. The source already exists by the
       // time the review renders (import runs first), so an attachment added here
@@ -36376,7 +36669,7 @@ require(['vs/editor/editor.main'], function () {
           const descTip = eDesc.length > 200 ? eDesc.slice(0, 200) + '…' : eDesc;
           return `<div class="sf-source-entry-row" data-source-common="${u}">
             <button class="sf-source-entry-pencil" data-common-edit-toggle="${u}" title="Edit name, description and group">&#9998;</button>
-            <span class="ent-name"><span class="ent-name-txt">${_sfEscape(eName)}</span><span class="ent-cust" data-cust-common="${u}">${_sfCommonCustMarkup(c)}</span></span>
+            <span class="ent-name"><span class="ent-name-txt">${_sfEscape(eName)}</span><span class="ent-cust" data-cust-common="${u}"${_sfCommonCustKnown(c) ? ' data-done="1"' : ''}>${_sfCommonCustMarkup(c)}</span></span>
             <span class="ent-desc"${eDesc ? ` title="${_sfEscape(descTip)}"` : ''}>${_sfEscape(eDesc)}</span>
             <span class="ent-group"${eGrp ? ` title="Group: ${_sfEscape(eGrp)}"` : ''}>${_sfEscape(eGrp)}</span>
             <span class="ent-meta">${meta}</span>
@@ -36390,6 +36683,7 @@ require(['vs/editor/editor.main'], function () {
         (async () => {
           for (const slot of els.entriesList.querySelectorAll('.ent-cust[data-cust-common]')) {
             if (slot.textContent) { slot.title = _custTitle; slot.dataset.done = '1'; continue; }
+            if (slot.dataset.done === '1') continue;   // the stamp already answered "not customized"
             let r = null;
             try { r = await window.electronAPI.commonCustomization({ uuid: slot.dataset.custCommon }); } catch {}
             if (_sfSourceOriginalUuid !== _custSrc || !slot.isConnected) return;
@@ -36545,9 +36839,11 @@ require(['vs/editor/editor.main'], function () {
         }
         const sm = src.meta || {};
         _sfSourceOriginalUuid = uuid;
+        _sfSourceImageSeed = Math.floor(Math.random() * 1e9);
         const popPromise = _sfRenderSourcePop();
+        const pictureRowPromise = _sfRenderSourcePictureRow();
         const picturePromise = _sfRenderPicture({ imgId: 'sf-source-picture', boxId: 'sf-source-meta-box',
-          find: () => window.electronAPI.findSourcePicture({ uuid }), isCurrent: () => _sfSourceOriginalUuid === uuid });
+          find: () => window.electronAPI.findSourcePicture({ uuid, seed: _sfSourceImageSeed }), isCurrent: () => _sfSourceOriginalUuid === uuid });
         const opToken = ++_sfSourceDetailOpToken;
         // Stub edit-state with empty entries/tags. The async entries load
         // below fills both in once they're known. Save() is disabled and the
@@ -36787,7 +37083,7 @@ require(['vs/editor/editor.main'], function () {
         // walks its inner archives) the app's busy card says so, with a Cancel that abandons the
         // open. The swap removes the caller's modal in the same tick ours appears, so the card
         // grid never shows between them.
-        const _wait = await waitWithBusy([entriesPromise, docsPromise, filesPromise, popPromise, picturePromise],
+        const _wait = await waitWithBusy([entriesPromise, docsPromise, filesPromise, popPromise, picturePromise, pictureRowPromise],
           `Opening ${_sfSourceEdit && _sfSourceEdit.bundleName ? _sfSourceEdit.bundleName : 'source'}…`);
         if (_wait.cancelled) _sfSourceDetailOpToken++;
         if (opToken !== _sfSourceDetailOpToken) return;
@@ -40325,7 +40621,7 @@ require(['vs/editor/editor.main'], function () {
         if (loopBtn) loopBtn.setAttribute('aria-pressed', 'false');
         const _find = kind === 'common' ? () => window.electronAPI.findCommonPicture({ uuid: id })
           : kind === 'entry' ? () => window.electronAPI.findEntryPicture({ name: id })
-          : kind === 'source' ? () => window.electronAPI.findSourcePicture({ uuid: id })
+          : kind === 'source' ? () => window.electronAPI.findSourcePicture({ uuid: id, seed: Math.floor(Math.random() * 1e9) })
           : async () => null;
         _sfRenderPicture({ imgId: 'sf-audio-picture', boxId: 'sf-audio-box', find: _find,
           isCurrent: () => token === _sfAudioOpenToken });
@@ -41203,7 +41499,7 @@ require(['vs/editor/editor.main'], function () {
       // hands off to the existing _sfShowDocViewer. Mirrors the audio
       // player's { kind, id, subPath } shape so the per-browser triggers
       // can dispatch on extension to the right opener.
-      const _sfOpenDocViewer = async ({ kind, id, subPath, size }) => {
+      const _sfOpenDocViewer = async ({ kind, id, subPath, size, remove }) => {
         const fileName = subPath.split('/').pop();
         let res;
         try {
@@ -41213,6 +41509,8 @@ require(['vs/editor/editor.main'], function () {
             res = await window.electronAPI.readCommonFileBytes({ uuid: id, subPath });
           } else if (kind === 'source') {
             res = await window.electronAPI.readSourceDocBytes({ uuid: id, path: subPath });
+          } else if (kind === 'attachment') {
+            res = await window.electronAPI.readAttachment({ id });
           } else {
             throw new Error(`Unknown doc viewer kind: ${kind}`);
           }
@@ -41227,7 +41525,7 @@ require(['vs/editor/editor.main'], function () {
         const bytes = Uint8Array.from(res.bytes || []);
         if (_sfImageExt.test(fileName)) {
           const blobUrl = URL.createObjectURL(new Blob([bytes], { type: _sfMimeFor(fileName) }));
-          _sfShowDocViewer(fileName, size || bytes.length, '', { kind: 'image', blobUrl });
+          _sfShowDocViewer(fileName, size || bytes.length, '', { kind: 'image', blobUrl, remove });
           return;
         }
         const raw = _sfDecodeBytes(bytes);
@@ -47923,6 +48221,8 @@ require(['vs/editor/editor.main'], function () {
       // Proof-of-purchase context {id, uuid} when the viewer shows an attachment;
       // null for plain vendor docs (which have no Open-externally / Remove actions).
       let _sfDocViewerPop = null;
+      // [B-511] An image's own Remove: { label, run }, where run() returns true once it is gone.
+      let _sfDocViewerRemove = null;
       // Modals to stash while the doc viewer is on top, so the user doesn't
       // see two layered modal panels at once. State stays intact (dirty edits,
       // input focus history, etc.) — only the visible .active class is toggled.
@@ -47963,7 +48263,13 @@ require(['vs/editor/editor.main'], function () {
         }
         // Proof-of-purchase actions (Open externally / Remove) only for attachments.
         _sfDocViewerPop = opts.pop || null;
-        if (_sfDocViewerEls.actions) _sfDocViewerEls.actions.style.display = _sfDocViewerPop ? '' : 'none';
+        _sfDocViewerRemove = opts.remove || null;
+        if (_sfDocViewerEls.actions) _sfDocViewerEls.actions.style.display = (_sfDocViewerPop || _sfDocViewerRemove) ? '' : 'none';
+        if (_sfDocViewerEls.openExt) _sfDocViewerEls.openExt.style.display = _sfDocViewerPop ? '' : 'none';
+        if (_sfDocViewerEls.remove) {
+          _sfDocViewerEls.remove.textContent = _sfDocViewerRemove ? _sfDocViewerRemove.label : 'Remove from source';
+          _sfDocViewerEls.remove.title = _sfDocViewerRemove ? 'Remove this image' : 'Remove this file from this source';
+        }
         // Hide any SF modals currently open so the viewer is the only thing
         // on screen. They get restored on close.
         _sfDocViewerStashedModalIds = [];
@@ -47983,6 +48289,7 @@ require(['vs/editor/editor.main'], function () {
         if (_sfDocViewerEls.body) { _sfDocViewerEls.body.innerHTML = ''; _sfDocViewerEls.body.classList.remove('sf-doc-viewer-media'); }
         if (_sfDocViewerEls.actions) _sfDocViewerEls.actions.style.display = 'none';
         _sfDocViewerPop = null;
+        _sfDocViewerRemove = null;
         // Restore whatever modals we hid when the viewer opened, preserving
         // their existing state (dirty flags, in-progress edits, etc.).
         for (const id of _sfDocViewerStashedModalIds) {
@@ -47995,6 +48302,10 @@ require(['vs/editor/editor.main'], function () {
         if (_sfDocViewerPop && _sfDocViewerPop.id) window.electronAPI.openAttachment({ id: _sfDocViewerPop.id });
       });
       _sfDocViewerEls.remove?.addEventListener('click', async () => {
+        if (_sfDocViewerRemove) {
+          if (await _sfDocViewerRemove.run()) _sfHideDocViewer();
+          return;
+        }
         if (!_sfDocViewerPop) return;
         const { id, uuid } = _sfDocViewerPop;
         // Situational: we know exactly how many sources use this file, so offer
@@ -50682,13 +50993,20 @@ require(['vs/editor/editor.main'], function () {
       // and the two copies disagreed - the completion quoted the pre-flight survey, so an export
       // that left a font out still reported the library's own count.
       // Both callers pass the figures for the ARCHIVE, never the library on disk.
-      const _sfLibrarySummary = (cs, totalBytes) => {
+      // Sizes in the footer's words: every name counted ("of files"), each shared file once ("on
+      // disk"), and the backup file itself once there is one. [B-498] Since a backup stores each
+      // shared file once, "of files" alone read as the size of a zip three times smaller. And in
+      // the footer's formatter, which truncates: these say how much is here, and rounding put
+      // "1.28 GB on disk" beside a footer reading 1.27 for the same library.
+      const _sfLibrarySummary = (cs, totalBytes, { onDiskBytes, zipBytes } = {}) => {
         const c = cs || {};
         const n = (v) => v || 0;
         return `Library: ${n(c.sources)} source${n(c.sources) === 1 ? '' : 's'}, `
              + `${n(c.library)} font${n(c.library) === 1 ? '' : 's'}, `
              + `${n(c.common)} common folder${n(c.common) === 1 ? '' : 's'}${_sfProofPart(c)}. `
-             + `Total ${_sfFormatBytesShort(totalBytes || 0)}.`;
+             + `Total ${_sfFormatBytes(totalBytes || 0)} of files`
+             + (onDiskBytes ? `, ${_sfFormatBytes(onDiskBytes)} on disk.` : '.')
+             + (zipBytes ? ` Backup file: ${_sfFormatBytes(zipBytes)}.` : '');
       };
       const _sfOpenExportBackup = async () => {
         // Pick the destination zip path first so the benchmark can run on
@@ -51138,7 +51456,8 @@ require(['vs/editor/editor.main'], function () {
             // The survey remains the fallback for an archive with no manifest.
             const _mf = r.manifest || null;
             const summaryLine = (_mf && _mf.counts)
-              ? _sfLibrarySummary(_mf.counts, _mf.totals && _mf.totals.totalBytes)
+              ? _sfLibrarySummary(_mf.counts, _mf.totals && _mf.totals.totalBytes,
+                  { onDiskBytes: _mf.totals && _mf.totals.onDiskBytes, zipBytes: r.zipBytes })
               : (cs ? _sfLibrarySummary(cs, survey ? survey.totalBytes : 0) : '');
             const message = [
               `Backup written to:\n${r.destPath || destPath}`,
@@ -52389,7 +52708,8 @@ require(['vs/editor/editor.main'], function () {
         // top, comparison on the bottom — the user reads the comparison
         // and then picks Replace or Merge with the consequences visible.
         const cs = observed.counts;
-        const totalSize = _sfFormatBytesShort(observed.totals.totalBytes);
+        const totalSize = `${_sfFormatBytes(observed.totals.totalBytes)} of files`
+          + (manifest.totals && manifest.totals.onDiskBytes ? `, ${_sfFormatBytes(manifest.totals.onDiskBytes)} on disk` : '');
         const exportedAt = manifest.exportedAt ? new Date(manifest.exportedAt).toLocaleString() : '';
         const summaryEl = document.getElementById('sf-backup-import-summary');
         if (summaryEl) {
@@ -53943,6 +54263,8 @@ require(['vs/editor/editor.main'], function () {
       // identical `;MC` config read as `Fire;MC`. [B-326]
       font.textContent = _sfFontDir(preset.font);
       row.appendChild(font);
+      // Hovering the font name shows its image, beside the list. [B-511]
+      window._jmtAttachFontImageHover?.(font, () => _sfFontDir(preset.font).split('/')[0], () => row.parentElement);
 
       const toggleBtn = document.createElement('button');
       toggleBtn.className = 'preset-row-toggle';

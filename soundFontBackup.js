@@ -25,8 +25,41 @@ const soundFontEntries = require('./soundFontEntries');
 // which part of it was blocking.
 const stallProbe = require('./stallProbe');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const BACKUP_TYPE = 'jmt-soundfontlibrary';
+
+// [B-498] THE ZIP HOLDS NO LIBRARY FOLDERS. Every file's bytes are stored once under STORE_DIR
+// with a name that is only a number, and PATHS_FILE maps each library path to the object holding
+// its bytes, with every folder listed so empty ones come back too. Files that share one copy on
+// disk are stored once. Unzipped by hand, nothing in it looks like a font, so nothing in it can be
+// copied to a card by mistake; the file named README_NAME says what it is and how to restore it.
+// `_openBackupZip` reads it back as if it still held the library's paths.
+const STORE_DIR = 'store';
+const PATHS_FILE = 'paths.json';
+// No program claims it, so a stored object opened by hand opens nothing.
+const OBJECT_EXT = '.jmtdata';
+const README_NAME = 'READ ME - This is a JMT Studio backup. Restore it from JMT Studio, do not unzip it.txt';
+function _readableDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+function _readmeText(appVersion, exportedAt) {
+  return [
+    'This is a backup of a JMT Studio sound font library.',
+    '',
+    'It is not a folder of fonts. Inside, every sound is stored once under a number, so the',
+    'files in here cannot be copied to an SD card or opened as fonts. Unzipping it gets you',
+    'nothing you can use.',
+    '',
+    'To restore it: open JMT Studio, go to Sound Fonts, click Backup, then Import Backup, and',
+    'choose this file. Merge adds it to the library you have; Replace puts the library back',
+    'exactly as it was when this backup was made.',
+    '',
+    `Made by JMT Studio ${appVersion || ''} on ${_readableDate(exportedAt)}.`.replace(/ +/g, ' '),
+    '',
+  ].join('\r\n');
+}
 
 // The per-file hash records, kept OUTSIDE the item folders so they can never leak onto an
 // SD card through an export path:
@@ -57,9 +90,102 @@ const FILEHASH_SUBDIR = { library: 'entries', sources: 'sources', common: 'commo
 // these out, because `library/.seen-backfill-done` splits into a bucket and an id exactly like
 // `library/Ahsoka/hum.wav` does: the inspect count, the merge survey's per-item aggregate and the
 // restore's per-item lists each turn it into a phantom font named `.seen-backfill-done`.
-const CARRIED_MARKERS = ['library/.seen-backfill-done'];
+const CARRIED_MARKERS = ['library/.seen-backfill-done', '_jmt_library_meta.json'];
+const POOL_DIR = 'pool';
 const _isCarriedMarker = (zipName) =>
   CARRIED_MARKERS.includes(String(zipName || '').replace(/\\/g, '/'));
+
+// [B-498] Open a backup so every reader sees the library's own paths. The zip stores bytes under
+// numbered objects; this answers entries() with one entry per library path (and one per folder,
+// as a directory entry, which is how folders came back before), and extract() of a path pulls its
+// object. A path whose object is already on disk from this same read is linked to it rather than
+// written again, so files that shared one copy when backed up share one copy when restored.
+// Every reader goes through here and keeps the four calls it already made.
+async function _openBackupZip(zipPath, options) {
+  const zip = openZipOwned(zipPath, options);
+  let index = null;
+  try {
+    const raw = await zip.entries();
+    if (raw[PATHS_FILE]) index = JSON.parse((await zip.entryData(PATHS_FILE)).toString('utf8'));
+    if (!index || !index.files) return zip;
+    const view = {};
+    if (raw['manifest.json']) view['manifest.json'] = raw['manifest.json'];
+    for (const d of index.dirs || []) view[`${d}/`] = { name: `${d}/`, isDirectory: true, size: 0 };
+    const objectOf = new Map();
+    for (const [p, object] of Object.entries(index.files)) {
+      const r = raw[object];
+      if (!r) continue;
+      view[p] = { name: p, isDirectory: false, size: r.size };
+      objectOf.set(p, object);
+    }
+    const firstTarget = new Map();   // object -> where it was first written
+    const pathsOf = new Map();       // object -> every library path that names it
+    for (const [p, object] of objectOf) {
+      if (!pathsOf.has(object)) pathsOf.set(object, []);
+      pathsOf.get(object).push(p);
+    }
+    // A Replace keeps unchanged items by moving them, not extracting them, so the first name of an
+    // object written in this read can have a sibling already on disk under the same root. Linking
+    // to it keeps the two sharing one copy as they did when backed up; the bytes are compared
+    // first, because in a merge a path of the same name can be the user's own, different, file.
+    const { hashFile } = require('./soundFontFileHash');
+    const linkToSibling = (name, object, target) => {
+      const rel = name.split('/').join(path.sep);
+      if (!target.endsWith(rel)) return;
+      const root = target.slice(0, target.length - rel.length);
+      let own = null;
+      for (const p of pathsOf.get(object) || []) {
+        if (p === name) continue;
+        const abs = root + p.split('/').join(path.sep);
+        try {
+          if (!fs.statSync(abs).isFile() || fs.statSync(abs).size !== fs.statSync(target).size) continue;
+          if (own === null) own = hashFile(target);
+          if (!own || hashFile(abs) !== own) continue;
+          const tmp = `${target}.link-tmp`;
+          try { fs.rmSync(tmp, { force: true }); } catch {}
+          try { fs.linkSync(abs, tmp); fs.renameSync(tmp, target); }
+          finally { try { fs.rmSync(tmp, { force: true }); } catch {} }
+          return;
+        } catch { /* missing, unreadable or not linkable: try the next */ }
+      }
+    };
+    return {
+      entries: async () => view,
+      entryData: (name) => zip.entryData(objectOf.get(name) || name),
+      extract: async (name, target) => {
+        const object = objectOf.get(name);
+        if (!object) return zip.extract(name, target);
+        const first = firstTarget.get(object);
+        if (first && path.resolve(first) !== path.resolve(target)) {
+          try {
+            if (fs.statSync(first).size === view[name].size) {
+              try { fs.rmSync(target, { force: true }); } catch {}
+              fs.linkSync(first, target);
+              return 1;
+            }
+          } catch { /* gone or not linkable: write the bytes */ }
+        }
+        const r = await zip.extract(object, target);
+        firstTarget.set(object, target);
+        if ((pathsOf.get(object) || []).length > 1) linkToSibling(name, object, target);
+        return r;
+      },
+      close: () => zip.close(),
+    };
+  } catch (err) {
+    try { await zip.close(); } catch {}
+    throw err;
+  }
+}
+
+// [B-511] A source's own picture is kept in the attachments store but is not proof of purchase, so
+// every count shown as "proofs of purchase" leaves it out. Its bytes still count toward size.
+function _isPictureDir(abs) {
+  return require('./soundFontAttachments').isPictureAttachmentDir(abs);
+}
+function _countItems(bucket, root, dirs) {
+  return bucket === 'attachments' ? dirs.filter((d) => !_isPictureDir(path.join(root, d.name))).length : dirs.length;
+}
 
 // Side-effect call into soundFontEntries: its _readEntryMeta backfills
 // entryUuid into any legacy meta.json that doesn't have one. Running
@@ -350,7 +476,7 @@ async function surveyLibraryAsync(userData, opts) {
     try { names = fs.readdirSync(root, { withFileTypes: true }); }
     catch { continue; }
     const dirs = names.filter(d => d.isDirectory());
-    counts[b] = dirs.length;
+    counts[b] = _countItems(b, root, dirs);
     // THE BREATH IS PER TOP-LEVEL ITEM, NOT PER BUCKET. A bucket is four iterations; a single
     // multi-GB voicepack is the thing that actually holds the loop, and yielding between buckets
     // would leave the longest stretch exactly as blocking as it is now.
@@ -425,7 +551,7 @@ function surveyLibrary(userData) {
     try { names = fs.readdirSync(root, { withFileTypes: true }); }
     catch { continue; }
     const dirs = names.filter(d => d.isDirectory());
-    counts[b] = dirs.length;
+    counts[b] = _countItems(b, root, dirs);
     for (const d of dirs) totals[b] += _dirBytes(path.join(root, d.name));
   }
   // sharedTracks — flat folder, count .wav files at top level only.
@@ -631,6 +757,19 @@ async function exportBackup({
     droppedUnreadable.set(key, (droppedUnreadable.get(key) || 0) + 1);
   }
   const skippedItems = [];
+  // [B-498] A file with a second name on disk is stored once, so its later names write nothing.
+  // Their bytes come off the bar's total here, in the same pass that counts files.
+  const _countedIds = new Set();
+  let _repeatBytes = 0;
+  const _noteRepeat = (abs) => {
+    try {
+      const st = fs.statSync(abs, { bigint: true });
+      if (st.nlink < 2n) return;
+      const id = `${st.dev}:${st.ino}`;
+      if (_countedIds.has(id)) _repeatBytes += Number(st.size);
+      else _countedIds.add(id);
+    } catch {}
+  };
   for (const bucket of ['sources', 'library', 'common', 'attachments']) {
     const root = path.join(_soundFontsRoot(userData), bucket);
     if (!fs.existsSync(root)) continue;
@@ -728,6 +867,7 @@ async function exportBackup({
               continue;
             }
           }
+          _noteRepeat(fileAbs);
           count++;
         }
       };
@@ -781,6 +921,7 @@ async function exportBackup({
           refusedAbs.add(fAbs);
           continue;
         }
+        _noteRepeat(fAbs);
         sharedTracksItemCount++;
       }
     }
@@ -896,7 +1037,9 @@ async function exportBackup({
   //
   // THE DESTINATION FIT CHECK STILL USES THE RAW SURVEY, deliberately: asking for room the backup
   // may not need is the safe direction, and the check runs before the skip is even agreed.
-  const _archiveTotalBytes = _manifestTotalBytes;
+  // [B-498] And it is what will be WRITTEN: a second name for a stored file costs nothing, so the
+  // bar runs against the library's size on disk rather than the sum of every name's size.
+  const _archiveTotalBytes = Math.max(0, _manifestTotalBytes - _repeatBytes);
 
   const manifest = {
     type: BACKUP_TYPE,
@@ -904,7 +1047,9 @@ async function exportBackup({
     appVersion: appVersion || '',
     exportedAt: new Date().toISOString(),
     counts: _manifestCounts,
-    totals: { ..._manifestTotals, totalBytes: _manifestTotalBytes },
+    // onDiskBytes: what the library takes on disk, each shared file once - the footer's second
+    // figure, and the bytes this archive actually holds before compression. [B-498]
+    totals: { ..._manifestTotals, totalBytes: _manifestTotalBytes, onDiskBytes: _archiveTotalBytes },
     settings: _captureLibrarySettings(prefs),
     // Per-item canonical content hashes, see soundFontFileHash.js for
     // what's included and excluded. Backups without this field fall
@@ -1271,7 +1416,32 @@ async function exportBackup({
     }
     return itemDoneGates.get(topKey);
   };
-  archive.on('entry', (entry) => {
+  // [B-498] Where each library file's bytes go. A file's identity is its file id when it has more
+  // than one name on disk (bigint: an NTFS id can exceed a double), else its own path, so the
+  // first name archived carries the bytes and every later name is only a row in PATHS_FILE.
+  const _objectOf = new Map();       // identity -> object name
+  const _pathOf = new Map();         // object name -> the library path that carried its bytes
+  const _paths = {};                 // library path -> object name
+  const _dirs = new Set();
+  let _objectCount = 0;
+  const _addDirs = (rel) => {
+    const segs = String(rel || '').split('/').filter(Boolean);
+    for (let i = 1; i <= segs.length; i++) _dirs.add(segs.slice(0, i).join('/'));
+  };
+  const _place = (abs, rel, stats) => {
+    let id = `path:${abs}`;
+    if (stats && stats.nlink > 1) {
+      try { const s = fs.statSync(abs, { bigint: true }); id = `${s.dev}:${s.ino}`; } catch {}
+    }
+    const known = _objectOf.get(id);
+    if (known) { _paths[rel] = known; return { dup: true, object: known }; }
+    const object = `${STORE_DIR}/${String(++_objectCount).padStart(6, '0')}${OBJECT_EXT}`;
+    _objectOf.set(id, object);
+    _pathOf.set(object, rel);
+    _paths[rel] = object;
+    return { dup: false, object };
+  };
+  const _onEntry = (entry) => {
     // Skip directory entries — archive.directory() emits an 'entry'
     // for every sub-folder as well as every file. The user-facing
     // counter and the pre-scan total both treat "files only" so we
@@ -1279,7 +1449,7 @@ async function exportBackup({
     const isDir = (entry.type === 'directory')
       || (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory());
     if (isDir) return;
-    if (entry.stats && entry.stats.size) processedBytes += entry.stats.size;
+    if (entry.stats && entry.stats.size && !entry.repeat) processedBytes += entry.stats.size;
     const parts = String(entry.name || '').split('/');
     const bucket = parts[0] || '';
     const topName = parts[1] || '';
@@ -1382,7 +1552,9 @@ async function exportBackup({
         attachmentsBucketGate.resolve();
       }
     }
-  });
+  };
+  // The archive names entries by object; progress and the gates speak library paths.
+  archive.on('entry', (entry) => _onEntry({ ...entry, name: _pathOf.get(entry.name) || entry.name }));
 
   // A file the archive cannot read must END the run, not park it. Measured 2026-10-11: one
   // unreadable file leaves `archive.finalize()` unsettled forever - reproduced with three
@@ -1474,10 +1646,45 @@ async function exportBackup({
       if (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory()) return entry;
       return refusedAbs.has(path.join(rootAbs, entry.name)) ? false : entry;
     };
+    // [B-498] Every directory call goes through here. A folder becomes a row in PATHS_FILE, a file
+    // becomes an object, and a second name for a file already stored becomes a row only. That row
+    // still counts as the file arriving, through the same handler the archive's own event feeds,
+    // so every per-item count and gate sees each file exactly once whether or not it was stored.
+    const _stored = (rootAbs, prefix, filter) => {
+      return (entry) => {
+        const e = filter ? filter(entry) : entry;
+        if (!e || !e.name) return e;
+        if (e.stats && typeof e.stats.isDirectory === 'function' && e.stats.isDirectory()) return false;
+        const rel = `${prefix}/${String(e.name).replace(/\\/g, '/')}`;
+        const placed = _place(path.join(rootAbs, e.name), rel, e.stats);
+        if (placed.dup) {
+          _onEntry({ name: rel, type: 'file', stats: e.stats, repeat: true });
+          return false;
+        }
+        e.name = placed.object;
+        e.prefix = '';
+        return e;
+      };
+    };
+    // A file appended from a buffer: stored once like the rest, and awaited so the next is not read
+    // until this one is written.
+    const _appendStored = async (buf, abs, rel) => {
+      let stats = null;
+      try { stats = fs.statSync(abs); } catch {}
+      const placed = _place(abs, rel, stats);
+      if (placed.dup) return;
+      const written = new Promise((resolve) => {
+        const onEntry = (e) => { if (e && e.name === placed.object) { archive.removeListener('entry', onEntry); resolve(); } };
+        archive.on('entry', onEntry);
+      });
+      archive.append(buf, { name: placed.object });
+      await Promise.race([written, fatal]);
+    };
+    archive.append(_readmeText(appVersion, manifest.exportedAt), { name: README_NAME });
     if (!cancelled) {
       const srcRoot = path.join(_soundFontsRoot(userData), 'sources');
       if (fs.existsSync(srcRoot)) {
-        archive.directory(srcRoot, 'sources', _skipRefused(srcRoot, 'sources'));
+        archive.directory(srcRoot, 'sources', _stored(srcRoot, 'sources', _skipRefused(srcRoot, 'sources')));
         // Wait for the entire sources bucket to flush before starting
         // library, otherwise archiver interleaves sources entries with
         // the first library entries and the user-facing label flips
@@ -1492,7 +1699,7 @@ async function exportBackup({
           if (cancelled) break;
           const topKey = `library/${item.name}`;
           const expected = filesPerTopItem.get(topKey) || 0;
-          archive.directory(item.abs, topKey, _skipRefused(item.abs));
+          archive.directory(item.abs, topKey, _stored(item.abs, topKey, _skipRefused(item.abs)));
           // Empty dirs would never resolve via the entry handler; just
           // skip the await in that case so the loop doesn't hang.
           if (expected > 0) await _gateFor(topKey).promise;
@@ -1506,7 +1713,7 @@ async function exportBackup({
           if (cancelled) break;
           const topKey = `common/${item.name}`;
           const expected = filesPerTopItem.get(topKey) || 0;
-          archive.directory(item.abs, topKey, _skipRefused(item.abs));
+          archive.directory(item.abs, topKey, _stored(item.abs, topKey, _skipRefused(item.abs)));
           if (expected > 0) await _gateFor(topKey).promise;
         }
       }
@@ -1514,7 +1721,7 @@ async function exportBackup({
     if (!cancelled) {
       const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
       if (fs.existsSync(stRoot)) {
-        archive.directory(stRoot, 'sharedTracks', _skipRefused(stRoot));
+        archive.directory(stRoot, 'sharedTracks', _stored(stRoot, 'sharedTracks', _skipRefused(stRoot)));
         if (archiveSharedTracks.total > 0) await sharedTracksBucketGate.promise;
       }
     }
@@ -1523,7 +1730,7 @@ async function exportBackup({
       if (fs.existsSync(attRoot)) {
         // FILTERED LIKE THE REST. Attachments are exempt from the carry test, never from the
         // readability skip - an unreadable receipt stops the archive exactly like any other file.
-        archive.directory(attRoot, 'attachments', _skipRefused(attRoot, 'attachments'));
+        archive.directory(attRoot, 'attachments', _stored(attRoot, 'attachments', _skipRefused(attRoot, 'attachments')));
         if (attachmentsFilesExpected > 0) await attachmentsBucketGate.promise;
       }
     }
@@ -1553,14 +1760,67 @@ async function exportBackup({
     if (!cancelled) {
       for (const rel of CARRIED_MARKERS) {
         let buf;
-        try { buf = fs.readFileSync(path.join(_soundFontsRoot(userData), rel)); }
+        const abs = path.join(_soundFontsRoot(userData), rel);
+        try { buf = fs.readFileSync(abs); }
         catch { continue; }
-        archive.append(buf, { name: rel });
+        await _appendStored(buf, abs, rel);
       }
     }
+    // [B-498] Read one file at a time rather than walked by the archiver, which nothing awaits:
+    // PATHS_FILE is written last and has to see every one of these placed.
     if (!cancelled) {
       const fhRoot = path.join(_soundFontsRoot(userData), FILEHASH_DIR);
-      if (fs.existsSync(fhRoot)) archive.directory(fhRoot, FILEHASH_DIR);
+      const fhFiles = [];
+      const walkFh = (dir, rel) => {
+        let items;
+        try { items = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const it of items) {
+          const abs = path.join(dir, it.name);
+          if (it.isDirectory()) walkFh(abs, `${rel}/${it.name}`);
+          else if (it.isFile()) fhFiles.push({ abs, rel: `${rel}/${it.name}` });
+        }
+      };
+      walkFh(fhRoot, FILEHASH_DIR);
+      for (const f of fhFiles) {
+        if (cancelled) break;
+        let buf;
+        try { buf = fs.readFileSync(f.abs); } catch { continue; }
+        await _appendStored(buf, f.abs, f.rel);
+      }
+    }
+    // [B-498] The content pool, flat, with its index. A Replace rebuilds the library from the
+    // zip, so a pool the zip does not carry comes back empty. One file at a time, each awaited
+    // before the next is read, so a large pool is never held in memory at once; read here rather
+    // than handed to archiver by path for the same [B-478] reason as the markers above.
+    if (!cancelled) {
+      const poolRoot = path.join(_soundFontsRoot(userData), POOL_DIR);
+      let poolFiles = [];
+      try { poolFiles = fs.readdirSync(poolRoot, { withFileTypes: true }).filter((f) => f.isFile()); } catch {}
+      for (const f of poolFiles) {
+        if (cancelled) break;
+        const abs = path.join(poolRoot, f.name);
+        if (skipSet.has(path.resolve(abs))) continue;
+        if (!f.name.startsWith('.') && checkCarryableFile(abs, f.name).blocked) continue;
+        let buf;
+        try { buf = fs.readFileSync(abs); } catch { continue; }
+        await _appendStored(buf, abs, `${POOL_DIR}/${f.name}`);
+      }
+    }
+    // Last, once every path is known. The folders come from one walk of the carried roots rather
+    // than from the archiver's walk, whose last folders can arrive after its last file.
+    if (!cancelled) {
+      const sfAbs = _soundFontsRoot(userData);
+      const walkDirs = (abs, rel) => {
+        if (droppedItems.has(rel)) return;
+        _addDirs(rel);
+        let items;
+        try { items = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
+        for (const it of items) if (it.isDirectory()) walkDirs(path.join(abs, it.name), `${rel}/${it.name}`);
+      };
+      for (const root of ['sources', 'library', 'common', 'sharedTracks', 'attachments', FILEHASH_DIR, POOL_DIR]) {
+        if (fs.existsSync(path.join(sfAbs, root))) walkDirs(path.join(sfAbs, root), root);
+      }
+      archive.append(JSON.stringify({ files: _paths, dirs: [..._dirs].sort() }), { name: PATHS_FILE });
     }
 
     // Raced against `fatal` so an unreadable file ends the run instead of parking it here
@@ -1755,7 +2015,7 @@ async function inspectBackup(zipPath) {
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     return { ok: false, reason: 'unreadable', error: String(err && err.message || err) };
   }
@@ -1815,6 +2075,13 @@ async function inspectBackup(zipPath) {
       if (!e.isDirectory) buckets[bucket].bytes += (e.size || 0);
     }
     for (const b of ['sources', 'library', 'common', 'attachments']) buckets[b].count = topDirs[b].size;
+    // Read from the zip: an attachment whose record says it is a picture is not proof of purchase.
+    for (const id of topDirs.attachments) {
+      try {
+        const rec = JSON.parse((await zip.entryData(`attachments/${id}/attachment.json`)).toString('utf8'));
+        if (rec && rec.role === 'picture') buckets.attachments.count--;
+      } catch {}
+    }
     const observedTotal = buckets.sources.bytes + buckets.library.bytes + buckets.common.bytes + buckets.sharedTracks.bytes + buckets.attachments.bytes;
     return {
       ok: true,
@@ -1920,7 +2187,7 @@ async function applyReplace({
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     // Rollback before re-throwing.
     try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
@@ -2265,6 +2532,9 @@ async function applyReplace({
     // [B-297] Same treatment, same reason: these land at a bucket root, so the per-item grouping
     // below would read one as a font directory.
     const markerFiles = [];
+    // [B-498] The content pool: after every bucket, so each pooled file extracts beside the font
+    // files it already matches and `_dedupeExtracted` links it to them.
+    const poolFiles = [];
     for (const key of Object.keys(entries)) {
       const e = entries[key];
       if (e.isDirectory) continue;
@@ -2273,6 +2543,7 @@ async function applyReplace({
       const parts = e.name.split('/');
       const bucket = parts[0] || '';
       if (_isCarriedMarker(e.name)) { markerFiles.push(e); continue; }
+      if (bucket === POOL_DIR && parts.length === 2) { poolFiles.push(e); continue; }
       if (bucket === FILEHASH_DIR) { hashManifestFiles.push(e); continue; }
       if (bucketFiles[bucket]) bucketFiles[bucket].push(e);
     }
@@ -2489,6 +2760,14 @@ async function applyReplace({
         await extractFile(e);
       }
     }
+    if (!cancelled && poolFiles.length > 0) {
+      onProgress({ processedBytes, totalBytes, currentItem: 'Restoring the content pool…',
+                   topItemName: 'Content Pool', topItemFilesProcessed: 0, topItemFilesTotal: poolFiles.length });
+      for (const e of poolFiles) {
+        if (cancelled) break;
+        await extractFile(e);
+      }
+    }
 
     if (!cancelled && hashManifestFiles.length > 0) {
       onProgress({
@@ -2556,7 +2835,7 @@ async function applyReplace({
   for (const bucket of ['sources', 'library', 'common', 'attachments']) {
     try {
       const d = fs.readdirSync(path.join(sfRoot, bucket), { withFileTypes: true });
-      counts[bucket] = d.filter(x => x.isDirectory()).length;
+      counts[bucket] = _countItems(bucket, path.join(sfRoot, bucket), d.filter(x => x.isDirectory()));
     } catch {}
   }
   try {
@@ -2580,7 +2859,7 @@ async function surveyMerge({ userData, zipPath }) {
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     throw new Error(`Could not open backup zip: ${err.message}`);
   }
@@ -3094,7 +3373,7 @@ async function applyMerge({
   const StreamZip = require('node-stream-zip');
   let zip;
   try {
-    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
   } catch (err) {
     throw new Error(`Could not open backup zip: ${err.message}`);
   }
@@ -3703,7 +3982,7 @@ async function applyMerge({
         rollbackLog.push(() => {
           for (const p of attCreated) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} }
         });
-        counts.attachments.added = attCreated.length;
+        counts.attachments.added = attCreated.filter((p) => !_isPictureDir(p)).length;
       } else {
         await emitBucketSkip('Attachments');
       }
@@ -3754,4 +4033,7 @@ module.exports = {
   applyReplace,
   surveyMerge,
   applyMerge,
+  openBackupZip: _openBackupZip,
+  PATHS_FILE,
+  README_NAME,
 };
