@@ -45,6 +45,22 @@ async function detect(readme) {
   check('a Thexter readme with no modifier line has no note',
         plain && plain.vendor === 'Thexter' && plain.vendorNote == null,
         JSON.stringify({ v: plain && plain.vendor, n: plain && plain.vendorNote }));
+  check('and no conversion credit', plain && plain.creditNote == null, JSON.stringify(plain && plain.creditNote));
+
+  // A font converted from Xenopixel: the converter's summary names nobody, so there is no creator,
+  // but the conversion is credited whatever creator is or is not found.
+  const CONVERTED = '=====================================\r\nCONVERSION SUMMARY\r\n'
+    + '=====================================\r\nConverted: 2025-08-07 13:29:39\r\nSource: Xenopixel font\r\n'
+    + 'Target: Proffie format\r\nFont Name: Techno\r\n\r\nConverter: Xenopixel to Proffie v1.0\r\n'
+    + '=====================================\r\n';
+  const conv = await detect(CONVERTED);
+  check('A CONVERTED FONT CARRIES THE CONVERSION CREDIT', conv && conv.creditNote === 'Converted to Proffie by JMT Sabers',
+        JSON.stringify(conv && conv.creditNote));
+  check('with no creator invented for it', conv && conv.vendor == null, JSON.stringify(conv && conv.vendor));
+  const both = await detect(SMTHJEDI + '\r\nConverter: Xenopixel to Proffie v1.0\r\n');
+  check('and a creator match keeps its own note beside it',
+        both && both.vendor === 'Thexter' && both.vendorNote === 'Modifications by Brian Conner 2022'
+        && both.creditNote === 'Converted to Proffie by JMT Sabers', JSON.stringify(both && { v: both.vendor, n: both.vendorNote, c: both.creditNote }));
 
   console.log(failures ? `\n${failures} FAILED` : '\nall passing');
   process.exit(failures ? 1 : 0);

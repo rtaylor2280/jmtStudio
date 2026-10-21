@@ -35,15 +35,23 @@ async function library() {
   fs.writeFileSync(path.join(src, 'Pack', 'common', 'mmain.wav'), w);
   const r = await C.importCommonFromFolder(ud, path.join(src, 'Pack'), 'Pack');
   const files = tmp('files');
-  // The store does not yet create its own folder on a library's first receipt (reported
-  // separately), so the fixture does.
-  fs.mkdirSync(path.join(ud, 'soundFonts', 'attachments'), { recursive: true });
   const kept = await A.addAttachmentToSourcesStreaming(ud, { filePath: put(files, 'kept.pdf', '%PDF kept'), uuids: [r.sourceUuid] });
   const loose = await A.addAttachmentToSourcesStreaming(ud, { filePath: put(files, 'loose.pdf', '%PDF loose'), uuids: [] });
   return { ud, sourceUuid: r.sourceUuid, kept: kept.id, loose: loose.id };
 }
 
 (async () => {
+  console.log("a library's first receipt");
+  {
+    const ud = tmp('first');
+    fs.mkdirSync(path.join(ud, 'soundFonts', 'sources', 's1'), { recursive: true });
+    fs.writeFileSync(path.join(ud, 'soundFonts', 'sources', 's1', 'meta.json'), '{}');
+    check('precondition: the library has no attachments folder', !fs.existsSync(path.join(ud, 'soundFonts', 'attachments')));
+    const r = await A.addAttachmentToSourcesStreaming(ud, { filePath: put(tmp('f'), 'first.pdf', '%PDF first'), uuids: ['s1'] });
+    check('THE FIRST RECEIPT IS STORED', r && r.ok && store(ud).includes(r.id), JSON.stringify(r));
+    check('and linked to its source', A.listAttachments(ud, 's1').length === 1);
+  }
+
   console.log('the startup sweep');
   {
     const { ud, kept, loose } = await library();

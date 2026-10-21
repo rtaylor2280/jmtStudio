@@ -1280,12 +1280,17 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // shape as the ownership match running after commit. Only fall back when analyze
   // did not run (the legacy one-shot path). (2026-08-31.)
   let vendorRes = null;
-  if (src._enrich && (src._enrich.vendor || src._enrich.vendorWebsite)) {
+  if (src._enrich && !(src._enrich.vendor || src._enrich.vendorWebsite)) {
+    // No creator from the review pass, but a credit note still rides it.
+    vendorRes = { vendorNote: src._enrich.vendorNote || null, creditNote: src._enrich.creditNote || null };
+  } else if (src._enrich && (src._enrich.vendor || src._enrich.vendorWebsite)) {
     vendorRes = {
       vendor: src._enrich.vendor,
       confidence: src._enrich.vendorConfidence,
       vendorWebsite: src._enrich.vendorWebsite,
       purchasedDefault: src._enrich.purchasedDefault,
+      vendorNote: src._enrich.vendorNote || null,
+      creditNote: src._enrich.creditNote || null,
     };
   } else if (!src._enrich) {
     try {
@@ -1345,13 +1350,18 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
       });
     } catch {}
   }
-  // A modifier credit from the matched readme ("Modifications by ...") goes into the source's
-  // notes when the detected creator stands and the source has no notes yet.
-  if (vendorRes && vendorRes.vendorNote && effectiveVendor === detectedVendor) {
+  // Credits from the readme go into the source's notes when it has none yet: a modifier line
+  // ("Modifications by ...") when the detected creator stands, and a credit that is not a creator
+  // at all (a conversion) whatever creator stands.
+  const _creditLines = [
+    (vendorRes && vendorRes.vendorNote && effectiveVendor === detectedVendor) ? vendorRes.vendorNote : null,
+    (vendorRes && vendorRes.creditNote) || null,
+  ].filter(Boolean);
+  if (_creditLines.length) {
     try {
       const _sm = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(userData), sourceUuid));
       if (!(_sm && _sm.userNotes)) {
-        soundFontSources.updateSourceMeta(userData, sourceUuid, { userNotes: vendorRes.vendorNote });
+        soundFontSources.updateSourceMeta(userData, sourceUuid, { userNotes: _creditLines.join('\n') });
       }
     } catch {}
   }
@@ -1754,6 +1764,8 @@ async function enrichSourceForGuided(src, learned = []) {
       out.vendor = vendorRes.vendor || null;
       out.vendorConfidence = vendorRes.confidence || null;
       out.vendorWebsite = vendorRes.vendorWebsite || null;
+      out.vendorNote = vendorRes.vendorNote || null;
+      out.creditNote = vendorRes.creditNote || null;
       if (vendorRes.purchasedDefault === false) out.purchasedDefault = false;
     }
     if (out.purchasedDefault && /\bfree\b/i.test(src.rawName || '')) out.purchasedDefault = false;

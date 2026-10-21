@@ -178,6 +178,8 @@ async function storeFileStreaming(userData, srcAbsPath, label, opts = {}) {
       { id, name, size, label: label || '', ...(role ? { role } : {}), addedAt: new Date().toISOString() }, null, 2));
     // THE RENAME IS THE COMMIT, and nothing before it is visible to the store. A reader
     // walking attachments/ sees either nothing or a complete attachment, never a half-copied one.
+    // The root does not exist until a library's first attachment, and a rename cannot create it.
+    fs.mkdirSync(root, { recursive: true });
     fs.renameSync(staging, dir);
     return { ok: true, id };
   } catch (err) {
@@ -473,8 +475,6 @@ async function setSourcePicture(userData, uuid, filePath) {
   if (!PICTURE_RX.test(String(filePath || ''))) {
     return { ok: false, error: 'That is not an image. Use a PNG, JPG, GIF, WebP or BMP file.' };
   }
-  // The store commits by renaming into its root, which has to exist first.
-  try { fs.mkdirSync(attachmentsRoot(userData), { recursive: true }); } catch {}
   const r = await storeFileStreaming(userData, filePath, null, { role: 'picture' });
   if (!r.ok) return r;
   const prior = meta.picture;
@@ -489,7 +489,6 @@ function setSourcePictureSync(userData, uuid, filePath) {
   const meta = readSourceMeta(userData, uuid);
   if (!meta) return { ok: false, error: 'source not found' };
   if (!PICTURE_RX.test(String(filePath || ''))) return { ok: false, error: 'not an image' };
-  try { fs.mkdirSync(attachmentsRoot(userData), { recursive: true }); } catch {}
   let id;
   try { id = storeFile(userData, filePath, null, 'picture'); }
   catch (err) { return { ok: false, error: String((err && err.message) || err) }; }

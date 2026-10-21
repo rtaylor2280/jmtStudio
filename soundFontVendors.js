@@ -787,11 +787,37 @@ async function _matchLearnedVendors(source, entries, learned) {
   return { vendor: only.vendor, matchedFile: only.matchedFile };
 }
 
+// Credits that are not a creator: a readme line saying who did something TO a font. Read on import
+// into the source's notes whatever creator is (or is not) detected, which is why they sit outside
+// the vendor table, where a note can only ride a creator match. The converter JMT Sabers uses
+// writes a CONVERSION SUMMARY readme that ends "Converter: Xenopixel to Proffie" and names nobody.
+const CREDIT_NOTES = [
+  {
+    fileMatch: /(^|\/)(read[\s_-]?me)[^/]*\.(txt|rtf|md)$/i,
+    contentMatch: /^[ \t]*Converter:\s*Xenopixel to Proffie\b/im,
+    note: 'Converted to Proffie by JMT Sabers',
+  },
+];
+
+async function _creditNote(source, entries) {
+  for (const c of CREDIT_NOTES) {
+    if (await _findReadmeMatch(source, entries, c)) return c.note;
+  }
+  return null;
+}
+
+// The creator match, plus `creditNote` when a readme carries one of the credits above.
 async function detectVendor(source, opts = {}) {
   if (!source || typeof source.listAll !== 'function') {
     return { vendorId: null, vendor: null, vendorAutoDetected: false };
   }
   const entries = await source.listAll();
+  const res = await _detectCreator(source, entries, opts);
+  try { const c = await _creditNote(source, entries); if (c) res.creditNote = c; } catch {}
+  return res;
+}
+
+async function _detectCreator(source, entries, opts = {}) {
 
   // Confidence levels:
   //   - 'content'    — a file inside the source contains the vendor's

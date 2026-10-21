@@ -32670,11 +32670,11 @@ require(['vs/editor/editor.main'], function () {
         //
         // Sidecar beats detector on purpose. Both are answers to the same
         // question, and one of them is the user's own, recorded last time.
-        // Without a sidecar, a modifier credit from the matched readme ("Modifications by ...")
-        // fills Notes.
+        // Without a sidecar, credits from the readme fill Notes: a modifier line ("Modifications
+        // by ...") with a matched creator, and a credit that is not a creator (a conversion) always.
         if (_sfImportEls.notes) {
           _sfImportEls.notes.value = _curHas('userNotes') ? _curSrc.userNotes
-            : ((hasContentMatch && v.vendorNote) || '');
+            : [hasContentMatch && v.vendorNote, v.creditNote].filter(Boolean).join('\n');
         }
         if (_cur) {
           if (_curHas('vendor') && _sfImportEls.vendor) _sfImportEls.vendor.value = _curSrc.vendor;
