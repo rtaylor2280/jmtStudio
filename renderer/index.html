@@ -6222,6 +6222,7 @@
         <button class="detail-pencil" id="btn-sf-name-edit" title="Edit name">&#9998;</button>
         <button class="detail-confirm" id="btn-sf-name-confirm" title="Confirm" style="display:none">&#10003;</button>
         <div class="sf-link-area">
+          <button id="sf-website-display" class="sf-url-display" style="display:none">Website</button>
           <button id="sf-demo-display" class="sf-url-display" style="display:none">Demo</button>
           <button id="sf-link-display" class="sf-url-display" style="display:none">Link</button>
           <button class="detail-link-btn" id="btn-sf-link-toggle" title="Edit demo and font page links">&#128279;</button>
@@ -34160,6 +34161,7 @@ require(['vs/editor/editor.main'], function () {
         notesInput:      document.getElementById('sf-detail-notes-input'),
         // Per-entry link (video demo / vendor page / anything)
         linkBtn:         document.getElementById('btn-sf-link-toggle'),
+        websiteDisplay:  document.getElementById('sf-website-display'),
         demoDisplay:     document.getElementById('sf-demo-display'),
         linkDisplay:     document.getElementById('sf-link-display'),
         linkEditRow:     document.getElementById('sf-link-edit-row'),
@@ -34367,6 +34369,11 @@ require(['vs/editor/editor.main'], function () {
         // Two display buttons sit inline next to the link icon — "Demo"
         // when demoUrl is set, "Link" when linkUrl is set. Each carries
         // its URL in the title attribute so hover reveals the destination.
+        // The creator's Website [B-486], shared with the source page like the creator itself.
+        if (_sfEntryDetailEls.websiteDisplay) {
+          _sfEntryDetailEls.websiteDisplay.title = _sfDetailEdit.vendorWebsite || '';
+          _sfEntryDetailEls.websiteDisplay.style.display = _sfDetailEdit.vendorWebsite ? 'inline-block' : 'none';
+        }
         if (_sfEntryDetailEls.demoDisplay) {
           _sfEntryDetailEls.demoDisplay.title = _sfDetailEdit.demoUrl || '';
           _sfEntryDetailEls.demoDisplay.style.display = hasDemo ? 'inline-block' : 'none';
@@ -34902,6 +34909,8 @@ require(['vs/editor/editor.main'], function () {
           purchased: m.purchased !== false, // default true when undefined
           demoUrl: m.demoUrl || '',
           linkUrl: m.linkUrl || '',
+          // The creator's site, kept on the font's source. Read-only here: it is edited on the source.
+          vendorWebsite: m.vendorWebsite || '',
           needsReview: !!m.needsReview,
           reviewReasons: Array.isArray(m.reviewReasons) ? m.reviewReasons.slice() : [],
           duplicateOfName: m.duplicateOfName || '',
@@ -42793,6 +42802,10 @@ require(['vs/editor/editor.main'], function () {
       // Click on either display button opens that URL externally (the
       // card-link handler upstream covers cards; these cover the detail
       // modal's own display buttons).
+      _sfEntryDetailEls.websiteDisplay?.addEventListener('click', () => {
+        if (!_sfDetailEdit?.vendorWebsite) return;
+        window.electronAPI.openExternal(_sfDetailEdit.vendorWebsite);
+      });
       _sfEntryDetailEls.demoDisplay?.addEventListener('click', () => {
         if (!_sfDetailEdit?.demoUrl) return;
         window.electronAPI.openExternal(_sfDetailEdit.demoUrl);
