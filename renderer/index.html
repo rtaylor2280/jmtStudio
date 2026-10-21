@@ -58267,7 +58267,11 @@ function _getFreshFieldRange(fieldName) {
         // to one click. Only shown when B1's color is resolvable AND the current arg
         // value doesn't already equal it (no point offering "Match B1" if we already
         // match). Visibility updated whenever the effective color changes.
+        // Once matched it STAYS matched: B1's colour changes carry here (_colorMatchEdits) until this
+        // colour is changed by hand or this blade's style is. A quiet label says so in the button's
+        // place. A default that happens to equal B1's is not a match anyone made: no label, no button.
         let matchBtn = null;
+        let matchedLbl = null;
         let b1Rgb    = null;
         function _updateMatchBtnVisibility() {
           if (!matchBtn || !b1Rgb) return;
@@ -58276,6 +58280,7 @@ function _getFreshFieldRange(fieldName) {
                           (eff[1]||0) === (b1Rgb[1]||0) &&
                           (eff[2]||0) === (b1Rgb[2]||0);
           matchBtn.style.display = matches ? 'none' : '';
+          if (matchedLbl) matchedLbl.style.display = (matches && curVals) ? '' : 'none';
         }
         if (regArg.kind === 'RgbArg' && slotIdx > 0 && preset?.styles?.[0]) {
           b1Rgb = _resolveSlotColor(preset.styles[0]);
@@ -58310,6 +58315,11 @@ function _getFreshFieldRange(fieldName) {
               updateReset();
             });
             row.appendChild(matchBtn);
+            matchedLbl = document.createElement('span');
+            matchedLbl.style.cssText = 'font-size:0.65rem;color:var(--c-text-dim);padding:0 4px;white-space:nowrap;flex-shrink:0;';
+            matchedLbl.textContent = `Matches ${_b1Label}`;
+            matchedLbl.title = `Follows ${_b1FullLbl}'s color. Pick another color here to stop.`;
+            row.appendChild(matchedLbl);
             _updateMatchBtnVisibility();
           }
         }
@@ -59808,7 +59818,7 @@ function _getFreshFieldRange(fieldName) {
           endLineNumber:   repEnd.lineNumber,   endColumn:   repEnd.column,
         },
         text: repText,
-      }, ...(after === null ? [] : _followEdits(slot, after))]);
+      }, ...(after === null ? [] : _propagationEdits(slot, after))]);
     }
 
     function _resetSlot(slot) {
@@ -59828,7 +59838,7 @@ function _getFreshFieldRange(fieldName) {
           endLineNumber:   live.endLine,   endColumn:   live.endCol + 1,
         },
         text: 'StylePtr<Black>()',
-      }, ..._followEdits(live, 'StylePtr<Black>()')]);
+      }, ..._propagationEdits(live, 'StylePtr<Black>()')]);
       _pendingSlotCommit = null;   // slot deliberately replaced; do not re-commit
       _closeSlotArgEdit();
       // Defer focus past the current click event. A synchronous editor.focus()
@@ -60264,7 +60274,7 @@ function _getFreshFieldRange(fieldName) {
       // changing a style by hand already does in this app - the comment above a slot is left where
       // it is - and a Fett263 header copied into every follower of every preset would bury the
       // file the user has to read.
-      const followEdits = _followEdits(live, exprText);
+      const followEdits = _propagationEdits(live, exprText);
 
       if (leadingComment) {
         // Replace any existing comment above the slot together with the slot itself,
@@ -60918,6 +60928,59 @@ function _getFreshFieldRange(fieldName) {
       return presetParser
         .planFollowWrites(arr.follows, here.bladeNum, oldText, newText, texts)
         .map(w => ({ range: _slotRange(here.preset.styles[w.blade - 1]), text: w.text }));
+    }
+
+    // ── Sticky Match B1: a matched colour moves with B1's colour ──────────────────
+    //
+    // The rule, 2026-10-21: "once you match it stays matched till you either delete/change the
+    // style for it (B2 in this case) or manually change the color." COLOUR ONLY; the blade keeps its
+    // own style, unlike Follow, which copies the whole expression.
+    // Nothing records the match, for Follow's reason: a colour set on a blade that still equals B1's
+    // colour IS matched, and one that differs was changed by hand. So when B1's colour moves, every
+    // colour in that preset still equal to B1's OLD colour moves with it. Only colours written into
+    // the blade's arguments count; a default is not a match anyone made.
+    const _sameRgb = (a, b) => !!a && !!b && (a[0]||0) === (b[0]||0) && (a[1]||0) === (b[1]||0) && (a[2]||0) === (b[2]||0);
+
+    /** B1's colour as `text` would show it. */
+    function _colorOfSlotText(text) {
+      const one = (presetParser.extractStyleSlots(text || '') || [])[0];
+      return one ? _resolveSlotColor(one) : null;
+    }
+
+    /**
+     * Edits that carry a change of B1's colour to the colours matched to it in the same preset.
+     * `taken` are edits already planned (Follow's); a blade they rewrite is left to them.
+     */
+    function _colorMatchEdits(slot, newText, taken) {
+      if (!editor) return [];
+      const here = _locateSlot(slot);
+      if (!here || here.bladeNum !== 1) return [];
+      const model = editor.getModel();
+      const oldRgb = _colorOfSlotText(model.getValueInRange(_slotRange(slot)));
+      const newRgb = _colorOfSlotText(newText);
+      if (!oldRgb || !newRgb || _sameRgb(oldRgb, newRgb)) return [];
+      const edits = [];
+      here.preset.styles.forEach((s, i) => {
+        if (i === 0 || !s || !s.startLine) return;
+        const range = _slotRange(s);
+        if ((taken || []).some(e => e.range.startLineNumber === range.startLineNumber
+                                 && e.range.startColumn === range.startColumn)) return;
+        const text = model.getValueInRange(range);
+        const one = (presetParser.extractStyleSlots(text) || [])[0];
+        if (!one || one.colorArg == null) return;
+        const np = window.proffieArgs?.rematchColors(one.colorArg, oldRgb, newRgb) ?? null;
+        if (np === null || np === one.colorArg) return;
+        const at = text.lastIndexOf(`"${one.colorArg}"`);
+        if (at < 0) return;
+        edits.push({ range, text: text.slice(0, at) + `"${np}"` + text.slice(at + one.colorArg.length + 2) });
+      });
+      return edits;
+    }
+
+    /** Everything a write to `slot` carries to other blades of its preset: Follow, then matched colours. */
+    function _propagationEdits(slot, newText) {
+      const follow = _followEdits(slot, newText);
+      return [...follow, ..._colorMatchEdits(slot, newText, follow)];
     }
 
     // ── Library picker ─────────────────────────────────────────────────────────

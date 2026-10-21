@@ -384,6 +384,30 @@
     return _serializeSlots(slots);
   }
 
+  /**
+   * `parens` with every colour set in it that equals `oldRgb` changed to `newRgb`, or null when none
+   * did. The sticky Match B1: a colour matched to B1 still equals B1's old colour, so it moves with
+   * it. Unset (default) colours never count; nobody matched those.
+   */
+  function rematchColors(parens, oldRgb, newRgb) {
+    if (!parens || !oldRgb || !newRgb) return null;
+    const same = (a) => (a[0]||0) === (oldRgb[0]||0) && (a[1]||0) === (oldRgb[1]||0) && (a[2]||0) === (oldRgb[2]||0);
+    let out = parens;
+    let changed = false;
+    for (const reg of registry) {
+      if (reg.kind !== 'RgbArg') continue;
+      const r = readRegistryArg(reg.name, out);
+      if (!r || r.isDefault || r.unsupported || !same(r.values)) continue;
+      out = writeRegistryArg(reg.name, newRgb, out);
+      changed = true;
+    }
+    if (changed) return out;
+    // The bare "r,g,b" form, which carries no argument names.
+    const csv = parens.split(',').map(v => parseInt(v.trim(), 10));
+    if (csv.length === 3 && csv.every(Number.isFinite) && same(csv)) return newRgb.slice(0, 3).join(',');
+    return null;
+  }
+
   function isNamedColor(s) {
     return Object.prototype.hasOwnProperty.call(NAMED_COLORS, s);
   }
@@ -400,6 +424,7 @@
     resolveColorDefault,
     readRegistryArg,
     writeRegistryArg,
+    rematchColors,
     colorLabel,
     isNamedColor,
     namedColors:    NAMED_COLORS,
