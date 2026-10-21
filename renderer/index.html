@@ -55546,6 +55546,8 @@ require(['vs/editor/editor.main'], function () {
 
       const cbWrap = document.createElement('label');
       cbWrap.className = 'preset-common-toggle';
+      // [B-278] Right-click: on or off in every preset.
+      cbWrap.addEventListener('contextmenu', ev => _showCommonAllMenu(ev));
       // Library-validation styling: if the SF library has no common
       // folders, the checkbox is meaningful only as a config string —
       // it'll write ";common" into the preset but the SD card will
@@ -61171,6 +61173,159 @@ function _getFreshFieldRange(fieldName) {
         item.addEventListener('mousedown', ev => { ev.stopPropagation(); open(); });
       }
 
+      if (!menu.children.length) return;
+      _jmtPlaceMenu(menu, e.clientX, e.clientY);
+    }
+
+    // ── Common folder on or off in every preset ─────────────────────────────────── [B-278]
+    //
+    // Right-click the common checkbox. The checkbox's own rule, applied to many presets: a shared
+    // folder SET to a name (font;name), or removed (the font folder alone). Setting replaces any
+    // shared folder the preset had, so it never stacks a second one.
+    // The names offered are the ones this config already uses. With one, the menu is two flat items
+    // over all presets. With several (common and common2, one per bank, say) each name gets a
+    // submenu of scopes: all presets, then each bank with the one being edited first. The first use
+    // of a new name is typed by hand once; that is what makes it a name the config uses.
+    // The count is EVERY preset in scope, not just those that change: "all presets (9)" over nine
+    // reads true, where (7) reads as if two were left out. The toast says which changed. An item that
+    // would change nothing is not shown. One undo.
+
+    /** The font field with its shared folder set to `name` (null removes it), or null if already so. */
+    function _sharedSetTo(font, name) {
+      const dirs = _sfSharedDirs(font);
+      const dir = _sfFontPathParts(font)[0] || '';
+      if (name === null) return dirs.length ? dir : null;
+      return (dirs.length === 1 && dirs[0] === name) ? null : `${dir};${name}`;
+    }
+
+    /** Edits setting the shared folder (or removing it) in every preset of `arrs`, disabled ones included. */
+    function _commonAllPlan(arrs, name) {
+      const out = { edits: [], matched: 0 };
+      if (!editor) return out;
+      const model = editor.getModel();
+      const full = model.getValue();
+      for (const arr of arrs) {
+        for (const p of arr.presets || []) {
+          if (!p.fontRange) continue;
+          const v = _sharedSetTo(p.font || '', name);
+          if (v === null) { out.matched++; continue; }
+          const r = p.fontRange;
+          out.edits.push({ range: { startLineNumber: r.startLine, startColumn: r.startCol + 1,
+                                    endLineNumber: r.endLine, endColumn: r.endCol + 1 }, text: `"${v}"` });
+        }
+        // Disabled presets too: re-enabled later, one would disagree with every preset around it.
+        const blocks = _scanDisabledPresets(full).filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
+        for (const b of blocks) {
+          const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+          const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+          const m = /"([^"]*)"/.exec(full.slice(innerStart, innerEnd));
+          if (!m) continue;
+          const v = _sharedSetTo(m[1], name);
+          if (v === null) { out.matched++; continue; }
+          const s = model.getPositionAt(innerStart + m.index);
+          const e = model.getPositionAt(innerStart + m.index + m[0].length);
+          out.edits.push({ range: { startLineNumber: s.lineNumber, startColumn: s.column,
+                                    endLineNumber: e.lineNumber, endColumn: e.column }, text: `"${v}"` });
+        }
+      }
+      return out;
+    }
+
+    /** Right-click on the common checkbox. */
+    function _showCommonAllMenu(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!editor) return;
+      const text = editor.getValue();
+      const arrays = presetParser.parsePresets(text).arrays || [];
+      const banks = arrays.map((a, i) => ({ a, i })).filter(({ a }) => (a.presets || []).length)
+        .sort((x, y) => (y.i === _activeArrayIndex) - (x.i === _activeArrayIndex) || x.i - y.i);
+      if (!banks.length) return;
+      let names = [];
+      try { names = _vpkScanPresets(text).sharedNames || []; } catch {}
+      if (!names.length) names = [_sfPreferredSharedName(text)];
+      // The current preset's own shared folder first, then the rest in the order the config uses them.
+      const mine = _sfSharedDirs(arrays[_activeArrayIndex]?.presets?.[_selectedPresetIndex]?.font || '')[0];
+      if (mine && names.includes(mine)) names = [mine, ...names.filter(n => n !== mine)];
+      const bankName = (a, i) => a.name || `Array ${i + 1}`;
+      const menu = document.getElementById('preset-ctx-menu');
+      menu.innerHTML = '';
+      const hideSubs = () => { _presetMoveSubmenu().style.display = 'none'; _presetSubmenu2().style.display = 'none'; };
+
+      const run = (bankIdxs, name) => {
+        const all = presetParser.parsePresets(editor.getValue()).arrays || [];
+        const plan = _commonAllPlan(bankIdxs.map(i => all[i]).filter(Boolean), name);
+        if (!plan.edits.length) return;
+        _atomicEdit(editor, 'common-all', plan.edits);
+        const n = plan.edits.length;
+        const what = name === null ? 'the shared folder' : name;
+        showToast(
+          `${name === null ? 'Removed' : 'Set'} ${what} ${name === null ? 'from' : 'in'} ${n} preset${n === 1 ? '' : 's'}`
+            + (plan.matched ? `; ${plan.matched} already ${name === null ? 'had none' : 'had it'}.` : '.'),
+          { action: { label: 'Undo', onClick: () => { try { editor.trigger('toast', 'undo', null); } catch {} } } },
+        );
+      };
+      // One scope: label, banks it covers, and its count of every preset in scope. Null when it would
+      // change nothing.
+      const scope = (label, bankIdxs, name) => {
+        const plan = _commonAllPlan(bankIdxs.map(i => arrays[i]), name);
+        if (!plan.edits.length) return null;
+        return { label: `${label} (${plan.edits.length + plan.matched})`, run: () => run(bankIdxs, name) };
+      };
+      // This preset alone, first: with several names the checkbox can only tick one of them.
+      const thisPreset = (name) => {
+        const p = arrays[_activeArrayIndex]?.presets?.[_selectedPresetIndex];
+        if (!p || !p.fontRange || _sharedSetTo(p.font || '', name) === null) return null;
+        return { label: 'This preset', run: () => {
+          const fresh = presetParser.parsePresets(editor.getValue()).arrays?.[_activeArrayIndex]?.presets?.[_selectedPresetIndex];
+          const v = fresh && fresh.fontRange ? _sharedSetTo(fresh.font || '', name) : null;
+          if (v === null) return;
+          const r = fresh.fontRange;
+          _atomicEdit(editor, 'common-all', [{ range: { startLineNumber: r.startLine, startColumn: r.startCol + 1,
+                                                        endLineNumber: r.endLine, endColumn: r.endCol + 1 }, text: `"${v}"` }]);
+        } };
+      };
+      const scopesFor = (name) => [
+        thisPreset(name),
+        scope('All presets', banks.map(b => b.i), name),
+        ...(banks.length > 1 ? banks.map(({ a, i }) => scope(`${bankName(a, i)} presets`, [i], name)) : []),
+      ].filter(Boolean);
+      const mkItem = (label, fn) => {
+        const d = document.createElement('div');
+        d.className = 'preset-ctx-item';
+        d.textContent = label;
+        d.addEventListener('mouseenter', hideSubs);
+        d.addEventListener('mousedown', ev => { ev.stopPropagation(); _hidePresetContextMenu(); fn(); });
+        menu.appendChild(d);
+      };
+      const mkParent = (label, scopes) => {
+        if (!scopes.length) return;
+        const d = document.createElement('div');
+        d.className = 'preset-ctx-item has-submenu';
+        d.textContent = label;
+        const rows = () => scopes.map(sc => {
+          const r = document.createElement('div');
+          r.className = 'preset-ctx-item';
+          r.textContent = sc.label;
+          r.addEventListener('mousedown', ev => { ev.stopPropagation(); _hidePresetContextMenu(); sc.run(); });
+          return r;
+        });
+        const open = () => { _presetSubmenu2().style.display = 'none'; _openCtxSubmenu(_presetMoveSubmenu(), d, rows()); };
+        d.addEventListener('mouseenter', open);
+        d.addEventListener('mousedown', ev => { ev.stopPropagation(); open(); });
+        menu.appendChild(d);
+      };
+
+      if (names.length === 1) {
+        const name = names[0];
+        const on = scope(`Use ${name} in all presets`, banks.map(b => b.i), name);
+        const off = scope(`Remove ${name} from all presets`, banks.map(b => b.i), null);
+        if (on) mkItem(on.label, on.run);
+        if (off) mkItem(off.label, off.run);
+      } else {
+        for (const name of names) mkParent(`Use ${name} in`, scopesFor(name));
+        mkParent('Remove shared folder from', scopesFor(null));
+      }
       if (!menu.children.length) return;
       _jmtPlaceMenu(menu, e.clientX, e.clientY);
     }
