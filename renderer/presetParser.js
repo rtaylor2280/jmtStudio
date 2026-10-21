@@ -569,6 +569,33 @@
     return { follows, followBodyOffset: match.index };
   }
 
+  /**
+   * A copied style made to fit the preset it lands in: every place `text` uses `fromName` as a
+   * template argument becomes `toName`. [B-222]
+   *
+   * The wrapper case: PixelSwitchWrapper<MainCalKestisSurvivorBlueBaseColor> on Cal_Blue's B2 wraps
+   * that preset's own B1. Copied to Cal_Cyan it must wrap Cal_Cyan's B1, or every preset gets the
+   * blue blade. Only template ARGUMENTS move (after `<` or `,`, before `>` or `,`), so a name that
+   * merely appears inside a longer one is left alone. `fromName` must be a plain identifier.
+   */
+  function retargetStyleText(text, fromName, toName) {
+    if (!text || !fromName || !toName || fromName === toName) return text;
+    if (!/^[A-Za-z_]\w*$/.test(fromName)) return text;
+    const re = new RegExp(`(?<=[<,]\\s*)${fromName}(?=\\s*[>,])`, 'g');
+    return text.replace(re, toName);
+  }
+
+  /**
+   * True when `expr` is a single wrapper around exactly `inner`: Wrapper<inner>, nothing else.
+   * It keeps a wrapper on B1 when B1 changes, including the placeholder a wrapper is copied
+   * around while B1 is still empty (PixelSwitchWrapper<Black>). Narrow on purpose: a style that
+   * merely contains `inner` among other things is never rewritten. [B-222]
+   */
+  function wrapsExactly(expr, inner) {
+    if (!expr || !inner || !/^[A-Za-z_]\w*$/.test(inner)) return false;
+    return new RegExp(`^[A-Za-z_]\\w*\\s*<\\s*${inner}\\s*>$`).test(String(expr).trim());
+  }
+
   /** Whitespace-insensitive comparison of two slot expressions. */
   function sameExpr(a, b) {
     return (a || '').replace(/\s+/g, '') === (b || '').replace(/\s+/g, '');
@@ -862,9 +889,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
+    module.exports = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
   } else {
-    root.presetParser = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
+    root.presetParser = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));

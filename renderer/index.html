@@ -54680,6 +54680,7 @@ require(['vs/editor/editor.main'], function () {
             const sub = _presetMoveSubmenu();
             sub.innerHTML = '';
             sub.style.minWidth = '200px';
+            sub.style.maxWidth = '';
             for (const { a, i } of _otherArrays) {
               const item = document.createElement('div');
               item.className = 'preset-ctx-item';
@@ -54722,6 +54723,11 @@ require(['vs/editor/editor.main'], function () {
         const sub = _presetMoveSubmenu();
         sub.style.display = 'none';
         sub.innerHTML = '';
+      } catch {}
+      // And the copy menu's second level (bank, then presets). [B-222]
+      try {
+        const sub2 = document.getElementById('preset-ctx-submenu2');
+        if (sub2) { sub2.style.display = 'none'; sub2.innerHTML = ''; }
       } catch {}
       // Clear any per-use width override (the SF effect-chip menu sets
       // minWidth: 0 for a content-fit dropdown). Subsequent menus that
@@ -56816,6 +56822,8 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const tile = document.createElement('div');
       tile.className = 'preset-slot-tile';
       tile.dataset.slotIdx = slotIdx;
+      // [B-222] Copy this blade's style elsewhere. Not on a missing slot: there is nothing to copy.
+      if (!isMissing && presetIdx != null) tile.addEventListener('contextmenu', ev => _showSlotCopyMenu(ev, presetIdx, slotIdx));
       // Built-in named colors (Black, Red, Cyan, etc.) look syntactically like library
       // references — single identifier, no angles — so the parser tags them 'helper'.
       // They are NOT library styles, so suppress the unlinked warning for them.
@@ -60858,6 +60866,315 @@ function _getFreshFieldRange(fieldName) {
       return true;
     }
 
+    // ── Copy a blade's style: to presets in any bank, to one preset, to another blade ── [B-222]
+    //
+    // ONE-SHOT, deliberately. A sticky copy was weighed on 2026-10-21 and dropped: across presets it
+    // has no natural source, so either any edit moves every copy (no way to change one preset) or the
+    // config has to remember which preset was copied from, and presets move. To change it everywhere
+    // again, copy again. Nothing is left behind in the config, which is also why the copy is free to
+    // cross banks. Across presets it is always the SAME blade number; another blade is offered only
+    // inside this preset.
+
+    /**
+     * The text `srcText` should take in a preset whose B1 is `tgtB1`: the wrapper swap, then the
+     * colour match. A colour matched to the source's B1 (B-519) arrives matched to the target's B1,
+     * so it keeps following there; into a preset whose B1 is still empty it takes the placeholder's
+     * colour and follows once B1 gets a real one.
+     */
+    function _copyTextFor(srcText, srcBladeExpr, srcB1, tgtB1, bladeNum) {
+      const t = _copyWrapperFor(srcText, srcBladeExpr, srcB1?.expr || '', tgtB1?.expr || '');
+      // B1 is the colour the others match, not one of them: copied as B1 it arrives as written.
+      if (bladeNum === 1) return t;
+      const from = _matchColorOf(srcB1);
+      const to = _matchColorOf(tgtB1);
+      if (!from || !to || _sameRgb(from, to)) return t;
+      const one = (presetParser.extractStyleSlots(t) || [])[0];
+      if (!one || one.colorArg == null) return t;
+      const np = window.proffieArgs?.rematchColors(one.colorArg, from, to) ?? null;
+      const at = np === null ? -1 : t.lastIndexOf(`"${one.colorArg}"`);
+      return at < 0 ? t : t.slice(0, at) + `"${np}"` + t.slice(at + one.colorArg.length + 2);
+    }
+
+    function _copyWrapperFor(srcText, srcBladeExpr, srcB1Expr, tgtB1Expr) {
+      if (!srcB1Expr || !tgtB1Expr) return srcText;
+      // B1 written as a library style name, not a built-in colour; a blade that IS B1 rather than
+      // wrapping it is copied as written.
+      if (!/^[A-Za-z_]\w*$/.test(srcB1Expr) || window.proffieArgs?.isNamedColor?.(srcB1Expr)) return srcText;
+      if (presetParser.sameExpr(srcBladeExpr, srcB1Expr)) return srcText;
+      return presetParser.retargetStyleText(srcText, srcB1Expr, tgtB1Expr);
+    }
+
+    /**
+     * Edits writing `src` (a live preset and blade) into the same blade of each target. A target is
+     * { arr, idxs, withDisabled }: live presets of that bank by index, plus its disabled presets.
+     * Shaped like _bulkFollowEdits: { replace, fill, matched, disabled }.
+     */
+    function _copyPlan(src, bladeNum, targets) {
+      // `extra` is what the writes carry to other blades (wrapper repair, matched colours, Follow);
+      // it is applied with them but never counted as a preset changed.
+      const out = { replace: [], fill: [], matched: 0, disabled: 0, extra: [] };
+      if (!editor) return out;
+      const model = editor.getModel();
+      const srcSlot = src.arr?.presets?.[src.idx]?.styles?.[bladeNum - 1];
+      if (!srcSlot || !srcSlot.startLine) return out;
+      const srcText = model.getValueInRange(_slotRange(srcSlot));
+      const srcB1 = src.arr.presets[src.idx].styles[0] || null;
+      const full = model.getValue();
+
+      for (const t of targets) {
+        for (const i of t.idxs || []) {
+          if (t.arr === src.arr && i === src.idx) continue;
+          const styles = t.arr.presets[i]?.styles || [];
+          const here = { arr: t.arr, preset: t.arr.presets[i], bladeNum };
+          const text = _keepMatchedColor(here, _copyTextFor(srcText, srcSlot.expr, srcB1, styles[0] || null, bladeNum));
+          const cur = styles[bladeNum - 1];
+          if (!cur || !cur.startLine) {
+            const ins = _followInsertPoint(styles, bladeNum);
+            if (ins) out.fill.push({ range: ins.range, text: `,\n${ins.indent}${text}` });
+            continue;
+          }
+          const curText = model.getValueInRange(_slotRange(cur));
+          if (presetParser.sameExpr(curText, text)) { out.matched++; continue; }
+          (_slotIsEmpty(curText) ? out.fill : out.replace).push({ range: _slotRange(cur), text });
+          out.extra.push(..._propagationAt(here, text));
+        }
+        if (!t.withDisabled) continue;
+        // Disabled presets are commented-out text the parser does not see; same reason as
+        // _disabledFollowEdits for not skipping them: re-enabled later, one would hold the old style.
+        const blocks = _scanDisabledPresets(full).filter(b => b.startLine > t.arr.startLine && b.endLine < t.arr.endLine);
+        for (const b of blocks) {
+          const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+          const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+          const innerText  = full.slice(innerStart, innerEnd);
+          const slots = presetParser.extractStyleSlots(innerText);
+          if (!slots.length) continue;
+          const text = _copyTextFor(srcText, srcSlot.expr, srcB1, slots[0] || null, bladeNum);
+          const cur = slots[bladeNum - 1];
+          if (!cur) {
+            if (slots.length !== bladeNum - 1) continue;
+            const last = slots[slots.length - 1];
+            const pos  = model.getPositionAt(innerStart + last.endOffset);
+            const indent = (model.getLineContent(pos.lineNumber).match(/^(\s*)/) || ['', ''])[1];
+            out.fill.push({ range: { startLineNumber: pos.lineNumber, startColumn: pos.column,
+                                     endLineNumber:   pos.lineNumber, endColumn:   pos.column },
+                            text: `,\n${indent}${text}` });
+            out.disabled++;
+            continue;
+          }
+          const curText = innerText.slice(cur.startOffset, cur.endOffset);
+          if (presetParser.sameExpr(curText, text)) { out.matched++; continue; }
+          const s = model.getPositionAt(innerStart + cur.startOffset);
+          const e = model.getPositionAt(innerStart + cur.endOffset);
+          (_slotIsEmpty(curText) ? out.fill : out.replace).push({
+            range: { startLineNumber: s.lineNumber, startColumn: s.column, endLineNumber: e.lineNumber, endColumn: e.column },
+            text,
+          });
+          out.disabled++;
+        }
+      }
+      return out;
+    }
+
+    /** Apply a copy plan as one undo step, asking first only when it overwrites styles someone wrote. */
+    async function _applyStyleCopy(plan, what) {
+      const edits = [...plan.replace, ...plan.fill];
+      const carried = plan.extra || [];
+      const s = (n) => (n === 1 ? '' : 's');
+      if (!edits.length) { showToast('Already has this style.'); return; }
+      if (plan.replace.length > 1) {
+        const n = plan.replace.length;
+        const ok = await promptConfirm({
+          title: `Replace ${what} in ${n} presets?`,
+          message: `${n} presets have a different style on ${what}`
+                 + (plan.disabled ? ', counting disabled ones' : '')
+                 + '. Each will get this one. One undo puts them all back.',
+          confirmText: 'Replace',
+          confirmKind: 'danger',
+        });
+        if (!ok) return;
+      }
+      _atomicEdit(editor, 'copy-style', [...edits, ...carried]);
+      showToast(
+        `Copied ${what} to ${edits.length} preset${s(edits.length)}`
+          + (plan.matched ? `; ${plan.matched} already had it.` : '.'),
+        { action: { label: 'Undo', onClick: () => { try { editor.trigger('toast', 'undo', null); } catch {} } } },
+      );
+    }
+
+    /** Copy this preset's blade `fromNum` onto blade `toNum` of the same preset. */
+    function _copyToBlade(arr, presetIdx, fromNum, toNum) {
+      const model = editor.getModel();
+      const styles = arr?.presets?.[presetIdx]?.styles || [];
+      const from = styles[fromNum - 1];
+      if (!from || !from.startLine) return;
+      const here = { arr, preset: arr.presets[presetIdx], bladeNum: toNum };
+      const text = _keepMatchedColor(here, model.getValueInRange(_slotRange(from)));
+      const to = styles[toNum - 1];
+      if (to && to.startLine) {
+        if (presetParser.sameExpr(model.getValueInRange(_slotRange(to)), text)) return;
+        _atomicEdit(editor, 'copy-style', [{ range: _slotRange(to), text }, ..._propagationAt(here, text)]);
+      } else {
+        const ins = _followInsertPoint(styles, toNum);
+        if (!ins) return;
+        _atomicEdit(editor, 'copy-style', [{ range: ins.range, text: `,\n${ins.indent}${text}` }]);
+      }
+    }
+
+    // The second submenu level (bank, then its presets). Its own element, so the first level stays
+    // open while it shows; _hidePresetContextMenu closes both.
+    function _presetSubmenu2() {
+      let el = document.getElementById('preset-ctx-submenu2');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'preset-ctx-submenu2';
+        el.className = 'preset-ctx-menu preset-ctx-submenu-sized';
+        el.style.display = 'none';
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+
+    /**
+     * Fill `sub` with rows and show it beside `parent`, inside the window: to the right, or flipped
+     * left when there is no room; level with the parent, or lifted until its bottom fits. Past half
+     * the window it scrolls (preset-ctx-submenu-sized).
+     */
+    function _openCtxSubmenu(sub, parent, rows) {
+      sub.innerHTML = '';
+      // As wide as its longest row, up to a cap; a longer name ends in an ellipsis and shows in full
+      // on hover.
+      sub.style.minWidth = '0';
+      sub.style.maxWidth = '280px';
+      sub.classList.add('preset-ctx-submenu-sized');
+      for (const r of rows) {
+        r.style.overflow = 'hidden';
+        r.style.textOverflow = 'ellipsis';
+        if (!r.title) r.title = r.textContent;
+        sub.appendChild(r);
+      }
+      sub.style.left = '0px';
+      sub.style.top = '0px';
+      sub.style.display = 'block';
+      const pr = parent.getBoundingClientRect();
+      const w = sub.offsetWidth, h = sub.offsetHeight, pad = 4;
+      let x = pr.right - 2;
+      if (x + w > window.innerWidth - pad) x = Math.max(pad, pr.left - w + 2);
+      const y = Math.max(pad, Math.min(pr.top - 4, window.innerHeight - h - pad));
+      sub.style.left = x + 'px';
+      sub.style.top = y + 'px';
+    }
+
+    /** Right-click on a blade tile. */
+    function _showSlotCopyMenu(e, presetIdx, slotIdx) {
+      e.preventDefault();
+      e.stopPropagation();
+      const arrays = (presetParser.parsePresets(editor?.getValue() || '').arrays || []);
+      const arr = arrays[_activeArrayIndex];
+      const preset = arr?.presets?.[presetIdx];
+      if (!preset || !preset.styles?.[slotIdx]?.startLine) return;
+      const bladeNum = slotIdx + 1;
+      const src = { arr, idx: presetIdx };
+      // "Blade 1 (B1)", or the blade's name and badge once named: "Main Blade (MB)".
+      const abbrs = _computeAbbreviations(arr.labels || {}, preset.styles.length);
+      const bladeName = (n) => `${arr.labels?.[n] || `Blade ${n}`} (${abbrs[n - 1] || `B${n}`})`;
+      const what = bladeName(bladeNum);
+      const bankName = (a, i) => a.name || `Array ${i + 1}`;
+      // The bank being edited comes first, then the rest in file order.
+      const banks = arrays.map((a, i) => ({ a, i })).filter(({ a }) => (a.presets || []).length)
+        .sort((x, y) => (y.i === _activeArrayIndex) - (x.i === _activeArrayIndex) || x.i - y.i);
+      // Re-read at click time: the menu can sit open while nothing changes, but the plan must be
+      // built from the document as it is when the copy happens.
+      const fresh = () => {
+        const all = presetParser.parsePresets(editor.getValue()).arrays || [];
+        return { all, src: { arr: all[_activeArrayIndex], idx: presetIdx } };
+      };
+      const allTargets = (list) => list.map(a => ({ arr: a, idxs: a.presets.map((p, i) => i), withDisabled: true }));
+
+      const menu = document.getElementById('preset-ctx-menu');
+      menu.innerHTML = '';
+      const hideSubs = () => { _presetMoveSubmenu().style.display = 'none'; _presetSubmenu2().style.display = 'none'; };
+      const mkItem = (text, cls, fn) => {
+        const d = document.createElement('div');
+        d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+        d.textContent = text;
+        d.addEventListener('mousedown', ev => { ev.stopPropagation(); if (!fn) return; _hidePresetContextMenu(); fn(); });
+        if (!cls || !cls.includes('has-submenu')) d.addEventListener('mouseenter', hideSubs);
+        menu.appendChild(d);
+        return d;
+      };
+      const mkRow = (text, cls, fn) => {
+        const d = document.createElement('div');
+        d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
+        d.textContent = text;
+        d.addEventListener('mousedown', ev => { ev.stopPropagation(); if (!fn) return; _hidePresetContextMenu(); fn(); });
+        return d;
+      };
+      const presetRows = (a) => a.presets
+        .map((p, i) => ({ p, i }))
+        .filter(({ i }) => !(a === arr && i === presetIdx))
+        .map(({ p, i }) => mkRow(`${i + 1}. ${p.displayName || `(unnamed ${i + 1})`}`, '', () => {
+          const f = fresh();
+          const ai = arrays.indexOf(a);
+          _applyStyleCopy(_copyPlan(f.src, bladeNum, [{ arr: f.all[ai], idxs: [i], withDisabled: false }]), what);
+        }));
+
+      // The count says what will change (presets already holding it are not counted), and an item
+      // that would change nothing is not shown.
+      const count = (plan) => plan.replace.length + plan.fill.length;
+      const allN = count(_copyPlan(src, bladeNum, allTargets(banks.map(b => b.a))));
+      if (allN) mkItem(`Copy to all presets (${allN})`, '', () => {
+        const f = fresh();
+        _applyStyleCopy(_copyPlan(f.src, bladeNum, allTargets(f.all.filter(a => (a.presets || []).length))), what);
+      });
+      if (banks.length > 1) {
+        for (const { a, i } of banks) {
+          const n = count(_copyPlan(src, bladeNum, allTargets([a])));
+          if (n) mkItem(`Copy to ${bankName(a, i)} presets (${n})`, '', () => {
+            const f = fresh();
+            _applyStyleCopy(_copyPlan(f.src, bladeNum, allTargets([f.all[i]])), what);
+          });
+        }
+      }
+
+      // Copy to preset: banks first when there are several, then that bank's presets.
+      const reachable = banks.filter(({ a }) => a.presets.some((p, i) => !(a === arr && i === presetIdx)));
+      if (reachable.length) {
+        const item = mkItem('Copy to preset', 'has-submenu', null);
+        const open = () => {
+          _presetSubmenu2().style.display = 'none';
+          if (reachable.length === 1) {
+            _openCtxSubmenu(_presetMoveSubmenu(), item, presetRows(reachable[0].a));
+            return;
+          }
+          const rows = reachable.map(({ a, i }) => {
+            const r = mkRow(bankName(a, i), 'has-submenu', null);
+            r.addEventListener('mouseenter', () => _openCtxSubmenu(_presetSubmenu2(), r, presetRows(a)));
+            r.addEventListener('mousedown', ev => { ev.stopPropagation(); _openCtxSubmenu(_presetSubmenu2(), r, presetRows(a)); });
+            return r;
+          });
+          _openCtxSubmenu(_presetMoveSubmenu(), item, rows);
+        };
+        item.addEventListener('mouseenter', open);
+        item.addEventListener('mousedown', ev => { ev.stopPropagation(); open(); });
+      }
+
+      const blades = preset.styles.map((s, i) => i + 1).filter(n => n !== bladeNum);
+      if (blades.length) {
+        const item = mkItem('Copy to blade', 'has-submenu', null);
+        const open = () => {
+          _presetSubmenu2().style.display = 'none';
+          _openCtxSubmenu(_presetMoveSubmenu(), item, blades.map(n => mkRow(bladeName(n), '', () => {
+            _copyToBlade(fresh().src.arr, presetIdx, bladeNum, n);
+          })));
+        };
+        item.addEventListener('mouseenter', open);
+        item.addEventListener('mousedown', ev => { ev.stopPropagation(); open(); });
+      }
+
+      if (!menu.children.length) return;
+      _jmtPlaceMenu(menu, e.clientX, e.clientY);
+    }
+
     // ── Blade follow propagation ───────────────────────────────────────────────
     //
     // Writing a followed blade writes its followers, in the SAME preset and nowhere else. Every
@@ -60910,12 +61227,13 @@ function _getFreshFieldRange(fieldName) {
      * has been overridden. Reads current text from the model rather than the parse, so the
      * follow/override comparison is made against what is actually on screen.
      */
-    function _followEdits(slot, newText) {
-      if (!editor) return [];
-      const arr = _parseResult?.arrays[_activeArrayIndex];
+    // The propagation rules take `here` = { arr, preset, bladeNum }: the bank, the preset and the
+    // blade being written. A copy into another bank has no tile and no _locateSlot to find it by,
+    // so the rules take the preset directly. [B-222]
+    function _followEditsAt(here, newText) {
+      if (!editor || !here) return [];
+      const arr = here.arr;
       if (!arr || !arr.follows || Object.keys(arr.follows).length === 0) return [];
-      const here = _locateSlot(slot);
-      if (!here) return [];
 
       const model = editor.getModel();
       const texts = {};
@@ -60941,20 +61259,31 @@ function _getFreshFieldRange(fieldName) {
     // the blade's arguments count; a default is not a match anyone made.
     const _sameRgb = (a, b) => !!a && !!b && (a[0]||0) === (b[0]||0) && (a[1]||0) === (b[1]||0) && (a[2]||0) === (b[2]||0);
 
+    /**
+     * A blade's colour for matching. The empty placeholder StylePtr<Black>() counts as black: the
+     * general resolver skips an all-zero named colour, but a colour copied in while B1 is empty is
+     * matched to exactly this, and has to move when B1 gets a real colour.
+     */
+    function _matchColorOf(slotLike) {
+      if (!slotLike) return null;
+      if (!slotLike.colorArg && presetParser.sameExpr(slotLike.expr || '', 'Black')) return [0, 0, 0];
+      return _resolveSlotColor(slotLike);
+    }
+
     /** B1's colour as `text` would show it. */
     function _colorOfSlotText(text) {
       const one = (presetParser.extractStyleSlots(text || '') || [])[0];
-      return one ? _resolveSlotColor(one) : null;
+      return one ? _matchColorOf(one) : null;
     }
 
     /**
      * Edits that carry a change of B1's colour to the colours matched to it in the same preset.
      * `taken` are edits already planned (Follow's); a blade they rewrite is left to them.
      */
-    function _colorMatchEdits(slot, newText, taken) {
-      if (!editor) return [];
-      const here = _locateSlot(slot);
-      if (!here || here.bladeNum !== 1) return [];
+    function _colorMatchEditsAt(here, newText, taken, bases) {
+      if (!editor || !here || here.bladeNum !== 1) return [];
+      const slot = here.preset.styles[0];
+      if (!slot || !slot.startLine) return [];
       const model = editor.getModel();
       const oldRgb = _colorOfSlotText(model.getValueInRange(_slotRange(slot)));
       const newRgb = _colorOfSlotText(newText);
@@ -60963,9 +61292,12 @@ function _getFreshFieldRange(fieldName) {
       here.preset.styles.forEach((s, i) => {
         if (i === 0 || !s || !s.startLine) return;
         const range = _slotRange(s);
-        if ((taken || []).some(e => e.range.startLineNumber === range.startLineNumber
-                                 && e.range.startColumn === range.startColumn)) return;
-        const text = model.getValueInRange(range);
+        const sameRange = e => e.range.startLineNumber === range.startLineNumber && e.range.startColumn === range.startColumn;
+        if ((taken || []).some(sameRange)) return;
+        // A blade another rule is already rewriting (the wrapper repair) gets its colour moved on
+        // top of that text, as ONE edit: two edits on one blade cannot both apply.
+        const base = (bases || []).find(sameRange);
+        const text = base ? base.text : model.getValueInRange(range);
         const one = (presetParser.extractStyleSlots(text) || [])[0];
         if (!one || one.colorArg == null) return;
         const np = window.proffieArgs?.rematchColors(one.colorArg, oldRgb, newRgb) ?? null;
@@ -60977,10 +61309,89 @@ function _getFreshFieldRange(fieldName) {
       return edits;
     }
 
-    /** Everything a write to `slot` carries to other blades of its preset: Follow, then matched colours. */
+    /**
+     * A wrapper around B1 keeps wrapping B1. [B-222] When B1's style changes in a preset, a blade
+     * there that is exactly Wrapper<B1's old style> becomes Wrapper<its new one>. This is also what
+     * repairs a wrapper copied in while B1 was still empty: it was written around the placeholder
+     * (PixelSwitchWrapper<Black>), and giving B1 a style moves it. Exact wrappers only (wrapsExactly).
+     */
+    function _wrapperRepairEditsAt(here, newText, taken) {
+      if (!editor || !here || here.bladeNum !== 1) return [];
+      const slot = here.preset.styles[0];
+      if (!slot || !slot.startLine) return [];
+      const model = editor.getModel();
+      const oldB1 = (presetParser.extractStyleSlots(model.getValueInRange(_slotRange(slot))) || [])[0]?.expr || '';
+      const newB1 = (presetParser.extractStyleSlots(newText || '') || [])[0]?.expr || '';
+      if (!oldB1 || !newB1 || presetParser.sameExpr(oldB1, newB1)) return [];
+      const edits = [];
+      here.preset.styles.forEach((s, i) => {
+        if (i === 0 || !s || !s.startLine) return;
+        const range = _slotRange(s);
+        if ((taken || []).some(e => e.range.startLineNumber === range.startLineNumber
+                                 && e.range.startColumn === range.startColumn)) return;
+        const text = model.getValueInRange(range);
+        const one = (presetParser.extractStyleSlots(text) || [])[0];
+        if (!one || !presetParser.wrapsExactly(one.expr, oldB1)) return;
+        edits.push({ range, text: presetParser.retargetStyleText(text, oldB1, newB1) });
+      });
+      return edits;
+    }
+
+    /** Everything a write to a blade carries to other blades of its preset: Follow, wrappers, matched colours. */
+    function _propagationAt(here, newText) {
+      const follow = _followEditsAt(here, newText);
+      const wrap = _wrapperRepairEditsAt(here, newText, follow);
+      const color = _colorMatchEditsAt(here, newText, follow, wrap);
+      const same = (a, b) => a.range.startLineNumber === b.range.startLineNumber && a.range.startColumn === b.range.startColumn;
+      return [...follow, ...wrap.filter(w => !color.some(c => same(c, w))), ...color];
+    }
+
+    /** The same, for a slot on screen in the active bank. */
     function _propagationEdits(slot, newText) {
-      const follow = _followEdits(slot, newText);
-      return [...follow, ..._colorMatchEdits(slot, newText, follow)];
+      const loc = _locateSlot(slot);
+      if (!loc) return [];
+      return _propagationAt({ arr: _parseResult?.arrays[_activeArrayIndex], ...loc }, newText);
+    }
+
+    /**
+     * A style copied onto B1 keeps the colour other blades are matched to. [B-222] Copying Kestis
+     * onto a preset whose B1 was cyan, with B2 matched to that cyan, wrote Kestis at its default
+     * blue and broke the match. So when a blade in the preset is matched to B1's colour and the new
+     * style takes a base colour, the copy carries B1's colour in. A style with no base colour cannot
+     * hold it; then the matched blades follow the new style's colour instead (_propagationAt), so a
+     * match is moved, never silently dropped.
+     */
+    function _keepMatchedColor(here, newText) {
+      if (!editor || !here || here.bladeNum !== 1) return newText;
+      const cur = here.preset.styles[0];
+      if (!cur || !cur.startLine) return newText;
+      const model = editor.getModel();
+      const old = _colorOfSlotText(model.getValueInRange(_slotRange(cur)));
+      // Black is a colour not chosen yet (the empty placeholder reads as black). Keeping it would
+      // put the new style out; so it goes the other way: the style keeps its own colour and the
+      // matched blades follow it.
+      if (!old || _sameRgb(old, [0, 0, 0])) return newText;
+      const probe = old.map(v => (v || 0) ^ 1);
+      const matched = here.preset.styles.some((s, i) => {
+        if (i === 0 || !s || !s.startLine) return false;
+        const one = (presetParser.extractStyleSlots(model.getValueInRange(_slotRange(s))) || [])[0];
+        return !!one && one.colorArg != null && window.proffieArgs?.rematchColors(one.colorArg, old, probe) != null;
+      });
+      if (!matched) return newText;
+      const one = (presetParser.extractStyleSlots(newText) || [])[0];
+      if (!one) return newText;
+      const lead = (one.expr.match(/^(\w+)/) || [])[1] || '';
+      const isBase = (a) => a && a.name === 'BASE_COLOR_ARG';
+      const takesBase = (styleArgResolver.findArgs(one.expr) || []).some(isBase)
+                     || (lead ? _getHelperRegistryArgs(lead) : []).some(isBase);
+      if (!takesBase) return newText;
+      const np = window.proffieArgs.writeRegistryArg('BASE_COLOR_ARG', old, one.colorArg || '');
+      if (one.colorArg != null) {
+        const at = newText.lastIndexOf(`"${one.colorArg}"`);
+        return at < 0 ? newText : newText.slice(0, at) + `"${np}"` + newText.slice(at + one.colorArg.length + 2);
+      }
+      const at = newText.lastIndexOf('()');
+      return at < 0 ? newText : newText.slice(0, at) + `("${np}")` + newText.slice(at + 2);
     }
 
     // ── Library picker ─────────────────────────────────────────────────────────
