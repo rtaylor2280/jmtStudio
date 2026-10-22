@@ -4379,6 +4379,14 @@
   .style-detail-name-input { flex: 1; font-size: 1.1rem; font-weight: 700; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--jmt-blue); border-radius: 4px; padding: 2px 8px; outline: none; min-width: 0; display: none; }
   .detail-pencil { font-size: 0.72rem; opacity: 0.35; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: var(--c-text); flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
   .detail-pencil:hover { opacity: 1; background: var(--c-bg-hover); }
+  /* [B-496] A field's value opens its edit on click, as its pencil does. A light hover says so. */
+  .sf-click-to-edit { cursor: text; border-radius: 3px; }
+  .sf-click-to-edit:hover { background: var(--c-bg-hover); }
+  /* The font list's own commit [B-496]: under the list, right-aligned, only while it holds edits. */
+  .sf-source-rows-apply { display: flex; justify-content: flex-end; gap: 8px; margin: 6px 0 10px; }
+  .sf-source-entries-list [data-common-confirm] { display: none; }
+  /* Style Library: Save is its one commit, so its fields carry no check mark [B-496]. */
+  #btn-detail-name-confirm, #btn-detail-source-confirm, #btn-detail-url-confirm { display: none !important; }
   /* Paste icon — same shape as .detail-pencil but uses a clipboard glyph
      and sits to the left of the X (clear) inside URL edit rows. Brief
      red-glow animation on the input flags an invalid paste so the
@@ -6536,6 +6544,11 @@
       <div class="sf-entry-detail-section">
         <h3 id="sf-source-entries-head"><span class="sf-source-entries-head-txt">Fonts from this source</span> <span id="sf-source-entries-count" class="sf-review-cand-count"></span></h3>
         <div class="sf-source-entries-list" id="sf-source-entries-list"></div>
+        <!-- [B-496] The list commits as a unit: renames can trade or reuse names, so they apply together. -->
+        <div class="sf-source-rows-apply" id="sf-source-rows-apply" style="display:none">
+          <button class="modal-btn-cancel" id="btn-sf-source-rows-cancel" title="Drop every edit in this list">Cancel</button>
+          <button class="modal-btn-primary" id="btn-sf-source-rows-apply">Apply</button>
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="modal-btn-primary sf-source-add-more-btn" id="btn-sf-source-add-more">+ Add more fonts from source</button>
           <button class="modal-btn-cancel sf-source-add-more-btn" id="btn-sf-source-duplicate" title="Open the same picker but with every font already in your library available to duplicate (auto-suggests numbered _N names)">+ Duplicate fonts from source</button>
@@ -24638,6 +24651,21 @@ document.getElementById('btn-detail-url-toggle').addEventListener('click', () =>
   }
 });
 document.getElementById('btn-detail-url-confirm').addEventListener('click', _commitDetailUrl);
+// [B-496] NO CHECK MARKS IN THE STYLE LIBRARY. It keeps Save, because it edits content (the style
+// itself), and a per-field check mark beside a Save button is two commit signals that contradict
+// each other: the mark says this field is done, Save says nothing is real yet. So a field closes on
+// Enter or when focus leaves it, and everything still waits for Save. The URL closes on leaving only
+// when it is a valid address; an invalid one stays open and marked rather than pulling focus back.
+document.getElementById('style-detail-name-input').addEventListener('blur', () => {
+  if (document.getElementById('style-detail-name-input').style.display !== 'none') _commitDetailName();
+});
+document.getElementById('detail-source-input').addEventListener('blur', () => {
+  if (document.getElementById('detail-source-input').classList.contains('visible')) _commitDetailSource();
+});
+document.getElementById('detail-url-input').addEventListener('blur', (e) => {
+  if (document.getElementById('detail-url-edit-row').style.display === 'none') return;
+  if (_validateUrl(e.target.value).ok) _commitDetailUrl();
+});
 document.getElementById('detail-url-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); _commitDetailUrl(); }
   else if (e.key === 'Escape') { _syncDetailUrlDisplay(); }
@@ -34234,10 +34262,39 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfEntryDetailEls.tagsChips.innerHTML = chips.join('');
       };
+      // [B-496] EVERY FIELD COMMITS ON ITS OWN. Entry detail edits metadata ABOUT a font, so there is
+      // no Save: a Save button promises that nothing is real until it is pressed, and here some actions
+      // already wrote straight through, so the promise was false in the direction that loses work. A
+      // change is written as soon as it is made (a field's check mark, a tag, a toggle); the only thing
+      // a close protects is a field still open (_sfEntryHasOpenEdit). Commits run one after another, and
+      // a commit never takes a field the user has not confirmed (flush: false).
+      let _sfEntryCommitChain = Promise.resolve();
       const _sfMarkDetailDirty = () => {
         _sfDetailDirty = true;
-        if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.disabled = false;
-        if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Discard';
+        // After the current handler finishes, so the field it confirmed has closed first.
+        _sfEntryCommitChain = _sfEntryCommitChain
+          .then(() => new Promise(r => setTimeout(r, 0)))
+          .then(() => (_sfDetailEdit && _sfDetailDirty) ? _sfSaveEntryDetail({ closeAfter: false, flush: false }) : true)
+          .then((ok) => {
+            // A refused commit (a rename onto a name already taken, say) has said why; put the
+            // name back so the next change does not retry it and fail the same way.
+            if (ok === false && _sfDetailEdit && _sfDetailEdit.name !== _sfDetailOriginalName) {
+              _sfDetailEdit.name = _sfDetailOriginalName;
+              try { _sfRefreshDisplayValues(); } catch {}
+            }
+          })
+          .catch(() => {});
+      };
+      // Dirty, now: a field open and not yet confirmed.
+      const _sfEntryHasOpenEdit = () => {
+        const btns = [
+          _sfEntryDetailEls.nameConfirmBtn, _sfEntryDetailEls.bylineConfirmBtn,
+          _sfEntryDetailEls.acquiredConfirmBtn, _sfEntryDetailEls.descConfirmBtn,
+          _sfEntryDetailEls.lastStyleConfirmBtn,
+        ];
+        if (btns.some(b => b && b.style.display && b.style.display !== 'none')) return true;
+        const row = _sfEntryDetailEls.linkEditRow;
+        return !!(row && row.style.display && row.style.display !== 'none');
       };
       // Friendly text for each review-trigger reason key. Kept in sync
       // with the keys emitted by soundFontBulkImport.runBulkImport.
@@ -35230,11 +35287,12 @@ require(['vs/editor/editor.main'], function () {
         _sfDetailDirty = false;
       };
       const _sfTryCloseEntryDetail = async () => {
-        if (_sfDetailDirty) {
+        await _sfEntryCommitChain;
+        if (_sfEntryHasOpenEdit()) {
           // Three-way prompt mirrors the navigation flows: Cancel
           // (stay open), Discard (close without saving), Save (persist
           // then close — the default closeAfter does the close for us).
-          const choice = await promptUnsaved('Unsaved changes to this sound font. Save before closing?');
+          const choice = await promptUnsaved('A field on this sound font is still being edited. Save it before closing?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveEntryDetail();
@@ -35277,9 +35335,9 @@ require(['vs/editor/editor.main'], function () {
       // the swap-to-next-modal logic still finds entry detail active.
       // Returns true on success, false on validation refusal or IPC fail
       // so callers can abort their follow-up action.
-      const _sfSaveEntryDetail = async ({ closeAfter = true } = {}) => {
+      const _sfSaveEntryDetail = async ({ closeAfter = true, flush = true } = {}) => {
         if (!_sfDetailEdit || !_sfDetailOriginalName) return false;
-        if (!_sfFlushEntryFieldEdits()) return false;
+        if (flush && !_sfFlushEntryFieldEdits()) return false;
         // Symmetric auto-handling of the creator_empty review reason
         // so the field tracks the author state on every save:
         //   - author NOW filled → drop creator_empty if present
@@ -35391,7 +35449,10 @@ require(['vs/editor/editor.main'], function () {
       // paths still go through _sfTryCloseEntryDetail since their
       // intent is ambiguous.
       _sfEntryDetailEls.discardBtn?.addEventListener('click', _sfCloseEntryDetail);
-      _sfEntryDetailEls.saveBtn?.addEventListener('click', _sfSaveEntryDetail);
+      // [B-496] No Save: every change commits as it is made. The button stays in the markup, hidden,
+      // so nothing that reads it breaks; the bottom button is Close.
+      if (_sfEntryDetailEls.saveBtn) _sfEntryDetailEls.saveBtn.style.display = 'none';
+      if (_sfEntryDetailEls.discardBtn) _sfEntryDetailEls.discardBtn.textContent = 'Close';
       // "Show missing" toggle on the Effects row — flips the missing-
       // chips strip in/out with a matching label swap. Modal-open path
       // resets to collapsed every time (see _sfOpenEntryDetail).
@@ -35593,9 +35654,26 @@ require(['vs/editor/editor.main'], function () {
       // X / Close / Esc still go through the explicit-prompt path.
       _sfEntryDetailEls.modal?.addEventListener('click', (e) => {
         if (e.target !== _sfEntryDetailEls.modal) return;
-        if (_sfDetailDirty) return;
+        if (_sfEntryHasOpenEdit()) return;
         _sfCloseEntryDetail();
       });
+      // [B-496] CLICKING THE TEXT EDITS IT, the same as its pencil. The pencils stay: they say at a
+      // glance what can be edited. Clicking the value is the quicker way in.
+      for (const [display, pencil] of [
+        [_sfEntryDetailEls.name, _sfEntryDetailEls.nameEditBtn],
+        [_sfEntryDetailEls.byline, _sfEntryDetailEls.bylineEditBtn],
+        [_sfEntryDetailEls.acquiredDisplay, _sfEntryDetailEls.acquiredEditBtn],
+        [_sfEntryDetailEls.descDisplay, _sfEntryDetailEls.descEditBtn],
+        [_sfEntryDetailEls.lastStyleDisplay, _sfEntryDetailEls.lastStyleEditBtn],
+      ]) {
+        if (!display || !pencil) continue;
+        display.classList.add('sf-click-to-edit');
+        display.addEventListener('click', (e) => {
+          if (e.target.closest('a, button')) return;
+          if (pencil.style.display === 'none') return;
+          pencil.click();
+        });
+      }
       // Pencil → input mode for each editable field.
       _sfEntryDetailEls.nameEditBtn?.addEventListener('click', () => {
         if (!_sfDetailEdit) return;
@@ -36562,10 +36640,36 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfSourceDetailEls.tagsChips.innerHTML = chips.join('');
       };
+      // [B-496] THE SOURCE'S OWN FIELDS COMMIT AS THEY CHANGE; THE FONT LIST COMMITS ON ITS APPLY. Same
+      // reasoning as entry detail: this dialog edits metadata, so a Save button promised an undo it
+      // did not give. The list is the exception because its rows depend on each other: a swap or a
+      // freed name needs every rename applied together ([B-517]), so it keeps one commit of its own
+      // (Apply / Cancel under the list) instead of a check mark per row.
+      let _sfSourceCommitChain = Promise.resolve();
       const _sfMarkSourceDirty = () => {
         _sfSourceDirty = true;
-        if (_sfSourceDetailEls.saveBtn) _sfSourceDetailEls.saveBtn.disabled = false;
-        if (_sfSourceDetailEls.discardBtn) _sfSourceDetailEls.discardBtn.textContent = 'Discard';
+        _sfSourceCommitChain = _sfSourceCommitChain
+          .then(() => new Promise(r => setTimeout(r, 0)))
+          .then(() => (_sfSourceEdit && _sfSourceDirty) ? _sfSaveSourceDetail({ closeAfter: false, flush: false, rows: false }) : true)
+          .catch(() => {});
+      };
+      // Dirty, now: a field open and not confirmed, or list edits not yet applied.
+      const _sfSourceHasOpenEdit = () => {
+        const open = (b) => !!(b && b.style.display && b.style.display !== 'none');
+        if ([_sfSourceDetailEls.nameConfirmBtn, _sfSourceDetailEls.creatorConfirmBtn,
+             _sfSourceDetailEls.acquiredConfirmBtn, _sfSourceDetailEls.linkEditRow].some(open)) return true;
+        return !!((_sfSourceEdit && _sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size)
+                  || (typeof _sfCommonRowEdits !== 'undefined' && _sfCommonRowEdits.size));
+      };
+      // The list's Apply shows while it has anything to apply, counting the rows held.
+      const _sfSyncSourceRowsApply = () => {
+        const bar = document.getElementById('sf-source-rows-apply');
+        if (!bar) return;
+        const n = ((_sfSourceEdit && _sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size) || 0)
+                + ((typeof _sfCommonRowEdits !== 'undefined' && _sfCommonRowEdits.size) || 0);
+        bar.style.display = n ? 'flex' : 'none';
+        const btn = document.getElementById('btn-sf-source-rows-apply');
+        if (btn) btn.textContent = n > 1 ? `Apply (${n})` : 'Apply';
       };
       const _sfSyncSourceLinkDisplay = () => {
         if (!_sfSourceEdit) return;
@@ -36798,9 +36902,6 @@ require(['vs/editor/editor.main'], function () {
                 <button class="sf-source-entry-pencil" data-entry-cancel="${escName}" title="Discard edits for this row">&#10005;</button>
                 <input type="text" class="sf-source-entry-name-input" data-entry-name-input="${escName}" value="${_sfEscape(effName)}" maxlength="200" autocomplete="off">
                 <input type="text" class="sf-source-entry-desc-input" data-entry-desc-input="${escName}" value="${_sfEscape(effDesc)}" placeholder="Add description…" maxlength="500" autocomplete="off">
-                <div class="sf-source-entry-edit-actions">
-                  <button class="detail-confirm" data-entry-confirm="${escName}" title="Lock in (saves when the modal is saved)">&#10003;</button>
-                </div>
               </div>`;
             }
             // Description: shown inline next to the name. Truncates with
@@ -36818,6 +36919,7 @@ require(['vs/editor/editor.main'], function () {
           }).join('');
           _sfFillSourceEntryCustomized(token);   // not awaited — the list is already usable
         }
+        _sfSyncSourceRowsApply();   // [B-496]
         // "Add more" button visibility — reuses the candidates fetched at
         // the top of this function so we don't pay a second detection cost.
         if (_sfSourceDetailEls.addMoreBtn) {
@@ -37163,11 +37265,12 @@ require(['vs/editor/editor.main'], function () {
         _sfSourceDirty = false;
       };
       const _sfTryCloseSourceDetail = async ({ dismissAll = false } = {}) => {
-        if (_sfSourceDirty) {
+        await _sfSourceCommitChain;
+        if (_sfSourceHasOpenEdit()) {
           // Three-way prompt mirrors the entry detail close path:
           // Cancel (stay), Discard (close without saving), Save
           // (persist then close — closeAfter default does the close).
-          const choice = await promptUnsaved('Unsaved changes to this source. Save before closing?');
+          const choice = await promptUnsaved('Some edits on this source are not applied yet. Save them before closing?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveSourceDetail({ dismissAll });
@@ -37204,9 +37307,16 @@ require(['vs/editor/editor.main'], function () {
       // has an active source modal to atomically deactivate. Returns
       // true on success, false on validation refusal or IPC fail so
       // callers can abort their follow-up action.
-      const _sfSaveSourceDetail = async ({ closeAfter = true, dismissAll = false } = {}) => {
+      // `rows: false` writes the source's own fields and tags only (a field commit); `fields: false`
+      // writes only the list (its Apply). A close that saves does both. [B-496]
+      const _sfSaveSourceDetail = async ({ closeAfter = true, dismissAll = false, flush = true, rows = true, fields = true } = {}) => {
         if (!_sfSourceEdit || !_sfSourceOriginalUuid) return false;
-        if (!_sfFlushSourceFieldEdits()) return false;
+        if (flush && !_sfFlushSourceFieldEdits()) return false;
+        if (rows) {
+          // A common row still open is read off its inputs the way its own check mark did.
+          for (const b of (_sfSourceDetailEls.entriesList?.querySelectorAll('[data-common-confirm]') || [])) b.click();
+        }
+        if (fields) {
         const updates = {
           bundleName: _sfSourceEdit.bundleName,
           vendor: _sfSourceEdit.vendor,
@@ -37221,12 +37331,13 @@ require(['vs/editor/editor.main'], function () {
           promptError('Save failed', (res && res.error) || 'unknown error');
           return false;
         }
+        }
         // ── PENDING COMMON ROW EDITS ───────────────────────────── [B-493, 2026-10-19]
         // Three separate writes per row because each field already owns its own rules:
         // rename resolves name collisions, and group and description each treat empty as
         // "clear" rather than "store a blank". Folding them into one setter would mean
         // re-implementing the collision walk here.
-        if (_sfCommonRowEdits.size) {
+        if (rows && _sfCommonRowEdits.size) {
           const failures = [];
           for (const [u, ed] of _sfCommonRowEdits) {
             const c = (_sfCommons || []).find((x) => x.uuid === u);
@@ -37263,7 +37374,7 @@ require(['vs/editor/editor.main'], function () {
         const tagsRemovedLc = new Set([...initialLc].filter(t => !currentLc.has(t)));
         const tagsAdded = current.filter(t => !initialLc.has(String(t).toLowerCase()));
         const tagFailures = [];
-        if (tagsRemovedLc.size > 0 || tagsAdded.length > 0) {
+        if (fields && (tagsRemovedLc.size > 0 || tagsAdded.length > 0)) {
           for (const entry of (_sfSourceEdit.entries || [])) {
             const existing = Array.isArray(entry.meta && entry.meta.tags) ? entry.meta.tags : [];
             const kept = existing.filter(t => !tagsRemovedLc.has(String(t).toLowerCase()));
@@ -37281,6 +37392,8 @@ require(['vs/editor/editor.main'], function () {
                 updates: { tags: finalTags },
               });
               if (!er || !er.ok) tagFailures.push({ name: entry.name, error: (er && er.error) || 'unknown error' });
+              // What is on disk now, so the next commit measures from it.
+              else if (entry.meta) entry.meta.tags = finalTags;
             } catch (err) {
               tagFailures.push({ name: entry.name, error: String(err && err.message || err) });
             }
@@ -37289,12 +37402,14 @@ require(['vs/editor/editor.main'], function () {
         if (tagFailures.length) {
           await _sfShowPartialFailures('Source saved, but some entries failed to update tags', tagFailures);
         }
+        // The committed tags are the new starting point: a tag added here is not "added" again next time.
+        if (fields) _sfSourceEdit.tagsInitial = current.slice();
         // Per-row inline edits: flush any pending name/description changes,
         // including rows still in edit mode (read the live input value so the
         // user doesn't have to click ✓ before Save). Per-entry failures don't
         // abort the rest — collect them and surface at the end.
         const entryEditFailures = [];
-        if (_sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size > 0) {
+        if (rows && _sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size > 0) {
           // Names first and all together, so one font can take a name another gives up in the same
           // save (a swap, or a reuse). Descriptions follow, each under the font's name after that.
           const renames = [];
@@ -37343,6 +37458,7 @@ require(['vs/editor/editor.main'], function () {
         if (entryEditFailures.length) {
           await _sfShowPartialFailures('Source saved, but some entry edits failed', entryEditFailures);
         }
+        if (rows && _sfSourceEdit && _sfSourceEdit.entryEdits) _sfSourceEdit.entryEdits.clear();
         _sfSourceDirty = false;
         if (closeAfter) await _sfCloseSourceDetail({ dismissAll });
         return true;
@@ -37354,12 +37470,31 @@ require(['vs/editor/editor.main'], function () {
       // either click is an explicit dismissal, so skip the prompt.
       // Same convention as the entry detail modal.
       _sfSourceDetailEls.discardBtn?.addEventListener('click', _sfCloseSourceDetail);
-      _sfSourceDetailEls.saveBtn?.addEventListener('click', _sfSaveSourceDetail);
+      // [B-496] No Save: fields commit as they change and the list has its own Apply. Hidden rather
+      // than removed so nothing that reads it breaks; the bottom button is Close.
+      if (_sfSourceDetailEls.saveBtn) _sfSourceDetailEls.saveBtn.style.display = 'none';
+      if (_sfSourceDetailEls.discardBtn) _sfSourceDetailEls.discardBtn.textContent = 'Close';
+      // The list's Apply and Cancel.
+      document.getElementById('btn-sf-source-rows-apply')?.addEventListener('click', async () => {
+        await _sfSourceCommitChain;
+        const ok = await _sfSaveSourceDetail({ closeAfter: false, flush: false, fields: false });
+        if (ok && _sfSourceOriginalUuid) {
+          await window.refreshSoundFontsView();
+          await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+        }
+        _sfSyncSourceRowsApply();
+      });
+      document.getElementById('btn-sf-source-rows-cancel')?.addEventListener('click', async () => {
+        if (_sfSourceEdit && _sfSourceEdit.entryEdits) _sfSourceEdit.entryEdits.clear();
+        _sfCommonRowEdits.clear();
+        if (_sfSourceOriginalUuid) await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+        _sfSyncSourceRowsApply();
+      });
       // Backdrop click: silent block when dirty — same convention as
       // the entry detail and reorganize modals.
       _sfSourceDetailEls.modal?.addEventListener('click', (e) => {
         if (e.target !== _sfSourceDetailEls.modal) return;
-        if (_sfSourceDirty) return;
+        if (_sfSourceHasOpenEdit()) return;
         _sfCloseSourceDetail();
       });
       // Pencil/confirm for source fields.
@@ -37551,7 +37686,8 @@ require(['vs/editor/editor.main'], function () {
         }
       });
       // Notes input.
-      _sfSourceDetailEls.notesInput?.addEventListener('input', (e) => {
+      // [B-496] Notes commit when the box is left: a write per keystroke is not what anyone means.
+      _sfSourceDetailEls.notesInput?.addEventListener('blur', (e) => {
         if (!_sfSourceEdit) return;
         const v = e.target.value || '';
         if (v !== _sfSourceEdit.userNotes) {
@@ -37622,20 +37758,14 @@ require(['vs/editor/editor.main'], function () {
         if (nameInput) {
           const key = nameInput.getAttribute('data-entry-name-input');
           const entry = _sfSourceEdit.entryEdits.get(key);
-          if (entry) {
-            entry.name = nameInput.value;
-            _sfMarkSourceDirty();
-          }
+          if (entry) entry.name = nameInput.value;   // held for the list's Apply [B-496]
           return;
         }
         const descInput = e.target.closest('[data-entry-desc-input]');
         if (descInput) {
           const key = descInput.getAttribute('data-entry-desc-input');
           const entry = _sfSourceEdit.entryEdits.get(key);
-          if (entry) {
-            entry.description = descInput.value;
-            _sfMarkSourceDirty();
-          }
+          if (entry) entry.description = descInput.value;   // held for the list's Apply [B-496]
         }
       });
       // Enter on either input collapses the row (treat as ✓). Escape cancels.
@@ -37645,8 +37775,9 @@ require(['vs/editor/editor.main'], function () {
         if (!nameInput && !descInput) return;
         const key = (nameInput || descInput).getAttribute(nameInput ? 'data-entry-name-input' : 'data-entry-desc-input');
         if (e.key === 'Enter') {
+          // [B-496] Enter applies the list, the way Apply does: rows commit together.
           e.preventDefault();
-          _sfCollapseEntryRowEdit(key);
+          document.getElementById('btn-sf-source-rows-apply')?.click();
         } else if (e.key === 'Escape') {
           e.preventDefault();
           _sfCancelEntryRowEdit(key);
@@ -37664,7 +37795,7 @@ require(['vs/editor/editor.main'], function () {
           // Pencil acts as a toggle: opens edit mode, or collapses if already.
           const existing = _sfSourceEdit.entryEdits?.get(name);
           if (existing && existing.editing) {
-            _sfCollapseEntryRowEdit(name);
+            _sfCancelEntryRowEdit(name);
           } else {
             // Await the re-render so the name input is in the DOM before we
             // try to focus/select it — convention is to land on the field
@@ -37740,7 +37871,6 @@ require(['vs/editor/editor.main'], function () {
             if (same) _sfCommonRowEdits.delete(u);
             else _sfCommonRowEdits.set(u, next);
           }
-          if (_sfCommonRowEdits.size) _sfMarkSourceDirty?.();
           await _sfRenderSourceEntries(_sfSourceOriginalUuid);
           return;
         }
@@ -37771,8 +37901,9 @@ require(['vs/editor/editor.main'], function () {
         if (crow) {
           const cu = crow.getAttribute('data-source-common');
           if (!cu) return;
-          if (_sfSourceDirty) {
-            const choice = await promptUnsaved('Unsaved source edits. Save before going to this common folder?');
+          await _sfSourceCommitChain;
+          if (_sfSourceHasOpenEdit()) {
+            const choice = await promptUnsaved('Some edits on this source are not applied yet. Save them before going to this common folder?');
             if (choice === 'cancel') return;
             if (choice === 'save') {
               const saved = await _sfSaveSourceDetail({ closeAfter: false });
@@ -37857,8 +37988,9 @@ require(['vs/editor/editor.main'], function () {
         // which direction they're navigating. Save keeps the source
         // modal active so the swap-to-entry-detail handshake below
         // still has a from-modal to atomically deactivate.
-        if (_sfSourceDirty) {
-          const choice = await promptUnsaved('Unsaved source edits. Save before going to this font?');
+        await _sfSourceCommitChain;
+        if (_sfSourceHasOpenEdit()) {
+          const choice = await promptUnsaved('Some edits on this source are not applied yet. Save them before going to this font?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveSourceDetail({ closeAfter: false });
@@ -38272,8 +38404,9 @@ require(['vs/editor/editor.main'], function () {
       };
       _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
-        if (_sfSourceDirty) {
-          if (!await _promptDiscard('Unsaved source edits. Discard them and continue?')) return;
+        await _sfSourceCommitChain;
+        if (_sfSourceHasOpenEdit()) {
+          if (!await _promptDiscard('Some edits on this source are not applied yet. Discard them and continue?')) return;
         }
         const uuid = _sfSourceOriginalUuid;
         // Drop the return-to-entry tracking — we're navigating to import,
@@ -38297,8 +38430,9 @@ require(['vs/editor/editor.main'], function () {
           await _sfDuplicateCommon(_cu, 'source');
           return;
         }
-        if (_sfSourceDirty) {
-          if (!await _promptDiscard('Unsaved source edits. Discard them and continue?')) return;
+        await _sfSourceCommitChain;
+        if (_sfSourceHasOpenEdit()) {
+          if (!await _promptDiscard('Some edits on this source are not applied yet. Discard them and continue?')) return;
         }
         const uuid = _sfSourceOriginalUuid;
         _sfSourceDetailReturnToEntry = null;
@@ -42690,12 +42824,13 @@ require(['vs/editor/editor.main'], function () {
         const entry = _sfAllEntries.find(e => e.name === _sfDetailOriginalName);
         const uuid = entry && entry.meta && entry.meta.sourceUuid;
         if (!uuid) return;
-        if (_sfDetailDirty) {
+        await _sfEntryCommitChain;
+        if (_sfEntryHasOpenEdit()) {
           // Three-way prompt: Cancel (stay) / Discard (lose edits, go) /
           // Save (persist edits, then go). The Save path keeps the entry
           // modal active so the swap-to-source-detail handshake below
           // still has a from-modal to atomically deactivate.
-          const choice = await promptUnsaved('Unsaved changes to this font. Save before going to source?');
+          const choice = await promptUnsaved('A field on this font is still being edited. Save it before going to source?');
           if (choice === 'cancel') return;
           if (choice === 'save') {
             const saved = await _sfSaveEntryDetail({ closeAfter: false });
@@ -42934,7 +43069,8 @@ require(['vs/editor/editor.main'], function () {
         }
       });
       // Notes textarea: any change marks dirty.
-      _sfEntryDetailEls.notesInput?.addEventListener('input', (e) => {
+      // [B-496] Notes commit when the box is left: a write per keystroke is not what anyone means.
+      _sfEntryDetailEls.notesInput?.addEventListener('blur', (e) => {
         if (!_sfDetailEdit) return;
         const v = e.target.value || '';
         if (v !== _sfDetailEdit.userNotes) {
