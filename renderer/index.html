@@ -37497,6 +37497,21 @@ require(['vs/editor/editor.main'], function () {
         if (_sfSourceHasOpenEdit()) return;
         _sfCloseSourceDetail();
       });
+      // [B-135] Clicking a value edits it, as on the font window: the two windows open from each other,
+      // so a value that answers a click in one and not the other reads as broken. Pencils stay.
+      for (const [display, pencil] of [
+        [_sfSourceDetailEls.name, _sfSourceDetailEls.nameEditBtn],
+        [_sfSourceDetailEls.creator, _sfSourceDetailEls.creatorEditBtn],
+        [_sfSourceDetailEls.acquiredDisplay, _sfSourceDetailEls.acquiredEditBtn],
+      ]) {
+        if (!display || !pencil) continue;
+        display.classList.add('sf-click-to-edit');
+        display.addEventListener('click', (e) => {
+          if (e.target.closest('a, button')) return;
+          if (pencil.style.display === 'none') return;
+          pencil.click();
+        });
+      }
       // Pencil/confirm for source fields.
       _sfSourceDetailEls.nameEditBtn?.addEventListener('click', () => {
         if (!_sfSourceEdit) return;
