@@ -2978,18 +2978,22 @@ ipcMain.handle('common:inspectIncomingFolder', (_, { folderPath } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:importFromZip', async (_, { zipPath, name, forceNewSource, askOnDuplicate, linkUrl, bundle } = {}) => {
+ipcMain.handle('common:importFromZip', async (_, { zipPath, name, forceNewSource, askOnDuplicate, downloadUrl, bundle } = {}) => {
   const token = _commonImportGate.begin();
   try {
     const ud = app.getPath('userData');
     const r = await soundFontCommon.importCommonFromZip(
       ud, zipPath, name, undefined, () => token.cancelled,
       { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate, bundle: !!bundle });
-    // The page the in-app browser downloaded from becomes the source's Link, when it has none.
-    if (linkUrl && r && r.ok && !r.isDuplicate && r.sourceUuid) {
+    // The page the in-app browser downloaded from becomes the source's Download, when it has none.
+    // [B-487] It was the Link until 2026-10-21; Link is the public "learn more or get it" field the
+    // user fills, Download is where this copy is downloaded again.
+    if (downloadUrl && r && r.ok && !r.isDuplicate && r.sourceUuid) {
       try {
         const sm = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(ud), r.sourceUuid));
-        if (!(sm && sm.linkUrl)) soundFontSources.updateSourceMeta(ud, r.sourceUuid, { linkUrl });
+        if (!(sm && sm.downloadUrl)) soundFontSources.updateSourceMeta(ud, r.sourceUuid, { downloadUrl });
+        const pub = soundFontLinkImport.publicLinkFor(downloadUrl);
+        if (pub && !(sm && sm.linkUrl)) soundFontSources.updateSourceMeta(ud, r.sourceUuid, { linkUrl: pub });
       } catch {}
     }
     return r;
@@ -5461,10 +5465,16 @@ ipcMain.handle('linkImport:start', async (event, { url } = {}) => {
     // other cancellable door, non-exclusive like the export one.
     const token = _linkImportGate.begin();
     try {
-      return await soundFontLinkImport.resolve(url, {
+      const r = await soundFontLinkImport.resolve(url, {
         onProgress,
         shouldStop: () => token.cancelled,
       });
+      // [B-487] Which of the links followed the source keeps as its Download.
+      if (r && r.ok) {
+        r.downloadUrl = soundFontLinkImport.pickDownloadUrl(r.chain);
+        r.linkUrl = soundFontLinkImport.publicLinkFor(r.downloadUrl);   // a public page is the Link too
+      }
+      return r;
     } finally {
       // Only ever our own token - a leftover makes the NEXT cancel report work
       // it is not really doing.
@@ -5685,7 +5695,13 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
             destDir,
             onProgress: (received, total) => { const now = Date.now(); if (now - last >= 150 || (total && received >= total)) { last = now; send({ received, total }); } },
           });
-          finish(r && r.ok ? { ok: true, filePath: r.filePath, fileName: r.fileName, pageUrl } : { ok: false, message: (r && r.message) || 'That download could not be imported.' });
+          // [B-487] The links this download went through, in order: the page it was started from, the
+          // download's own first request (before redirects), then any link a pointer file held.
+          let firstReq = null;
+          try { firstReq = (item.getURLChain() || [])[0] || item.getURL() || null; } catch {}
+          const downloadUrl = soundFontLinkImport.pickDownloadUrl([pageUrl, firstReq, ...((r && r.chain) || [])]);
+          const linkUrl = soundFontLinkImport.publicLinkFor(downloadUrl);   // a public page is the Link too
+          finish(r && r.ok ? { ok: true, filePath: r.filePath, fileName: r.fileName, pageUrl, downloadUrl, linkUrl } : { ok: false, message: (r && r.message) || 'That download could not be imported.' });
         } catch (e) { finish({ ok: false, message: String(e && e.message || e) }); }
       });
     };

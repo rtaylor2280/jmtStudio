@@ -217,7 +217,17 @@ async function downloadAndInstall({ id, userData, onProgress }) {
     // `X_1` from a duplicate - two conventions for one problem, in one list.
     const name = soundFontCommon.nextNumberedName(userData, entry.baseName);
     if (!name) return { ok: false, error: 'Could not find a free name' };
-    return await soundFontCommon.importCommonFromZip(userData, tmpZip, name);
+    const r = await soundFontCommon.importCommonFromZip(userData, tmpZip, name);
+    // [B-487] The catalog link is where this pack is downloaded again: a share link (V2, Dropbox) or
+    // a direct one (V1, hubbe.net), both stable. Recorded unless the source already has a Download.
+    if (r && r.ok && !r.isDuplicate && r.sourceUuid && entry.zipUrl) {
+      try {
+        const S = require('./soundFontSources');
+        const sm = S.readSourceMeta(path.join(S.sourcesRoot(userData), r.sourceUuid));
+        if (!(sm && sm.downloadUrl)) S.updateSourceMeta(userData, r.sourceUuid, { downloadUrl: entry.zipUrl });
+      } catch {}
+    }
+    return r;
   } catch (err) {
     return { ok: false, error: `Install failed: ${err.message}` };
   } finally {

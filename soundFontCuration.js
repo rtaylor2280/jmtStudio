@@ -66,7 +66,7 @@ const SCHEMA_VERSION = 1;
 // `originalName` (the archive's filename) cannot stand in for it. Without this a
 // restore falls back to the file it was picked from — which for an auto-numbered
 // export reads "Outcast_Knight (1)".
-const SOURCE_FIELDS = ['bundleName', 'vendor', 'vendorWebsite', 'linkUrl', 'userNotes', 'purchased'];
+const SOURCE_FIELDS = ['bundleName', 'vendor', 'vendorWebsite', 'linkUrl', 'downloadUrl', 'userNotes', 'purchased'];
 // Entry-level fields, keyed by candidatePath — the only stable identifier an
 // entry has across a delete and re-import. A name can be edited; the path the
 // font occupies inside the archive cannot.
@@ -621,7 +621,7 @@ function summarize(payload, attachmentsWritten, customizedWritten) {
   // One bucket for every kind of link, because that is the word the user owns.
   // A style-library reference is not a URL, but "links" is what they would call
   // it, and splitting it out lengthens the sentence without telling them more.
-  const links = on(src, 'linkUrl') || on(src, 'vendorWebsite')
+  const links = on(src, 'linkUrl') || on(src, 'vendorWebsite') || on(src, 'downloadUrl')
     || anyEntry('demoUrl') || anyEntry('linkedStyleLibraryEntry');
   const attachments = typeof attachmentsWritten === 'number'
     ? attachmentsWritten

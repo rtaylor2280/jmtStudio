@@ -204,7 +204,10 @@ const BROWSER_RECOVERABLE = new Set(['too-deep', 'fetch-failed', 'gated', 'no-do
 // Public entry: peel, then tag failures with browserRecoverable so the UI knows
 // whether to offer the in-app browser fallback.
 async function resolve(inputUrl, opts = {}, depth = 0, referer) {
+  // Every link followed, in order, as REQUESTED (before redirects), for pickDownloadUrl. [B-487]
+  if (!Array.isArray(opts.chain)) opts = Object.assign({}, opts, { chain: [] });
   const r = await peel(inputUrl, opts, depth, referer);
+  if (r && r.ok) r.chain = opts.chain.slice();
   if (r && !r.ok) {
     r.browserRecoverable = BROWSER_RECOVERABLE.has(r.reason) || /^http-(4\d\d|5\d\d)$/.test(r.reason || '');
   }
@@ -219,6 +222,9 @@ async function peel(inputUrl, opts = {}, depth = 0, referer) {
   if (depth > MAX_DEPTH) return { ok: false, reason: 'too-deep', message: 'This link points through too many pages to follow automatically.' };
   const url = normalizeDropbox(String(inputUrl || '').trim());
   if (!/^https?:\/\//i.test(url)) return { ok: false, reason: 'bad-url', message: 'That does not look like a web link. Paste the download link from your receipt.' };
+  // As requested, not where it redirected: a Dropbox or Drive share link redirects to a temporary
+  // content address, and the share link is the one that still works next month.
+  if (Array.isArray(opts.chain)) opts.chain.push(url);
 
   let r;
   try { r = await httpGet(url, { referer }); }
@@ -300,4 +306,73 @@ async function resolveLocalFile(filePath, opts = {}) {
   return { ok: false, reason: 'not-a-font', message: 'That download was not a font archive, and had no link inside it. Download the font from the vendor, then use Pick .zip file.', browserRecoverable: false };
 }
 
-module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload };
+// ── Which link to keep as the source's Download [B-487] ─────────────────────────────────────────
+//
+// A download can take several links to reach: a receipt, a document with a link inside it, a
+// page with a button, the file. The one worth keeping is the LATEST one that is a place to download
+// from again. Not the first one pasted, when the chain went further: that is often a document
+// whose only job was to hold the next link. Not a login page: that is where you sign in, not where
+// the file is. And not a store's own file URL: those are commonly signed and expire within minutes
+// (one measured at fifteen). So:
+//   1. the file's own link, when it is on a file-sharing host (built to be shared and reused);
+//   2. otherwise the latest link before it that is not a login page or a checkout record;
+//   3. otherwise a known creator's own download page (KNOWN_DOWNLOAD_PAGES);
+//   4. otherwise nothing.
+// Creators whose behaviour has been MEASURED get a rule of their own; everyone else gets the
+// general one as a best guess.
+const FILE_HOSTS = /(^|\.)(dropbox\.com|drive\.google\.com|docs\.google\.com|onedrive\.live\.com|1drv\.ms|sharepoint\.com|mega\.nz|mega\.co\.nz|mediafire\.com|box\.com|we\.tl|wetransfer\.com)$/i;
+function _host(u) { try { return new URL(u).hostname; } catch { return ''; } }
+function isFileHost(u) { return FILE_HOSTS.test(_host(u)); }
+function isLoginUrl(u) {
+  return /\/(login|log-in|signin|sign-in|my-account|account)(\/|\?|#|$)/i.test(String(u || ''))
+      || /[?&]wc_error=/i.test(String(u || ''))
+      || /^accounts\.google\.com$/i.test(_host(u));
+}
+// A checkout or payment record: proof of a purchase, not a place to download from. Stripe's hosted
+// checkout, a page carrying a Stripe session id, and PayPal's return pages. A real BVM purchase's
+// exported curation carried one of these in its notes (2026-10-07), which is how it is known.
+function isCheckoutRecord(u) {
+  const h = _host(u);
+  return /^checkout\.stripe\.com$/i.test(h)
+      || /[?&](session_id|session|checkout_session)=/i.test(String(u || ''))
+      || (/(^|\.)paypal\.com$/i.test(h) && /\/(checkoutnow|webapps\/hermes|cgi-bin\/webscr)/i.test(String(u || '')));
+}
+// Creators whose download pages are known. `page` stands in when the chain offers nothing better;
+// `owns(u)` says a link is that page in some other dress, recorded as `page` itself; `isPublic`
+// means anyone can get the font there, so it is also the source's Link.
+//   BVM Sabers: its file link is /api/downloads/<signed token>, measured expiring in about fifteen
+//   minutes ([B-480]); its button posts a request for that token, so no lasting file link exists.
+//   Every font, free ones with no sign-up, is downloaded from its fonts page, which keeps the last
+//   tab chosen in the address (?tier=premium even while downloading free fonts, 2026-10-22).
+const KNOWN_DOWNLOAD_PAGES = [
+  {
+    host: /(^|\.)bvm-sabers\.co\.uk$/i,
+    page: 'https://www.bvm-sabers.co.uk/fonts',
+    owns: (u) => { try { return /^\/fonts\/?$/i.test(new URL(u).pathname); } catch { return false; } },
+    isPublic: true,
+  },
+];
+function _known(u) { const h = _host(u); return KNOWN_DOWNLOAD_PAGES.find(k => k.host.test(h)) || null; }
+// A known creator's page in its plain form; anything else unchanged.
+function _plain(u) { const k = _known(u); return (k && k.owns(u)) ? k.page : u; }
+// The public page to offer as Link when this Download is one, else null.
+function publicLinkFor(downloadUrl) {
+  const k = downloadUrl && _known(downloadUrl);
+  return (k && k.isPublic && downloadUrl === k.page) ? k.page : null;
+}
+// `chain`: links in the order followed, the last being the one the file came from.
+function pickDownloadUrl(chain) {
+  const urls = (chain || []).filter(u => /^https?:\/\//i.test(String(u || '')));
+  if (!urls.length) return null;
+  const file = urls[urls.length - 1];
+  if (isFileHost(file)) return file;
+  for (let i = urls.length - 2; i >= 0; i--) {
+    if (!isLoginUrl(urls[i]) && !isCheckoutRecord(urls[i])) return _plain(urls[i]);
+  }
+  for (const known of KNOWN_DOWNLOAD_PAGES) {
+    if (urls.some(u => known.host.test(_host(u)))) return known.page;
+  }
+  return null;
+}
+
+module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord };

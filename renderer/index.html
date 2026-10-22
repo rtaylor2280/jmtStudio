@@ -6149,6 +6149,14 @@
           </div>
         </div>
         <div class="import-field">
+          <label>Download</label>
+          <div class="sf-url-input-wrap">
+            <input type="text" id="sf-review-download" placeholder="Where you download your copy again" maxlength="500" autocomplete="off">
+            <button type="button" class="sf-url-input-paste" id="btn-sf-review-download-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+            <button type="button" class="sf-url-input-clear" id="btn-sf-review-download-clear" title="Clear">&#10005;</button>
+          </div>
+        </div>
+        <div class="import-field">
           <label>Acquisition Date</label>
           <input type="date" id="sf-review-purchase-date">
         </div>
@@ -6437,6 +6445,7 @@
         <div class="sf-link-area">
           <button id="sf-source-website-display" class="sf-url-display" style="display:none">Website</button>
           <button id="sf-source-link-display" class="sf-url-display" style="display:none">Link</button>
+          <button id="sf-source-download-display" class="sf-url-display" style="display:none">Download</button>
           <button class="detail-link-btn" id="btn-sf-source-link-toggle" title="Edit creator website and source link">&#128279;</button>
         </div>
       </div>
@@ -6464,6 +6473,14 @@
           <input type="url" id="sf-source-link-input" class="sf-edit-input" placeholder="Where to learn more or get this source">
           <button class="sf-url-input-paste" id="btn-sf-source-link-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
           <button class="sf-url-input-clear" id="btn-sf-source-link-clear" title="Clear link">&#10005;</button>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span class="sf-edit-row-label" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Download</span>
+        <div class="sf-url-input-wrap">
+          <input type="url" id="sf-source-download-input" class="sf-edit-input" placeholder="Where you download your copy again">
+          <button class="sf-url-input-paste" id="btn-sf-source-download-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
+          <button class="sf-url-input-clear" id="btn-sf-source-download-clear" title="Clear download link">&#10005;</button>
         </div>
       </div>
     </div>
@@ -28039,7 +28056,7 @@ require(['vs/editor/editor.main'], function () {
         let res;
         try {
           const _impArgs = { name, forceNewSource, askOnDuplicate: !forceNewSource, bundle: _bundle };
-          if (mode === 'zip') res = await window.electronAPI.importCommonFromZip({ zipPath: pick.filePath, ..._impArgs, linkUrl });
+          if (mode === 'zip') res = await window.electronAPI.importCommonFromZip({ zipPath: pick.filePath, ..._impArgs, downloadUrl: linkUrl });
           else res = await window.electronAPI.importCommonFromFolder({ folderPath: pick.filePath, ..._impArgs });
         } catch (err) {
           res = { ok: false, error: String(err && err.message || err) };
@@ -28801,7 +28818,8 @@ require(['vs/editor/editor.main'], function () {
           promptError('Download failed', (r && r.message) || 'That download could not be imported.');
           return;
         }
-        try { await _sfImportCommon('zip', false, r.filePath, r.pageUrl || url); }
+        // [B-487] The link chosen from what the download went through, not the raw page it started on.
+        try { await _sfImportCommon('zip', false, r.filePath, r.downloadUrl || null); }
         finally { try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {} }
       };
 
@@ -30699,6 +30717,9 @@ require(['vs/editor/editor.main'], function () {
         link:        document.getElementById('sf-review-link'),
         linkPaste:   document.getElementById('btn-sf-review-link-paste'),
         linkClear:   document.getElementById('btn-sf-review-link-clear'),
+        download:      document.getElementById('sf-review-download'),
+        downloadPaste: document.getElementById('btn-sf-review-download-paste'),
+        downloadClear: document.getElementById('btn-sf-review-download-clear'),
         purchased:   document.getElementById('sf-review-purchased'),
         purchaseDate:document.getElementById('sf-review-purchase-date'),
         notes:       document.getElementById('sf-review-notes'),
@@ -32184,8 +32205,11 @@ require(['vs/editor/editor.main'], function () {
         }
         return parts.join(' ');
       };
+      // downloadUrl [B-487]: for a link import, the page the download came from, so the source records
+      // where its owner downloads it again. The page, never the file's own URL: some creators sign
+      // that and it expires within minutes.
       const _sfRunImport = async (sourcePath, { forceNewSource, fromLink, knownHash, finalizeStaged,
-                                                revealWizard = false } = {}) => {
+                                                revealWizard = false, downloadUrl = null, linkUrl = null } = {}) => {
         // Auto-opt-in: create the library sentinel on the user's first
         // import action. Idempotent on the main side.
         try { await window.electronAPI.createSoundFonts(); } catch {}
@@ -32210,7 +32234,7 @@ require(['vs/editor/editor.main'], function () {
           if (await _sfWarnSlowImport(_impEjSrc, { handoff: true })) return;
         }
         const myRun = Symbol('sfImportRun');
-        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink };
+        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink, downloadUrl: downloadUrl || null, linkUrl: linkUrl || null };
         _sfShowPhase('progress');
         // THE WIZARD APPEARS HERE, AFTER THE SOURCE CHECK, NOT BEFORE IT. [2026-10-04]
         // The rule, from watching export do it: the check comes *before* the window, not over it.
@@ -32571,7 +32595,7 @@ require(['vs/editor/editor.main'], function () {
           // knownHash: the scan that raised this prompt already hashed the file —
           // hand it to the re-run so it skips straight to the copy stage. For
           // folders the staged zip goes further: finalize it, no re-zip at all.
-          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, knownHash: scannedHash, finalizeStaged: staged }); resolve(); };
+          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, downloadUrl: _sfImport?.downloadUrl, linkUrl: _sfImport?.linkUrl, knownHash: scannedHash, finalizeStaged: staged }); resolve(); };
           _sfDupEls.keepBtn?.addEventListener('click', onKeep);
           _sfDupEls.reimportBtn?.addEventListener('click', onReimport);
           _sfDupEls.cancelBtn?.addEventListener('click', onCancel);
@@ -32632,7 +32656,14 @@ require(['vs/editor/editor.main'], function () {
         // Source-level Link has no auto-detection signal at all, so it is either
         // the sidecar's or empty. Add-more / duplicate flows hide the source
         // section entirely, so this only ever runs in the user-facing case.
-        if (_sfImportEls.link) _sfImportEls.link.value = _curHas('linkUrl') ? _curSrc.linkUrl : '';
+        // A link import from a creator's public page offers that page as the Link too [B-487].
+        if (_sfImportEls.link) _sfImportEls.link.value = _curHas('linkUrl') ? _curSrc.linkUrl : ((_sfImport && _sfImport.linkUrl) || '');
+        // [B-487] DOWNLOAD: where this copy is downloaded again. A link import brings the page it
+        // came from (fresher than any sidecar); otherwise the sidecar's, else empty for the user.
+        if (_sfImportEls.download) {
+          _sfImportEls.download.value = (_sfImport && _sfImport.downloadUrl)
+            || (_curHas('downloadUrl') ? _curSrc.downloadUrl : '');
+        }
         if (_sfImportEls.notes && _curHas('userNotes')) _sfImportEls.notes.value = _curSrc.userNotes;
         // Source Name is set LATE, at the bundle-name block below — that writer is
         // unconditional, so anything set here would be erased. Deliberately not
@@ -33445,6 +33476,7 @@ require(['vs/editor/editor.main'], function () {
           entryAuthor = (_sfImportEls.vendor?.value || '').trim() || null;
           const entryWebsite = (_sfImportEls.website?.value || '').trim() || null;
           const entryLink = (_sfImportEls.link?.value || '').trim() || null;
+          const entryDownload = (_sfImportEls.download?.value || '').trim() || null;
           purchaseDate = _sfImportEls.purchaseDate?.value || _jmtLocalDateString();
           purchased = !(_sfImportEls.purchased && _sfImportEls.purchased.checked);
           userBundle = (_sfImportEls.bundleNameInput?.value || '').trim() || null;
@@ -33459,6 +33491,7 @@ require(['vs/editor/editor.main'], function () {
               vendor: entryAuthor,
               vendorWebsite: entryWebsite,
               linkUrl: entryLink,
+              downloadUrl: entryDownload,
               purchased,
               purchaseDate,
               userNotes: sourceNotes,
@@ -33997,7 +34030,7 @@ require(['vs/editor/editor.main'], function () {
         clearInterval(ticker);
         try { if (unsub) unsub(); } catch {}
         if (r && r.ok && r.filePath) {
-          await _sfRunImport(r.filePath, { fromLink: true });
+          await _sfRunImport(r.filePath, { fromLink: true, downloadUrl: r.downloadUrl || null, linkUrl: r.linkUrl || null });
           try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
         } else if (r && r.cancelled) {
           // A CANCEL IS AN OUTCOME, NOT A FAILURE. [B-424] The user asked for
@@ -34147,7 +34180,7 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         if (r && r.ok && r.filePath) {
-          await _sfRunImport(r.filePath, { fromLink: true });
+          await _sfRunImport(r.filePath, { fromLink: true, downloadUrl: r.downloadUrl || null, linkUrl: r.linkUrl || null });
           try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
         } else {
           _sfShowPhase('pick');
@@ -35895,6 +35928,10 @@ require(['vs/editor/editor.main'], function () {
         linkInput:       document.getElementById('sf-source-link-input'),
         linkPaste:       document.getElementById('btn-sf-source-link-paste'),
         linkClearBtn:    document.getElementById('btn-sf-source-link-clear'),
+        downloadDisplay: document.getElementById('sf-source-download-display'),
+        downloadInput:   document.getElementById('sf-source-download-input'),
+        downloadPaste:   document.getElementById('btn-sf-source-download-paste'),
+        downloadClear:   document.getElementById('btn-sf-source-download-clear'),
         acquiredDisplay: document.getElementById('sf-source-acquired-display'),
         acquiredInput:   document.getElementById('sf-source-acquired-input'),
         acquiredEditBtn: document.getElementById('btn-sf-source-acquired-edit'),
@@ -36675,12 +36712,13 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfSourceEdit) return;
         const hasWebsite = !!_sfSourceEdit.vendorWebsite;
         const hasLink = !!_sfSourceEdit.linkUrl;
-        const hasAny = hasWebsite || hasLink;
+        const hasDownload = !!_sfSourceEdit.downloadUrl;
+        const hasAny = hasWebsite || hasLink || hasDownload;
         if (_sfSourceDetailEls.linkBtn) {
           _sfSourceDetailEls.linkBtn.classList.toggle('has-url', hasAny);
           // Revert chain icon (the panel just closed via sync).
           _sfSourceDetailEls.linkBtn.innerHTML = '\u{1F517}';
-          _sfSourceDetailEls.linkBtn.title = hasAny ? 'Edit creator website and source link' : 'Add creator website and source link';
+          _sfSourceDetailEls.linkBtn.title = hasAny ? 'Edit website, link and download' : 'Add website, link and download';
         }
         if (_sfSourceDetailEls.websiteDisplay) {
           _sfSourceDetailEls.websiteDisplay.title = _sfSourceEdit.vendorWebsite || '';
@@ -36689,6 +36727,12 @@ require(['vs/editor/editor.main'], function () {
         if (_sfSourceDetailEls.linkDisplay) {
           _sfSourceDetailEls.linkDisplay.title = _sfSourceEdit.linkUrl || '';
           _sfSourceDetailEls.linkDisplay.style.display = hasLink ? 'inline-block' : 'none';
+        }
+        // [B-487] Download: where this copy is downloaded again. On the source only; a font's own page
+        // keeps Website, Demo and Link, the public ways to learn about or get it.
+        if (_sfSourceDetailEls.downloadDisplay) {
+          _sfSourceDetailEls.downloadDisplay.title = _sfSourceEdit.downloadUrl || '';
+          _sfSourceDetailEls.downloadDisplay.style.display = hasDownload ? 'inline-block' : 'none';
         }
         if (_sfSourceDetailEls.linkEditRow) _sfSourceDetailEls.linkEditRow.style.display = 'none';
       };
@@ -36996,6 +37040,7 @@ require(['vs/editor/editor.main'], function () {
           vendor: sm.vendor || '',
           vendorWebsite: sm.vendorWebsite || '',
           linkUrl: sm.linkUrl || '',
+          downloadUrl: sm.downloadUrl || '',
           // Fallback chain mirrors the backend projection: purchaseDate is
           // canonical post-2026-06-26 unification, but legacy data may still
           // carry the date under acquisitionDate (the old migration hoist
@@ -37322,6 +37367,7 @@ require(['vs/editor/editor.main'], function () {
           vendor: _sfSourceEdit.vendor,
           vendorWebsite: _sfSourceEdit.vendorWebsite,
           linkUrl: _sfSourceEdit.linkUrl,
+          downloadUrl: _sfSourceEdit.downloadUrl,
           purchaseDate: _sfSourceEdit.purchaseDate,
           purchased: _sfSourceEdit.purchased,
           userNotes: _sfSourceEdit.userNotes,
@@ -37580,6 +37626,11 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfSourceEdit) return;
         const websiteVal = (_sfSourceDetailEls.websiteInput?.value || '').trim();
         const linkVal = (_sfSourceDetailEls.linkInput?.value || '').trim();
+        const downloadVal = (_sfSourceDetailEls.downloadInput?.value || '').trim();
+        if (downloadVal !== (_sfSourceEdit.downloadUrl || '')) {
+          _sfSourceEdit.downloadUrl = downloadVal;
+          _sfMarkSourceDirty();
+        }
         if (websiteVal !== _sfSourceEdit.vendorWebsite) {
           _sfSourceEdit.vendorWebsite = websiteVal;
           _sfMarkSourceDirty();
@@ -37599,6 +37650,7 @@ require(['vs/editor/editor.main'], function () {
           editRow.style.display = 'flex';
           if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = _sfSourceEdit.vendorWebsite || '';
           if (_sfSourceDetailEls.linkInput)    _sfSourceDetailEls.linkInput.value    = _sfSourceEdit.linkUrl || '';
+          if (_sfSourceDetailEls.downloadInput) _sfSourceDetailEls.downloadInput.value = _sfSourceEdit.downloadUrl || '';
           _sfSourceDetailEls.linkBtn.innerHTML = '\u{2713}';
           _sfSourceDetailEls.linkBtn.title = 'Save links';
           setTimeout(() => { _sfSourceDetailEls.websiteInput?.focus(); _sfSourceDetailEls.websiteInput?.select?.(); }, 0);
@@ -37613,6 +37665,25 @@ require(['vs/editor/editor.main'], function () {
       _sfSourceDetailEls.linkDisplay?.addEventListener('click', () => {
         if (!_sfSourceEdit?.linkUrl) return;
         window.electronAPI.openExternal(_sfSourceEdit.linkUrl);
+      });
+      _sfSourceDetailEls.downloadDisplay?.addEventListener('click', () => {
+        if (!_sfSourceEdit?.downloadUrl) return;
+        window.electronAPI.openExternal(_sfSourceEdit.downloadUrl);
+      });
+      _sfSourceDetailEls.downloadClear?.addEventListener('click', () => {
+        if (!_sfSourceEdit) return;
+        if (_sfSourceEdit.downloadUrl) {
+          _sfSourceEdit.downloadUrl = '';
+          _sfMarkSourceDirty();
+        }
+        if (_sfSourceDetailEls.downloadInput) _sfSourceDetailEls.downloadInput.value = '';
+      });
+      _sfSourceDetailEls.downloadPaste?.addEventListener('click', async () => {
+        if (!_sfSourceEdit || !_sfSourceDetailEls.downloadInput) return;
+        await _sfTryPasteUrlInto(_sfSourceDetailEls.downloadInput, (url) => {
+          _sfSourceEdit.downloadUrl = url;
+          _sfMarkSourceDirty();
+        });
       });
       _sfSourceDetailEls.websiteClear?.addEventListener('click', () => {
         if (!_sfSourceEdit) return;
@@ -37655,6 +37726,7 @@ require(['vs/editor/editor.main'], function () {
       };
       _sfSourceDetailEls.websiteInput?.addEventListener('keydown', _sfSourceLinkKeydown);
       _sfSourceDetailEls.linkInput?.addEventListener('keydown', _sfSourceLinkKeydown);
+      _sfSourceDetailEls.downloadInput?.addEventListener('keydown', _sfSourceLinkKeydown);
       // Tag chip remove. "free" stays the source-level purchased toggle;
       // any other chip is part of the bulk-tag set that will be applied to
       // every entry on Save.
@@ -53460,6 +53532,13 @@ require(['vs/editor/editor.main'], function () {
       });
       _sfImportEls.linkClear?.addEventListener('click', () => {
         if (_sfImportEls.link) _sfImportEls.link.value = '';
+      });
+      _sfImportEls.downloadPaste?.addEventListener('click', async () => {
+        if (!_sfImportEls.download) return;
+        await _sfTryPasteUrlInto(_sfImportEls.download);
+      });
+      _sfImportEls.downloadClear?.addEventListener('click', () => {
+        if (_sfImportEls.download) _sfImportEls.download.value = '';
       });
       // Search bar wiring for the browse grid
       document.getElementById('sf-search')?.addEventListener('input', function() {
