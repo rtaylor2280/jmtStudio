@@ -498,6 +498,9 @@ async function initBuildPanel() {
 
   // Wire buttons
   el('bp-btn-compile').addEventListener('click', doCompile);
+  // The tooltip names the board and port, which change without the button being redrawn; reading
+  // them again on hover keeps it true.
+  el('bp-btn-compile').addEventListener('pointerenter', applyCompileButtonState);
   el('bp-btn-flash').addEventListener('click', doFlash);
   el('bp-btn-refresh-ports').addEventListener('click', async () => {
     const btn = el('bp-btn-refresh-ports');
@@ -720,6 +723,23 @@ function setGatePhase(on) {
 // ── Compile ────────────────────────────────────────────
 async function doCompile() {
   if (isBusy) return;
+  // [B-470] A CLICK DURING THE CACHE CHECK IS REFUSED. The button stays enabled while the check
+  // runs, because disabling it blinked it on every config switch (tried and reverted 2026-10-21),
+  // and holding the click to act on it later was a delayed action nobody asked for. But letting it
+  // through started a full build the cache already had, and a full OS8 build of a 43-preset config
+  // is 29 min 28 s. So the click does nothing and the tooltip says why ("Checking for a build of
+  // this config"); a moment later the button is either disabled as already compiled or live. The
+  // refusal shows as the red glow the Paste cue uses when the clipboard holds nothing to paste.
+  if (cacheCheckPending) {
+    const btn = el('bp-btn-compile');
+    if (btn) {
+      btn.classList.remove('sf-url-paste-invalid');
+      void btn.offsetWidth;   // restart the animation if it is still running
+      btn.classList.add('sf-url-paste-invalid');
+      setTimeout(() => btn.classList.remove('sf-url-paste-invalid'), 3000);
+    }
+    return;
+  }
   // Compile continues into a flash, so the target has to be fixed here too, not only in
   // doFlash. See lockDisplayedPort. [B-472]
   lockDisplayedPort();
@@ -3009,7 +3029,72 @@ function applyCompileButtonState() {
   if (!btn) return;
   const reason = compileBlockedReason();
   btn.disabled = !!reason;
-  btn.title    = reason || '';
+  // A check in flight does not disable the button (that blinks it on every config switch); the
+  // tooltip says so, and a click meanwhile is refused (doCompile). [B-470]
+  _compileTip().set(reason || (cacheCheckPending ? 'Checking for a build of this config…' : compileReadyTip()));
+}
+
+// Compile's tooltip, drawn by the app rather than the OS: a native title is read once when it appears,
+// so hovering through the cache check kept showing "Checking..." after the answer had landed. [B-470]
+// Hover is tracked by the pointer's position over the button, not the button's own events: a
+// disabled button is not guaranteed to receive them, and its reason is when the tooltip matters most.
+// Built on first use, not at load: applyCompileButtonState can run before this point in the file,
+// which is also why this is `var` (hoisted) and not `let` (unreadable until its line has run).
+var _compileTipInst = null;
+function _compileTip() { return _compileTipInst || (_compileTipInst = _makeCompileTip()); }
+function _makeCompileTip() {
+  let text = '';
+  let tip = null;
+  let inside = false;
+  let timer = null;
+  const node = () => {
+    if (!tip) { tip = document.createElement('div'); tip.className = 'bp-live-tip'; document.body.appendChild(tip); }
+    return tip;
+  };
+  const place = (btn) => {
+    const t = node();
+    const r = btn.getBoundingClientRect();
+    t.style.display = 'block';
+    const w = t.offsetWidth, h = t.offsetHeight;
+    t.style.left = Math.max(4, Math.min(r.left, window.innerWidth - w - 4)) + 'px';
+    t.style.top = (r.bottom + 6 + h > window.innerHeight ? r.top - h - 6 : r.bottom + 6) + 'px';
+  };
+  const hide = () => { clearTimeout(timer); timer = null; if (tip) tip.style.display = 'none'; };
+  document.addEventListener('mousemove', (e) => {
+    const btn = el('bp-btn-compile');
+    const r = btn && btn.getBoundingClientRect();
+    const now = !!r && r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (now === inside) return;
+    inside = now;
+    if (!now) { hide(); return; }
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (inside && text) { node().textContent = text; place(btn); } }, 500);
+  }, { passive: true });
+  document.addEventListener('mousedown', hide, true);
+  return {
+    set(t) {
+      text = t || '';
+      const btn = el('bp-btn-compile');
+      if (btn) btn.removeAttribute('title');
+      if (tip && tip.style.display === 'block') {
+        if (!text) { hide(); return; }
+        tip.textContent = text;
+        if (btn) place(btn);
+      }
+    },
+  };
+}
+
+// What a click on a live Compile will do, which depends on what is plugged in: a compile carries
+// straight on into a flash when a Proffieboard is on the port or the board is in bootloader mode,
+// and otherwise waits for one to be connected (onBuildDone). "Compile and flash" leads, so the flash is
+// part of the promise before the click; a user who expected only a compile was surprised by it.
+function compileReadyTip() {
+  if (isDfuMode) return 'Compile and flash this config to the board in bootloader (DFU) mode.';
+  if (selectedPortIsProffieboard && selectedPort) {
+    return `Compile and flash this config to the Proffieboard on ${selectedPort}.`;
+  }
+  return 'Compile this config into firmware for your board. Connect your Proffieboard to flash it when it finishes.';
 }
 
 function setBusy(busy) {

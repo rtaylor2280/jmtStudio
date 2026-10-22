@@ -616,6 +616,10 @@
   }
   .build-btn-compile:hover { background: #1e3a78; }
   .build-btn-compile:disabled { opacity: 0.35; cursor: not-allowed; }
+  /* Compile's own tooltip [B-470]. A native title is read once when it appears, so it kept saying
+     "Checking for a build" after the check had answered until the pointer left and came back. This
+     one is rewritten in place while it shows. */
+  .bp-live-tip { position: fixed; z-index: 10030; max-width: 340px; padding: 5px 9px; font-size: 0.74rem; line-height: 1.35; color: var(--c-text); background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.45); pointer-events: none; display: none; }
 
   .build-btn-flash {
     padding: 6px 18px;
@@ -4398,6 +4402,17 @@
     animation: sfUrlPasteInvalid 3s ease-out 1, sfPasteWordInvalid 3s ease-out 1;
     border-radius: 3px;
   }
+  /* And on Compile, refused while the cache check is still answering [B-470]: the same red glow on
+     the same 3 s clock, fading in and out rather than snapping back. Nothing else about the button
+     changes, so the click visibly registered without anything happening. */
+  /* The border turns red with the ring and fades back on the same clock, as the Paste word does: on
+     a bold button the ring alone, sized for a text field, is easy to miss. */
+  @keyframes compileRefusedBorder {
+    0%       { border-color: #2a4080; }
+    12%, 40% { border-color: rgb(228, 68, 68); }
+    100%     { border-color: #2a4080; }
+  }
+  .build-btn-compile.sf-url-paste-invalid { animation: sfUrlPasteInvalid 3s ease-out 1, compileRefusedBorder 3s ease-out 1; }
   .detail-confirm { font-size: 0.72rem; cursor: pointer; padding: 2px 4px; border-radius: 3px; border: none; background: none; color: #4a4; opacity: 0.7; flex-shrink: 0; transition: opacity 0.1s, background 0.1s; }
   .detail-confirm:hover { opacity: 1; background: rgba(40,160,40,0.12); }
   #btn-detail-url-confirm { color: #4a4; opacity: 0.7; }
