@@ -326,6 +326,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   linkImportBrowser:     (params)     => ipcRenderer.invoke('linkImport:browser', params),
   linkImportBrowserCancel: ()         => ipcRenderer.invoke('linkImport:browserCancel'),
   linkImportCleanup:     (params)     => ipcRenderer.invoke('linkImport:cleanup', params),
+  linkCaptureOpen:       (params)     => ipcRenderer.invoke('linkCapture:open', params),
+  linkCaptureClose:      ()           => ipcRenderer.invoke('linkCapture:close'),
+  linkCaptureFonts:      (fonts)      => ipcRenderer.send('linkCapture:fonts', { fonts }),
+  onLinkCapturePick: (cb) => {
+    const h = (_e, p) => cb(p);
+    ipcRenderer.on('linkCapture:pick', h);
+    return () => ipcRenderer.removeListener('linkCapture:pick', h);
+  },
   onLinkImportProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('linkImport:progress', handler);

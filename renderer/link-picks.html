@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Saved</title>
+<style>
+  /* The strip docked to the bottom of the in-app browser: what the right-click menu saved. */
+  :root {
+    --jmt-blue: #025192; --c-bg-card: #222222; --c-border-heavy: #3a3a3a;
+    --c-text: #cccccc; --c-text-muted: #888888; --c-ok: #3fb950; --c-border-strong: #333333;
+  }
+  html, body { margin: 0; height: 100%; background: var(--c-bg-card); color: var(--c-text);
+    font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
+  body { padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--c-border-heavy); border-radius: 6px;
+    position: relative; }
+  #rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px;
+    grid-auto-rows: 34px; align-items: center; height: 100%; overflow-y: auto; }
+  .row { display: contents; }
+  .label { color: var(--c-text); }
+  .value { min-width: 0; background: #111111; border: 1px solid var(--c-border-heavy); border-radius: 4px;
+    padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+  /* The app's scrollbar, as index.html sets it for every element. */
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+  *::-webkit-scrollbar-corner { background: transparent; }
+  #toast { position: absolute; bottom: 8px; right: 14px; background: var(--jmt-blue); color: #ffffff;
+    padding: 3px 10px; border-radius: 4px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div id="rows"></div>
+  <div id="toast"></div>
+<script>
+  const rowsEl = document.getElementById('rows');
+  const toast = document.getElementById('toast');
+  let hideTimer = null;
+  window.linkPicks.onUpdate(({ rows, toast: msg }) => {
+    rowsEl.replaceChildren(...rows.map(({ label, hint, value }) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const l = document.createElement('div');
+      l.className = 'label';
+      l.textContent = label;
+      if (hint) l.title = hint;
+      const v = document.createElement('div');
+      v.className = 'value';
+      v.textContent = value;
+      v.title = value;
+      row.append(l, v);
+      return row;
+    }));
+    rowsEl.scrollTop = 0;
+    if (msg) {
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+  });
+</script>
+</body>
+</html>

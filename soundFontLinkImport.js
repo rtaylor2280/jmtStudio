@@ -388,4 +388,25 @@ function pickDownloadUrl(chain) {
   return null;
 }
 
-module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord };
+// A YouTube video's id from any of its link shapes (watch, youtu.be, embed, privacy embed, shorts,
+// live, mobile), or null for anything that is not YouTube. [B-521]
+function youtubeVideoId(u) {
+  try {
+    const x = new URL(u);
+    const host = x.hostname.replace(/^www\.|^m\./i, '').toLowerCase();
+    if (host === 'youtu.be') return x.pathname.slice(1).split('/')[0] || null;
+    if (!/^(youtube\.com|youtube-nocookie\.com)$/.test(host)) return null;
+    if (x.searchParams.get('v')) return x.searchParams.get('v');
+    const m = x.pathname.match(/^\/(?:embed|shorts|live|v)\/([\w-]{6,})/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+// A link that opens a YouTube video at a moment, and the moment as m:ss (h:mm:ss past an hour).
+function youtubeMoment(id, seconds) {
+  const t = Math.max(0, Math.floor(seconds || 0));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  const label = h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+  return { label, url: `https://www.youtube.com/watch?v=${id}&t=${t}s` };
+}
+
+module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment };

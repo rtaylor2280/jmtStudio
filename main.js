@@ -5579,6 +5579,17 @@ function _attachFindBar(page) {
   _findBarContext.set(page.webContents.id, tellContext);
 }
 // The topic id in a Discourse thread URL: /t/<slug>/<id>[/<post>] or /t/<id>.
+// The in-app browser's background before a page draws: the app's own, so a dark app does not flash
+// white between pages. A site's own background replaces it as soon as it paints.
+async function _appBackground() {
+  try {
+    if (win && !win.isDestroyed()) {
+      const light = await win.webContents.executeJavaScript("document.documentElement.classList.contains('light-mode')", true);
+      if (light) return '#f2f2f2';
+    }
+  } catch {}
+  return '#111111';
+}
 function _discourseTopicId(url) {
   try {
     const m = new URL(url).pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/\d+)?\/?$/);
@@ -5586,6 +5597,144 @@ function _discourseTopicId(url) {
   } catch { return null; }
 }
 const _findBarContext = new Map();   // page webContents id -> re-check whether it is a thread
+
+
+// ── Right-click in the in-app browser [B-521] ─────────────────────────────────────────────────
+// Copy the right-clicked link, or the page address when no link is under the pointer, or save it as
+// the import's Link, Demo or Website. Save page as PDF keeps the page as a proof of purchase, except on forum threads and
+// cloud drives. Saved values show in a strip docked to the bottom of the window, and saving the
+// same kind again replaces it.
+const _CLOUD_DRIVE_HOST = /(^|\.)(drive\.google\.com|docs\.google\.com|dropbox\.com|dropboxusercontent\.com|onedrive\.live\.com|1drv\.ms|sharepoint\.com|mega\.nz|box\.com|icloud\.com|mediafire\.com|wetransfer\.com|we\.tl)$/i;
+async function _pdfAllowed(page) {
+  let u;
+  try { u = new URL(page.webContents.getURL()); } catch { return false; }
+  if (!/^https?:$/.test(u.protocol)) return false;
+  if (_CLOUD_DRIVE_HOST.test(u.hostname) || /(^|\.)discord(app)?\.com$/i.test(u.hostname)) return false;
+  if (_discourseTopicId(u.href)) {
+    try {
+      const gen = await page.webContents.executeJavaScript(
+        "(document.querySelector('meta[name=generator]') || {}).content || ''", true);
+      if (/discourse/i.test(String(gen))) return false;
+    } catch {}
+  }
+  return true;
+}
+// onSave(key, value) receives each save: key is 'linkUrl', 'demoUrl' or 'proof' ({ filePath, fileName }),
+// and with `fonts` (a function returning the font names) a Demo is saved per font as 'demo:<index>'. getDir() returns the capture's temp
+// folder, creating it on first use.
+function _attachLinkPicks(page, { getDir, fonts = null, onSave }) {
+  const { Menu, clipboard } = require('electron');
+  const shown = new Map();   // row key -> { label, hint, value }, most recently saved first
+  let strip = null;
+  let stripReady = false;
+  let proofPath = null;
+  const rows = () => Array.from(shown.values()).reverse();
+  const place = () => {
+    if (!strip || strip.isDestroyed() || page.isDestroyed()) return;
+    const b = page.getContentBounds();
+    const h = 18 + Math.min(shown.size, 4) * 34;   // padding and border, four rows, then the strip scrolls
+    strip.setBounds({ x: b.x + 8, y: b.y + b.height - h - 8, width: Math.max(200, b.width - 16), height: h });
+  };
+  const show = (toast) => {
+    if (page.isDestroyed()) return;
+    const push = () => { place(); strip.showInactive(); strip.webContents.send('linkpicks:update', { rows: rows(), toast }); };
+    if (strip && !strip.isDestroyed()) { if (stripReady) push(); return; }
+    strip = new BrowserWindow({
+      parent: page, frame: false, resizable: false, movable: false, minimizable: false,
+      maximizable: false, skipTaskbar: true, show: false, focusable: false, width: 400, height: 48,
+      backgroundColor: '#222222', ...WINDOW_ICON,
+      webPreferences: { preload: path.join(__dirname, 'linkPicksPreload.js'), sandbox: true, contextIsolation: true },
+    });
+    strip.loadFile(path.join(__dirname, 'renderer', 'link-picks.html'));
+    strip.once('ready-to-show', () => { stripReady = true; push(); });
+    strip.on('closed', () => { strip = null; stripReady = false; });
+  };
+  page.on('move', place);
+  page.on('resize', place);
+  const save = (key, label, value, shownValue, toast, hint) => {
+    shown.delete(key);
+    shown.set(key, { label, hint, value: shownValue || value });
+    try { onSave(key, value); } catch {}
+    show(toast);
+  };
+  const savePdf = async () => {
+    try {
+      const dir = getDir();
+      if (!dir) return;
+      const data = await page.webContents.printToPDF({ printBackground: true });
+      const base = (page.webContents.getTitle() || 'Proof of purchase')
+        .replace(/[<>:"/\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Proof of purchase';
+      const fileName = `${base}.pdf`;
+      const filePath = path.join(dir, fileName);
+      if (proofPath && proofPath !== filePath) { try { fs.unlinkSync(proofPath); } catch {} }
+      fs.writeFileSync(filePath, data);
+      proofPath = filePath;
+      save('proof', 'Proof of purchase', { filePath, fileName }, fileName, 'Saved as proof of purchase', 'Your receipt, kept with the source');
+    } catch (e) {
+      show(`Could not save the page as PDF: ${String(e && e.message || e)}`);
+    }
+  };
+  page.webContents.on('context-menu', async (_e, params) => {
+    const link = params.linkURL && /^https?:\/\//i.test(params.linkURL) ? params.linkURL : null;
+    const url = link || page.webContents.getURL();
+    const names = typeof fonts === 'function' ? (fonts() || []) : null;
+    const DEMO_HINT = 'A demo of this font';
+    // The Link hover names what the Link is for when the fonts are known (the review and the font and
+    // source windows); the download browser does not know yet.
+    const LINK_HINT = !names ? "The creator's page, like its product page."
+      : `The creator's page for this ${names.length > 1 ? 'font bundle' : 'font'}, like its product page.`;
+    // One Demo item for a given address: straight to the font, or a submenu of the checked fonts
+    // with "All checked fonts" first when there are two or more.
+    const demoItem = (label, demoUrl) => {
+      const one = (i) => save(`demo:${i}`, `Demo · ${names[i]}`, demoUrl, null, `Saved as Demo for ${names[i]}`, DEMO_HINT);
+      if (!names) return { label, click: () => save('demoUrl', 'Demo', demoUrl, null, 'Saved as Demo', DEMO_HINT) };
+      if (names.length === 1) return { label, click: () => one(0) };
+      return { label, submenu: [
+        { label: 'All checked fonts', click: () => {
+          names.forEach((n, i) => { shown.delete(`demo:${i}`); shown.set(`demo:${i}`, { label: `Demo · ${n}`, hint: DEMO_HINT, value: demoUrl }); try { onSave(`demo:${i}`, demoUrl); } catch {} });
+          show(`Saved as Demo for ${names.length} fonts`);
+        } },
+        { type: 'separator' },
+        ...names.map((n, i) => ({ label: n, click: () => one(i) })),
+      ] };
+    };
+    const items = [
+      { label: link ? 'Copy link URL' : 'Copy page URL', click: () => clipboard.writeText(url) },
+      { type: 'separator' },
+      { label: 'Save as Link', click: () => save('linkUrl', 'Link', url, null, 'Saved as Link', LINK_HINT) },
+    ];
+    if (!names || names.length) {
+      items.push(demoItem('Save as Demo', url));
+      const moment = await _youtubeMoment(page);
+      if (moment) items.push(demoItem(`Save as Demo at ${moment.label}`, moment.url));
+    }
+    if (await _pdfAllowed(page)) {
+      items.push({ type: 'separator' }, { label: 'Save page as proof of purchase (PDF)', click: savePdf });
+    }
+    if (page.isDestroyed()) return;
+    Menu.buildFromTemplate(items).popup({ window: page });
+  });
+}
+// Where a YouTube player on the page is in its video, as a link that opens at that moment. Reads the
+// page itself and any embedded player frame; a playing video wins over a paused one. Null when there
+// is no YouTube video or it is still at the start.
+async function _youtubeMoment(page) {
+  let frames = [];
+  try { frames = page.webContents.mainFrame.framesInSubtree || []; } catch { return null; }
+  let best = null;
+  for (const f of frames) {
+    const id = soundFontLinkImport.youtubeVideoId(f.url);
+    if (!id) continue;
+    let r = null;
+    try {
+      r = await f.executeJavaScript(
+        "(() => { const v = document.querySelector('video'); return v ? { t: v.currentTime, playing: !v.paused } : null; })()");
+    } catch { r = null; }
+    if (!r || !(r.t >= 1)) continue;
+    if (!best || (r.playing && !best.playing)) best = { id, t: Math.floor(r.t), playing: r.playing };
+  }
+  return best ? soundFontLinkImport.youtubeMoment(best.id, best.t) : null;
+}
 ipcMain.on('findbar:query', (e, { text, forward = true, fresh = true } = {}) => {
   const f = _findBars.get(e.sender.id);
   if (!f || f.page.isDestroyed()) return;
@@ -5613,7 +5762,7 @@ ipcMain.on('findbar:close', (e) => {
   if (f && !f.bar.isDestroyed()) f.bar.close();
 });
 
-ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = {}) => {
+ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, savePicks } = {}) => {
   const os = require('os');
   const fsL = require('fs');
   const pathL = require('path');
@@ -5624,6 +5773,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
   let destDir = null;
   const send = (payload) => { try { event.sender.send('linkImport:progress', payload); } catch {} };
   const ses = session.fromPartition('persist:jmt-linkimport');
+  const backgroundColor = await _appBackground();
   return await new Promise((resolve) => {
     let settled = false;
     let gotDownload = false;
@@ -5638,6 +5788,8 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
     let dlItem = null;
     let cancelled = false;
     let pageUrl = null;
+    // [B-521] What the user saved from the right-click menu, handed back with the download.
+    const picks = {};
     // THROUGH rmWithRetry, AND THE FIRST TEST RUN PROVED WHY. [B-424] A plain
     // `rmSync(dir, { recursive: true, force: true })` removed the partial FILE and left the
     // DIRECTORY, so a cancel came back with no orphan source and an empty `jmt-linkimport-*`
@@ -5648,7 +5800,9 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
       if (!destDir) return;
       try { await require('./fsRemove').rmWithRetry(destDir); } catch {}
     };
-    const onWillDownload = (_e, item) => {
+    const onWillDownload = (_e, item, wc) => {
+      // The session is shared with the review's capture browser, whose downloads are not this one's.
+      if (wc && bw && !bw.isDestroyed() && wc !== bw.webContents) return;
       gotDownload = true;
       dlItem = item;
       if (!destDir) {
@@ -5701,7 +5855,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
           try { firstReq = (item.getURLChain() || [])[0] || item.getURL() || null; } catch {}
           const downloadUrl = soundFontLinkImport.pickDownloadUrl([pageUrl, firstReq, ...((r && r.chain) || [])]);
           const linkUrl = soundFontLinkImport.publicLinkFor(downloadUrl);   // a public page is the Link too
-          finish(r && r.ok ? { ok: true, filePath: r.filePath, fileName: r.fileName, pageUrl, downloadUrl, linkUrl } : { ok: false, message: (r && r.message) || 'That download could not be imported.' });
+          finish(r && r.ok ? { ok: true, filePath: r.filePath, fileName: r.fileName, pageUrl, downloadUrl, linkUrl, picks } : { ok: false, message: (r && r.message) || 'That download could not be imported.' });
         } catch (e) { finish({ ok: false, message: String(e && e.message || e) }); }
       });
     };
@@ -5714,6 +5868,9 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
       if (_linkBrowserCancel === cancelHook) _linkBrowserCancel = null;
       try { ses.removeListener('will-download', onWillDownload); } catch {}
       try { if (bw && !bw.isDestroyed()) bw.destroy(); } catch {}
+      // A saved PDF sits in the temp folder before any download does, so a capture that ends
+      // without one removes it here. A started download cleans up in its own 'done'.
+      if (!(result && result.ok) && !dlItem) dropDestDir();
       resolve(result);
     };
     // LIVE FOR THE WHOLE CAPTURE, including before a download exists. Cancelling at the browser
@@ -5757,11 +5914,21 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
       ...(geom.x != null && geom.y != null ? { x: geom.x, y: geom.y } : {}),
       show: !autoHidden,
       title: (typeof title === 'string' && title) || 'Download your font from the creator',
+      backgroundColor,
       autoHideMenuBar: true,
       ...WINDOW_ICON,
-      webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true },
+      webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js') },
     });
     _attachFindBar(bw);
+    if (savePicks) {
+      _attachLinkPicks(bw, {
+        getDir: () => {
+          if (!destDir) destDir = fsL.mkdtempSync(pathL.join(os.tmpdir(), 'jmt-linkimport-'));
+          return destDir;
+        },
+        onSave: (key, value) => { picks[key] = value; },
+      });
+    }
     // Auto-hidden mode: we already have the vendor's session cookies, so try to
     // let the download fire with no window at all. If instead a PAGE finishes
     // loading (a login screen, or a page that needs a click) and no download has
@@ -5841,6 +6008,71 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title } = 
     bw.on('closed', () => { if (!gotDownload) finish({ ok: false, canceled: true }); });
     bw.loadURL(url).catch(() => {});
   });
+});
+
+// ── Open in app browser, from the import review [B-521] ───────────────────────────────────────
+// The creator's site in the in-app browser, for capturing a Link, a Demo per font, or the page as a
+// PDF while the review is open. Each save goes straight to the review. Downloads here are cancelled:
+// this window gathers details, it does not import.
+let _captureBrowser = null;
+let _captureFonts = [];   // the review's checked fonts, kept current by linkCapture:fonts
+ipcMain.on('linkCapture:fonts', (_e, { fonts } = {}) => {
+  _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
+});
+ipcMain.handle('linkCapture:open', async (event, { url, fonts } = {}) => {
+  const os = require('os');
+  const { session } = require('electron');
+  if (!url || !/^https?:\/\//i.test(url)) return { ok: false };
+  _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
+  if (_captureBrowser && !_captureBrowser.isDestroyed()) {
+    _captureBrowser.loadURL(url).catch(() => {});
+    _captureBrowser.show();
+    _captureBrowser.focus();
+    return { ok: true };
+  }
+  const ses = session.fromPartition('persist:jmt-linkimport');
+  let dir = null;
+  let bounds = { width: 1040, height: 780 };
+  try {
+    if (win && !win.isDestroyed()) {
+      const p = win.getContentBounds();
+      const width = Math.round(Math.max(Math.min(p.width - 64, 760), Math.min(1500, p.width * 0.8)));
+      const height = Math.round(Math.max(Math.min(p.height - 64, 640), Math.min(1000, p.height * 0.85)));
+      bounds = { width, height, x: Math.round(p.x + (p.width - width) / 2), y: Math.round(p.y + (p.height - height) / 2) };
+    }
+  } catch {}
+  const bw = new BrowserWindow({
+    parent: win, ...bounds, title: 'Right-click to save a Link, a Demo or a proof of purchase', autoHideMenuBar: true, ...WINDOW_ICON,
+    backgroundColor: await _appBackground(),
+    webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js') },
+  });
+  _captureBrowser = bw;
+  const noDownloads = (_e, item, wc) => { if (wc === bw.webContents) { try { item.cancel(); } catch {} } };
+  ses.on('will-download', noDownloads);
+  _attachFindBar(bw);
+  _attachLinkPicks(bw, {
+    fonts: () => _captureFonts,
+    getDir: () => {
+      // The review removes the folder once it has attached a PDF, so a second save makes a new one.
+      if (!dir || !fs.existsSync(dir)) dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-linkimport-'));
+      return dir;
+    },
+    onSave: (key, value) => { try { event.sender.send('linkCapture:pick', { key, value }); } catch {} },
+  });
+  bw.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
+    try { if (popupUrl && popupUrl !== 'about:blank') bw.loadURL(popupUrl); } catch {}
+    return { action: 'deny' };
+  });
+  bw.on('closed', () => {
+    try { ses.removeListener('will-download', noDownloads); } catch {}
+    if (_captureBrowser === bw) _captureBrowser = null;
+  });
+  bw.loadURL(url).catch(() => {});
+  return { ok: true };
+});
+ipcMain.handle('linkCapture:close', () => {
+  try { if (_captureBrowser && !_captureBrowser.isDestroyed()) _captureBrowser.close(); } catch {}
+  return { ok: true };
 });
 
 // Delete a link-import temp dir once the source has been copied into the library

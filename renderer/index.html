@@ -3285,6 +3285,8 @@
   .sf-review-vendor-info.suggested { color: var(--c-text-sub); }
   .sf-vendor-suggest-apply { color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
   .sf-vendor-suggest-apply:hover { opacity: 0.85; }
+  .sf-review-open-browser { margin-left: 8px; }
+  .sf-private-tag { font-size: 0.68rem; color: var(--c-text-muted); font-style: italic; cursor: help; }
   .sf-import-field-hint { font-size: 0.7rem; color: var(--c-text-dim); margin-top: 4px; line-height: 1.4; }
   .sf-review-cand-count { font-size: 0.72rem; color: var(--c-text-dim); font-weight: 400; margin-left: 6px; }
   .sf-review-candidate-list { display: flex; flex-direction: column; gap: 6px; }
@@ -6127,13 +6129,13 @@
         <h3>Source</h3>
         <div class="sf-import-review-source-path" id="sf-import-review-source-path"></div>
         <div class="import-field">
-          <label>Creator</label>
+          <label title="Who you got this font from: where you bought, downloaded or were given it. For a collaboration, the creator who sold or released it">Creator</label>
           <input type="text" id="sf-review-vendor" list="sf-review-vendor-list" placeholder="Creator name" maxlength="120" autocomplete="off">
           <datalist id="sf-review-vendor-list"></datalist>
           <div class="sf-review-vendor-info" id="sf-review-vendor-info"></div>
         </div>
         <div class="import-field">
-          <label>Website</label>
+          <label title="The creator's homepage">Website <a href="#" id="sf-review-website-open" class="sf-vendor-suggest-apply sf-review-open-browser" style="display:none" title="Open this site in the in-app browser to save a Link, a Demo or a proof of purchase">Open in app browser</a></label>
           <div class="sf-url-input-wrap">
             <input type="text" id="sf-review-website" placeholder="https://..." maxlength="200" autocomplete="off">
             <button type="button" class="sf-url-input-paste" id="btn-sf-review-website-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
@@ -6141,36 +6143,36 @@
           </div>
         </div>
         <div class="import-field">
-          <label>Link</label>
+          <label id="sf-review-link-label" title="The creator&#39;s page for this font, like its product page.">Link</label>
           <div class="sf-url-input-wrap">
-            <input type="text" id="sf-review-link" placeholder="Where to learn more or get this font" maxlength="200" autocomplete="off">
+            <input type="text" id="sf-review-link" placeholder="Where to learn more or get it" maxlength="200" autocomplete="off">
             <button type="button" class="sf-url-input-paste" id="btn-sf-review-link-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
             <button type="button" class="sf-url-input-clear" id="btn-sf-review-link-clear" title="Clear">&#10005;</button>
           </div>
         </div>
         <div class="import-field">
-          <label>Download</label>
+          <label title="Private: stays on this computer, and goes into an export only when you include proof of purchase">Download <span class="sf-private-tag">private</span></label>
           <div class="sf-url-input-wrap">
-            <input type="text" id="sf-review-download" placeholder="Where you download your copy again" maxlength="500" autocomplete="off">
+            <input type="text" id="sf-review-download" placeholder="Your download link from the creator" maxlength="500" autocomplete="off">
             <button type="button" class="sf-url-input-paste" id="btn-sf-review-download-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
             <button type="button" class="sf-url-input-clear" id="btn-sf-review-download-clear" title="Clear">&#10005;</button>
           </div>
         </div>
         <div class="import-field">
-          <label>Acquisition Date</label>
+          <label title="When you got this font">Acquisition Date</label>
           <input type="date" id="sf-review-purchase-date">
         </div>
         <div class="import-field sf-import-checkbox-row">
           <input type="checkbox" id="sf-review-purchased">
-          <label for="sf-review-purchased">Free content</label>
+          <label for="sf-review-purchased" title="The creator offers this font free of charge, publicly, to anyone">Free content</label>
         </div>
         <div class="import-field" id="sf-review-bundle-field" style="display:none">
-          <label>Source Name</label>
+          <label title="The name of the download these fonts came in">Source Name</label>
           <input type="text" id="sf-review-bundle-name" placeholder="Friendly name for this source" maxlength="64" autocomplete="off">
           <div class="sf-import-field-hint">Auto-detected from the file you picked. Becomes a tag on every font imported from this source, so you can find them together later. When the source is a bundle of several fonts, this is the bundle name.</div>
         </div>
         <div class="import-field">
-          <label>Notes</label>
+          <label title="Anything you want to remember about this source">Notes</label>
           <textarea id="sf-review-notes" placeholder="Anything you want to remember about this source (optional)" maxlength="500"></textarea>
         </div>
         <!-- ── Proof of Purchase, at IMPORT time ── (2026-09-03: "we should
@@ -6186,7 +6188,7 @@
              Same chips + actions as the source detail's Proof of Purchase row,
              deliberately: this is the same object in a different place. -->
         <div class="import-field" id="sf-review-pop-field">
-          <label>Proof of Purchase</label>
+          <label title="Your receipt or order confirmation for this source">Proof of Purchase</label>
           <div class="sf-meta-val sf-pop-val">
             <span class="sf-doc-chips sf-pop-chips" id="sf-review-pop-chips" data-doc-scope="pop"></span>
             <span class="sf-pop-actions">
@@ -6269,9 +6271,9 @@
           </div>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span class="sf-edit-row-label" style="width: 50px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Link</span>
+          <span class="sf-edit-row-label" title="Set on the source, so every font from it shows the same Link" style="width: 50px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Link<span class="sf-private-tag" id="sf-link-shared-tag" style="display:none"><br>shared</span></span>
           <div class="sf-url-input-wrap">
-            <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="Where to learn more or get this font">
+            <input type="url" id="sf-link-input" class="sf-edit-input" placeholder="Where to learn more or get it">
             <button class="sf-url-input-paste" id="btn-sf-link-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
             <button class="sf-url-input-clear" id="btn-sf-link-clear" title="Clear link">&#10005;</button>
           </div>
@@ -6460,7 +6462,7 @@
     </div>
     <div class="sf-link-edit-row" id="sf-source-link-edit-row" style="display:none; flex-direction: column; gap: 4px; align-items: stretch;">
       <div style="display: flex; align-items: center; gap: 6px;">
-        <span class="sf-edit-row-label" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Website</span>
+        <span class="sf-edit-row-label" title="The creator's homepage" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Website</span>
         <div class="sf-url-input-wrap">
           <input type="url" id="sf-source-website-input" class="sf-edit-input" placeholder="Creator's homepage">
           <button class="sf-url-input-paste" id="btn-sf-source-website-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
@@ -6468,17 +6470,17 @@
         </div>
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
-        <span class="sf-edit-row-label" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Link</span>
+        <span class="sf-edit-row-label" id="sf-source-link-label" title="The creator&#39;s page for this font, like its product page." style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Link</span>
         <div class="sf-url-input-wrap">
-          <input type="url" id="sf-source-link-input" class="sf-edit-input" placeholder="Where to learn more or get this source">
+          <input type="url" id="sf-source-link-input" class="sf-edit-input" placeholder="Where to learn more or get it">
           <button class="sf-url-input-paste" id="btn-sf-source-link-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
           <button class="sf-url-input-clear" id="btn-sf-source-link-clear" title="Clear link">&#10005;</button>
         </div>
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
-        <span class="sf-edit-row-label" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Download</span>
+        <span class="sf-edit-row-label" title="Private: stays on this computer, and goes into an export only when you include proof of purchase" style="width: 70px; flex-shrink: 0; font-size: 0.78rem; color: var(--c-text-sub);">Download<br><span class="sf-private-tag">private</span></span>
         <div class="sf-url-input-wrap">
-          <input type="url" id="sf-source-download-input" class="sf-edit-input" placeholder="Where you download your copy again">
+          <input type="url" id="sf-source-download-input" class="sf-edit-input" placeholder="Your download link from the creator">
           <button class="sf-url-input-paste" id="btn-sf-source-download-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
           <button class="sf-url-input-clear" id="btn-sf-source-download-clear" title="Clear download link">&#10005;</button>
         </div>
@@ -8267,6 +8269,29 @@ function promptConfirm(opts) {
   });
 }
 window.promptConfirm = promptConfirm;
+// [B-146] Free content means the creator offers it free of charge, publicly, to anyone. The user
+// confirms that whenever they mark something free themselves; Cancel leaves it unmarked.
+window.confirmFreeContent = confirmFreeContent;
+// Free is stored on the source, so every font from it changes together; `reach` says how far:
+// { sourceUuids } for sources already in the library, or { fonts, sourceName } for an import.
+function confirmFreeContent(reach = {}) {
+  let fonts = reach.fonts || 0;
+  let where = reach.sourceName || '';
+  if (Array.isArray(reach.sourceUuids) && window._sfFontsInSources) {
+    const r = window._sfFontsInSources(reach.sourceUuids);
+    fonts = r.fonts;
+    where = r.names.length === 1 ? r.names[0] : `${r.names.length} sources`;
+  }
+  const scope = fonts > 1 ? ` This marks ${fonts === 2 ? 'both' : `all ${fonts}`} fonts from ${where || 'this source'} as free.` : '';
+  return promptConfirm({
+    title: 'Mark as free content',
+    message: 'By marking this as free content, you confirm that its creator offers it free of charge, '
+      + 'publicly, to anyone. A font you were given, or found on a saber, is not free content unless '
+      + 'its creator gives it away.' + scope,
+    confirmText: 'I confirm',
+    confirmKind: 'primary',
+  });
+}
 // Info-only modal — single OK button, app-styled (vs the native alert()
 // dialog which carries OS chrome and bypasses our visual language).
 // Used for non-recoverable error messages where the user just needs to
@@ -30712,6 +30737,7 @@ require(['vs/editor/editor.main'], function () {
         vendorList:  document.getElementById('sf-review-vendor-list'),
         vendorInfo:  document.getElementById('sf-review-vendor-info'),
         website:     document.getElementById('sf-review-website'),
+        websiteOpen: document.getElementById('sf-review-website-open'),
         websitePaste: document.getElementById('btn-sf-review-website-paste'),
         websiteClear: document.getElementById('btn-sf-review-website-clear'),
         link:        document.getElementById('sf-review-link'),
@@ -31916,6 +31942,7 @@ require(['vs/editor/editor.main'], function () {
         const _payloadToDiscard = (uuidToClean && _sfImport && _sfImport.customizedPayload
           && _sfImport.customizedPayload.curationTmp) || null;
         if (_sfImportEls.modal) _sfImportEls.modal.classList.remove('active');
+        try { window.electronAPI.linkCaptureClose(); } catch {}
         _sfImport = null;
         if (uuidToClean) {
           _sfDiscardSource(uuidToClean, 'an import cancel');
@@ -32209,7 +32236,7 @@ require(['vs/editor/editor.main'], function () {
       // where its owner downloads it again. The page, never the file's own URL: some creators sign
       // that and it expires within minutes.
       const _sfRunImport = async (sourcePath, { forceNewSource, fromLink, knownHash, finalizeStaged,
-                                                revealWizard = false, downloadUrl = null, linkUrl = null } = {}) => {
+                                                revealWizard = false, downloadUrl = null, linkUrl = null, picks = null, startUrl = null } = {}) => {
         // Auto-opt-in: create the library sentinel on the user's first
         // import action. Idempotent on the main side.
         try { await window.electronAPI.createSoundFonts(); } catch {}
@@ -32234,7 +32261,7 @@ require(['vs/editor/editor.main'], function () {
           if (await _sfWarnSlowImport(_impEjSrc, { handoff: true })) return;
         }
         const myRun = Symbol('sfImportRun');
-        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink, downloadUrl: downloadUrl || null, linkUrl: linkUrl || null };
+        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink, downloadUrl: downloadUrl || null, linkUrl: linkUrl || null, picks: picks || null, startUrl: startUrl || null };
         _sfShowPhase('progress');
         // THE WIZARD APPEARS HERE, AFTER THE SOURCE CHECK, NOT BEFORE IT. [2026-10-04]
         // The rule, from watching export do it: the check comes *before* the window, not over it.
@@ -32531,6 +32558,14 @@ require(['vs/editor/editor.main'], function () {
         // already been cleared - so if this throws, the user is left staring at a
         // frozen "Finding fonts…" forever with no error and no way forward but
         // Cancel. The import itself SUCCEEDED; only the screen failed. Say so.
+        // [B-521] A page saved as PDF in the in-app browser is attached to the new source, once,
+        // before the review lists its proof of purchase. Awaited: the PDF lives in the download's
+        // temp folder, which is removed as soon as this import run returns.
+        const _pickProof = _sfImport && _sfImport.picks && _sfImport.picks.proof;
+        if (_pickProof && !_sfImport.picks.proofAttached && _sfImport.uuid) {
+          _sfImport.picks.proofAttached = true;
+          try { await window.electronAPI.addAttachmentToSources({ filePath: _pickProof.filePath, label: '', uuids: [_sfImport.uuid] }); } catch {}
+        }
         try {
           _sfPopulateReview(sourcePath);
           _sfShowPhase('review');
@@ -32595,7 +32630,7 @@ require(['vs/editor/editor.main'], function () {
           // knownHash: the scan that raised this prompt already hashed the file —
           // hand it to the re-run so it skips straight to the copy stage. For
           // folders the staged zip goes further: finalize it, no re-zip at all.
-          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, downloadUrl: _sfImport?.downloadUrl, linkUrl: _sfImport?.linkUrl, knownHash: scannedHash, finalizeStaged: staged }); resolve(); };
+          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, downloadUrl: _sfImport?.downloadUrl, linkUrl: _sfImport?.linkUrl, picks: _sfImport?.picks, startUrl: _sfImport?.startUrl, knownHash: scannedHash, finalizeStaged: staged }); resolve(); };
           _sfDupEls.keepBtn?.addEventListener('click', onKeep);
           _sfDupEls.reimportBtn?.addEventListener('click', onReimport);
           _sfDupEls.cancelBtn?.addEventListener('click', onCancel);
@@ -32658,6 +32693,15 @@ require(['vs/editor/editor.main'], function () {
         // section entirely, so this only ever runs in the user-facing case.
         // A link import from a creator's public page offers that page as the Link too [B-487].
         if (_sfImportEls.link) _sfImportEls.link.value = _curHas('linkUrl') ? _curSrc.linkUrl : ((_sfImport && _sfImport.linkUrl) || '');
+        if (_sfImportEls.link) {
+          const _nc = Math.max(((_sfImport && _sfImport.candidates) || []).length, 1);
+          const _w = window._sfLinkWording ? window._sfLinkWording(_nc) : null;
+          if (_w) {
+            _sfImportEls.link.placeholder = _w.placeholder;
+            const _lbl = document.getElementById('sf-review-link-label');
+            if (_lbl) _lbl.title = _w.hover;
+          }
+        }
         // [B-487] DOWNLOAD: where this copy is downloaded again. A link import brings the page it
         // came from (fresher than any sidecar); otherwise the sidecar's, else empty for the user.
         if (_sfImportEls.download) {
@@ -32742,7 +32786,29 @@ require(['vs/editor/editor.main'], function () {
           if (_sfImportEls.vendor)  _sfImportEls.vendor.value  = '';
           if (_sfImportEls.website) _sfImportEls.website.value = '';
           if (_sfImportEls.purchased) _sfImportEls.purchased.checked = false;
-          if (_sfImportEls.vendorInfo) {
+          // [B-521] A link import that started on a known creator's site suggests that creator,
+          // only when nothing in the font itself named one. Matched on the site, never the path.
+          const _hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./i, '').toLowerCase(); } catch { return ''; } };
+          const _startHost = _hostOf(_sfImport && _sfImport.startUrl);
+          const _siteVendor = _startHost ? _sfGetKnownVendors().find(k => k.website && _hostOf(k.website) === _startHost) : null;
+          if (_siteVendor && _sfImportEls.vendorInfo) {
+            _sfImportEls.vendorInfo.innerHTML =
+              `Suggested: <strong>${_sfEscape(_siteVendor.name)}</strong>, from the site you started on. ` +
+              `<a href="#" id="sf-review-vendor-apply" class="sf-vendor-suggest-apply">Apply suggestion</a>`;
+            _sfImportEls.vendorInfo.classList.remove('detected');
+            _sfImportEls.vendorInfo.classList.add('suggested');
+            document.getElementById('sf-review-vendor-apply')?.addEventListener('click', (e) => {
+              e.preventDefault();
+              if (_sfImportEls.vendor)  _sfImportEls.vendor.value = _siteVendor.name;
+              if (_sfImportEls.website) _sfImportEls.website.value = _siteVendor.website || '';
+              if (_sfImportEls.vendorInfo) {
+                _sfImportEls.vendorInfo.textContent = `Applied suggestion: ${_siteVendor.name}`;
+                _sfImportEls.vendorInfo.classList.remove('suggested');
+                _sfImportEls.vendorInfo.classList.add('detected');
+              }
+              _sfRevalidateCandidates();
+            });
+          } else if (_sfImportEls.vendorInfo) {
             _sfImportEls.vendorInfo.textContent = 'No creator matched. Type a creator name (required).';
             _sfImportEls.vendorInfo.classList.remove('detected');
             _sfImportEls.vendorInfo.classList.remove('suggested');
@@ -32800,6 +32866,12 @@ require(['vs/editor/editor.main'], function () {
             _sfImportEls.vendorInfo.classList.add('detected');
             _sfImportEls.vendorInfo.classList.remove('suggested');
           }
+        }
+        // [B-521] What the user saved from the in-app browser's right-click menu. Chosen by hand in
+        // this import, so it wins over the sidecar and the detector.
+        const _picks = (_sfImport && _sfImport.picks) || null;
+        if (_picks) {
+          if (_picks.linkUrl && _sfImportEls.link) _sfImportEls.link.value = _picks.linkUrl;
         }
         // Receipts restored from a sidecar are already linked to the source by
         // now, so this both lists them and IS the pre-fill for that field.
@@ -33074,7 +33146,9 @@ require(['vs/editor/editor.main'], function () {
               const _curName = (_curEntry && typeof _curEntry.name === 'string' && _curEntry.name.trim()
                   && !_takenNames.has(_curEntry.name.trim()))
                 ? _curEntry.name : null;
-              const _curDemo = (_curEntry && typeof _curEntry.demoUrl === 'string') ? _curEntry.demoUrl : '';
+              // [B-521] A Demo saved from the in-app browser goes on the first font.
+              const _pickDemo = (i === 0 && _sfImport && _sfImport.picks && _sfImport.picks.demoUrl) || '';
+              const _curDemo = _pickDemo || ((_curEntry && typeof _curEntry.demoUrl === 'string') ? _curEntry.demoUrl : '');
               const initialName = _curName || _sfSuggestName(c, i, currentPrefix, prependBundle);
               const alreadyName = existingByPath.get(c.path || '');
               const isAlready = !!alreadyName;
@@ -34030,7 +34104,7 @@ require(['vs/editor/editor.main'], function () {
         clearInterval(ticker);
         try { if (unsub) unsub(); } catch {}
         if (r && r.ok && r.filePath) {
-          await _sfRunImport(r.filePath, { fromLink: true, downloadUrl: r.downloadUrl || null, linkUrl: r.linkUrl || null });
+          await _sfRunImport(r.filePath, { fromLink: true, downloadUrl: r.downloadUrl || null, linkUrl: r.linkUrl || null, startUrl: url });
           try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
         } else if (r && r.cancelled) {
           // A CANCEL IS AN OUTCOME, NOT A FAILURE. [B-424] The user asked for
@@ -34155,7 +34229,7 @@ require(['vs/editor/editor.main'], function () {
           };
         }
         let r;
-        try { r = await window.electronAPI.linkImportBrowser({ url, autoHidden: auto }); }
+        try { r = await window.electronAPI.linkImportBrowser({ url, autoHidden: auto, savePicks: true }); }
         catch (e) { r = { ok: false, message: String(e && e.message || e) }; }
         if (_biCancelBtn) {
           // busy-dots comes off with the label, or the next open renders animated dots after Cancel.
@@ -34180,7 +34254,7 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         if (r && r.ok && r.filePath) {
-          await _sfRunImport(r.filePath, { fromLink: true, downloadUrl: r.downloadUrl || null, linkUrl: r.linkUrl || null });
+          await _sfRunImport(r.filePath, { fromLink: true, downloadUrl: r.downloadUrl || null, linkUrl: r.linkUrl || null, picks: r.picks || null, startUrl: url });
           try { await window.electronAPI.linkImportCleanup({ filePath: r.filePath }); } catch {}
         } else {
           _sfShowPhase('pick');
@@ -34319,15 +34393,22 @@ require(['vs/editor/editor.main'], function () {
           .catch(() => {});
       };
       // Dirty, now: a field open and not yet confirmed.
+      // The open font's source, from the library listing (the window's own state does not carry it).
+      const _sfDetailSourceUuid = () => {
+        const e = (_sfAllEntries || []).find(x => x.name === _sfDetailOriginalName);
+        return (e && e.meta && e.meta.sourceUuid) || null;
+      };
+      // An open field is unsaved only when what is in it differs from what it opened with.
       const _sfEntryHasOpenEdit = () => {
         const btns = [
           _sfEntryDetailEls.nameConfirmBtn, _sfEntryDetailEls.bylineConfirmBtn,
           _sfEntryDetailEls.acquiredConfirmBtn, _sfEntryDetailEls.descConfirmBtn,
           _sfEntryDetailEls.lastStyleConfirmBtn,
         ];
-        if (btns.some(b => b && b.style.display && b.style.display !== 'none')) return true;
+        if (btns.some(_sfOpenFieldChanged)) return true;
         const row = _sfEntryDetailEls.linkEditRow;
-        return !!(row && row.style.display && row.style.display !== 'none');
+        return !!(row && row.style.display && row.style.display !== 'none'
+          && [_sfEntryDetailEls.demoInput, _sfEntryDetailEls.linkInput].some(_sfInputChanged));
       };
       // Friendly text for each review-trigger reason key. Kept in sync
       // with the keys emitted by soundFontBulkImport.runBulkImport.
@@ -34492,11 +34573,42 @@ require(['vs/editor/editor.main'], function () {
       // Toggle between display and input modes for a single field. Inputs
       // get explicit display:inline-block because their CSS rule has
       // display:none; clearing the inline style would fall back to that.
+      // How many fonts the given sources hold, and the sources' names.
+      window._sfSelectedSourceUuids = () => Array.from(_sfSelectedNames || [])
+        .map(n => { const e = (_sfAllEntries || []).find(x => x.name === n); return e && e.meta && e.meta.sourceUuid; })
+        .filter(Boolean);
+      window._sfFontsInSources = (uuids) => {
+        const set = new Set((uuids || []).filter(Boolean));
+        const fonts = (_sfAllEntries || []).filter(x => x.meta && set.has(x.meta.sourceUuid)).length;
+        const names = Array.from(set).map(u => {
+          const m = (_sfAllSourcesByUuid && _sfAllSourcesByUuid[u] && _sfAllSourcesByUuid[u].meta) || {};
+          return m.bundleName || m.originalName || 'this source';
+        });
+        return { fonts, names };
+      };
+      // What a Link is for, by how many fonts its source holds: a font, a font bundle, or (no fonts)
+      // a voicepack. Gives the placeholder and the label's hover.
+      window._sfLinkWording = (n) => {
+        const what = n > 1 ? 'font bundle' : n === 1 ? 'font' : 'voicepack';
+        return {
+          placeholder: `Where to learn more or get this ${what}`,
+          hover: `The creator's page for this ${what}, like its product page.`
+            + (n > 1 ? ` Set on the source, so ${n === 2 ? 'both' : `all ${n}`} fonts show the same Link.` : ''),
+        };
+      };
+      // A field's input against the value it opened with. No recorded value counts as changed, so a
+      // field opened some other way is never silently dropped.
+      const _sfInputChanged = (input) => !!input
+        && (input.dataset.openValue === undefined || (input.value || '').trim() !== input.dataset.openValue.trim());
+      const _sfOpenFieldChanged = (btn) => !!(btn && btn.style.display && btn.style.display !== 'none')
+        && (btn._editInput ? _sfInputChanged(btn._editInput) : true);
       const _sfStartFieldEdit = (display, input, editBtn, confirmBtn, value) => {
         if (display) display.style.display = 'none';
+        if (confirmBtn) confirmBtn._editInput = input || null;
         if (input) {
           input.style.display = 'inline-block';
           input.value = value || '';
+          input.dataset.openValue = value || '';
           setTimeout(() => { input.focus(); input.select?.(); }, 0);
         }
         if (editBtn) editBtn.style.display = 'none';
@@ -35453,9 +35565,10 @@ require(['vs/editor/editor.main'], function () {
         // only it propagates. Failures are silent best-effort; they
         // don't block the user's primary save.
         const _resolvedCreatorEmpty = !activeReviewReasons.includes('creator_empty');
-        if (_resolvedCreatorEmpty && _sfDetailEdit && _sfDetailEdit.sourceUuid) {
+        const _ceSource = _sfDetailEdit ? _sfDetailSourceUuid() : null;
+        if (_resolvedCreatorEmpty && _ceSource) {
           const siblings = (_sfAllEntries || []).filter(e =>
-            e && e.meta && e.meta.sourceUuid === _sfDetailEdit.sourceUuid
+            e && e.meta && e.meta.sourceUuid === _ceSource
             && e.name !== _sfDetailOriginalName
           );
           for (const sib of siblings) {
@@ -35827,10 +35940,11 @@ require(['vs/editor/editor.main'], function () {
         const stored = (_sfDetailEdit.lastUsedStyleName || '').trim();
         if (els.lastStyleDisplay)    els.lastStyleDisplay.style.display = 'none';
         if (els.lastStyleEditBtn)    els.lastStyleEditBtn.style.display = 'none';
-        if (els.lastStyleConfirmBtn) els.lastStyleConfirmBtn.style.display = 'inline-block';
+        if (els.lastStyleConfirmBtn) { els.lastStyleConfirmBtn.style.display = 'inline-block'; els.lastStyleConfirmBtn._editInput = els.lastStyleInput || null; }
         if (els.lastStyleCombo)      els.lastStyleCombo.style.display = 'flex';
         if (els.lastStyleInput) {
           els.lastStyleInput.value = stored;
+          els.lastStyleInput.dataset.openValue = stored;
           _sfLastStyleMarkInLib(stored);
           setTimeout(() => { els.lastStyleInput.focus(); els.lastStyleInput.select(); }, 0);
         }
@@ -36157,6 +36271,80 @@ require(['vs/editor/editor.main'], function () {
         // mistake that is cheap to undo.
         try { await window.electronAPI.unlinkAttachment({ uuid, id }); } catch {}
         _sfRenderReviewPop();
+      });
+      // ── Open in app browser [B-521] ─────────────────────────────────
+      // The Website in the in-app browser while the review is open. A Link or Demo saved there by
+      // right-click lands in this review's fields; a page saved as PDF is attached as a proof of
+      // purchase. Demo names a font, so the browser is handed the review's font rows in order.
+      let _sfCaptureRows = [];
+      _sfImportEls.purchased?.addEventListener('change', async () => {
+        if (!_sfImportEls.purchased.checked) return;
+        const _fonts = ((_sfImport && _sfImport.candidates) || []).length;
+        const _name = (_sfImportEls.bundleNameInput?.value || '').trim();
+        if (!(await confirmFreeContent({ fonts: _fonts, sourceName: _name }))) _sfImportEls.purchased.checked = false;
+      });
+      // Shown only while Website holds an address. The field is written from several places that fire
+      // no event (paste, clear, Apply suggestion, the creator lookup, the review's pre-fill), so the
+      // check runs on the element's own value setter as well as on typing.
+      const _sfRefreshWebsiteOpen = () => {
+        if (!_sfImportEls.websiteOpen) return;
+        const v = (_sfImportEls.website?.value || '').trim();
+        _sfImportEls.websiteOpen.style.display = /^https?:\/\/\S/i.test(v) ? '' : 'none';
+      };
+      if (_sfImportEls.website) {
+        const _desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        Object.defineProperty(_sfImportEls.website, 'value', {
+          configurable: true,
+          get() { return _desc.get.call(this); },
+          set(v) { _desc.set.call(this, v); _sfRefreshWebsiteOpen(); },
+        });
+        _sfImportEls.website.addEventListener('input', _sfRefreshWebsiteOpen);
+      }
+      _sfImportEls.websiteOpen?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const url = (_sfImportEls.website?.value || '').trim();
+        if (!/^https?:\/\//i.test(url)) return;
+        _sfCaptureOpen = true;
+        window._sfCaptureTarget = 'import';
+        try { await window.electronAPI.linkCaptureOpen({ url, fonts: _sfCaptureFontList() }); } catch {}
+      });
+      // The fonts the Demo submenu offers: the checked ones, in order. Re-sent as rows are ticked,
+      // unticked or renamed while the browser is open.
+      let _sfCaptureOpen = false;
+      const _sfCaptureFontList = () => {
+        _sfCaptureRows = Array.from(_sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row') || [])
+          .filter(r => r.dataset.already !== '1' && r.dataset.kind !== 'customized'
+            && r.querySelector('.cand-demo-input') && r.querySelector('.cand-check')?.checked);
+        return _sfCaptureRows.map(r => (r.querySelector('.cand-name')?.value || '').trim() || 'Untitled');
+      };
+      const _sfCaptureResendFonts = () => {
+        if (!_sfCaptureOpen) return;
+        try { window.electronAPI.linkCaptureFonts(_sfCaptureFontList()); } catch {}
+      };
+      _sfImportEls.candList?.addEventListener('change', _sfCaptureResendFonts);
+      _sfImportEls.candList?.addEventListener('input', _sfCaptureResendFonts);
+      window.electronAPI.onLinkCapturePick?.(async ({ key, value } = {}) => {
+        if (window._sfCaptureTarget !== 'import') return;
+        if (!_sfImport || !_sfImportEls.modal?.classList.contains('active')) return;
+        if (key === 'linkUrl') {
+          if (_sfImportEls.link) _sfImportEls.link.value = value;
+        } else if (typeof key === 'string' && key.startsWith('demo:')) {
+          const row = _sfCaptureRows[parseInt(key.slice(5), 10)];
+          if (!row || !row.isConnected) return;
+          row.dataset.demourl = value;
+          const dRow = row.querySelector('.cand-demo-row');
+          const dInput = row.querySelector('.cand-demo-input');
+          if (dInput) dInput.value = value;
+          if (dRow) dRow.style.display = '';
+        } else if (key === 'proof' && value && value.filePath) {
+          try {
+            if (_sfImport.uuid) {
+              await window.electronAPI.addAttachmentToSources({ filePath: value.filePath, label: '', uuids: [_sfImport.uuid] });
+              _sfRenderReviewPop();
+            }
+          } catch {}
+          finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
+        }
       });
       _sfImportEls.addPopBtn?.addEventListener('click', () => {
         if (!_sfImport || !_sfImport.uuid) return;
@@ -36692,21 +36880,38 @@ require(['vs/editor/editor.main'], function () {
       };
       // Dirty, now: a field open and not confirmed, or list edits not yet applied.
       const _sfSourceHasOpenEdit = () => {
-        const open = (b) => !!(b && b.style.display && b.style.display !== 'none');
         if ([_sfSourceDetailEls.nameConfirmBtn, _sfSourceDetailEls.creatorConfirmBtn,
-             _sfSourceDetailEls.acquiredConfirmBtn, _sfSourceDetailEls.linkEditRow].some(open)) return true;
-        return !!((_sfSourceEdit && _sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size)
-                  || (typeof _sfCommonRowEdits !== 'undefined' && _sfCommonRowEdits.size));
+             _sfSourceDetailEls.acquiredConfirmBtn].some(_sfOpenFieldChanged)) return true;
+        const row = _sfSourceDetailEls.linkEditRow;
+        if (row && row.style.display && row.style.display !== 'none'
+          && [_sfSourceDetailEls.websiteInput, _sfSourceDetailEls.linkInput, _sfSourceDetailEls.downloadInput]
+            .some(_sfInputChanged)) return true;
+        return _sfSourceRowChanges() > 0;
       };
-      // The list's Apply shows while it has anything to apply, counting the rows held.
+      // Rows whose name or description differs from what they hold; an open row left as it was is
+      // not a change. Common-folder rows count while held.
+      const _sfSourceRowChanges = () => {
+        let n = (typeof _sfCommonRowEdits !== 'undefined' && _sfCommonRowEdits.size) || 0;
+        for (const [orig, ed] of ((_sfSourceEdit && _sfSourceEdit.entryEdits) || new Map())) {
+          const cached = _sfSourceEdit.entries?.find(en => en.name === orig);
+          const meta = (cached && cached.meta) || {};
+          if (((ed.name || '').trim() || orig) !== orig || (ed.description || '').trim() !== (meta.description || '').trim()) n++;
+        }
+        return n;
+      };
+      // The list's Apply shows while a row is open, and is enabled once one has changed.
       const _sfSyncSourceRowsApply = () => {
         const bar = document.getElementById('sf-source-rows-apply');
         if (!bar) return;
-        const n = ((_sfSourceEdit && _sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size) || 0)
+        const open = ((_sfSourceEdit && _sfSourceEdit.entryEdits && _sfSourceEdit.entryEdits.size) || 0)
                 + ((typeof _sfCommonRowEdits !== 'undefined' && _sfCommonRowEdits.size) || 0);
-        bar.style.display = n ? 'flex' : 'none';
+        bar.style.display = open ? 'flex' : 'none';
+        const n = _sfSourceRowChanges();
         const btn = document.getElementById('btn-sf-source-rows-apply');
-        if (btn) btn.textContent = n > 1 ? `Apply (${n})` : 'Apply';
+        if (btn) {
+          btn.textContent = n > 1 ? `Apply (${n})` : 'Apply';
+          btn.disabled = n === 0;
+        }
       };
       const _sfSyncSourceLinkDisplay = () => {
         if (!_sfSourceEdit) return;
@@ -37648,9 +37853,17 @@ require(['vs/editor/editor.main'], function () {
         const opening = editRow.style.display === 'none';
         if (opening) {
           editRow.style.display = 'flex';
-          if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = _sfSourceEdit.vendorWebsite || '';
-          if (_sfSourceDetailEls.linkInput)    _sfSourceDetailEls.linkInput.value    = _sfSourceEdit.linkUrl || '';
-          if (_sfSourceDetailEls.downloadInput) _sfSourceDetailEls.downloadInput.value = _sfSourceEdit.downloadUrl || '';
+          if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = _sfSourceDetailEls.websiteInput.dataset.openValue = _sfSourceEdit.vendorWebsite || '';
+          if (_sfSourceDetailEls.linkInput)    _sfSourceDetailEls.linkInput.value    = _sfSourceDetailEls.linkInput.dataset.openValue = _sfSourceEdit.linkUrl || '';
+          if (_sfSourceDetailEls.linkInput) {
+            // A source with no fonts holds common folders, which are voicepacks.
+            const n = (_sfAllEntries || []).filter(x => x.meta && x.meta.sourceUuid === _sfSourceOriginalUuid).length;
+            const _w = window._sfLinkWording(n);
+            _sfSourceDetailEls.linkInput.placeholder = _w.placeholder;
+            const _lbl = document.getElementById('sf-source-link-label');
+            if (_lbl) _lbl.title = _w.hover;
+          }
+          if (_sfSourceDetailEls.downloadInput) _sfSourceDetailEls.downloadInput.value = _sfSourceDetailEls.downloadInput.dataset.openValue = _sfSourceEdit.downloadUrl || '';
           _sfSourceDetailEls.linkBtn.innerHTML = '\u{2713}';
           _sfSourceDetailEls.linkBtn.title = 'Save links';
           setTimeout(() => { _sfSourceDetailEls.websiteInput?.focus(); _sfSourceDetailEls.websiteInput?.select?.(); }, 0);
@@ -37746,7 +37959,7 @@ require(['vs/editor/editor.main'], function () {
       });
       // Tag add. Mirrors the entry-detail input behavior: Enter or comma
       // commits, "free" is reserved and maps to the source's purchased flag.
-      _sfSourceDetailEls.tagsInput?.addEventListener('keydown', (e) => {
+      _sfSourceDetailEls.tagsInput?.addEventListener('keydown', async (e) => {
         if (!_sfSourceEdit) return;
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -37754,6 +37967,7 @@ require(['vs/editor/editor.main'], function () {
           if (!raw) return;
           if (/^free$/i.test(raw)) {
             if (_sfSourceEdit.purchased !== false) {
+              if (!(await confirmFreeContent({ sourceUuids: [_sfSourceOriginalUuid] })) || !_sfSourceEdit) { e.target.value = ''; return; }
               _sfSourceEdit.purchased = false;
               _sfMarkSourceDirty();
             }
@@ -37846,6 +38060,7 @@ require(['vs/editor/editor.main'], function () {
           const key = nameInput.getAttribute('data-entry-name-input');
           const entry = _sfSourceEdit.entryEdits.get(key);
           if (entry) entry.name = nameInput.value;   // held for the list's Apply [B-496]
+          _sfSyncSourceRowsApply();
           return;
         }
         const descInput = e.target.closest('[data-entry-desc-input]');
@@ -37853,6 +38068,7 @@ require(['vs/editor/editor.main'], function () {
           const key = descInput.getAttribute('data-entry-desc-input');
           const entry = _sfSourceEdit.entryEdits.get(key);
           if (entry) entry.description = descInput.value;   // held for the list's Apply [B-496]
+          _sfSyncSourceRowsApply();
         }
       });
       // Enter on either input collapses the row (treat as ✓). Escape cancels.
@@ -38018,7 +38234,7 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           const name = del.getAttribute('data-entry-delete');
           if (!name) return;
-          _sfSourceDetailEls.modal?.classList.remove('active');
+          // The confirm sits over the source window, which stays up behind it.
           const messageHtml = await _sfBuildDeleteMessage(name);
           const { willRemove, sourceUuid } = await _sfWillSourceBeRemovedOnEntryDelete(name);
           const res = await promptConfirm({
@@ -38377,11 +38593,11 @@ require(['vs/editor/editor.main'], function () {
             // The damage dialog above is what authorizes the strip, so the flag rides with the
             // answer rather than being the copier's default. No dialog, no damage, no strip.
             folderSource: { folderPath: r.folderPath, stripDamagedWavs: _damaged.length > 0 },
-            // Seeded like a sibling, the same fields duplicateEntry's from-source
-            // mode carries. Description and notes are deliberately NOT among them:
-            // those describe the anchor's files, and these are different files the
-            // user brought from somewhere else.
+            // Seeded from the font it was added to, description and notes included, as a starting
+            // point to edit from.
             metadata: {
+              description: anchorMeta.description || '',
+              userNotes: anchorMeta.userNotes || '',
               tags: Array.isArray(anchorMeta.tags) ? anchorMeta.tags.slice() : [],
               author: anchorMeta.author || '',
               acquisitionDate: anchorMeta.acquisitionDate || '',
@@ -43045,8 +43261,19 @@ require(['vs/editor/editor.main'], function () {
         const opening = editRow.style.display === 'none';
         if (opening) {
           editRow.style.display = 'flex';
-          if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = _sfDetailEdit.demoUrl || '';
-          if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = _sfDetailEdit.linkUrl || '';
+          if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = _sfEntryDetailEls.demoInput.dataset.openValue = _sfDetailEdit.demoUrl || '';
+          if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = _sfEntryDetailEls.linkInput.dataset.openValue = _sfDetailEdit.linkUrl || '';
+          // "shared" only says something when the source has other fonts showing the same Link, and
+          // the placeholder names what the Link is for: one font or a bundle of them.
+          const su = _sfDetailSourceUuid();
+          const n = su ? (_sfAllEntries || []).filter(x => x.meta && x.meta.sourceUuid === su).length : 0;
+          const _w = window._sfLinkWording(Math.max(n, 1));
+          const _sharedTag = document.getElementById('sf-link-shared-tag');
+          if (_sharedTag) {
+            _sharedTag.style.display = n > 1 ? '' : 'none';
+            _sharedTag.parentElement.title = _w.hover;
+          }
+          if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.placeholder = _w.placeholder;
           // Swap the icon to a checkmark so a second click reads as
           // "commit and close" rather than "toggle again."
           _sfEntryDetailEls.linkBtn.innerHTML = LINK_ICON_CONFIRM;
@@ -43065,6 +43292,84 @@ require(['vs/editor/editor.main'], function () {
       _sfEntryDetailEls.websiteDisplay?.addEventListener('click', () => {
         if (!_sfDetailEdit?.vendorWebsite) return;
         window.electronAPI.openExternal(_sfDetailEdit.vendorWebsite);
+      });
+      // ── Open in app browser from the font and source windows [B-521] ──────────────────
+      // Right-click the Website chip. Website is the creator's, so what is captured is source data:
+      // a Link goes on the source, a PDF becomes the source's proof of purchase, and a Demo goes on
+      // one of the fonts listed under "Fonts from this source" (the font opened from comes first).
+      // Each save commits as it lands, as every other change in these windows does.
+      let _sfCapture = null;   // { uuid, names: [entry names, in menu order] }
+      const _sfOpenSourceCapture = async (e, url, uuid, firstName) => {
+        e.preventDefault();
+        if (!url || !uuid) return;
+        let entries = [];
+        try { const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid }); entries = (r && r.ok && r.entries) || []; } catch {}
+        const names = entries.map(x => x.name).sort((a, b) => a.localeCompare(b));
+        if (firstName && names.includes(firstName)) names.splice(names.indexOf(firstName), 1), names.unshift(firstName);
+        _sfCapture = { uuid, names };
+        window._sfCaptureTarget = 'source';
+        try { await window.electronAPI.linkCaptureOpen({ url, fonts: names }); } catch {}
+      };
+      for (const [el, ctx] of [
+        [_sfEntryDetailEls.websiteDisplay, () => _sfDetailEdit && { url: _sfDetailEdit.vendorWebsite, uuid: _sfDetailSourceUuid(), first: _sfDetailOriginalName }],
+        [_sfSourceDetailEls.websiteDisplay, () => _sfSourceEdit && { url: _sfSourceEdit.vendorWebsite, uuid: _sfSourceOriginalUuid, first: null }],
+      ]) {
+        el?.addEventListener('contextmenu', (e) => {
+          const c = ctx();
+          if (!c || !c.url) return;
+          e.preventDefault();
+          const menu = document.getElementById('preset-ctx-menu');
+          if (!menu) return;
+          menu.innerHTML = '';
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = 'Open in app browser';
+          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; _sfOpenSourceCapture(e2, c.url, c.uuid, c.first); });
+          menu.appendChild(d);
+          _jmtPlaceMenu(menu, e.clientX, e.clientY);
+        });
+      }
+      window.electronAPI.onLinkCapturePick?.(async ({ key, value } = {}) => {
+        if (window._sfCaptureTarget !== 'source' || !_sfCapture) return;
+        const { uuid, names } = _sfCapture;
+        const sourceOpen = !!(_sfSourceEdit && _sfSourceOriginalUuid === uuid);
+        try {
+          if (key === 'linkUrl') {
+            if (sourceOpen) {
+              _sfSourceEdit.linkUrl = value;
+              if (_sfSourceDetailEls.linkInput) _sfSourceDetailEls.linkInput.value = _sfSourceDetailEls.linkInput.dataset.openValue = value;
+              _sfRefreshSourceDisplayValues();
+              _sfMarkSourceDirty();
+            } else {
+              await window.electronAPI.updateSourceMeta({ uuid, updates: { linkUrl: value } });
+            }
+            // An open font window from this source shows the source's Link and writes it back on its
+            // next commit, so it takes the new one too.
+            if (_sfDetailEdit && _sfDetailSourceUuid() === uuid) {
+              _sfDetailEdit.linkUrl = value;
+              if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = _sfEntryDetailEls.linkInput.dataset.openValue = value;
+              _sfRefreshDisplayValues();
+            }
+          } else if (typeof key === 'string' && key.startsWith('demo:')) {
+            const name = names[parseInt(key.slice(5), 10)];
+            if (!name) return;
+            if (_sfDetailEdit && _sfDetailOriginalName === name) {
+              _sfDetailEdit.demoUrl = value;
+              if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = _sfEntryDetailEls.demoInput.dataset.openValue = value;
+              _sfRefreshDisplayValues();
+              _sfMarkDetailDirty();
+            } else {
+              await window.electronAPI.updateEntryMeta({ currentName: name, updates: { demoUrl: value } });
+            }
+          } else if (key === 'proof' && value && value.filePath) {
+            try {
+              await window.electronAPI.addAttachmentToSources({ filePath: value.filePath, label: '', uuids: [uuid] });
+              if (sourceOpen) _sfRenderSourcePop();
+            } finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
+            return;
+          }
+          try { await window.refreshSoundFontsView(); } catch {}
+        } catch {}
       });
       _sfEntryDetailEls.demoDisplay?.addEventListener('click', () => {
         if (!_sfDetailEdit?.demoUrl) return;
@@ -43134,7 +43439,7 @@ require(['vs/editor/editor.main'], function () {
         _sfMarkDetailDirty();
       });
       // Tag add: Enter commits.
-      _sfEntryDetailEls.tagsInput?.addEventListener('keydown', (e) => {
+      _sfEntryDetailEls.tagsInput?.addEventListener('keydown', async (e) => {
         if (!_sfDetailEdit) return;
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -43143,6 +43448,7 @@ require(['vs/editor/editor.main'], function () {
           // "free" is a reserved word that maps to the purchased flag.
           if (/^free$/i.test(raw)) {
             if (_sfDetailEdit.purchased !== false) {
+              if (!(await confirmFreeContent({ sourceUuids: [_sfDetailSourceUuid()] })) || !_sfDetailEdit) { e.target.value = ''; return; }
               _sfDetailEdit.purchased = false;
               _sfMarkDetailDirty();
             }
@@ -53385,11 +53691,13 @@ require(['vs/editor/editor.main'], function () {
       });
       // Enter adds the typed tag to the working set if it's not already
       // there (case-insensitive). Escape closes the modal.
-      document.getElementById('sf-bulk-tag-input')?.addEventListener('keydown', (e) => {
+      document.getElementById('sf-bulk-tag-input')?.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           const raw = (e.target.value || '').trim();
           if (!raw) return;
+          if (/^free$/i.test(raw) && !_sfBulkTagWorking.some(t => t.toLowerCase() === 'free')
+            && !(await window.confirmFreeContent({ sourceUuids: window._sfSelectedSourceUuids ? window._sfSelectedSourceUuids() : [] }))) { e.target.value = ''; return; }
           // The fourth and last door a tag can be typed through (2026-10-08). All four share
           // one canonicaliser; a door left out is a door that reintroduces a second spelling.
           const _tag = /^free$/i.test(raw) ? 'free'   // the free setting, as in the font window
