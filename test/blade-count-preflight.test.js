@@ -256,7 +256,7 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(preset
 
   {
     // [B-379] The crude token count must see all SEVEN wrapper names. It used to
-    // anchor `Style\w*Ptr`, which misses ChargingStylePtr - the one name whose
+    // anchor `\bStyle\w*Ptr`, which misses ChargingStylePtr - the one name whose
     // variant sits at the FRONT - so every charge-detect preset read one style short.
     // This counter exists to DISAGREE with the parser; one blind in the same direction
     // as the thing it checks is not a second opinion.

@@ -53941,7 +53941,7 @@ require(['vs/editor/editor.main'], function () {
           }
           // Fallback (no styles in entry — extremely unusual): take the last string overall
           if (!displayName && strings.length > 1) displayName = strings[strings.length - 1].value;
-          const styleLines = innerLines.filter(l => /\w*Style\w*Ptr\s*</.test(l)).map(l => l.trim());
+          const styleLines = innerLines.filter(l => /\b\w*Style\w*Ptr\s*</.test(l)).map(l => l.trim());
           result.push({
             startLine, endLine,
             displayName: displayName || '(disabled)',

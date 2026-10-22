@@ -83,7 +83,7 @@ function ok(label, cond, detail) {
      /Keep everything\. JMT Studio saves you space by storing identical sounds only once, while maintaining the original file structure/.test(copy)
      // FULL BRANDING. Ruled 2026-09-19: the bare "Studio" was inconsistent with
      // the savings sentence elsewhere, which already says "JMT Studio saved you X".
-     && !/(?<!JMT )Studio saves/.test(copy));
+     && !/(?<!JMT )\bStudio saves\b/.test(copy));
 
   // NO COINED TERM. That session ruled against an Apple-style 'Optimized Storage' noun: the
   // branding is one sentence SHAPE repeated wherever savings appear.
@@ -96,8 +96,12 @@ function ok(label, cond, detail) {
   // sf-bulk-explain-cost and the local is `cost`, so scanning the source would fail forever on
   // code that is perfectly correct. FIFTH anchoring slip of the day, same root every time:
   // asserting about WORDS while looking at something that is not only words.
-  const _copy = (fn.match(/'[^']*'/g) || []).join(' ');
-  ok('it never says "cost" about storage', !/costs?/i.test(_copy), _copy.slice(0, 200));
+  // Prose only: a quoted string with a space in it. Element ids are quoted too, and
+  // 'sf-bulk-explain-cost' has a word boundary before 'cost', so scraping every quoted string
+  // failed on the id. That went unseen while this regex held a stray backspace and matched nothing
+  // (fixed 2026-10-22; test/no-control-chars-in-source.test.js now guards against it).
+  const _copy = (fn.match(/'[^']*'/g) || []).filter(q => / /.test(q)).join(' ');
+  ok('it never says "cost" about storage', !/\bcosts?\b/i.test(_copy), _copy.slice(0, 200));
 
   // And it names the ideal input, not just the accepted one. Ruled 2026-09-19.
   ok('it names the original zips as ideal',
