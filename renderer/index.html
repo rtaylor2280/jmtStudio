@@ -38666,10 +38666,19 @@ require(['vs/editor/editor.main'], function () {
             if (ar && ar.ok) _att = _att.concat(ar.attachments || []);
           }
         } catch {}
-        const _attBox = _att.length ? {
-          label: _att.length === 1
-            ? 'Include proof of purchase with zip archive'
-            : `Include ${_att.length} proofs of purchase with zip archive`,
+        // [B-487] The source's Download link is purchase material too (private, often redeemable),
+        // so this box carries it and says so: shown when there is a receipt OR a link, worded for
+        // exactly what this export holds.
+        const _dlCount = list.filter(s => {
+          const m = (s && s.meta) || ((typeof _sfAllSourcesByUuid !== 'undefined' && _sfAllSourcesByUuid[s && s.uuid]) || {}).meta || {};
+          return !!m.downloadUrl;
+        }).length;
+        const _proofWords = _att.length === 0 ? ''
+          : _att.length === 1 ? 'proof of purchase' : `${_att.length} proofs of purchase`;
+        const _linkWords = _dlCount === 0 ? ''
+          : _dlCount === 1 ? 'download link' : `${_dlCount} download links`;
+        const _attBox = (_att.length || _dlCount) ? {
+          label: `Include ${[_proofWords, _linkWords].filter(Boolean).join(' and ')} with zip archive`,
           // Name the actual file. It is the one fact not already on this screen,
           // and it is the one someone about to pass a zip on would want.
           // NAME THEM WHILE NAMING THEM HELPS. One receipt: which one is the useful fact. Two:

@@ -21,9 +21,17 @@ console.log('a document whose link leads to a file-sharing host');
 check('NOT THE PASTED DOCUMENT: THE SHARE LINK INSIDE IT', L.pickDownloadUrl([DOC, DROPBOX]), DROPBOX);
 
 console.log('a store that signs its own file URL');
-check('BVM: NOT THE EXPIRING FILE LINK, NOT THE CHECKOUT RECORD: ITS FONTS PAGE',
+// [B-497]: a paid BVM font is downloaded again only from its checkout-success page.
+check('BVM PREMIUM: THE CHECKOUT-SUCCESS PAGE IS THE ONLY WAY BACK, SO IT IS THE DOWNLOAD',
   L.pickDownloadUrl(['https://www.bvm-sabers.co.uk/checkout/success?session_id=cs_live_x', 'https://www.bvm-sabers.co.uk/api/downloads/SIGNEDTOKEN']),
-  'https://www.bvm-sabers.co.uk/fonts');
+  'https://www.bvm-sabers.co.uk/checkout/success?session_id=cs_live_x');
+check('whatever the parameter is called, even on the fonts page itself',
+  L.pickDownloadUrl(['https://www.bvm-sabers.co.uk/fonts?purchase=cs_live_a1B2c3', 'https://www.bvm-sabers.co.uk/api/downloads/T']),
+  'https://www.bvm-sabers.co.uk/fonts?purchase=cs_live_a1B2c3');
+check('or in the path', L.pickDownloadUrl(['https://www.bvm-sabers.co.uk/success/cs_live_Z9', 'https://www.bvm-sabers.co.uk/api/downloads/T']),
+  'https://www.bvm-sabers.co.uk/success/cs_live_Z9');
+check('and being private, it is never offered as the Link',
+  L.publicLinkFor('https://www.bvm-sabers.co.uk/checkout/success?session_id=cs_live_x'), null);
 check('BVM free font from the in-app browser: the page it was clicked on',
   L.pickDownloadUrl(['https://www.bvm-sabers.co.uk/fonts', 'https://www.bvm-sabers.co.uk/api/downloads/T']),
   'https://www.bvm-sabers.co.uk/fonts');

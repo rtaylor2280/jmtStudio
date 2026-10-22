@@ -335,6 +335,8 @@ function isCheckoutRecord(u) {
   const h = _host(u);
   return /^checkout\.stripe\.com$/i.test(h)
       || /[?&](session_id|session|checkout_session)=/i.test(String(u || ''))
+      // A Stripe checkout session id wherever it sits, whatever the parameter or path calls it.
+      || /\bcs_(live|test)_[A-Za-z0-9]+/.test(String(u || ''))
       || (/(^|\.)paypal\.com$/i.test(h) && /\/(checkoutnow|webapps\/hermes|cgi-bin\/webscr)/i.test(String(u || '')));
 }
 // Creators whose download pages are known. `page` stands in when the chain offers nothing better;
@@ -350,6 +352,10 @@ const KNOWN_DOWNLOAD_PAGES = [
     page: 'https://www.bvm-sabers.co.uk/fonts',
     owns: (u) => { try { return /^\/fonts\/?$/i.test(new URL(u).pathname); } catch { return false; } },
     isPublic: true,
+    // A paid BVM font is downloaded again only from its checkout-success page: no email, no
+    // account, a fixed number of downloads ([B-497], measured 2026-10-08). So for BVM that record
+    // IS the Download. It is private, so never the Link.
+    checkoutIsDownload: true,
   },
 ];
 function _known(u) { const h = _host(u); return KNOWN_DOWNLOAD_PAGES.find(k => k.host.test(h)) || null; }
@@ -367,7 +373,14 @@ function pickDownloadUrl(chain) {
   const file = urls[urls.length - 1];
   if (isFileHost(file)) return file;
   for (let i = urls.length - 2; i >= 0; i--) {
-    if (!isLoginUrl(urls[i]) && !isCheckoutRecord(urls[i])) return _plain(urls[i]);
+    const u = urls[i];
+    if (isLoginUrl(u)) continue;
+    if (isCheckoutRecord(u)) {
+      const k = _known(u);
+      if (k && k.checkoutIsDownload) return u;
+      continue;
+    }
+    return _plain(u);
   }
   for (const known of KNOWN_DOWNLOAD_PAGES) {
     if (urls.some(u => known.host.test(_host(u)))) return known.page;

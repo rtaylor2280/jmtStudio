@@ -158,6 +158,10 @@ function buildForSource(userData, uuid, appVersion, opts) {
   if (!sourceMeta) return null;
 
   const source = _pick(sourceMeta, SOURCE_FIELDS);
+  // [B-487] THE DOWNLOAD LINK IS PRIVATE: tied to its buyer and often redeemable by anyone holding
+  // it ([B-497]). So it rides an export only under the same box as the receipts, which is the
+  // export's disclosure for purchase material, and stays behind when that box is cleared.
+  if (!includeAttachments) delete source.downloadUrl;
   // A vendor the app guessed is not curation — re-importing will guess it
   // again, and shipping it would let a stale guess outrank a fresh one.
   if (sourceMeta.vendorAutoDetected) { delete source.vendor; delete source.vendorWebsite; }
