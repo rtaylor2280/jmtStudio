@@ -5622,7 +5622,7 @@ async function _pdfAllowed(page) {
 // onSave(key, value) receives each save: key is 'linkUrl', 'demoUrl' or 'proof' ({ filePath, fileName }),
 // and with `fonts` (a function returning the font names) a Demo is saved per font as 'demo:<index>'. getDir() returns the capture's temp
 // folder, creating it on first use.
-function _attachLinkPicks(page, { getDir, fonts = null, onSave }) {
+function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', onSave }) {
   const { Menu, clipboard } = require('electron');
   const shown = new Map();   // row key -> { label, hint, value }, most recently saved first
   let strip = null;
@@ -5652,6 +5652,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, onSave }) {
   page.on('move', place);
   page.on('resize', place);
   const save = (key, label, value, shownValue, toast, hint) => {
+    if (typeof value === 'string') value = soundFontLinkImport.stripSessionParams(value);
     shown.delete(key);
     shown.set(key, { label, hint, value: shownValue || value });
     try { onSave(key, value); } catch {}
@@ -5690,8 +5691,9 @@ function _attachLinkPicks(page, { getDir, fonts = null, onSave }) {
       if (!names) return { label, click: () => save('demoUrl', 'Demo', demoUrl, null, 'Saved as Demo', DEMO_HINT) };
       if (names.length === 1) return { label, click: () => one(0) };
       return { label, submenu: [
-        { label: 'All checked fonts', click: () => {
-          names.forEach((n, i) => { shown.delete(`demo:${i}`); shown.set(`demo:${i}`, { label: `Demo · ${n}`, hint: DEMO_HINT, value: demoUrl }); try { onSave(`demo:${i}`, demoUrl); } catch {} });
+        { label: names.length === 2 ? allLabel.replace(/^All\b/, 'Both') : allLabel, click: () => {
+          const cleanUrl = soundFontLinkImport.stripSessionParams(demoUrl);
+          names.forEach((n, i) => { shown.delete(`demo:${i}`); shown.set(`demo:${i}`, { label: `Demo · ${n}`, hint: DEMO_HINT, value: cleanUrl }); try { onSave(`demo:${i}`, cleanUrl); } catch {} });
           show(`Saved as Demo for ${names.length} fonts`);
         } },
         { type: 'separator' },
@@ -5699,7 +5701,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, onSave }) {
       ] };
     };
     const items = [
-      { label: link ? 'Copy link URL' : 'Copy page URL', click: () => clipboard.writeText(url) },
+      { label: link ? 'Copy link URL' : 'Copy page URL', click: () => clipboard.writeText(soundFontLinkImport.stripSessionParams(url)) },
       { type: 'separator' },
       { label: 'Save as Link', click: () => save('linkUrl', 'Link', url, null, 'Saved as Link', LINK_HINT) },
     ];
@@ -6019,7 +6021,7 @@ let _captureFonts = [];   // the review's checked fonts, kept current by linkCap
 ipcMain.on('linkCapture:fonts', (_e, { fonts } = {}) => {
   _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
 });
-ipcMain.handle('linkCapture:open', async (event, { url, fonts } = {}) => {
+ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel } = {}) => {
   const os = require('os');
   const { session } = require('electron');
   if (!url || !/^https?:\/\//i.test(url)) return { ok: false };
@@ -6052,6 +6054,7 @@ ipcMain.handle('linkCapture:open', async (event, { url, fonts } = {}) => {
   _attachFindBar(bw);
   _attachLinkPicks(bw, {
     fonts: () => _captureFonts,
+    allLabel: typeof allLabel === 'string' && allLabel ? allLabel : 'All fonts',
     getDir: () => {
       // The review removes the folder once it has attached a PDF, so a second save makes a new one.
       if (!dir || !fs.existsSync(dir)) dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-linkimport-'));

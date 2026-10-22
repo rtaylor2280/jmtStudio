@@ -1,10 +1,10 @@
 // No invisible control characters in source files.
 //
 // A regex written through a script as "\b" can land as a literal backspace (0x08) instead of a word
-// boundary. It parses, it runs, and it never matches anything, with no error anywhere. One sat in
-// _scanDisabledPresets for weeks, so a disabled preset's detail never listed its styles; two more
-// were written and caught the night it was found (2026-10-22). Backspace, bell, vertical tab and form
-// feed have no legitimate place in this codebase's source, so any of them is a defect.
+// boundary. It parses, it runs, and it never matches anything, with no error anywhere; one in
+// _scanDisabledPresets kept a disabled preset's detail from listing its styles. Backspace, bell,
+// vertical tab and form feed have no legitimate place in this codebase's source, so any of them is
+// a defect.
 'use strict';
 
 const fs = require('fs');

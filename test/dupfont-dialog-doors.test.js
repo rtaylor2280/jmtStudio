@@ -219,10 +219,10 @@ function ok(name, cond, extra) {
   ok('and it does not claim the sources are duplicates of each other',
      !/duplicates of each other/.test(html) && !/identical to each other/.test(html));
   ok('the simple wording survives when nothing was collapsed',
-     /All \$\{ownedUnique\.length\} of these fonts match sounds you already have:/.test(html));
+     /\$\{_allOf\(ownedUnique\.length, \{ cap: true \}\)\} of these fonts match sounds you already have:/.test(html));
 
   ok('the body states the GROUPED count, not the source count',
-     /All \$\{ownedUnique\.length\} of these fonts match sounds you already have:/.test(html),
+     /\$\{_allOf\(ownedUnique\.length, \{ cap: true \}\)\} of these fonts match sounds you already have:/.test(html),
      'matched.length here is the number he could not reconcile with the grid');
   ok('and the list renders the groups, not the raw matches',
      /Array\.from\(groups, \(\[lib, alts\]\) => groupLi\(lib, alts\)\)/.test(html));

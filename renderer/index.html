@@ -8271,6 +8271,12 @@ function promptConfirm(opts) {
 window.promptConfirm = promptConfirm;
 // [B-146] Free content means the creator offers it free of charge, publicly, to anyone. The user
 // confirms that whenever they mark something free themselves; Cancel leaves it unmarked.
+// "all 5" for a count, and "both" for two, which is how the sentence reads. `cap` starts a sentence;
+// `shown` is the number as already formatted.
+function _allOf(n, { cap = false, shown } = {}) {
+  const w = n === 2 ? 'both' : `all ${shown !== undefined ? shown : n}`;
+  return cap ? w[0].toUpperCase() + w.slice(1) : w;
+}
 window.confirmFreeContent = confirmFreeContent;
 // Free is stored on the source, so every font from it changes together; `reach` says how far:
 // { sourceUuids } for sources already in the library, or { fonts, sourceName } for an import.
@@ -8282,7 +8288,7 @@ function confirmFreeContent(reach = {}) {
     fonts = r.fonts;
     where = r.names.length === 1 ? r.names[0] : `${r.names.length} sources`;
   }
-  const scope = fonts > 1 ? ` This marks ${fonts === 2 ? 'both' : `all ${fonts}`} fonts from ${where || 'this source'} as free.` : '';
+  const scope = fonts > 1 ? ` This marks ${_allOf(fonts)} fonts from ${where || 'this source'} as free.` : '';
   return promptConfirm({
     title: 'Mark as free content',
     message: 'By marking this as free content, you confirm that its creator offers it free of charge, '
@@ -13170,7 +13176,7 @@ function _sdActionRowHtml(c) {
   const _nExec = _anyExec ? c._execScan.files.length : 0;
   const _importTitle = _anyExec
     ? (_nExec === 1 ? 'The fonts import. The program file stays behind.'
-                    : `The fonts import. All ${_nExec} program files stay behind.`)
+                    : `The fonts import. ${_allOf(_nExec, { cap: true })} program files stay behind.`)
     : '';
   const _titleAttr = _importTitle ? ` title="${_sdEsc(_importTitle)}"` : '';
   if (canFonts) btns.push(`<button id="sd-act-import" class="${ctx === 'sfl' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn"${_titleAttr}>${_importLabel}</button>`);
@@ -25019,7 +25025,9 @@ async function switchTab(name) {
   if (name === 'soundfonts') {
     // Re-evaluate which empty-state layer to show whenever the user lands here.
     // Library can be created or fonts added from outside the renderer too (the
-    // disk is source of truth), so we re-derive rather than cache.
+    // disk is source of truth), so we re-derive rather than cache. What is already loaded is drawn
+    // first, against the open config, so the tab never shows the previous config's in-use set.
+    window._sfRedrawFromCache?.();
     window.refreshSoundFontsView?.();
   }
 }
@@ -26468,7 +26476,7 @@ require(['vs/editor/editor.main'], function () {
           markAllBtn.dataset.count = String(newCount);
           markAllBtn.style.display = (newCount > 0 && _sfSelectedNames.size === 0) ? '' : 'none';
           markAllBtn.textContent = `Clear New (${newCount})`;
-          markAllBtn.title = `Clear the New badge on all ${newCount} font${newCount === 1 ? '' : 's'}`;
+          markAllBtn.title = (newCount === 1 ? 'Clear the New badge on 1 font' : `Clear the New badge on ${_allOf(newCount)} fonts`);
         }
         // In-use filter button: visible only when at least one entry is
         // referenced by an open-config preset. Badge shows the count of
@@ -29590,17 +29598,16 @@ require(['vs/editor/editor.main'], function () {
           // it cannot honour. [B-287]
           _sfSyncBulkTracksToggle();
         }
-        // Select-helpers appear whenever there are entries to act on. Hide
-        // "Select all" if every visible entry is already selected (no-op).
-        // Hide "Select in-use" if zero visible entries are in use.
+        // Select all and Select in-use start a selection, so they show only while nothing is selected:
+        // with a selection open, either would replace it. Select in-use also hides when nothing
+        // visible is in use.
+        const _anySelected = _sfSelectedNames.size > 0;
         if (allBtn) {
-          const allAlreadySelected = visibleCount > 0
-            && _sfLastMatchingNames.every(name => _sfSelectedNames.has(name));
-          allBtn.style.display = (visibleCount > 0 && !allAlreadySelected) ? '' : 'none';
+          allBtn.style.display = (visibleCount > 0 && !_anySelected) ? '' : 'none';
           allBtn.textContent = `Select all (${visibleCount})`;
         }
         if (inUseBtn) {
-          inUseBtn.style.display = visibleInUseCount > 0 ? '' : 'none';
+          inUseBtn.style.display = (visibleInUseCount > 0 && !_anySelected) ? '' : 'none';
           inUseBtn.textContent = `Select in-use (${visibleInUseCount})`;
         }
       };
@@ -30527,6 +30534,12 @@ require(['vs/editor/editor.main'], function () {
         _sfWirePathLinks();
         await dlg;
       };
+      // Redraw from what is already loaded, with the open config's in-use set, and no disk round trip.
+      // Used the moment the tab is shown, so it never shows the last config's state first.
+      window._sfRedrawFromCache = () => {
+        if (!_sfAllEntries || !_sfAllEntries.length) return;
+        try { _sfRenderGrid(); } catch {}
+      };
       window.refreshSoundFontsView = async () => {
         await _refreshSoundFontsToggleLock();
         // [B-318] Footer size. Deliberately NOT awaited: this hands back the last known figure
@@ -30911,7 +30924,7 @@ require(['vs/editor/editor.main'], function () {
               // library font without being the same as each other.
               : (ownedUnique.length !== matched.length
                   ? `The ${matched.length} fonts you picked match <strong>${ownedUnique.length}</strong> already in your library:`
-                  : `All ${ownedUnique.length} of these fonts match sounds you already have:`)
+                  : `${_allOf(ownedUnique.length, { cap: true })} of these fonts match sounds you already have:`)
                 + `<ul class="sf-dupfont-list">${Array.from(groups, ([lib, alts]) => groupLi(lib, alts)).join('')}</ul>`;
           }
           // ── [B-390] THE PRIMARY BUTTON IS A DESTINATION, NOT A LABEL ───────
@@ -34593,7 +34606,7 @@ require(['vs/editor/editor.main'], function () {
         return {
           placeholder: `Where to learn more or get this ${what}`,
           hover: `The creator's page for this ${what}, like its product page.`
-            + (n > 1 ? ` Set on the source, so ${n === 2 ? 'both' : `all ${n}`} fonts show the same Link.` : ''),
+            + (n > 1 ? ` Set on the source, so ${_allOf(n)} fonts show the same Link.` : ''),
         };
       };
       // A field's input against the value it opened with. No recorded value counts as changed, so a
@@ -36306,7 +36319,7 @@ require(['vs/editor/editor.main'], function () {
         if (!/^https?:\/\//i.test(url)) return;
         _sfCaptureOpen = true;
         window._sfCaptureTarget = 'import';
-        try { await window.electronAPI.linkCaptureOpen({ url, fonts: _sfCaptureFontList() }); } catch {}
+        try { await window.electronAPI.linkCaptureOpen({ url, fonts: _sfCaptureFontList(), allLabel: 'All checked fonts' }); } catch {}
       });
       // The fonts the Demo submenu offers: the checked ones, in order. Re-sent as rows are ticked,
       // unticked or renamed while the browser is open.
@@ -43294,7 +43307,7 @@ require(['vs/editor/editor.main'], function () {
         window.electronAPI.openExternal(_sfDetailEdit.vendorWebsite);
       });
       // ── Open in app browser from the font and source windows [B-521] ──────────────────
-      // Right-click the Website chip. Website is the creator's, so what is captured is source data:
+      // Right-click the Website or Link chip. Both are the source's, so what is captured is source data:
       // a Link goes on the source, a PDF becomes the source's proof of purchase, and a Demo goes on
       // one of the fonts listed under "Fonts from this source" (the font opened from comes first).
       // Each save commits as it lands, as every other change in these windows does.
@@ -43313,6 +43326,9 @@ require(['vs/editor/editor.main'], function () {
       for (const [el, ctx] of [
         [_sfEntryDetailEls.websiteDisplay, () => _sfDetailEdit && { url: _sfDetailEdit.vendorWebsite, uuid: _sfDetailSourceUuid(), first: _sfDetailOriginalName }],
         [_sfSourceDetailEls.websiteDisplay, () => _sfSourceEdit && { url: _sfSourceEdit.vendorWebsite, uuid: _sfSourceOriginalUuid, first: null }],
+        // The Link is source data too, and usually the page the Demo videos are on.
+        [_sfEntryDetailEls.linkDisplay, () => _sfDetailEdit && { url: _sfDetailEdit.linkUrl, uuid: _sfDetailSourceUuid(), first: _sfDetailOriginalName }],
+        [_sfSourceDetailEls.linkDisplay, () => _sfSourceEdit && { url: _sfSourceEdit.linkUrl, uuid: _sfSourceOriginalUuid, first: null }],
       ]) {
         el?.addEventListener('contextmenu', (e) => {
           const c = ctx();
@@ -46053,7 +46069,7 @@ require(['vs/editor/editor.main'], function () {
           `<strong>${_sfEscape(fonts)}${_sfEscape(srcs)}</strong> removed.`,
           (exp.length === 1
             ? `Your copy of <strong>${_sfEscape(label || one.label || 'the source')}</strong> is saved`
-            : `Your copies of all ${exp.length} sources are saved`)
+            : `Your copies of ${_allOf(exp.length)} sources are saved`)
             + (dir ? ` to ${_sfPathLinkHtml(dir)}` : '')
             + (bytes ? ` (${_sfEscape(fmtB(bytes))})` : '') + '.',
           // ONE SENTENCE, NOT TWO. [2026-09-24] My first cut added the customized-font fact as
@@ -46460,7 +46476,7 @@ require(['vs/editor/editor.main'], function () {
             // something was kept. Say what matched, then what did not and why.
             lines.push(`${n(total)} of ${n(total + kept.length)} shared ${plural(total + kept.length, 'track')} already matched.`);
           } else {
-            lines.push(`All ${n(total)} shared ${plural(total, 'track')} were already there.`);
+            lines.push(`${_allOf(total, { cap: true, shown: n(total) })} shared ${plural(total, 'track')} were already there.`);
           }
           if (kept.length) {
             // NO LIST OF NAMES. The user ticked Skip on those exact rows a moment ago, so
@@ -48905,7 +48921,7 @@ require(['vs/editor/editor.main'], function () {
         if (usedBy > 1) {
           const choice = await promptConfirm({
             title: 'Remove proof of purchase',
-            message: `This file is attached to ${usedBy} sources. Remove it from just this source, or from all ${usedBy}?`,
+            message: `This file is attached to ${usedBy} sources. Remove it from just this source, or from ${_allOf(usedBy)}?`,
             middleText: 'This source only',
             confirmText: 'Remove from all',
             confirmKind: 'danger',
@@ -49258,7 +49274,7 @@ require(['vs/editor/editor.main'], function () {
           const files = window._sfSharedTracksFiles || [];
           const msg = files.length === 0
             ? 'Remove the Shared Tracks folder from JMT Studio? The folder on your SD card is NOT touched.'
-            : `Remove the Shared Tracks folder and all ${files.length} track${files.length === 1 ? '' : 's'} inside? The folder on your SD card is NOT touched.`;
+            : `Remove the Shared Tracks folder and ${files.length === 1 ? 'the 1 track' : `${_allOf(files.length)} tracks`} inside? The folder on your SD card is NOT touched.`;
           const ok = await promptConfirm({
             title: 'Delete Shared Tracks folder',
             message: msg,
@@ -50484,7 +50500,7 @@ require(['vs/editor/editor.main'], function () {
               // contradiction caught in the old collision wording.
               if (!_wrote.length) {
                 const _allSame = _skipped.length && _skipped.every((x) => x.mode === 'identical');
-                const _what = _many ? `All ${_n} fonts` : fontName;
+                const _what = _many ? `${_allOf(_n, { cap: true })} fonts` : fontName;
                 await _sfCompletionNotice({
                   title: 'Nothing exported',
                   message: _allSame
@@ -60585,7 +60601,7 @@ function _getFreshFieldRange(fieldName) {
           ? `${name} follows ${_bladeDisplayName(arr, followTargetOf)}`
           : `${_bladeDisplayName(arr, followersOf[0])} follows ${name}`;
         hereFollowNote = `${pair}. Deleting it removes that relationship here or in `
-                       + `all ${collapses.length}.`;
+                       + `${_allOf(collapses.length)}.`;
       }
 
       // WHAT "ALL N" DOES BEYOND THE STYLES, and it is the half that is invisible: the named blade
@@ -60609,7 +60625,7 @@ function _getFreshFieldRange(fieldName) {
             + `${authored === 1 ? 'has' : 'have'} a style on ${name}.`
           : null,
         removes.length
-          ? `All ${collapses.length} Presets removes ${removes.join(' and ')}.`
+          ? `${_allOf(collapses.length, { cap: true })} Presets removes ${removes.join(' and ')}.`
           : null,
         removes.length && hereEdit ? `This Preset removes only this style.` : null,
       ].filter(Boolean).join(' ');
@@ -60639,7 +60655,7 @@ function _getFreshFieldRange(fieldName) {
           // one operation on offer. (Unreachable today - see middleText below.)
           title: hereEdit
             ? `Delete this style, or the ${name} blade position?`
-            : `Delete ${name} from all ${collapses.length} presets?`,
+            : `Delete ${name} from ${_allOf(collapses.length)} presets?`,
           // Dropped 2026-08-27: "N presets have more blades than NUM_BLADES." Reported: "not sure
           // the value add here." Right - the red "4/2 BLADES" header on every over-count preset
           // already says they are invalid, and the confirm button already carries the count. It
@@ -60667,7 +60683,7 @@ function _getFreshFieldRange(fieldName) {
           // and the button repeats that count. It was also the only line implying
           // the correct presets were ever at risk, and the dialog never threatened
           // them, so it planted the doubt it was answering.
-          confirmText: `All ${collapses.length} Presets`,
+          confirmText: `${_allOf(collapses.length, { cap: true })} Presets`,
           confirmKind: 'danger',
           // Only offer "This Preset" when we actually know which one was clicked.
           // Unreachable today - the x only exists on an over-count preset, so hereEdit
@@ -61339,7 +61355,7 @@ function _getFreshFieldRange(fieldName) {
             // "from the same preset" trails the noun, so it reads as one particular preset rather
             // than each preset's own. Establishing the per-preset frame FIRST - "in each one" -
             // fixes it without a possessive that would give the preset ownership it has not got.
-            message: `All ${n} preset${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} a different style on ${follower}`
+            message: `${n === 1 ? 'The 1 preset has' : `${_allOf(n, { cap: true })} presets have`} a different style on ${follower}`
                    + (dAll ? `, including ${dAll} disabled` : '') + '. '
                    + (n === 1 ? `It will be replaced by that preset's ${target} style.`
                               : `In each one, ${follower} will be replaced by that preset's ${target} style.`)

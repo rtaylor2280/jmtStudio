@@ -401,6 +401,19 @@ function youtubeVideoId(u) {
     return m ? m[1] : null;
   } catch { return null; }
 }
+// A saved Link or Demo without a site's login-session parameters, which tie the address to the
+// person who copied it and stop working when the session ends. Everything else is kept. [B-521]
+const SESSION_PARAMS = new Set(['phpsessid', 'jsessionid', 'sid', 'sessionid', 'session_id']);
+function stripSessionParams(url) {
+  let u;
+  try { u = new URL(url); } catch { return url; }
+  u.pathname = u.pathname.replace(/;jsessionid=[^/;?#]*/ig, '');
+  for (const k of Array.from(u.searchParams.keys())) {
+    if (SESSION_PARAMS.has(k.toLowerCase())) u.searchParams.delete(k);
+  }
+  return u.toString().replace(/\?$/, '');
+}
+
 // A link that opens a YouTube video at a moment, and the moment as m:ss (h:mm:ss past an hour).
 function youtubeMoment(id, seconds) {
   const t = Math.max(0, Math.floor(seconds || 0));
@@ -409,4 +422,4 @@ function youtubeMoment(id, seconds) {
   return { label, url: `https://www.youtube.com/watch?v=${id}&t=${t}s` };
 }
 
-module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment };
+module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams };
