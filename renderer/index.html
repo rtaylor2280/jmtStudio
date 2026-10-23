@@ -4362,15 +4362,10 @@
   .styles-active-filter-remove:hover { color: #ff6464; }
   .styles-active-filter-clear { background: transparent; border: none; color: var(--c-text-faint); font-size: 0.68rem; cursor: pointer; padding: 0 4px; margin-left: 4px; text-decoration: underline; }
   .styles-active-filter-clear:hover { color: var(--jmt-blue); }
-  /* Effects filter — amber accent so it reads distinct from tag filters at a glance */
-  .styles-effect-filter-btn.has-active { color: #ffb046; border-color: rgba(255,176,70,0.45); }
-  .styles-effect-filter-badge { background: #ffb046; }
+  /* [B-286] Effects use the same blue as tags, as on Sound Fonts; an absent effect is the red
+     sf-effect-state-absent / sf-active-filter-effect-missing pair. */
   .style-effect-chip { cursor: pointer; }
-  .style-effect-chip.active { color: #ffb046; background: rgba(255,176,70,0.12); border-color: rgba(255,176,70,0.45); opacity: 1; }
-  .styles-active-effect-chip { display: inline-flex; align-items: center; gap: 2px; background: rgba(255,176,70,0.12); color: #ffb046; border: 1px solid rgba(255,176,70,0.45); border-radius: 3px; padding: 1px 4px 1px 6px; font-size: 0.7rem; }
-  .styles-active-effect-chip .styles-active-filter-remove { color: #ffb046; }
-  .styles-effect-dropdown-item.selected { color: #ffb046; background: rgba(255,176,70,0.08); }
-  .styles-effect-dropdown-item .styles-tag-dropdown-check { color: #ffb046; }
+  .style-effect-chip.active { color: var(--jmt-blue); background: rgba(0,130,255,0.1); border-color: rgba(0,130,255,0.35); opacity: 1; }
   .style-card-effects { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
   .style-effect-chip { font-size: 0.6rem; color: var(--c-text-muted); background: transparent; border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 0px 4px; white-space: nowrap; opacity: 0.7; }
   /* Style detail modal */
@@ -5478,6 +5473,17 @@
           <span id="styles-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
         </span>
         <span id="styles-search-count" class="styles-search-count"></span>
+        <!-- [B-286] Sort first and apart, as on Sound Fonts: it orders everything, the filters pick
+             which. The button shows the current order. -->
+        <div class="styles-tag-filter-wrap">
+          <button id="btn-styles-sort" class="styles-tag-filter-btn" title="Sort order">
+            <span class="styles-tag-filter-icon">&#9662;</span> <span id="styles-sort-label">File order</span>
+          </button>
+          <div id="styles-sort-dropdown" class="styles-tag-dropdown" style="display:none">
+            <div id="styles-sort-dropdown-list"></div>
+          </div>
+        </div>
+        <div class="ui-divider"></div>
         <div class="styles-tag-filter-wrap">
           <button id="btn-styles-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
             <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="styles-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
@@ -5494,6 +5500,13 @@
             <div id="styles-effect-dropdown-list"></div>
           </div>
         </div>
+        <!-- [B-286] In use / Not in use, as on Sound Fonts: the inverse shows once either is on. -->
+        <button id="btn-styles-in-use-filter" class="styles-tag-filter-btn" title="Only styles used by the open config" style="display:none">
+          In use<span id="styles-in-use-count" class="styles-tag-filter-badge" style="display:none">0</span>
+        </button>
+        <button id="btn-styles-not-in-use-filter" class="styles-tag-filter-btn" title="Only styles NOT used by the open config" style="display:none">
+          Not in use<span id="styles-not-in-use-count" class="styles-tag-filter-badge sf-badge-muted" style="display:none">0</span>
+        </button>
         <button id="btn-add-style" class="btn-blue" style="margin-left:auto;flex-shrink:0">&#43; Add Style</button>
       </div>
       <div id="styles-active-filters" class="styles-active-filters" style="display:none"></div>
@@ -20383,6 +20396,9 @@ let _detailUrl             = '';
 let _detailNotes           = '';
 let _activeFilterTags      = new Set();
 let _activeFilterEffects   = new Set();
+// [B-286] Effects a style must NOT have, set by right-click, as on Sound Fonts. Setting one polarity
+// of an effect clears the other.
+let _activeFilterEffectsMissing = new Set();
 
 // ── Add Style helpers ──────────────────────────────────
 
@@ -21314,6 +21330,8 @@ function _stylesClearAllFilters() {
   if (sc) sc.style.display = 'none';
   _activeFilterTags    = new Set();
   _activeFilterEffects = new Set();
+  _activeFilterEffectsMissing = new Set();
+  _stylesInUseFilter   = '';
   _applyStylesSearch();
 }
 
@@ -21321,30 +21339,37 @@ function _applyStylesSearch() {
   const q     = (document.getElementById('styles-search')?.value || '').toLowerCase();
   const cards = document.querySelectorAll('#styles-visual-list .style-card');
   let shown   = 0;
+  let inUseCount = 0, notInUseCount = 0;
   cards.forEach(card => {
     const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
-    let matchesTags = true;
-    if (_activeFilterTags.size) {
-      for (const tag of _activeFilterTags) {
-        if (!card.querySelector(`.style-tag[data-tag="${CSS.escape(tag)}"]`)) {
-          matchesTags = false;
-          break;
-        }
-      }
-    }
-    let matchesEffects = true;
-    if (matchesTags && _activeFilterEffects.size) {
-      for (const fx of _activeFilterEffects) {
-        if (!card.querySelector(`.style-effect-chip[data-effect="${CSS.escape(fx)}"]`)) {
-          matchesEffects = false;
-          break;
-        }
-      }
-    }
-    const vis = matchesQ && matchesTags && matchesEffects;
+    const matchesTags = _styleInTagScope(card);
+    const matchesEffects = matchesTags && _styleInEffectScope(card);
+    const inUse = card.classList.contains('in-use');
+    const others = matchesQ && matchesTags && matchesEffects;
+    if (others) { if (inUse) inUseCount++; else notInUseCount++; }
+    const matchesInUse = !_stylesInUseFilter || (_stylesInUseFilter === 'in' ? inUse : !inUse);
+    const vis = others && matchesInUse;
     card.style.display = vis ? '' : 'none';
     if (vis) shown++;
   });
+  // [B-286] Counts follow the other filters, as on Sound Fonts. In use shows while anything is in
+  // use or the filter is on; Not in use only once either polarity is on.
+  {
+    const inBtn = document.getElementById('btn-styles-in-use-filter');
+    const notBtn = document.getElementById('btn-styles-not-in-use-filter');
+    const inBadge = document.getElementById('styles-in-use-count');
+    const notBadge = document.getElementById('styles-not-in-use-count');
+    if (inBtn) {
+      inBtn.style.display = (inUseCount > 0 || !!_stylesInUseFilter) ? '' : 'none';
+      inBtn.classList.toggle('active', _stylesInUseFilter === 'in');
+    }
+    if (inBadge) { inBadge.textContent = String(inUseCount); inBadge.style.display = inUseCount > 0 ? '' : 'none'; }
+    if (notBtn) {
+      notBtn.style.display = _stylesInUseFilter ? '' : 'none';
+      notBtn.classList.toggle('active', _stylesInUseFilter === 'not');
+    }
+    if (notBadge) { notBadge.textContent = String(notInUseCount); notBadge.style.display = ''; }
+  }
   // Update active state on all tag chips across all cards
   document.querySelectorAll('.style-tag').forEach(el => {
     el.classList.toggle('active', _activeFilterTags.has(el.dataset.tag));
@@ -21363,7 +21388,8 @@ function _applyStylesSearch() {
   // this was originally reported. Matches the Sound Fonts list, which already had
   // all three cases; this side had none of them.
   const listEl     = document.getElementById('styles-visual-list');
-  const isFiltering = !!q || _activeFilterTags.size > 0 || _activeFilterEffects.size > 0;
+  const isFiltering = !!q || _activeFilterTags.size > 0 || _activeFilterEffects.size > 0
+    || _activeFilterEffectsMissing.size > 0 || !!_stylesInUseFilter;
   const autoClear  = _stylesAutoClearOnEmpty;
   _stylesAutoClearOnEmpty = false;
   if (listEl) {
@@ -21396,17 +21422,35 @@ function _applyStylesSearch() {
 // Used by both facet dropdowns so each one's available options narrow with every
 // other filter as well as its own. Self-application is intentional: it prevents
 // dead-end picks (a tag or effect that would yield zero results never appears).
-function _matchingCardsForFacet() {
+// [B-286] The Sound Fonts rule [B-305/B-382]: within a facet the picks OR (a style with ANY picked
+// tag, ANY picked effect), facets AND together, and an absent effect excludes.
+function _styleHas(card, sel, attr, value) {
+  return !!card.querySelector(`${sel}[${attr}="${CSS.escape(value)}"]`);
+}
+function _styleInTagScope(card) {
+  if (!_activeFilterTags.size) return true;
+  for (const tag of _activeFilterTags) if (_styleHas(card, '.style-tag', 'data-tag', tag)) return true;
+  return false;
+}
+function _styleInEffectScope(card) {
+  if (_activeFilterEffects.size) {
+    let any = false;
+    for (const fx of _activeFilterEffects) if (_styleHas(card, '.style-effect-chip', 'data-effect', fx)) { any = true; break; }
+    if (!any) return false;
+  }
+  for (const fx of _activeFilterEffectsMissing) if (_styleHas(card, '.style-effect-chip', 'data-effect', fx)) return false;
+  return true;
+}
+// The cards a facet's dropdown counts over: every filter EXCEPT that facet's own, so a second pick is
+// always on offer (picks in one facet widen, they do not narrow).
+function _matchingCardsForFacet(own) {
   const q = (document.getElementById('styles-search')?.value || '').toLowerCase();
   const all = Array.from(document.querySelectorAll('#styles-visual-list .style-card'));
   return all.filter(card => {
     if (q && !(card.dataset.searchBlob || '').includes(q)) return false;
-    for (const tag of _activeFilterTags) {
-      if (!card.querySelector(`.style-tag[data-tag="${CSS.escape(tag)}"]`)) return false;
-    }
-    for (const fx of _activeFilterEffects) {
-      if (!card.querySelector(`.style-effect-chip[data-effect="${CSS.escape(fx)}"]`)) return false;
-    }
+    if (own !== 'tag' && !_styleInTagScope(card)) return false;
+    if (own !== 'effect' && !_styleInEffectScope(card)) return false;
+    if (_stylesInUseFilter && card.classList.contains('in-use') !== (_stylesInUseFilter === 'in')) return false;
     return true;
   });
 }
@@ -21415,7 +21459,7 @@ function _matchingCardsForFacet() {
 // Counts = how many of those visible cards have each tag.
 function _computeAvailableTagsWithCounts() {
   const counts = new Map();
-  _matchingCardsForFacet().forEach(card => {
+  _matchingCardsForFacet('tag').forEach(card => {
     card.querySelectorAll('.style-tag').forEach(el => {
       const tag = el.dataset.tag;
       counts.set(tag, (counts.get(tag) || 0) + 1);
@@ -21429,16 +21473,18 @@ function _computeAvailableTagsWithCounts() {
 // Same shape as _computeAvailableTagsWithCounts, but for the effect facet.
 function _computeAvailableEffectsWithCounts() {
   const counts = new Map();
-  _matchingCardsForFacet().forEach(card => {
+  _matchingCardsForFacet('effect').forEach(card => {
     card.querySelectorAll('.style-effect-chip').forEach(el => {
       const fx = el.dataset.effect;
       if (!fx) return;
       counts.set(fx, (counts.get(fx) || 0) + 1);
     });
   });
+  // An effect set either way always has a row, so it can be turned off from here.
+  for (const fx of [..._activeFilterEffects, ..._activeFilterEffectsMissing]) if (!counts.has(fx)) counts.set(fx, 0);
+  const on = (fx) => _activeFilterEffects.has(fx) || _activeFilterEffectsMissing.has(fx);
   return Array.from(counts.entries()).sort((a, b) =>
-    _facetSortCompare(a[0], a[1], _activeFilterEffects.has(a[0]),
-                      b[0], b[1], _activeFilterEffects.has(b[0])));   // [B-285]
+    _facetSortCompare(a[0], a[1], on(a[0]), b[0], b[1], on(b[0])));   // [B-285]
 }
 
 // ── Facet sort: ONE rule for all five dropdowns ───────────────────────────
@@ -21529,7 +21575,7 @@ function _renderTagFilterDropdown() {
       if (_activeFilterTags.has(tag)) _activeFilterTags.delete(tag);
       else _activeFilterTags.add(tag);
       _applyStylesSearch();
-      _closeTagFilterDropdown();
+      _renderTagFilterDropdown();   // stays open: a multi-select, as on Sound Fonts
     });
   });
 }
@@ -21545,92 +21591,151 @@ function _renderActiveFilterChips() {
     else tagBadge.style.display = 'none';
   }
   if (tagBtn) tagBtn.classList.toggle('has-active', _activeFilterTags.size > 0);
+  const fxCount = _activeFilterEffects.size + _activeFilterEffectsMissing.size;
   if (fxBadge) {
-    if (_activeFilterEffects.size) { fxBadge.textContent = _activeFilterEffects.size; fxBadge.style.display = ''; }
+    if (fxCount) { fxBadge.textContent = fxCount; fxBadge.style.display = ''; }
     else fxBadge.style.display = 'none';
   }
-  if (fxBtn) fxBtn.classList.toggle('has-active', _activeFilterEffects.size > 0);
+  if (fxBtn) fxBtn.classList.toggle('has-active', fxCount > 0);
   if (!strip) return;
-  // Search counts as a filter here, same as on the Sound Fonts side (B-156,
-  // 2026-08-17). A query typed minutes ago is otherwise invisible state: the list
-  // is short, nothing says why, and the only clue is a count in the corner.
+  // Search counts as a filter here, same as on the Sound Fonts side (B-156).
   const searchQ = (document.getElementById('styles-search')?.value || '').trim();
-  const totalActive = _activeFilterTags.size + _activeFilterEffects.size + (searchQ ? 1 : 0);
+  const totalActive = _activeFilterTags.size + _activeFilterEffects.size + _activeFilterEffectsMissing.size
+    + (searchQ ? 1 : 0) + (_stylesInUseFilter ? 1 : 0);
   if (!totalActive) {
     strip.style.display = 'none';
     strip.innerHTML = '';
     return;
   }
   strip.style.display = '';
-  const tagChips = Array.from(_activeFilterTags).map(tag =>
-    `<span class="styles-active-filter-chip" data-tag="${tag}">${tag}`
-    + `<button class="styles-active-filter-remove" title="Remove tag filter">&#10005;</button>`
-    + `</span>`
-  ).join('');
-  const fxChips = Array.from(_activeFilterEffects).map(fx =>
-    `<span class="styles-active-effect-chip" data-effect="${fx}">${fx}`
-    + `<button class="styles-active-filter-remove" title="Remove effect filter">&#10005;</button>`
-    + `</span>`
-  ).join('');
-  // Shown with any active filter, the same as the Sound Fonts bar (2026-10-21).
-  const clearAll = totalActive >= 1
-    ? `<button class="styles-active-filter-clear" id="styles-clear-all-filters">Clear all</button>` : '';
-  strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>${tagChips}${fxChips}${clearAll}`;
-  // The search chip is built as DOM rather than interpolated into the innerHTML
-  // above: the query is user-typed, and this function has no escape helper in
-  // scope. textContent removes the question entirely. Inserted directly after the
-  // label so it reads first, matching the Sound Fonts order.
-  if (searchQ) {
-    const sChip = document.createElement('span');
-    sChip.className = 'styles-active-filter-chip';
-    sChip.dataset.search = '1';
-    sChip.textContent = '“' + searchQ + '”';
-    const sRm = document.createElement('button');
-    sRm.className = 'styles-active-filter-remove';
-    sRm.title = 'Clear search';
-    sRm.innerHTML = '&#10005;';
-    sRm.addEventListener('click', e => {
+  // [B-286] The Sound Fonts row [B-305/B-382]: chips grouped by facet, each group labelled and joined
+  // the way its predicate joins (tags OR, effects OR, without AND), groups joined by "and", and the
+  // In use flag a plain chip after them. Each chip names what its ✕ removes.
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const chip = (text, kind, value, extra = '') =>
+    `<span class="styles-active-filter-chip${extra}" data-remove="${kind}" data-value="${esc(value)}">${esc(text)}`
+    + `<button class="styles-active-filter-remove" title="Remove">&#10005;</button></span>`;
+  const group = (label, chips, joiner) => chips.length
+    ? `<span class="sf-filter-group" data-facet="${label}"><span class="sf-filter-group-label">${label}</span>`
+      + `<span class="sf-filter-group-chips" data-join="${joiner}">${chips.join('')}</span></span>`
+    : '';
+  const groups = [
+    group('search',  searchQ ? [chip('“' + searchQ + '”', 'search', '')] : [],                              'or'),
+    group('tag',     Array.from(_activeFilterTags).map(t => chip(t, 'tag', t)),                               'or'),
+    group('effect',  Array.from(_activeFilterEffects).map(fx => chip(fx, 'effect', fx)),                      'or'),
+    group('without', Array.from(_activeFilterEffectsMissing).map(fx =>
+      chip(fx, 'without', fx, ' sf-active-filter-effect-missing')),                                           'and'),
+  ].filter(Boolean);
+  const flags = _stylesInUseFilter
+    ? chip(_stylesInUseFilter === 'in' ? 'In use' : 'Not in use', 'in-use', '', ' sf-active-filter-in-use')
+    : '';
+  strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>`
+    + groups.join('<span class="sf-filter-join">and</span>')
+    + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
+    + flags
+    + `<button class="styles-active-filter-clear" id="styles-clear-all-filters">Clear all</button>`;
+  strip.querySelectorAll('[data-remove] .styles-active-filter-remove').forEach(btn => {
+    btn.addEventListener('click', e => {
       e.stopPropagation();
-      const si = document.getElementById('styles-search');
-      if (si) si.value = '';
-      const sc = document.getElementById('styles-search-clear');
-      if (sc) sc.style.display = 'none';
+      const c = btn.closest('[data-remove]');
+      const v = c.dataset.value;
+      switch (c.dataset.remove) {
+        case 'search': {
+          const si = document.getElementById('styles-search');
+          if (si) si.value = '';
+          const sc = document.getElementById('styles-search-clear');
+          if (sc) sc.style.display = 'none';
+          break;
+        }
+        case 'tag':     _activeFilterTags.delete(v); break;
+        case 'effect':  _activeFilterEffects.delete(v); break;
+        case 'without': _activeFilterEffectsMissing.delete(v); break;
+        case 'in-use':  _stylesInUseFilter = ''; break;
+      }
       _applyStylesSearch();
-    });
-    sChip.appendChild(sRm);
-    strip.querySelector('.styles-active-filters-label')?.after(sChip);
-  }
-  strip.querySelectorAll('.styles-active-filter-chip').forEach(chip => {
-    chip.querySelector('.styles-active-filter-remove').addEventListener('click', e => {
-      e.stopPropagation();
-      _activeFilterTags.delete(chip.dataset.tag);
-      _applyStylesSearch();
-      const dd = document.getElementById('styles-tag-dropdown');
-      if (dd && dd.style.display !== 'none') _renderTagFilterDropdown();
-    });
-  });
-  strip.querySelectorAll('.styles-active-effect-chip').forEach(chip => {
-    chip.querySelector('.styles-active-filter-remove').addEventListener('click', e => {
-      e.stopPropagation();
-      _activeFilterEffects.delete(chip.dataset.effect);
-      _applyStylesSearch();
-      const dd = document.getElementById('styles-effect-dropdown');
-      if (dd && dd.style.display !== 'none') _renderEffectFilterDropdown();
+      _refreshOpenFacetDropdowns();
     });
   });
-  const clearBtn = document.getElementById('styles-clear-all-filters');
-  if (clearBtn) {
-    clearBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      _activeFilterTags.clear();
-      _activeFilterEffects.clear();
-      _applyStylesSearch();
-      const tagDd = document.getElementById('styles-tag-dropdown');
-      if (tagDd && tagDd.style.display !== 'none') _renderTagFilterDropdown();
-      const fxDd = document.getElementById('styles-effect-dropdown');
-      if (fxDd && fxDd.style.display !== 'none') _renderEffectFilterDropdown();
-    });
+  document.getElementById('styles-clear-all-filters')?.addEventListener('click', e => {
+    e.stopPropagation();
+    // Everything, search included: the same clear as the no-match link.
+    _stylesClearAllFilters();
+    _refreshOpenFacetDropdowns();
+  });
+}
+
+// ── [B-286] Sort and In use, as on the Sound Fonts toolbar ────────────────────────────────────
+// A style carries no dates or size, only what my_styles.h says, so the orders are the file's own and
+// by name. The active row carries the direction and clicking it flips; picking closes the menu.
+let _stylesInUseFilter = '';   // '' | 'in' | 'not'
+let _stylesSort = { key: 'file', dir: 'asc' };
+const _STYLES_SORTS = [
+  { key: 'file', label: 'File order' },
+  { key: 'name', label: 'Name', asc: 'A–Z', desc: 'Z–A' },
+];
+try {
+  window.electronAPI.getSetting('styleLibrarySort', null).then(v => {
+    if (v && _STYLES_SORTS.some(s => s.key === v.key)) {
+      _stylesSort = { key: v.key, dir: v.dir === 'desc' ? 'desc' : 'asc' };
+      _syncStylesSortLabel();
+      if (_stylesSort.key !== 'file' && typeof _buildStylesVisual === 'function' && _stylesEditorInstance) _buildStylesVisual();
+    }
+  }).catch(() => {});
+} catch {}
+function _stylesSortLabel() {
+  if (_stylesSort.key === 'file') return 'File order';
+  return `Name ${_stylesSort.dir === 'asc' ? 'A–Z' : 'Z–A'}`;
+}
+function _syncStylesSortLabel() {
+  const l = document.getElementById('styles-sort-label');
+  if (l) l.textContent = _stylesSortLabel();
+}
+let _sortDropdownOutsideHandler = null;
+function _closeStylesSortDropdown() {
+  const dd = document.getElementById('styles-sort-dropdown');
+  if (dd) dd.style.display = 'none';
+  if (_sortDropdownOutsideHandler) {
+    document.removeEventListener('mousedown', _sortDropdownOutsideHandler, true);
+    _sortDropdownOutsideHandler = null;
   }
+}
+function _renderStylesSortDropdown() {
+  const list = document.getElementById('styles-sort-dropdown-list');
+  if (!list) return;
+  list.innerHTML = _STYLES_SORTS.map(d => {
+    const sel = d.key === _stylesSort.key;
+    const dirLabel = sel && d.asc ? (_stylesSort.dir === 'asc' ? d.asc : d.desc) : '';
+    return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-sort-key="${d.key}">
+      <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+      <span class="styles-tag-dropdown-name">${d.label}</span>
+      <span class="styles-tag-dropdown-count">${dirLabel}</span>
+    </button>`;
+  }).join('');
+  list.querySelectorAll('[data-sort-key]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.sortKey;
+      if (_stylesSort.key === key && key === 'name') _stylesSort.dir = _stylesSort.dir === 'asc' ? 'desc' : 'asc';
+      else _stylesSort = { key, dir: 'asc' };
+      try { window.electronAPI.setSetting('styleLibrarySort', _stylesSort); } catch {}
+      _syncStylesSortLabel();
+      _closeStylesSortDropdown();
+      _buildStylesVisual();
+    });
+  });
+}
+function _toggleStylesSortDropdown() {
+  const dd = document.getElementById('styles-sort-dropdown');
+  if (!dd) return;
+  if (dd.style.display !== 'none' && dd.style.display) { _closeStylesSortDropdown(); return; }
+  _renderStylesSortDropdown();
+  dd.style.display = 'block';
+  _sortDropdownOutsideHandler = (ev) => {
+    const b = document.getElementById('btn-styles-sort');
+    if (dd.contains(ev.target) || (b && b.contains(ev.target))) return;
+    _closeStylesSortDropdown();
+  };
+  document.addEventListener('mousedown', _sortDropdownOutsideHandler, true);
 }
 
 let _tagDropdownOutsideHandler = null;
@@ -21670,23 +21775,35 @@ function _renderEffectFilterDropdown() {
     list.innerHTML = '<div class="styles-tag-dropdown-empty">No effects available</div>';
     return;
   }
+  const tip = 'Left click: filter for styles that have this effect.\nRight click: filter for styles that don\'t have this effect.';
   list.innerHTML = _facetSortBarHtml() + fx.map(([effect, count]) => {
-    const sel = _activeFilterEffects.has(effect);
-    return `<button class="styles-tag-dropdown-item styles-effect-dropdown-item${sel ? ' selected' : ''}" data-effect="${effect}">`
-      + `<span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>`
+    const present = _activeFilterEffects.has(effect);
+    const absent  = _activeFilterEffectsMissing.has(effect);
+    const state   = present ? ' selected sf-effect-state-present' : absent ? ' selected sf-effect-state-absent' : '';
+    return `<button class="styles-tag-dropdown-item styles-effect-dropdown-item${state}" data-effect="${effect}" title="${tip}">`
+      + `<span class="styles-tag-dropdown-check">${present ? '&#10003;' : absent ? '&#10005;' : ''}</span>`
       + `<span class="styles-tag-dropdown-name">${effect}</span>`
       + `<span class="styles-tag-dropdown-count">${count}</span>`
       + `</button>`;
   }).join('');
   _wireFacetSortBar(list, _renderEffectFilterDropdown);   // [B-285]
+  // Left click toggles "has it", right click toggles "does not have it"; either clears the other.
+  // Both stay open, as on Sound Fonts.
+  const flip = (effect, on, off) => {
+    if (on.has(effect)) on.delete(effect);
+    else { off.delete(effect); on.add(effect); }
+    _applyStylesSearch();
+    _renderEffectFilterDropdown();
+  };
   list.querySelectorAll('.styles-effect-dropdown-item').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      const effect = btn.dataset.effect;
-      if (_activeFilterEffects.has(effect)) _activeFilterEffects.delete(effect);
-      else _activeFilterEffects.add(effect);
-      _applyStylesSearch();
-      _closeEffectFilterDropdown();
+      flip(btn.dataset.effect, _activeFilterEffects, _activeFilterEffectsMissing);
+    });
+    btn.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      flip(btn.dataset.effect, _activeFilterEffectsMissing, _activeFilterEffects);
     });
   });
 }
@@ -22579,7 +22696,12 @@ function _buildStylesVisual() {
   );
 
   list.innerHTML = '';
-  fullStyles.forEach(entry => {
+  // [B-286] File order is my_styles.h's own; Name sorts on the style name.
+  const ordered = _stylesSort.key === 'name'
+    ? [...fullStyles].sort((a, b) => (_stylesSort.dir === 'asc' ? 1 : -1) * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    : fullStyles;
+  _syncStylesSortLabel();
+  ordered.forEach(entry => {
     const { name, meta } = entry;
     const card = document.createElement('div');
     card.className      = 'style-card';
@@ -22657,7 +22779,7 @@ function _buildStylesVisual() {
         const fx = el.dataset.effect;
         if (!fx) return;
         if (_activeFilterEffects.has(fx)) _activeFilterEffects.delete(fx);
-        else _activeFilterEffects.add(fx);
+        else { _activeFilterEffectsMissing.delete(fx); _activeFilterEffects.add(fx); }
         _applyStylesSearch();
         const dd = document.getElementById('styles-effect-dropdown');
         if (dd && dd.style.display !== 'none') _renderEffectFilterDropdown();
@@ -24770,6 +24892,24 @@ document.getElementById('styles-search-clear')?.addEventListener('click', () => 
   _applyStylesSearch();
   _refreshOpenFacetDropdowns();
   inp.focus();
+});
+
+// [B-286] Sort, and the In use pair (clicking the active one turns it off, the other switches).
+document.getElementById('btn-styles-sort')?.addEventListener('click', e => {
+  e.stopPropagation();
+  _toggleStylesSortDropdown();
+});
+document.getElementById('btn-styles-in-use-filter')?.addEventListener('click', e => {
+  e.stopPropagation();
+  _stylesInUseFilter = _stylesInUseFilter === 'in' ? '' : 'in';
+  _applyStylesSearch();
+  _refreshOpenFacetDropdowns();
+});
+document.getElementById('btn-styles-not-in-use-filter')?.addEventListener('click', e => {
+  e.stopPropagation();
+  _stylesInUseFilter = _stylesInUseFilter === 'not' ? '' : 'not';
+  _applyStylesSearch();
+  _refreshOpenFacetDropdowns();
 });
 
 // Facet dropdown buttons
