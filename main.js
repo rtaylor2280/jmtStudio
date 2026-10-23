@@ -2263,6 +2263,15 @@ ipcMain.handle('entries:list', () => {
 // callers fire it freely and the first one wins. [B-213]
 // Does this entry differ from the source archive it came from? [B-304]
 // Cheap: a diff of two manifests already on disk, nothing extracted or re-hashed.
+// [B-313] Each file's standing against the source (customized, removed, missing), and putting one back.
+ipcMain.handle('entries:fileStates', (_, { name } = {}) => {
+  try { return soundFontEntries.getEntryFileStates(app.getPath('userData'), name); }
+  catch (err) { return { ok: false, known: false, files: [], error: String(err && err.message || err) }; }
+});
+ipcMain.handle('entries:restoreFile', (_, { name, path: rel } = {}) => {
+  try { return soundFontEntries.restoreEntryFileFromSource(app.getPath('userData'), name, rel); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
 ipcMain.handle('entries:customization', (_, { name } = {}) => {
   try { return soundFontEntries.getEntryCustomization(app.getPath('userData'), name); }
   catch (err) { return { ok: false, known: false, error: String(err && err.message || err) }; }

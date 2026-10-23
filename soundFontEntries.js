@@ -2092,6 +2092,23 @@ function recomputeEntryContentHash(userData, entryName) {
   let meta;
   try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
   catch { return null; }
+  // [B-313] Every rebuild of the record passes here, so this is where a lost file is noticed before
+  // the rebuild absorbs it: a file the CLEAN record lists that is not on disk was not removed by the
+  // app (an app removal marks the font dirty first). Kept on meta.missingFiles, written below.
+  if (!meta.contentHashDirty && meta.entryUuid) {
+    try {
+      const { readFileHashManifest } = require('./soundFontFileHash');
+      const prev = readFileHashManifest(fileHashManifestPath(userData, 'entries', meta.entryUuid));
+      if (prev && Array.isArray(prev.records) && (!prev.contentHash || prev.contentHash === meta.contentHash)) {
+        const missing = new Set(Array.isArray(meta.missingFiles) ? meta.missingFiles : []);
+        for (const r of prev.records) {
+          const rel = String((r && r.relPath) || '');
+          if (rel && r.fileHash !== '<empty>' && !fs.existsSync(path.join(entryDir, rel))) missing.add(rel);
+        }
+        if (missing.size) meta.missingFiles = [...missing].sort();
+      }
+    } catch {}
+  }
   // One walk yields the per-file records; fold them for the aggregate AND persist them
   // as the entry's LIVE manifest in the central store, so meta.contentHash and the
   // manifest stay in step and no second read is added. (hashRecords over the unfiltered
@@ -2413,6 +2430,123 @@ function resolveEntryEffectsDirty(userData, entryName) {
 // could not tell — a missing manifest, no candidatePath — and a caller must show
 // NOTHING in that case rather than guessing either way. An entry wrongly flagged as
 // the user's own work is worse than an unflagged one.
+// [B-313] Each file's standing against the font's source, for the Files list:
+//   added / changed / renamed  - customized (blue)
+//   removed                    - in the source, not in the font (grey; can be added back)
+//   missing                    - the font had it, it is no longer on disk and the app did not remove it
+//                                (red; can be added back when the source has it)
+// Missing files are noticed where the record is rebuilt (recomputeEntryContentHash), before the rebuild
+// absorbs them, and kept on meta.missingFiles until the file is back or added back.
+// Returns { ok, known, files: [{ path, state, from? , inSource }] }; known:false means no source to
+// compare with, and the caller shows no states.
+function getEntryFileStates(userData, entryName) {
+  const { readFileHashManifest } = require('./soundFontFileHash');
+  const root = path.join(entriesRoot(userData), entryName);
+  const metaPath = path.join(root, 'meta.json');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { return { ok: false, known: false, files: [] }; }
+  // The refresh notes lost files (recomputeEntryContentHash); run it first so this reads its answer.
+  try { getEntryContentHash(userData, entryName); } catch {}
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { return { ok: false, known: false, files: [] }; }
+  const missing = new Set(Array.isArray(meta.missingFiles) ? meta.missingFiles : []);
+  // A file that came back, by any route, is no longer missing.
+  for (const rel of [...missing]) if (fs.existsSync(path.join(root, rel))) missing.delete(rel);
+  const before = JSON.stringify(Array.isArray(meta.missingFiles) ? meta.missingFiles : []);
+  const after = [...missing].sort();
+  if (JSON.stringify(after) !== before) {
+    try {
+      const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      if (after.length) m.missingFiles = after; else delete m.missingFiles;
+      fs.writeFileSync(metaPath, JSON.stringify(m, null, 2));
+    } catch {}
+  }
+  // The refresh, and the Customized stamp, as every other view sees them.
+  const cust = getEntryCustomization(userData, entryName);
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { return { ok: false, known: false, files: [] }; }
+  const files = [];
+  const srcFile = (key) => meta.sourceUuid
+    ? path.join(userData, 'soundFonts', 'sources', meta.sourceUuid, 'source', ...(meta.candidatePath ? [meta.candidatePath] : []), key)
+    : null;
+  const inSource = (key) => { const p = srcFile(key); return !!(p && fs.existsSync(p)); };
+  if (!cust || !cust.known) {
+    for (const rel of after) files.push({ path: rel, state: 'missing', inSource: inSource(rel) });
+    return { ok: true, known: false, files };
+  }
+  const em = readFileHashManifest(fileHashManifestPath(userData, 'entries', meta.entryUuid));
+  const sDir = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid);
+  const sm = readFileHashManifest(path.join(sDir, '.jmt-source-manifest.json'))
+    || readFileHashManifest(fileHashManifestPath(userData, 'sources', meta.sourceUuid));
+  if (!em || !sm || !Array.isArray(em.records) || !Array.isArray(sm.records)) return { ok: true, known: false, files };
+  const { diffAgainstSource } = require('./soundFontFileHash');
+  const d = diffAgainstSource(em.records, sm.records, meta.candidatePath);
+  if (!d.known) return { ok: true, known: false, files };
+  const pfx = meta.candidatePath ? meta.candidatePath + '/' : '';
+  const srcHash = new Map(sm.records.filter(r => r && String(r.relPath || '').startsWith(pfx))
+    .map(r => [String(r.relPath).slice(pfx.length), r.fileHash]));
+  const liveHash = new Map(em.records.map(r => [String((r && r.relPath) || ''), r && r.fileHash]));
+  // A rename is an added file whose bytes are a removed one's: shown once, under the new name.
+  const removedByHash = new Map();
+  for (const k of d.removedKeys) if (!missing.has(k)) {
+    const h = srcHash.get(k);
+    if (h && !removedByHash.has(h)) removedByHash.set(h, k);
+  }
+  const renamedFrom = new Set();
+  for (const k of d.addedKeys) {
+    const from = removedByHash.get(liveHash.get(k));
+    if (from && !renamedFrom.has(from)) { renamedFrom.add(from); files.push({ path: k, state: 'renamed', from }); }
+    else files.push({ path: k, state: 'added' });
+  }
+  for (const k of d.changedKeys) files.push({ path: k, state: 'changed' });
+  for (const k of d.removedKeys) {
+    if (missing.has(k) || renamedFrom.has(k)) continue;
+    files.push({ path: k, state: 'removed', inSource: inSource(k) });
+  }
+  for (const rel of after) files.push({ path: rel, state: 'missing', inSource: inSource(rel) });
+  // The source's folders (every folder above a file, and empty ones by their marker), so the list can
+  // tell a folder the source never had from one it did.
+  const sourceDirs = new Set();
+  for (const r of sm.records) {
+    const rp = String((r && r.relPath) || '');
+    if (!rp.startsWith(pfx)) continue;
+    const rel = rp.slice(pfx.length);
+    const parts = rel.split('/');
+    const upto = r.fileHash === '<empty>' ? parts.length : parts.length - 1;
+    for (let i = 1; i <= upto; i++) sourceDirs.add(parts.slice(0, i).join('/'));
+  }
+  return { ok: true, known: true, files, sourceDirs: [...sourceDirs] };
+}
+
+// [B-313] Put a file back from the font's source: the same file, linked as the font's other files
+// are, at the same place. Clears it from missingFiles.
+function restoreEntryFileFromSource(userData, entryName, relPath) {
+  const root = path.join(entriesRoot(userData), entryName);
+  const metaPath = path.join(root, 'meta.json');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { return { ok: false, error: 'Font not found' }; }
+  const rel = String(relPath || '').replace(/\\/g, '/');
+  if (!rel || rel.split('/').some(s => s === '..' || s === '')) return { ok: false, error: 'Bad path' };
+  if (!meta.sourceUuid) return { ok: false, error: 'This font has no source to restore from' };
+  const src = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid, 'source',
+    ...(meta.candidatePath ? [meta.candidatePath] : []), ...rel.split('/'));
+  if (!fs.existsSync(src)) return { ok: false, error: 'The source does not have this file' };
+  const dest = path.join(root, ...rel.split('/'));
+  if (fs.existsSync(dest)) return { ok: false, error: 'A file is already there' };
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    try { fs.linkSync(src, dest); } catch { fs.copyFileSync(src, dest); }
+    const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    if (Array.isArray(m.missingFiles)) {
+      m.missingFiles = m.missingFiles.filter(p => p !== rel);
+      if (!m.missingFiles.length) delete m.missingFiles;
+      fs.writeFileSync(metaPath, JSON.stringify(m, null, 2));
+    }
+    markEntryContentDirty(userData, entryName);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
 function getEntryCustomization(userData, entryName) {
   const unknown = { ok: true, known: false, customized: false, added: 0, removed: 0, changed: 0 };
   let meta;
@@ -2545,6 +2679,12 @@ function getEntryCustomization(userData, entryName) {
   const { diffAgainstSource } = require('./soundFontFileHash');
   const d = diffAgainstSource(em.records, sm.records, meta.candidatePath);
   if (!d.known) return unknown;
+  // [B-313] A file that went missing is not a customization: it is shown as missing, not counted here.
+  if (Array.isArray(meta.missingFiles) && meta.missingFiles.length) {
+    const gone = new Set(meta.missingFiles);
+    d.removedKeys = d.removedKeys.filter(k => !gone.has(k));
+    d.removed = d.removedKeys.length;
+  }
 
   // TRACKS ARE THEIR OWN STATE, not an exclusion (2026-09-03:
   // "Customized (tracks only)"). Measured on a real library the day this was built:
@@ -2820,6 +2960,8 @@ module.exports = {
   recomputeEntryContentHash,
   getEntryContentHash,
   getEntryCustomization,
+  getEntryFileStates,
+  restoreEntryFileFromSource,
   markEntryContentDirty,
   markEntrySeen,
   markEntryNew,

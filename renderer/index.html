@@ -2564,6 +2564,10 @@
   /* Undersized track warning — files below ProffieOS's 200KB cutoff are
      visually flagged so the user knows they won't play. */
   .sf-entry-files-row-name.warn { color: #d97706; }
+  /* [B-313] A file's standing against its source, on the name only (the icon stays as it is). */
+  .sf-entry-files-row-name.sf-file-state-custom  { color: var(--jmt-blue); }
+  .sf-entry-files-row-name.sf-file-state-removed { color: var(--c-text-faint); }
+  .sf-entry-files-row-name.sf-file-state-missing { color: var(--c-danger-text); }
   /* Footer explaining the amber rows — only rendered when at least one
      undersized track exists. Color matches the row tint so the link
      between footer and rows reads at a glance. */
@@ -3621,6 +3625,8 @@
      root, "Files: Sabine › clsh" when navigated into a subfolder. */
   .sf-entry-files-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 8px 0; font-size: 0.85rem; color: var(--c-text); font-weight: 600; }
   .sf-entry-files-head-actions { display: inline-flex; gap: 4px; margin-left: auto; }
+  /* A button inside a dropdown wrapper (+ Add) stretches like its neighbours, as in the common header. */
+  .sf-entry-files-head-actions .styles-tag-filter-wrap { display: flex; }
   .sf-entry-files-head-btn { font-size: 0.7rem; padding: 2px 8px; font-weight: 500; }
   .sf-entry-play-btn { color: var(--jmt-blue); }
   .sf-entry-play-btn.playing { color: #fff; background: var(--jmt-blue); border-color: var(--jmt-blue); }
@@ -3651,6 +3657,9 @@
      space as is and this customized word doesn't need to be given any space.") */
   .sf-entry-customized { margin-right: auto; align-self: center; font-size: 0.78rem; color: var(--jmt-blue); }
   .sf-entry-customized .sf-cust-note { opacity: 0.7; }
+  .sf-entry-customized .sf-removed-sep { color: var(--c-text-muted); }
+  .sf-entry-customized .sf-removed-toggle { color: var(--c-text-muted); cursor: pointer; display: inline-block; }
+  .sf-entry-customized .sf-removed-toggle:hover { text-decoration: underline; color: var(--c-text); }
   .sf-entry-files-browser { background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; padding: 6px 8px; flex: 1; min-height: 100px; overflow-y: auto; }
   /* Row-major list: items flow left-to-right and wrap to the next row
      when they hit the container edge. Vertical scroll lives on the
@@ -35047,27 +35056,170 @@ require(['vs/editor/editor.main'], function () {
         }
         crumbEl.innerHTML = crumbs.join('');
         // List rows — directories first (server already sorted), then files.
-        const children = _sfChildrenAt(_sfEntryFilesTree, _sfEntryFilesPath);
+        // [B-313] Each file's standing against the source, fetched once per tree and drawn on the next
+        // pass. Removed and missing files are not on disk, so they are added here as rows of their own.
+        if (_sfEntryFileStates.forTree !== _sfEntryFilesTree && _sfDetailOriginalName) {
+          const tree = _sfEntryFilesTree, forName = _sfDetailOriginalName;
+          _sfEntryFileStates = { forTree: tree, byPath: new Map() };
+          window.electronAPI.entryFileStates({ name: forName }).then(r => {
+            if (_sfEntryFileStates.forTree !== tree || _sfDetailOriginalName !== forName) return;
+            _sfEntryFileStates = { forTree: tree, byPath: new Map(((r && r.files) || []).map(f => [f.path, f])),
+                                   known: !!(r && r.known), sourceDirs: new Set((r && r.sourceDirs) || []) };
+            _sfRenderEntryFiles();
+            _sfRenderRemovedToggle();
+          }).catch(() => {});
+        }
+        const children = _sfWithAbsentRows(_sfChildrenAt(_sfEntryFilesTree, _sfEntryFilesPath), _sfEntryFilesPath);
         if (children.length === 0) {
           list.innerHTML = `<div class="sf-entry-files-empty">This folder is empty.</div>`;
           return;
         }
-        list.innerHTML = children.map(n => {
-          const isSel = !n.isDir && _sfEntryFilesSelected.has(n.path);
+        // Removed (grey) rows go last, keeping folders-first order on each side.
+        const stateOf = (n) => (!n.isDir ? _sfEntryFileStates.byPath.get(n.path) : _sfFolderState(n));
+        const isGrey = (n) => { const s = stateOf(n); return !!(s && s.state === 'removed'); };
+        const ordered = [...children.filter(n => !isGrey(n)), ...children.filter(isGrey)];
+        list.innerHTML = ordered.map(n => {
+          const st = stateOf(n);
+          const absent = !n.isDir && !!(st && (st.state === 'removed' || st.state === 'missing'));
+          // A folder on disk selects with Ctrl/Shift alongside files [B-313]; a folder that is only
+          // listed because of removed files inside it (n.absent) is not there to select.
+          const selectable = n.isDir ? !n.absent : !absent;
+          const isSel = selectable && _sfEntryFilesSelected.has(n.path);
           const klasses = ['sf-entry-files-row'];
           if (n.isDir) klasses.push('is-dir');
           if (isSel) klasses.push('selected');
+          // A removed or missing file is not on disk: no file path (so it cannot be played, selected,
+          // dragged or exported), only the path to add it back.
           const dataAttr = n.isDir
-            ? `data-dir-path="${_sfEscape(n.path)}"`
-            : `data-file-path="${_sfEscape(n.path)}"`;
-          // Files draggable for drop targets within the same modal.
-          // Folders aren't draggable (they're nav targets, not payload).
-          const dragAttr = n.isDir ? '' : 'draggable="true"';
-          return `<div class="${klasses.join(' ')}" ${dataAttr} ${dragAttr} title="${_sfEscape(n.name)}">
+            ? `data-dir-path="${_sfEscape(n.path)}"${selectable ? ` data-sel-path="${_sfEscape(n.path)}"` : ''}`
+            : absent ? `data-absent-path="${_sfEscape(n.path)}" data-absent-source="${st.inSource ? '1' : ''}"`
+            : `data-file-path="${_sfEscape(n.path)}" data-sel-path="${_sfEscape(n.path)}"`;
+          // Files and folders on disk drag onto folder rows within the same modal.
+          const dragAttr = selectable ? 'draggable="true"' : '';
+          const nameClass = st ? ` sf-file-state-${_sfFileStateClass(st.state)}` : '';
+          const tip = st ? _sfFileStateTip(st) : n.name;
+          return `<div class="${klasses.join(' ')}" ${dataAttr} ${dragAttr} title="${_sfEscape(tip)}">
             <span class="sf-entry-files-row-icon">${_sfEntryFileIcon(n)}</span>
-            <span class="sf-entry-files-row-name">${_sfEscape(n.name)}</span>
+            <span class="sf-entry-files-row-name${nameClass}">${_sfEscape(n.name)}</span>
           </div>`;
         }).join('');
+      };
+      // [B-313] ─────────────────────────────────────────────────────────────────────────────────
+      let _sfEntryFileStates = { forTree: null, byPath: new Map(), known: false, sourceDirs: new Set() };
+      // Whether removed (grey) files are listed: one preference for every font, kept across restarts.
+      // Missing (red) files always show.
+      let _sfShowRemovedFiles = true;
+      try {
+        window.electronAPI.getSetting('showRemovedFiles', true).then(v => {
+          _sfShowRemovedFiles = v !== false;
+          if (_sfDetailOriginalName) { _sfRenderEntryFiles(); _sfRenderRemovedToggle(); }
+        }).catch(() => {});
+      } catch {}
+      // "· hide removed (3)" after the Customized word, only while the font has removed files.
+      const _sfRenderRemovedToggle = () => {
+        const el = _sfEntryDetailEls.customized;
+        if (!el) return;
+        el.querySelectorAll('.sf-removed-toggle, .sf-removed-sep').forEach(x => x.remove());
+        const n = [..._sfEntryFileStates.byPath.values()].filter(f => f.state === 'removed').length;
+        if (!n) return;
+        const t = document.createElement('span');
+        t.className = 'sf-removed-toggle';
+        t.textContent = `${_sfShowRemovedFiles ? 'hide' : 'show'} removed (${n})`;
+        t.title = _sfShowRemovedFiles
+          ? 'Hide the files this font no longer has from its source. Applies to every font.'
+          : 'Show the files this font no longer has from its source, in grey. Applies to every font.';
+        t.addEventListener('click', () => {
+          _sfShowRemovedFiles = !_sfShowRemovedFiles;
+          try { window.electronAPI.setSetting('showRemovedFiles', _sfShowRemovedFiles); } catch {}
+          _sfRenderEntryFiles();
+          _sfRenderRemovedToggle();
+        });
+        // The separator is its own plain span, so only the words underline on hover.
+        if (el.textContent) {
+          const sep = document.createElement('span');
+          sep.className = 'sf-removed-sep';
+          sep.textContent = ' · ';
+          el.appendChild(sep);
+        }
+        el.appendChild(t);
+      };
+      const _sfFileStateClass = (s) => (s === 'removed' ? 'removed' : s === 'missing' ? 'missing' : 'custom');
+      // A folder's standing is what is inside it: a folder the source never had is added (or renamed,
+      // when everything in it is a rename out of one source folder); anything missing inside makes it
+      // red; any other difference inside makes it customized; a folder that is only removed files is
+      // removed. Nothing inside differs and the source has it: no state.
+      const _sfFolderState = (n) => {
+        if (!_sfEntryFileStates.known && !n.absent) return null;
+        const pre = n.path + '/';
+        const inside = [..._sfEntryFileStates.byPath.values()].filter(f => f.path.startsWith(pre));
+        const count = (s) => inside.filter(f => f.state === s).length;
+        const c = { added: count('added') + count('renamed'), changed: count('changed'),
+                    removed: count('removed'), missing: count('missing') };
+        const base = { path: n.path, isFolder: true, counts: c };
+        if (n.absent) return { ...base, state: c.missing ? 'missing' : 'removed' };
+        if (c.missing) return { ...base, state: 'missing' };
+        if (!_sfEntryFileStates.sourceDirs.has(n.path)) {
+          const renames = inside.filter(f => f.state === 'renamed');
+          let from = null;
+          if (renames.length && renames.length === inside.length) {
+            const roots = new Set(renames.map(f => {
+              const tail = f.path.slice(pre.length);
+              return f.from.endsWith('/' + tail) ? f.from.slice(0, f.from.length - tail.length - 1) : null;
+            }));
+            if (roots.size === 1 && !roots.has(null)) from = [...roots][0];
+          }
+          return { ...base, state: from ? 'renamed' : 'added', from };
+        }
+        if (c.added + c.changed + c.removed) return { ...base, state: 'contains' };
+        return null;
+      };
+      const _sfFolderCounts = (c) => [c.added && `${c.added} added`, c.changed && `${c.changed} changed`,
+        c.removed && `${c.removed} removed`, c.missing && `${c.missing} missing`].filter(Boolean).join(', ');
+      const _sfFileStateTip = (st) => {
+        const name = st.path.split('/').pop();
+        if (st.isFolder) {
+          const inner = _sfFolderCounts(st.counts);
+          switch (st.state) {
+            case 'added':    return `${name}\nCustomized: a folder the source does not have.${inner ? ` Inside: ${inner}.` : ''}`;
+            case 'renamed':  return `${name}\nCustomized: renamed from ${st.from.split('/').pop()}.`;
+            case 'contains': return `${name}\nCustomized inside: ${inner}.`;
+            case 'removed':  return `${name}\nRemoved: in the source but not in this font. Open it to add files back.`;
+            case 'missing':  return `${name}\nSomething inside is missing: ${inner}.`;
+          }
+        }
+        switch (st.state) {
+          case 'added':   return `${name}\nCustomized: added, not in the source.`;
+          case 'renamed': return `${name}\nCustomized: renamed from ${st.from.split('/').pop()}.`;
+          case 'changed': return `${name}\nCustomized: differs from the source.`;
+          case 'removed': return `${name}\nRemoved: in the source but not in this font. Right-click to add it back.`;
+          case 'missing': return st.inSource
+            ? `${name}\nMissing: this font had it, and it is no longer on disk. Right-click to add it back from the source.`
+            : `${name}\nMissing: this font had it, and it is no longer on disk. The source does not have it, so it cannot be added back here.`;
+          default: return name;
+        }
+      };
+      // The rows a folder shows for files that are not on disk: the file itself where it sits here, or a
+      // folder that exists only because something inside it is absent.
+      const _sfWithAbsentRows = (children, navPath) => {
+        const absent = [..._sfEntryFileStates.byPath.values()]
+          .filter(f => f.state === 'missing' || (f.state === 'removed' && _sfShowRemovedFiles));
+        if (!absent.length) return children;
+        const base = navPath ? navPath + '/' : '';
+        const out = children.slice();
+        const have = new Set(children.map(c => c.name));
+        for (const f of absent) {
+          if (base && !f.path.startsWith(base)) continue;
+          const rest = f.path.slice(base.length);
+          const slash = rest.indexOf('/');
+          const seg = slash < 0 ? rest : rest.slice(0, slash);
+          if (have.has(seg)) continue;
+          have.add(seg);
+          out.push(slash < 0
+            ? { name: seg, isDir: false, path: f.path, size: 0, absent: true }
+            : { name: seg, isDir: true, path: base + seg, children: [], absent: true });
+        }
+        return out.sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1)
+          : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })));
       };
       // SEEN is stamped, never derived. One helper so a fourth way of using a
       // font joins by calling this rather than by re-deriving the rule. Fire and
@@ -35253,7 +35405,7 @@ require(['vs/editor/editor.main'], function () {
             try { await window.refreshSoundFontsView(); } catch {}
           }
         }
-        if (!r || !r.known || !r.customized) return;
+        if (!r || !r.known || !r.customized) { _sfRenderRemovedToggle(); return; }
         // "(tracks only)" names WHAT was added rather than demoting it. Music you
         // added is still yours to lose. Measured on the library: 26 tracks-only
         // against 24 with edited font files, so the distinction earns its place.
@@ -35262,6 +35414,7 @@ require(['vs/editor/editor.main'], function () {
         el.title = r.tracksOnly
           ? 'This font has tracks the original did not include.'
           : 'This font differs from the source it came from.';
+        _sfRenderRemovedToggle();
       };
 
       const _sfOpenEntryDetail = async (entryName, opts = {}) => {
@@ -39493,11 +39646,12 @@ require(['vs/editor/editor.main'], function () {
       });
 
       // Shift-range helper for entry file selection. Enumerates visible
-      // file rows in document order, then selects everything between the
-      // anchor and target inclusive. Stale anchor collapses to single.
+      // selectable rows (files and folders on disk) in document order, then
+      // selects everything between the anchor and target inclusive. Stale
+      // anchor collapses to single.
       const _sfShiftSelectEntryFilesTo = (targetPath) => {
-        const all = [...document.querySelectorAll('#sf-entry-files-list [data-file-path]')];
-        const allPaths = all.map(el => el.getAttribute('data-file-path'));
+        const all = [...document.querySelectorAll('#sf-entry-files-list [data-sel-path]')];
+        const allPaths = all.map(el => el.getAttribute('data-sel-path'));
         const toIdx = allPaths.indexOf(targetPath);
         if (toIdx < 0) return;
         let fromIdx = _sfEntryFilesAnchor ? allPaths.indexOf(_sfEntryFilesAnchor) : -1;
@@ -39541,6 +39695,22 @@ require(['vs/editor/editor.main'], function () {
         }
         const dir = e.target.closest('[data-dir-path]');
         if (!dir) return;
+        // Ctrl/Shift on a folder selects it with the files [B-313]; a plain click still opens it.
+        const selPath = dir.getAttribute('data-sel-path');
+        if (selPath && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+          if (e.shiftKey && _sfEntryFilesAnchor) {
+            _sfShiftSelectEntryFilesTo(selPath);
+          } else if (e.shiftKey) {
+            _sfEntryFilesSelected.add(selPath);
+            _sfEntryFilesAnchor = selPath;
+          } else {
+            if (_sfEntryFilesSelected.has(selPath)) _sfEntryFilesSelected.delete(selPath);
+            else _sfEntryFilesSelected.add(selPath);
+            _sfEntryFilesAnchor = selPath;
+          }
+          _sfRenderEntryFiles();
+          return;
+        }
         _sfEntryFilesPath = dir.getAttribute('data-dir-path') || '';
         _sfEntryFilesSelected.clear();
         _sfEntryFilesAnchor = null;
@@ -39609,9 +39779,14 @@ require(['vs/editor/editor.main'], function () {
         const paths = [..._sfEntryFilesSelected];
         const names = paths.map(p => p.split('/').pop());
         const preview = names.slice(0, 6).join(', ') + (names.length > 6 ? `, +${names.length - 6} more` : '');
+        // The selection can hold folders too [B-313], and a folder goes with everything inside it.
+        const dirs = new Set(_sfChildrenAt(_sfEntryFilesTree, _sfEntryFilesPath).filter(n => n.isDir).map(n => n.path));
+        const nDirs = paths.filter(p => dirs.has(p)).length, nFiles = paths.length - nDirs;
+        const what = [nDirs ? `${nDirs} folder${nDirs === 1 ? '' : 's'}` : '', nFiles ? `${nFiles} file${nFiles === 1 ? '' : 's'}` : '']
+          .filter(Boolean).join(' and ');
         const ok = await promptConfirm({
-          title: `Delete ${paths.length} file${paths.length === 1 ? '' : 's'}`,
-          message: `Delete ${paths.length} file${paths.length === 1 ? '' : 's'} from this entry?\n${preview}`,
+          title: `Delete ${what}`,
+          message: `Delete ${what} from this entry?${nDirs ? ' Folders go with everything inside them.' : ''}\n${preview}`,
           confirmText: 'Delete',
           confirmKind: 'danger',
         });
@@ -42728,6 +42903,31 @@ require(['vs/editor/editor.main'], function () {
         e.preventDefault();
         const menu = document.getElementById('preset-ctx-menu');
         if (!menu) return;
+        // [B-313] A removed or missing file has one action: add it back from the source.
+        const absentRow = e.target.closest('[data-absent-path]');
+        if (absentRow) {
+          if (!absentRow.dataset.absentSource) { menu.style.display = 'none'; return; }
+          menu.innerHTML = '';
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = 'Add back from source';
+          d.addEventListener('mousedown', async (e2) => {
+            e2.stopPropagation();
+            menu.style.display = 'none';
+            const rel = absentRow.dataset.absentPath;
+            const r = await window.electronAPI.restoreEntryFile({ name: _sfDetailOriginalName, path: rel });
+            if (!r || !r.ok) { window.showToast?.(`Could not add it back: ${(r && r.error) || 'unknown error'}`, { kind: 'error' }); return; }
+            try {
+              const fr = await window.electronAPI.listEntryFiles({ name: _sfDetailOriginalName });
+              _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
+            } catch {}
+            _sfRenderEntryFiles();
+            try { await window.refreshSoundFontsView(); } catch {}
+          });
+          menu.appendChild(d);
+          _jmtPlaceMenu(menu, e.clientX, e.clientY);
+          return;
+        }
         const hasImage = await _sfClipboardHasImage();
         const mkItem = (text, cls, fn) => {
           const d = document.createElement('div');
@@ -42859,8 +43059,25 @@ require(['vs/editor/editor.main'], function () {
           mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
           mkSep();
           mkItem(count > 1 ? `× Delete (${count})` : '× Delete', 'danger', () => _sfDeleteEntryFilesPrompt());
+        } else if (dirRow && dirRow.dataset.selPath && _sfEntryFilesSelected.size > 1
+                   && _sfEntryFilesSelected.has(dirRow.dataset.selPath)) {
+          // A folder inside a multi-selection acts on the whole selection [B-313]. Rename stays single.
+          const count = _sfEntryFilesSelected.size;
+          mkItem(`Copy (${count})`, '', _sfCopyEntryFilesSelection);
+          mkSep();
+          mkItem(`↗ Export… (${count})`, '', () => _sfExportFiles({ kind: 'entry', id: _sfDetailOriginalName, subPaths: [..._sfEntryFilesSelected] }));
+          mkItem('+ New folder', '', _sfCreateEntrySubfolderPrompt);
+          mkSep();
+          mkItem(`× Delete (${count})`, 'danger', () => _sfDeleteEntryFilesPrompt());
         } else if (dirRow) {
           const dirSubPath = dirRow.getAttribute('data-dir-path') || '';
+          // Right-clicking a folder outside the selection collapses the selection to it, as a file row does.
+          if (dirRow.dataset.selPath && !_sfEntryFilesSelected.has(dirSubPath)) {
+            _sfEntryFilesSelected.clear();
+            _sfEntryFilesSelected.add(dirSubPath);
+            _sfEntryFilesAnchor = dirSubPath;
+            _sfRenderEntryFiles();
+          }
           if (clipboardCount > 0) mkItem(`Paste into ${dirRow.querySelector('.sf-entry-files-row-name')?.textContent || 'folder'} (${clipboardCount})`, '', async () => {
             const prev = _sfEntryFilesPath;
             _sfEntryFilesPath = dirSubPath || prev;
@@ -42932,9 +43149,9 @@ require(['vs/editor/editor.main'], function () {
         if (_sfEntryFilesDragTargetEl) _sfEntryFilesDragTargetEl.classList.add('drop-target');
       };
       document.getElementById('sf-entry-files-browser')?.addEventListener('dragstart', (e) => {
-        const fileRow = e.target.closest('[data-file-path]');
+        const fileRow = e.target.closest('[data-sel-path]');
         if (!fileRow || !_sfDetailOriginalName) { e.preventDefault(); return; }
-        const p = fileRow.getAttribute('data-file-path');
+        const p = fileRow.getAttribute('data-sel-path');
         if (!p) { e.preventDefault(); return; }
         // Match OS file manager: if the row isn't in the selection,
         // dragging just that row drags only it.
@@ -42951,7 +43168,8 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('sf-entry-files-browser')?.addEventListener('dragover', (e) => {
         if (!_sfEntryFilesDragData) return;
         const dir = e.target.closest('[data-dir-path]');
-        if (!dir) { _sfEntrySetDragTarget(null); return; }
+        // A dragged folder is not a place to drop itself [B-313].
+        if (!dir || _sfEntryFilesDragData.paths.includes(dir.getAttribute('data-dir-path'))) { _sfEntrySetDragTarget(null); return; }
         e.preventDefault();
         try { e.dataTransfer.dropEffect = 'move'; } catch {}
         _sfEntrySetDragTarget(dir);
@@ -42964,7 +43182,7 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfEntryFilesDragData) return;
         const dir = e.target.closest('[data-dir-path]');
         _sfEntrySetDragTarget(null);
-        if (!dir) { _sfEntryFilesDragData = null; return; }
+        if (!dir || _sfEntryFilesDragData.paths.includes(dir.getAttribute('data-dir-path'))) { _sfEntryFilesDragData = null; return; }
         e.preventDefault();
         const destSubPath = dir.getAttribute('data-dir-path') || '';
         const data = _sfEntryFilesDragData;

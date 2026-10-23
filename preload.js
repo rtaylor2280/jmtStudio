@@ -396,6 +396,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeAttachmentEverywhere: (params) => ipcRenderer.invoke('attachments:removeEverywhere', params),
   listEntryDocs:         (params)     => ipcRenderer.invoke('entries:listDocs', params),
   listEntryFiles:        (params)     => ipcRenderer.invoke('entries:listFiles', params),
+  entryFileStates:       (params)     => ipcRenderer.invoke('entries:fileStates', params),
+  restoreEntryFile:      (params)     => ipcRenderer.invoke('entries:restoreFile', params),
 
   // Reorganize ops (entry detail modal)
   reorganizeDetect:      (params)     => ipcRenderer.invoke('reorganize:detect', params),

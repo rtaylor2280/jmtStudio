@@ -54,6 +54,7 @@ const INWARD = [
   // `soundFonts:importFont` and `sources:extractTo` were removed 2026-09-26 [B-434] -
   // both unreachable, both listed here as though covered. door-reachability.test.js guards it.
   'sources:restoreCustomized',
+  'entries:restoreFile',
   'common:importFromZip',
   'common:importFromFolder',
   'common:addFiles',

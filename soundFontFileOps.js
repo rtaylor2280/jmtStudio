@@ -475,8 +475,16 @@ function moveWithinLocation({
       let srcAbs;
       try { srcAbs = _resolve(userData, kind, id, srcSubPath); }
       catch (err) { failed.push({ source: srcSubPath, error: err.message }); continue; }
-      if (!fs.existsSync(srcAbs) || !fs.statSync(srcAbs).isFile()) {
+      if (!fs.existsSync(srcAbs)) {
         failed.push({ source: srcSubPath, error: 'Source file not found' });
+        continue;
+      }
+      // A folder moves whole [B-313], never into itself or its own subfolder, and never over a
+      // folder of the same name.
+      const isDir = fs.statSync(srcAbs).isDirectory();
+      const srcClean = srcSubPath.replace(/\\/g, '/').replace(/\/+$/g, '');
+      if (isDir && (cleanDest === srcClean || cleanDest.startsWith(srcClean + '/'))) {
+        failed.push({ source: srcSubPath, error: 'A folder cannot go inside itself' });
         continue;
       }
       const srcParts = srcSubPath.split('/'); srcParts.pop();
@@ -485,7 +493,11 @@ function moveWithinLocation({
         moved.push(srcSubPath);
         continue;
       }
-      const finalName = _proffieVariantName(destDir, path.basename(srcAbs));
+      if (isDir && fs.existsSync(path.join(destDir, path.basename(srcAbs)))) {
+        failed.push({ source: srcSubPath, error: 'A folder with that name is already there' });
+        continue;
+      }
+      const finalName = isDir ? path.basename(srcAbs) : _proffieVariantName(destDir, path.basename(srcAbs));
       const destPath = path.join(destDir, finalName);
       fs.renameSync(srcAbs, destPath);
       const rel = path.relative(filesRoot, destPath).replace(/\\/g, '/');
