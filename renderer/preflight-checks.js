@@ -68,6 +68,10 @@
     return (c.match(_parser().stylePtrOpenRe()) || []).length + (c.match(/&\w+/g) || []).length;
   };
 
+  // Written Missing placeholders in a preset's text. A slot, not a style. [B-525]
+  const _placeholderTokens = raw =>
+    (_stripForCount(raw).match(/\bStylePtr\s*<\s*MISSING_STYLE\s*>\s*\(\s*\)/g) || []).length;
+
   preflight.register({
     id: 'blade-style-count',
     severity: 'block',
@@ -90,8 +94,11 @@
           // want: a disabled preset is not compiled, so it cannot fail to compile.
           // (The over-count repair DOES walk disabled blocks, for the opposite
           // reason — those come back.)
-          const actual = (p.styles || []).length;
-          if (actual === expected) continue;
+          // Slots decide over-count; real styles decide short, since a Missing placeholder
+          // holds a slot and does not compile. [B-525]
+          const slots  = (p.styles || []).length;
+          const actual = (p.styles || []).filter(s => !_parser().isPlaceholderSlot(s)).length;
+          if (actual === expected && slots === expected) continue;
 
           // THE PARSER IS NOT CORROBORATION OF ITSELF, and that cost three false
           // positives before it was measured. Across 173 real configs the rule
@@ -101,7 +108,8 @@
           // difference, and that is silence. Over-counting costs a missed case,
           // which is cheap; the other direction blocks a working build.
           const tokens = _styleTokens(p.raw);
-          if (actual < expected && tokens > actual) continue;
+          const isOver = slots > expected;
+          if (!isOver && tokens - _placeholderTokens(p.raw) > actual) continue;
 
           // THE SAME INSTRUMENT AIMED THE OTHER WAY, AND IT ABSTAINS ON THE
           // OPPOSITE DISAGREEMENT. An under-counting parser cannot INVENT a slot,
@@ -109,7 +117,7 @@
           // is still too many even if the truth is 5. What WOULD be a false
           // positive is the parser claiming more slots than the text can show, so
           // that is the direction to go quiet on.
-          if (actual > expected && tokens < actual) continue;
+          if (isOver && tokens < slots) continue;
 
           // A preset with no styles parsed has no trustworthy name either: with
           // nothing between the strings the parser takes the LAST one, which is the
@@ -118,7 +126,7 @@
           const name = (!nameRaw || nameRaw === (p.track || '').trim())
             ? `Preset ${p.index}`
             : nameRaw;
-          (actual < expected ? short : over).push({ name, actual, array: arr.name });
+          (isOver ? over : short).push({ name, actual: isOver ? slots : actual, array: arr.name });
         }
       }
       if (!short.length && !over.length) return null;

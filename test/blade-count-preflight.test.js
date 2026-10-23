@@ -272,6 +272,35 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testba
        (await check(P('ChargingStylePtr<BatteryBladeStyle>()'))).blocked);
   }
 
+  // ── 5b. a Missing placeholder holds a slot and is not a style [B-525] ──
+  {
+    const PH = 'StylePtr<MISSING_STYLE>()';
+    const P = (name, ...slots) => `  { "font", "track.wav", ${slots.join(', ')}, "${name}" },`;
+    const cfg = (...presets) => `
+#define NUM_BLADES 4
+Preset presets[] = {
+${presets.join('\n')}
+};
+BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(presets) }};
+`;
+    const S = (c) => `StylePtr<${c}>()`;
+    // Vader: four slots, one a placeholder. Yoda: three slots, one a placeholder.
+    const r = await check(cfg(
+      P('windu', S('A'), S('B'), S('C'), S('D')),
+      P('vader', S('A'), S('B'), PH, S('D')),
+      P('yoda', PH, S('A'), S('D')),
+    ));
+    ok('A PRESET WHOSE ONLY GAP IS A WRITTEN PLACEHOLDER IS CAUGHT',
+       r.blocked && r.finding.items.includes('vader'), r.finding && r.finding.items.join(','));
+    ok('a placeholder does not count as a style (yoda has 2)',
+       r.blocked && r.finding.items.includes('yoda') && /fewer than 4 blade styles/.test(r.body), r.body);
+    ok('the complete preset is not named', r.blocked && !r.finding.items.includes('windu'));
+    const one = await check(cfg(P('vader', S('A'), S('B'), PH, S('D'))));
+    ok('alone, it reads "3 of 4"', /1 preset has 3 of 4 blade styles/.test(one.body), one.body);
+    ok('a config with no placeholders and every slot filled still passes',
+       !(await check(cfg(P('windu', S('A'), S('B'), S('C'), S('D'))))).blocked);
+  }
+
   // ── 6. the corpus, which is the only check that cannot be rigged ───────
   //
   // "What did it do across the corpus" is B-224's stated bar for any new check,
