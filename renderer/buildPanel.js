@@ -662,8 +662,19 @@ async function initBuildPanel() {
     document.getElementById('bm-abort').textContent = 'Aborting...';
     await window.electronAPI.abortCompile();
   });
-  document.getElementById('bm-retry').addEventListener('click', () => {
+  document.getElementById('bm-retry').addEventListener('click', (e) => {
     document.getElementById('build-modal').style.display = 'none';
+    // [B-289] After an interrupted flash the button is the step the message names.
+    const step = document.getElementById('bm-status')?.dataset.interrupted === '1' ? e.currentTarget.dataset.interrupted : null;
+    delete e.currentTarget.dataset.interrupted;
+    e.currentTarget.textContent = '↺ Retry Flash';
+    _stopInterruptedWatch();
+    if (step === 'dfu-flash') {
+      // Already in the bootloader: enter Bootloader Mode, and flash once it confirms the board.
+      _setupDfuModeUI();
+      _checkDfuOnEntry().then(() => { if (dfuDeviceReady) doFlashDFU(); });
+      return;
+    }
     if (_dfuRetryRecheck) {
       _dfuRetryRecheck = false;
       startDfuWaitModal(true, _dfuRetryAutoFlash);
@@ -894,6 +905,7 @@ async function _flashAfterSdFix() {
 
 // ── Flash ──────────────────────────────────────────────
 async function doFlash() {
+  _clearInterruptedFlash();
   if (isDfuMode) { await doFlashDFU(); return; }
   // Fix the target on the press, before anything can re-resolve it. DFU mode returns
   // above because it has no port to lock. See lockDisplayedPort. [B-472]
@@ -1208,6 +1220,7 @@ async function refreshPorts() {
     await openSerialMonitor();
     el('bp-serial-input')?.focus();
   }
+  _refreshInterruptedFlashStatus();
 }
 
 // Adds the DFU mode sentinel as the last option in the port select
@@ -1833,7 +1846,7 @@ function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnown
     : 'Flashed from a different version of this config.';
 }
 
-function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sourceChanged, coreVersion, osVersion, addonsVersion, compiledFqbn, compiledUsb }) {
+function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sourceChanged, interrupted, coreVersion, osVersion, addonsVersion, compiledFqbn, compiledUsb }) {
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
@@ -1900,6 +1913,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
   }
   if (type === 'flash') {
     window._isFlashing = false;
+    if (ok) _clearInterruptedFlash();
     // SETTLE THE DROPDOWN NOW, BECAUSE THE EVENT THAT WOULD HAVE DONE IT ALREADY FIRED.
     // [B-471, 2026-10-05] refreshPorts() ignores ports-changed while _isFlashing, which is the
     // whole point - the board leaves its port for DFU mid-flash and the dropdown must not chase
@@ -1908,7 +1922,9 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
     // wrong answer this guard exists to prevent, just frozen instead of flickering. So the
     // refresh is explicit here, immediately after the flag clears: one update, after, instead
     // of several during.
-    refreshPorts();
+    // [B-289] Until it settles, the port held from before the flash says nothing about now.
+    _interruptedPortsKnown = false;
+    refreshPorts().finally(() => { _interruptedPortsKnown = true; _refreshInterruptedFlashStatus(); });
     stopFlashTimer();
     resumeSerialAfterFlash();
     // Whatever we knew about the board's ProffieOS is now about the firmware we
@@ -1952,7 +1968,12 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       }
       _flashTargetPort = null;
       _flashTargetSN   = null;
-      finishBuildModal(false, '✗ Flash Failed', error, { retriable: !!retriable });
+      // [B-289] An interrupted flash waits for the board to come back.
+      const _waitBoard = !!interrupted;
+      _interruptedFlashBase = _waitBoard ? error : null;
+      _interruptedInBootloader = false;
+      finishBuildModal(false, '✗ Flash Failed', _waitBoard ? _interruptedFlashStatus() : error, { retriable: !!retriable });
+      if (_waitBoard) _applyInterruptedFlashAction();
       if (error) appendLog(`\n⚠ ${error}`, true);
       return;
     }
@@ -2180,6 +2201,7 @@ function showMultiBoardSelect(proffieports) {
 function _setStatusTiered(elm, msg) {
   if (!elm) return;
   elm.textContent = '';
+  delete elm.dataset.interrupted;   // [B-289] set again only by the interrupted-flash status
   if (!msg) return;
   const [lead, ...rest] = String(msg).split('\n');
   const leadEl = document.createElement('span');
@@ -2236,6 +2258,85 @@ function _withUserConfigName(text) {
   return text.split(_STAGED_CONFIG_BASENAME).join(own);
 }
 
+// [B-289] An interrupted flash's next step depends on one thing: whether the board still has a port.
+// With one, flashing again is the step and Bootloader Mode the fallback; without one, the Flash button
+// is greyed, so Bootloader Mode is the only step offered. Redrawn as the port list changes while the
+// message is up, since a board can take a moment to come back on its port.
+let _interruptedFlashBase = null;
+// In Bootloader Mode there is no port; the bootloader check below is what says the board is back.
+function _interruptedHasPort() { return !isDfuMode && !!selectedPort; }
+// With no port, the board may also turn up in the bootloader (BOOT and RESET, or on its own); the
+// message is checked for that every two seconds while it is up, since a bootloader is not a port.
+let _interruptedInBootloader = false;
+let _interruptedWatch = null;
+let _interruptedPortsKnown = true;
+function _interruptedState() {
+  if (_interruptedPortsKnown && _interruptedHasPort()) return 'port';
+  return _interruptedInBootloader ? 'bootloader' : 'none';
+}
+function _interruptedFlashStatus() {
+  const next = {
+    port:       'The board is connected again.',
+    bootloader: 'The board is in bootloader mode.',
+    none:       'Waiting for the board. Flash Now appears when it reconnects, or when it is in bootloader '
+              + 'mode (hold BOOT, tap RESET, release both).',
+  }[_interruptedState()];
+  return _interruptedFlashBase + '\n\n' + next;
+}
+// Flash Now shows only once there is a board to flash: back on its port, or in the bootloader.
+function _applyInterruptedFlashAction() {
+  const btn = document.getElementById('bm-retry');
+  if (!btn) return;
+  const state = _interruptedState();
+  if (state === 'none') {
+    btn.style.display = 'none';
+    delete btn.dataset.interrupted;
+  } else {
+    btn.textContent = '⚡ Flash Now';
+    btn.dataset.interrupted = state === 'port' ? 'flash' : 'dfu-flash';
+    btn.style.display = 'inline-block';
+  }
+  if (state === 'port') _stopInterruptedWatch(); else _startInterruptedWatch();
+}
+function _startInterruptedWatch() {
+  if (_interruptedWatch) return;
+  let busy = false;
+  _interruptedWatch = setInterval(async () => {
+    const st = document.getElementById('bm-status');
+    const modal = document.getElementById('build-modal');
+    if (!st || st.dataset.interrupted !== '1' || !modal || modal.style.display === 'none') { _stopInterruptedWatch(); return; }
+    if (busy || _interruptedHasPort()) return;
+    busy = true;
+    let r = null;
+    try { r = await window.electronAPI.detectDFU(); } catch {}
+    busy = false;
+    const ready = !!(r && r.found && r.accessible);
+    if (ready !== _interruptedInBootloader) {
+      _interruptedInBootloader = ready;
+      _refreshInterruptedFlashStatus();
+    }
+  }, 2000);
+}
+function _stopInterruptedWatch() {
+  if (_interruptedWatch) { clearInterval(_interruptedWatch); _interruptedWatch = null; }
+}
+// A new flash, or a successful one, ends the wait: nothing may redraw the old failure over it.
+function _clearInterruptedFlash() {
+  _stopInterruptedWatch();
+  _interruptedFlashBase = null;
+  _interruptedInBootloader = false;
+  const st = document.getElementById('bm-status');
+  if (st) delete st.dataset.interrupted;
+  const btn = document.getElementById('bm-retry');
+  if (btn) delete btn.dataset.interrupted;
+}
+function _refreshInterruptedFlashStatus() {
+  const st = document.getElementById('bm-status');
+  if (!_interruptedFlashBase || !st || st.dataset.interrupted !== '1') return;
+  _setStatusTiered(st, _withUserConfigName(_interruptedFlashStatus()));
+  st.dataset.interrupted = '1';
+  _applyInterruptedFlashAction();
+}
 function finishBuildModal(success, title, statusMsg, { retriable = false, isFlash = false } = {}) {
   stopCompileHints();
   stopPortWatch();
@@ -2245,6 +2346,7 @@ function finishBuildModal(success, title, statusMsg, { retriable = false, isFlas
   // [B-373] One substitution point, so it covers every error signature at once rather
   // than being repeated per translation.
   _setStatusTiered(document.getElementById('bm-status'), _withUserConfigName(statusMsg || ''));
+  if (!success && _interruptedFlashBase) document.getElementById('bm-status').dataset.interrupted = '1';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-dfu-setup').style.display = 'none';
   document.getElementById('bm-manual-row').style.display = 'none';
@@ -3804,6 +3906,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
 
 // Called when Flash is clicked in DFU mode, or auto-triggered from startDfuWaitModal.
 async function doFlashDFU() {
+  _clearInterruptedFlash();
   if (isBusy) return;
   if (!compileSuccess) {
     appendLog('Compile first before flashing.', true);

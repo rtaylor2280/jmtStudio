@@ -7,53 +7,25 @@
 //   - the error-preferring fallback (no interruption signature at all)
 // Everything else here is a real log captured from a board on 2026-07-26.
 //
-// Function body is mirrored from toolchain.js; requiring it would pull in electron.
+// The functions are taken from toolchain.js itself, so the test runs the shipped code and cannot
+// drift from it; requiring the module would pull in electron.
 'use strict';
 
-function _isDfuProgressLine(line) {
-  return /^\s*(Download|Upload)\s*\[/.test(line) || /\[[=\s]*\]\s*\d+%/.test(line);
-}
-function _looksLikeFlashError(line) {
-  if (_isDfuProgressLine(line)) return false;
-  return /error|libusb_control_transfer returned|LIBUSB_ERROR|cannot open|access is denied|no dfu capable|timed out|failed/i.test(line);
-}
-
-function extractFlashError(raw) {
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  if (raw.includes('Cannot open'))       return 'Port unavailable. Check connection and try again.';
-  if (raw.includes('Access is denied'))  return 'Port access denied. Close any other programs using this port.';
-  if (raw.includes('No DFU capable'))    return 'No DFU device found. Board may not be in bootloader mode.';
-  if (raw.includes('timed out'))         return 'Upload timed out. Try reconnecting the board.';
-
-  const lastProgress = [...lines].reverse().find(_isDfuProgressLine);
-  const pm = lastProgress && lastProgress.match(/(\d+)%\s+(\d+)\s+bytes/);
-  const stoppedAt = pm ? ` It stopped at ${pm[1]}% (${Number(pm[2]).toLocaleString()} bytes).` : '';
-
-  const stoppedShort = !!pm && Number(pm[1]) < 100;
-  const dropLine = lines.find(l =>
-    /libusb_control_transfer returned|LIBUSB_ERROR/i.test(l) ||
-    /Error during special command|ERASE_PAGE|during download get_status/i.test(l));
-  if (dropLine || stoppedShort) {
-    return 'The flash was interrupted before it finished' + (stoppedAt ? ' -' + stoppedAt.replace(' It stopped at', ' it stopped at').replace(/\.$/, '') : '') + '.\n\n'
-         + 'The board is fine. It holds partial firmware until a flash completes, and the bootloader cannot be erased. '
-         + 'Verify connection and flash again. If the board is not in the port list, pick "Switch to Bootloader Mode (DFU)" from the port dropdown.';
+const _src = require('fs').readFileSync(require('path').join(__dirname, '..', 'toolchain.js'), 'utf8');
+function _take(name) {
+  const start = _src.indexOf('function ' + name + '(');
+  if (start < 0) throw new Error('toolchain.js has no function ' + name);
+  let depth = 0;
+  for (let i = _src.indexOf('{', start); i < _src.length; i++) {
+    if (_src[i] === '{') depth++;
+    else if (_src[i] === '}' && --depth === 0) return _src.slice(start, i + 1);
   }
-  if (raw.includes('dfu-util: error')) {
-    const errLine = lines.find(l => l.includes('dfu-util: error'));
-    if (errLine) return errLine;
-  }
-  const _isBenignStatusLine = l =>
-    /Determining device status|dfuERROR, clearing status|dfuIDLE, continuing|^\s*dfuERROR\s*$/i.test(l);
-  const diagnostic = lines.filter(l => !_isDfuProgressLine(l));
-  const errish = diagnostic.filter(l => _looksLikeFlashError(l) && !_isBenignStatusLine(l));
-  if (errish.length) return (stoppedAt ? stoppedAt.trim() + '\n' : '') + errish.slice(-3).join('\n');
-  const meaningful = diagnostic.filter(l => !_isBenignStatusLine(l));
-  if (!meaningful.length) {
-    return 'The flash failed before it started transferring.\n\n'
-         + 'Check the cable and the board connection, then flash again.';
-  }
-  return meaningful.slice(-8).join('\n');
+  throw new Error('unbalanced braces in ' + name);
 }
+// eslint-disable-next-line no-eval
+const { extractFlashError } = new Function(
+  _take('_isDfuProgressLine') + _take('_looksLikeFlashError') + _take('extractFlashError')
+  + '; return { extractFlashError };')();
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 const HANDSHAKE = [
@@ -127,5 +99,14 @@ for (const c of cases) {
   console.log((ok ? 'PASS  ' : 'FAIL  ') + c.name);
   if (!ok) console.log('        got: ' + out.split('\n')[0]);
 }
-console.log(fail ? `\n${fail} FAILED` : `\nall ${cases.length} passed`);
+// [B-289] An interruption states what happened and that the board is fine, and stops there: the
+// next step depends on whether the board still has a port, which only the window knows.
+{
+  const out = extractFlashError([HANDSHAKE, prog(80, 167936), 'Error during download get_status'].join('\n'));
+  const ok = INTERRUPTED.test(out) && /cannot be erased\.$/.test(out) && !/flash again|Bootloader Mode/i.test(out);
+  if (!ok) fail++;
+  console.log((ok ? 'PASS  ' : 'FAIL  ') + 'an interruption leaves the next step to the window');
+  if (!ok) console.log('        got: ' + JSON.stringify(out));
+}
+console.log(fail ? `\n${fail} FAILED` : `\nall ${cases.length + 1} passed`);
 process.exitCode = fail ? 1 : 0;

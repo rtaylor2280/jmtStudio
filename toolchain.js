@@ -1531,12 +1531,31 @@ function checkArduinoRunning() {
 //   cause: 'port-locked' (Arduino IDE / other app holds the port)
 //        | 'driver'      (driver-layer failure — often a flaky cable, marginal USB port, or stuck COM driver)
 //        | undefined     (success path)
+// [B-289] Windows can list a port before the board behind it answers: "File not found" or "Unknown
+// error code 433" (a device which does not exist), most often a board still restarting after a flash.
+// That is not a failure, so the open is retried until the board answers, up to NOT_YET_MS.
+const NOT_YET_MS = 15000;
+const _portNotYet = (msg) => /file not found|error code 433\b/i.test(String(msg || ''));
 function touchReset(port, onLog) {
   return new Promise((resolve) => {
     onLog(`Sending 1200-bps touch reset on ${port}...`, false);
     const { SerialPort } = require('serialport');
+    const started = Date.now();
+    let waitingNoted = false;
+    const attempt = () => {
     const sp = new SerialPort({ path: port, baudRate: 1200, autoOpen: false });
     sp.open(async err => {
+      if (err && _portNotYet(err.message) && Date.now() - started < NOT_YET_MS) {
+        if (!waitingNoted) {
+          waitingNoted = true;
+          onLog(`${port} is listed, but the board is not answering on it yet. Waiting for it...`, false);
+        }
+        setTimeout(attempt, 500);
+        return;
+      }
+      if (!err && waitingNoted) {
+        onLog(`The board answered on ${port} after ${((Date.now() - started) / 1000).toFixed(1)}s.`, false);
+      }
       if (err) {
         const isAccessDenied = err.message.toLowerCase().includes('access denied')
                             || err.message.toLowerCase().includes('cannot open')
@@ -1552,6 +1571,11 @@ function touchReset(port, onLog) {
           return resolve({ ok: false, retriable: true, cause: 'port-locked' });
         }
         onLog(`Touch reset error: ${err.message}`, true);
+        // Still not answering after the whole wait.
+        if (_portNotYet(err.message)) {
+          onLog(`The board never answered on ${port}.`, false);
+          return resolve({ ok: false, retriable: true, cause: 'port-gone' });
+        }
         onLog('This is sometimes a flaky USB cable, a marginal USB port, or a stuck COM driver. Try a different cable or USB port, then retry.', false);
         return resolve({ ok: false, retriable: true, cause: 'driver' });
       }
@@ -1561,6 +1585,8 @@ function touchReset(port, onLog) {
         }, 200);
       });
     });
+    };
+    attempt();
   });
 }
 
@@ -1593,6 +1619,8 @@ function _getDfuBoundService() {
 // Resolves { openable, everPresent, elapsedMs }
 //   openable    — dfu-util can open the device now; safe to flash
 //   everPresent — the DFU VID:PID appeared at least once (board did enter DFU)
+const STUCK_BOOTLOADER = 'The board is in bootloader mode but is not responding. '
+  + 'Hold BOOT, tap RESET, release both, then flash again.';
 function waitForDfuAccessible(onLog, deadlineMs = 25000) {
   return new Promise((resolve) => {
     onLog('Waiting for DFU device...', false);
@@ -1690,6 +1718,12 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
           onLog(kept.length
             ? `dfu-util reported: ${kept.join(' | ')}`
             : 'dfu-util did not find a Proffieboard bootloader.', false);
+          // [B-289] Windows can list the STM32 bootloader, driver bound and status OK, while dfu-util
+          // cannot see it at all. Only BOOT and RESET bring it back, so that is what to say.
+          if (!everPresent && process.platform === 'win32' && await _getDfuBoundService()) {
+            onLog(STUCK_BOOTLOADER, false);
+            return resolve({ openable: false, everPresent, stuck: true, elapsedMs: elapsed });
+          }
           return resolve({ openable: false, everPresent, elapsedMs: elapsed });
         }
         setTimeout(check, 750);
@@ -1964,6 +1998,9 @@ async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
     onLog('--- Flash failed ---', true);
     const combined = (flashResult.stderr || '') + (flashResult.stdout || '');
     const error = extractFlashError(combined);
+    // [B-289] An interrupted flash leaves the next step to the window, which knows whether the
+    // board still has a port.
+    const interrupted = error.startsWith('The flash was interrupted before it finished');
     // Linux without udev rules: dfu-util can enumerate the device via sysfs
     // (so waitForDfuAccessible + detectDFU don't catch it as inaccessible) but the
     // actual transfer fails inside libusb with LIBUSB_ERROR_ACCESS. Surface
@@ -1972,7 +2009,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
     const needsDfuDriver =
       process.platform === 'linux' &&
       /LIBUSB_ERROR_ACCESS|cannot open DFU device|Permission denied/i.test(combined);
-    return { ok: false, error, needsDfuDriver };
+    return { ok: false, error, needsDfuDriver, interrupted };
   }
 }
 
@@ -2177,6 +2214,12 @@ async function flash(port, fqbn, onLog, expectedSN, sourceDir) {
     let msg;
     if (resetResult.cause === 'port-locked') {
       msg = 'Flash stopped. Free the port and click Retry Flash.';
+    } else if (already.stuck) {
+      msg = STUCK_BOOTLOADER;
+    } else if (resetResult.cause === 'port-gone') {
+      // Waited the whole window and it never answered, so it is not just restarting.
+      msg = `The board did not answer on ${port}.\n\n`
+          + 'Pick "Switch to Bootloader Mode (DFU)" from the port dropdown to flash it from there.';
     } else if (already.everPresent) {
       msg = 'The board is in bootloader mode but Windows will not let us open it yet. '
           + 'Give it a moment and click Retry Flash; if it persists, check the DFU driver.';
@@ -2315,8 +2358,7 @@ function extractFlashError(raw) {
     // user nothing they can act on, and which one appears is only a matter of which step
     // was in flight when the connection died.
     return 'The flash was interrupted before it finished' + (stoppedAt ? ' -' + stoppedAt.replace(' It stopped at', ' it stopped at').replace(/\.$/, '') : '') + '.\n\n'
-         + 'The board is fine. It holds partial firmware until a flash completes, and the bootloader cannot be erased. '
-         + 'Verify connection and flash again. If the board is not in the port list, pick "Switch to Bootloader Mode (DFU)" from the port dropdown.';
+         + 'The board is fine. It holds partial firmware until a flash completes, and the bootloader cannot be erased.';
   }
   if (raw.includes('dfu-util: error')) {
     const errLine = lines.find(l => l.includes('dfu-util: error'));
