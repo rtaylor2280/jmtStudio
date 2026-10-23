@@ -58683,6 +58683,19 @@ function _getFreshFieldRange(fieldName) {
 
     // ── Slot inline editor ─────────────────────────────────────────────────────
 
+    /** Whether the selected preset's slots in the document differ from `preset` as parsed. */
+    function _presetChangedSinceParse(preset) {
+      if (!editor || !preset) return false;
+      let fresh;
+      try { fresh = presetParser.parsePresets(editor.getValue()).arrays[_activeArrayIndex]?.presets[_selectedPresetIndex]; }
+      catch { return false; }
+      const a = preset.styles || [], b = fresh?.styles || [];
+      if (!fresh || a.length !== b.length) return true;
+      return a.some((s, i) => s.expr !== b[i].expr || s.colorArg !== b[i].colorArg
+        || s.startLine !== b[i].startLine || s.startCol !== b[i].startCol
+        || s.endLine !== b[i].endLine || s.endCol !== b[i].endCol);
+    }
+
     function _startSlotArgEdit(tile, preset, slot, slotIdx) {
       // Closing may now COMMIT the previous slot's typed text, which rewrites the
       // document - and `slot` here was captured when the sidecar was last built,
@@ -58690,8 +58703,11 @@ function _getFreshFieldRange(fieldName) {
       // coordinates to a Monaco range edit corrupts the config, so hand off to
       // the rebuild and let it reopen this slot with fresh coordinates. This is
       // the same mechanism applyEdit already uses. (2026-08-15)
-      if (_closeSlotArgEdit()) {
+      // A write that went in immediately (a colour picked on B1 and carried to its matched blades)
+      // leaves `preset` stale too, without anything pending to commit. [B-519]
+      if (_closeSlotArgEdit() || _presetChangedSinceParse(preset)) {
         _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx };
+        _scheduleRebuild();
         return;
       }
       _editingSlot = true;
@@ -59253,7 +59269,7 @@ function _getFreshFieldRange(fieldName) {
         // match). Visibility updated whenever the effective color changes.
         // Once matched it STAYS matched: B1's colour changes carry here (_colorMatchEdits) until this
         // colour is changed by hand or this blade's style is. A quiet label says so in the button's
-        // place. A default that happens to equal B1's is not a match anyone made: no label, no button.
+        // place, for a default that equals B1's as well.
         let matchBtn = null;
         let matchedLbl = null;
         let b1Rgb    = null;
@@ -59264,7 +59280,7 @@ function _getFreshFieldRange(fieldName) {
                           (eff[1]||0) === (b1Rgb[1]||0) &&
                           (eff[2]||0) === (b1Rgb[2]||0);
           matchBtn.style.display = matches ? 'none' : '';
-          if (matchedLbl) matchedLbl.style.display = (matches && curVals) ? '' : 'none';
+          if (matchedLbl) matchedLbl.style.display = matches ? '' : 'none';
         }
         if (regArg.kind === 'RgbArg' && slotIdx > 0 && preset?.styles?.[0]) {
           b1Rgb = _resolveSlotColor(preset.styles[0]);
@@ -62395,8 +62411,8 @@ function _getFreshFieldRange(fieldName) {
     // own style, unlike Follow, which copies the whole expression.
     // Nothing records the match, for Follow's reason: a colour set on a blade that still equals B1's
     // colour IS matched, and one that differs was changed by hand. So when B1's colour moves, every
-    // colour in that preset still equal to B1's OLD colour moves with it. Only colours written into
-    // the blade's arguments count; a default is not a match anyone made.
+    // colour in that preset still equal to B1's OLD colour moves with it, a base colour left at its
+    // default included.
     const _sameRgb = (a, b) => !!a && !!b && (a[0]||0) === (b[0]||0) && (a[1]||0) === (b[1]||0) && (a[2]||0) === (b[2]||0);
 
     /**
@@ -62439,12 +62455,15 @@ function _getFreshFieldRange(fieldName) {
         const base = (bases || []).find(sameRange);
         const text = base ? base.text : model.getValueInRange(range);
         const one = (presetParser.extractStyleSlots(text) || [])[0];
-        if (!one || one.colorArg == null) return;
-        const np = window.proffieArgs?.rematchColors(one.colorArg, oldRgb, newRgb) ?? null;
+        if (!one) return;
+        let np = one.colorArg ? (window.proffieArgs?.rematchColors(one.colorArg, oldRgb, newRgb) ?? null) : null;
+        // A base colour left at its default matches too, when it shows B1's old colour.
+        if (np === null && _takesBaseColor(one.expr) && _sameRgb(_matchColorOf(one), oldRgb)) {
+          np = window.proffieArgs.writeRegistryArg('BASE_COLOR_ARG', newRgb, one.colorArg || '');
+        }
         if (np === null || np === one.colorArg) return;
-        const at = text.lastIndexOf(`"${one.colorArg}"`);
-        if (at < 0) return;
-        edits.push({ range, text: text.slice(0, at) + `"${np}"` + text.slice(at + one.colorArg.length + 2) });
+        const next = _withColorArg(text, one, np);
+        if (next !== text) edits.push({ range, text: next });
       });
       return edits;
     }
@@ -62494,44 +62513,46 @@ function _getFreshFieldRange(fieldName) {
     }
 
     /**
-     * A style copied onto B1 keeps the colour other blades are matched to. [B-222] Copying Kestis
-     * onto a preset whose B1 was cyan, with B2 matched to that cyan, wrote Kestis at its default
-     * blue and broke the match. So when a blade in the preset is matched to B1's colour and the new
-     * style takes a base colour, the copy carries B1's colour in. A style with no base colour cannot
-     * hold it; then the matched blades follow the new style's colour instead (_propagationAt), so a
-     * match is moved, never silently dropped.
+     * A style copied onto B1 keeps the preset's colour, when the style takes a base colour. [B-519]
+     * 1. B1's current style takes a base colour that is not black: that colour, set or default.
+     * 2. Otherwise the first other blade, B2 first, whose style takes a non-black base colour.
+     * 3. Otherwise the style arrives as written.
+     * Blades matched to B1's old colour then follow the new one (_propagationAt).
      */
     function _keepMatchedColor(here, newText) {
       if (!editor || !here || here.bladeNum !== 1) return newText;
-      const cur = here.preset.styles[0];
-      if (!cur || !cur.startLine) return newText;
-      const model = editor.getModel();
-      const old = _colorOfSlotText(model.getValueInRange(_slotRange(cur)));
-      // Black is a colour not chosen yet (the empty placeholder reads as black). Keeping it would
-      // put the new style out; so it goes the other way: the style keeps its own colour and the
-      // matched blades follow it.
-      if (!old || _sameRgb(old, [0, 0, 0])) return newText;
-      const probe = old.map(v => (v || 0) ^ 1);
-      const matched = here.preset.styles.some((s, i) => {
-        if (i === 0 || !s || !s.startLine) return false;
-        const one = (presetParser.extractStyleSlots(model.getValueInRange(_slotRange(s))) || [])[0];
-        return !!one && one.colorArg != null && window.proffieArgs?.rematchColors(one.colorArg, old, probe) != null;
-      });
-      if (!matched) return newText;
       const one = (presetParser.extractStyleSlots(newText) || [])[0];
-      if (!one) return newText;
-      const lead = (one.expr.match(/^(\w+)/) || [])[1] || '';
-      const isBase = (a) => a && a.name === 'BASE_COLOR_ARG';
-      const takesBase = (styleArgResolver.findArgs(one.expr) || []).some(isBase)
-                     || (lead ? _getHelperRegistryArgs(lead) : []).some(isBase);
-      if (!takesBase) return newText;
-      const np = window.proffieArgs.writeRegistryArg('BASE_COLOR_ARG', old, one.colorArg || '');
-      if (one.colorArg != null) {
-        const at = newText.lastIndexOf(`"${one.colorArg}"`);
-        return at < 0 ? newText : newText.slice(0, at) + `"${np}"` + newText.slice(at + one.colorArg.length + 2);
+      if (!one || !_takesBaseColor(one.expr)) return newText;
+      const model = editor.getModel();
+      let keep = null;
+      for (const s of here.preset.styles || []) {
+        if (!s || !s.startLine) continue;
+        const c = (presetParser.extractStyleSlots(model.getValueInRange(_slotRange(s))) || [])[0];
+        if (!c || !_takesBaseColor(c.expr)) continue;
+        const rgb = _matchColorOf(c);
+        if (rgb && !_sameRgb(rgb, [0, 0, 0])) { keep = rgb; break; }
       }
-      const at = newText.lastIndexOf('()');
-      return at < 0 ? newText : newText.slice(0, at) + `("${np}")` + newText.slice(at + 2);
+      if (!keep || _sameRgb(keep, _matchColorOf(one))) return newText;
+      const np = window.proffieArgs.writeRegistryArg('BASE_COLOR_ARG', keep, one.colorArg || '');
+      return _withColorArg(newText, one, np);
+    }
+
+    /** Whether a style expression takes a base colour argument. */
+    function _takesBaseColor(expr) {
+      const lead = ((expr || '').match(/^(\w+)/) || [])[1] || '';
+      const isBase = (a) => a && a.name === 'BASE_COLOR_ARG';
+      return (styleArgResolver.findArgs(expr || '') || []).some(isBase)
+          || (lead ? _getHelperRegistryArgs(lead) : []).some(isBase);
+    }
+
+    /** `text` (one slot, parsed as `one`) with its colour argument string replaced by `np`. */
+    function _withColorArg(text, one, np) {
+      if (one.colorArg != null) {
+        const at = text.lastIndexOf(`"${one.colorArg}"`);
+        return at < 0 ? text : text.slice(0, at) + `"${np}"` + text.slice(at + one.colorArg.length + 2);
+      }
+      const at = text.lastIndexOf('()');
+      return at < 0 ? text : text.slice(0, at) + `("${np}")` + text.slice(at + 2);
     }
 
     // ── Library picker ─────────────────────────────────────────────────────────
