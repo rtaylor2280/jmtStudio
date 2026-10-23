@@ -7906,6 +7906,23 @@ ipcMain.handle('shell:openExternal', (_, url) => {
 // hunting for it in a date-sorted folder. Resolve + existence-check first,
 // because showItemInFolder silently does nothing on a bad/relative path; fall
 // back to opening the containing folder so the user always lands somewhere.
+// The serial log, saved straight to Downloads. Never overwrites: a name already taken gets " (2)",
+// " (3)" and so on.
+ipcMain.handle('serial:exportLog', async (_, { fileName, text } = {}) => {
+  try {
+    const dir = app.getPath('downloads');
+    const safe = String(fileName || 'serial.txt').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+    const ext = path.extname(safe);
+    const stem = safe.slice(0, safe.length - ext.length);
+    let name = safe;
+    for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = `${stem} (${n})${ext}`;
+    const full = path.join(dir, name);
+    await fs.promises.writeFile(full, String(text || ''), { encoding: 'utf8', flag: 'wx' });
+    return { ok: true, path: full, fileName: name };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
 ipcMain.handle('shell:showItemInFolder', async (_, p) => {
   try {
     if (!p) return { ok: false, error: 'no path' };

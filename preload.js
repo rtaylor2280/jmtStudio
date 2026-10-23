@@ -357,6 +357,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // can own everything after it. Returns { ok, destFile } or { ok:false, canceled }.
   pickExportFilePath:      (params)   => ipcRenderer.invoke('dialog:pickExportFilePath', params),
   showItemInFolder:        (p)        => ipcRenderer.invoke('shell:showItemInFolder', p),
+  exportSerialLog:         (params)   => ipcRenderer.invoke('serial:exportLog', params),
   openFolder:              (p)        => ipcRenderer.invoke('shell:openFolder', p),
   onFileOpsCopyProgress: (cb) => {
     const handler = (_, data) => cb(data);

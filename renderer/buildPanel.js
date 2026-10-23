@@ -2502,6 +2502,7 @@ function _serialAppendLine(lineText) {
   if (_matchesAnyRule(lineText)) div.classList.add('suppressed');
   log.appendChild(div);
   while (log.children.length > SERIAL_MAX_LINES) log.removeChild(log.firstChild);
+  if (el('bp-serial-copy')?.style.display === 'none') _syncSerialLogActions();
   // Only snap-to-bottom while the user is following the live tail. When they
   // scroll up to read history, _serialAutoScroll is false and new lines stay
   // off-screen — Arduino IDE pet peeve fix. Bump the jump-pill counter so the
@@ -2962,9 +2963,82 @@ function _syncSerialPauseToCollapse(open) {
   _setSerialPaused(!open);
 }
 
+// ── Copy and export the serial log ─────────────────────
+// Shown whenever the log has history, connected or not. Both take every received line, the ones a
+// filter hides included; the app's own placeholder hints are not part of the log.
+function _serialLogLines() {
+  const log = el('bp-serial-log');
+  if (!log) return [];
+  return Array.from(log.querySelectorAll('.serial-line:not(.serial-hint)')).map(d => d.textContent);
+}
+function _syncSerialLogActions() {
+  const has = !!el('bp-serial-log')?.querySelector('.serial-line:not(.serial-hint)');
+  for (const id of ['bp-serial-copy', 'bp-serial-export']) {
+    const b = el(id);
+    if (b) b.style.display = has ? '' : 'none';
+  }
+}
+function _fieldText(id) {
+  const f = document.getElementById(id);
+  if (!f) return '';
+  if (f.tagName === 'SELECT') return (f.selectedOptions[0]?.textContent || f.value || '').trim();
+  return String(f.value || '').trim();
+}
+function _serialLogHeader(lineCount, appVersion) {
+  const now = new Date();
+  const rows = [
+    ['Saved',          now.toLocaleString()],
+    ['Config',         _fieldText('input-filename') + (window._currentFilePath ? `  (${window._currentFilePath})` : '')],
+    ['Description',    _fieldText('input-desc')],
+    ['Board',          _fieldText('input-board')],
+    ['OS version',     _fieldText('input-version')],
+    ['Prop',           _fieldText('input-prop')],
+    ['USB',            _fieldText('bp-usb-select')],
+    ['Port',           selectedPort || ''],
+    ['Board serial',   selectedPortSN || ''],
+    ['Board reports',  _boardOSVersion ? `ProffieOS ${_boardOSVersion}` : ''],
+    ['JMT Studio',     appVersion || ''],
+    ['Lines',          String(lineCount)],
+  ].filter(([, v]) => v);
+  const w = Math.max(...rows.map(([k]) => k.length)) + 2;
+  return ['JMT Studio serial log', ...rows.map(([k, v]) => (k + ':').padEnd(w) + v), '-'.repeat(60)].join('\n');
+}
+async function _copySerialLog() {
+  const lines = _serialLogLines();
+  if (!lines.length) return;
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'));
+    window.showToast?.(`Serial log copied (${lines.length} line${lines.length === 1 ? '' : 's'}).`, { kind: 'success' });
+  } catch (e) {
+    window.showToast?.(`Could not copy the serial log: ${e.message}`, { kind: 'error' });
+  }
+}
+async function _exportSerialLog() {
+  const lines = _serialLogLines();
+  if (!lines.length) return;
+  let appVersion = '';
+  try { appVersion = await window.electronAPI.getAppVersion(); } catch {}
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const config = (_fieldText('input-filename') || 'serial').replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'serial';
+  const text = _serialLogHeader(lines.length, appVersion) + '\n' + lines.join('\n') + '\n';
+  let r = null;
+  try { r = await window.electronAPI.exportSerialLog({ fileName: `${stamp}_${config}_serial.txt`, text }); } catch (e) { r = { ok: false, error: e.message }; }
+  if (r && r.ok) {
+    window.showToast?.(`Serial log saved to Downloads: ${r.fileName}`, {
+      kind: 'success',
+      action: { label: 'Show in folder', onClick: () => window.electronAPI.showItemInFolder(r.path) },
+    });
+  } else {
+    window.showToast?.(`Could not save the serial log: ${(r && r.error) || 'unknown error'}`, { kind: 'error' });
+  }
+}
+
 function _clearSerialLog() {
   const log = el('bp-serial-log');
   if (log) log.innerHTML = '';
+  _syncSerialLogActions();
   _serialPausedBuf = '';
   _serialPending   = '';
   // After clearing, user is implicitly "at the bottom" of an empty log — re-engage
@@ -3018,6 +3092,8 @@ function wireSerialMonitor() {
     if (el('bp-log-body').classList.contains('open')) toggleLog();
   });
   el('bp-serial-clear')?.addEventListener('click', _clearSerialLog);
+  el('bp-serial-copy')?.addEventListener('click', _copySerialLog);
+  el('bp-serial-export')?.addEventListener('click', _exportSerialLog);
   el('bp-serial-filters')?.addEventListener('click', () => _toggleSuppressPopover());
   el('bp-serial-filters-clearall')?.addEventListener('click', e => { e.stopPropagation(); _clearAllSuppression(); });
   // Right-click anywhere on a line in the serial log → suppression menu
