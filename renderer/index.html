@@ -55068,15 +55068,16 @@ require(['vs/editor/editor.main'], function () {
       if (!preset) return;
       const expected = fresh.bladeCount || 0;
       const actual   = preset.styles.length;
-      const mismatch = expected > 0 && actual !== expected;
+      const filled   = preset.styles.filter(s => !presetParser.isPlaceholderSlot(s)).length;
+      const mismatch = expected > 0 && (filled !== expected || actual > expected);
       const label    = document.querySelector('#preset-detail .preset-detail-slots-label');
       if (!label) return;
       label.className   = 'preset-detail-slots-label' + (mismatch ? ' field-error' : '');
       label.textContent = expected
-        ? `Styles (${actual}/${expected} blades)`
-        : `Styles (${actual} blades)`;
+        ? `Styles (${filled}/${expected} blades)`
+        : `Styles (${filled} blades)`;
       label.title = mismatch
-        ? `Your config has ${expected} blade${expected === 1 ? '' : 's'}, this preset has ${actual} style${actual === 1 ? '' : 's'}`
+        ? `Your config has ${expected} blade${expected === 1 ? '' : 's'}, this preset has ${filled} style${filled === 1 ? '' : 's'}`
         : 'A preset carries one style per blade. How many blades you have is set by the defined NUM_BLADES in your config, and each blade is described in the BladeConfig - main blade, crystal chamber, accent LEDs, and so on.';
     }
 
@@ -57593,7 +57594,9 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const wrap = document.createElement('div');
       const expected = _parseResult?.bladeCount || 0;
       const actual   = preset.styles.length;
-      const mismatch = expected > 0 && actual !== expected;
+      // A placeholder holds a slot's position but is not a style. (B-355)
+      const filled   = preset.styles.filter(s => !presetParser.isPlaceholderSlot(s)).length;
+      const mismatch = expected > 0 && (filled !== expected || actual > expected);
 
       // Blade label data for this array
       const arr       = _parseResult?.arrays[_activeArrayIndex];
@@ -57604,10 +57607,10 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       const label = document.createElement('div');
       label.className = 'preset-detail-slots-label' + (mismatch ? ' field-error' : '');
       label.textContent = expected
-        ? `Styles (${actual}/${expected} blades)`
-        : `Styles (${actual} blades)`;
+        ? `Styles (${filled}/${expected} blades)`
+        : `Styles (${filled} blades)`;
       label.title = mismatch
-        ? `Your config has ${expected} blade${expected === 1 ? '' : 's'}, this preset has ${actual} style${actual === 1 ? '' : 's'}`
+        ? `Your config has ${expected} blade${expected === 1 ? '' : 's'}, this preset has ${filled} style${filled === 1 ? '' : 's'}`
         : 'A preset carries one style per blade. How many blades you have is set by the defined NUM_BLADES in your config, and each blade is described in the BladeConfig - main blade, crystal chamber, accent LEDs, and so on. You can set custom names for each blade below.';
       wrap.appendChild(label);
 
@@ -57615,94 +57618,113 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       slots.className = 'preset-detail-slots';
       preset.styles.forEach((slot, i) => {
         const excess = expected > 0 && i >= expected;
-        slots.appendChild(_buildSlotTile(preset, slot, i, false, excess, abbrs[i], arrLabels[i + 1] || null, presetIdx));
+        if (!excess && presetParser.isPlaceholderSlot(slot)) {
+          slots.appendChild(_buildMissingSlotTile(presetIdx, i, abbrs[i], arrLabels[i + 1] || null));
+        } else {
+          slots.appendChild(_buildSlotTile(preset, slot, i, false, excess, abbrs[i], arrLabels[i + 1] || null, presetIdx));
+        }
       });
       if (expected > 0 && actual < expected) {
         for (let i = actual; i < expected; i++) {
-          const missing = document.createElement('div');
-          missing.className = 'preset-slot-tile slot-missing';
-          missing.title = 'Click to add style';
-          missing.style.cursor = 'pointer';
-          missing.dataset.slotIdx = i;
-          const num = document.createElement('span');
-          num.className = 'preset-slot-num';
-          num.textContent = abbrs[i] || `B${i + 1}`;
-          if (arrLabels[i + 1]) num.title = arrLabels[i + 1];
-          const body = document.createElement('span');
-          body.className = 'preset-slot-body';
-          body.innerHTML = '<span class="preset-slot-expr">Missing, click to add</span>';
-          missing.appendChild(num);
-          missing.appendChild(body);
-          missing.addEventListener('click', () => {
-            if (_editingSlot) { _closeSlotArgEdit(); return; }
-            if (!editor) return;
-            const model = editor.getModel();
-            // Determine the insertion RANGE and how the new style wraps.
-            // COLUMN-PRECISE AFTER THE LAST STYLE, NEVER endLine+1 ([B-344]).
-            // The common tail shape puts the display name and closing brace ON
-            // THE SAME LINE as the last style (`...(), "Windu"},`), so a
-            // whole-line insert at endLine+1 landed BELOW the closing brace: an
-            // orphan StylePtr<Black>(), OUTSIDE the preset, inside the presets
-            // array — invalid initializer, config silently uncompilable. And
-            // because the orphan was outside, the re-parse still counted the
-            // preset short, the tile stayed "Missing", and every click added
-            // another orphan (seven on the screenshot). Anchoring just past
-            // the last style's own trailing comma keeps the insert inside the
-            // preset in every tail shape; the multi-line shape produces the
-            // same text the old line-insert did.
-            let indent, insRange, insTextFor;
-            if (preset.styles.length > 0) {
-              const lastSlot = preset.styles[preset.styles.length - 1];
-              const lineText = model.getLineContent(lastSlot.endLine);
-              indent = (lineText.match(/^(\s*)/) || ['', ''])[1];
-              const after = lineText.slice(lastSlot.endCol);
-              const cm = after.match(/^\s*,/);
-              const insCol = lastSlot.endCol + 1 + (cm ? cm[0].length : 0);
-              insRange = { startLineNumber: lastSlot.endLine, startColumn: insCol,
-                           endLineNumber:   lastSlot.endLine, endColumn:   insCol };
-              // With a trailing comma present we land after it and bring our
-              // own; without one (unusual) we supply the separator ourselves.
-              insTextFor = (expr) => cm ? `\n${indent}${expr},` : `,\n${indent}${expr}`;
-            } else if (preset.displayNameRange) {
-              const insertLine = preset.displayNameRange.startLine;
-              indent = (model.getLineContent(insertLine).match(/^(\s*)/) || ['', ''])[1];
-              insRange = { startLineNumber: insertLine, startColumn: 1,
-                           endLineNumber:   insertLine, endColumn:   1 };
-              insTextFor = (expr) => `${indent}${expr},\n`;
-            } else {
-              const insertLine = preset.startLine + 1;
-              indent = '  ';
-              insRange = { startLineNumber: insertLine, startColumn: 1,
-                           endLineNumber:   insertLine, endColumn:   1 };
-              insTextFor = (expr) => `${indent}${expr},\n`;
-            }
-            // If this blade FOLLOWS another one, the slot has to arrive holding the target's style,
-            // not the default. Following is derived from the text matching, so a slot added as
-            // StylePtr<Black>() differs from its target the instant it exists - which reads as a
-            // deliberate per-preset override and permanently excludes that preset from
-            // propagation. The user would have declared a follower and silently got an exception.
-            // (B-219)
-            const followArrNow = _parseResult?.arrays[_activeArrayIndex];
-            const followsTo    = followArrNow?.follows?.[i + 1];
-            let addExpr = 'StylePtr<Black>()';
-            if (followsTo) {
-              const tgt = (preset.styles || [])[followsTo - 1];
-              // Falls back to the default when the target slot is itself missing - adding B3 while
-              // B2 is also absent - rather than inventing something to copy.
-              if (tgt && tgt.startLine) addExpr = model.getValueInRange(_slotRange(tgt));
-            }
-            _atomicEdit(editor,'add-missing-style', [{
-              range: insRange,
-              text: insTextFor(addExpr),
-            }]);
-            editor.focus();
-            _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx: i };
-          });
-          slots.appendChild(missing);
+          slots.appendChild(_buildMissingSlotTile(presetIdx, i, abbrs[i], arrLabels[i + 1] || null));
         }
       }
       wrap.appendChild(slots);
       return wrap;
+    }
+
+    // A blade this preset has no style for: a written placeholder, or a slot past the last style.
+    // Click fills this slot; the badge drags it (see _moveSlot). (B-355)
+    function _buildMissingSlotTile(presetIdx, i, abbr, fullLabel) {
+      const missing = document.createElement('div');
+      missing.className = 'preset-slot-tile slot-missing';
+      missing.title = 'Click to add style';
+      missing.style.cursor = 'pointer';
+      missing.dataset.slotIdx = i;
+      const num = document.createElement('span');
+      num.className = 'preset-slot-num';
+      num.textContent = abbr || `B${i + 1}`;
+      num.title = fullLabel ? `${fullLabel} · drag to move` : 'Drag to move';
+      num.style.cursor = 'grab';
+      num.addEventListener('click', e => e.stopPropagation());
+      num.addEventListener('mousedown', e => { if (!_editingSlot) { e.stopPropagation(); missing.draggable = true; } });
+      num.addEventListener('mouseup', () => { missing.draggable = false; });
+      const body = document.createElement('span');
+      body.className = 'preset-slot-body';
+      body.innerHTML = '<span class="preset-slot-expr">Missing, click to add</span>';
+      missing.appendChild(num);
+      missing.appendChild(body);
+      _wireSlotDragSource(missing, i, true);
+      _wireSlotDropTarget(missing, i, presetIdx);
+      missing.addEventListener('click', () => {
+        if (_editingSlot) { _closeSlotArgEdit(); return; }
+        if (!editor) return;
+        const model  = editor.getModel();
+        const parsed = presetParser.parsePresets(model.getValue());
+        const arrNow = parsed.arrays[_activeArrayIndex];
+        const preset = arrNow?.presets[presetIdx];
+        if (!preset) return;
+        const styles = preset.styles || [];
+        // If this blade FOLLOWS another one, the slot has to arrive holding the target's style,
+        // not the default. Following is derived from the text matching, so a slot added as
+        // StylePtr<Black>() differs from its target the instant it exists - which reads as a
+        // deliberate per-preset override and permanently excludes that preset from
+        // propagation. The user would have declared a follower and silently got an exception.
+        // (B-219)
+        const followsTo = arrNow?.follows?.[i + 1];
+        let addExpr = 'StylePtr<Black>()';
+        if (followsTo) {
+          const tgt = styles[followsTo - 1];
+          // Falls back to the default when the target slot is itself missing.
+          if (tgt && tgt.startLine && !presetParser.isPlaceholderSlot(tgt)) {
+            addExpr = model.getValueInRange(_slotRange(tgt));
+          }
+        }
+        let edit;
+        if (i < styles.length) {
+          // A written placeholder: replace it where it stands.
+          edit = { range: _slotRange(styles[i]), text: addExpr };
+        } else {
+          // Past the last style: placeholders for any slots between, then the style itself.
+          const items = [];
+          for (let k = styles.length; k < i; k++) items.push(presetParser.PLACEHOLDER_STYLE);
+          items.push(addExpr);
+          // COLUMN-PRECISE AFTER THE LAST STYLE, NEVER endLine+1 ([B-344]). The common tail shape
+          // puts the display name and closing brace ON THE SAME LINE as the last style
+          // (`...(), "Windu"},`), so a whole-line insert below it lands outside the preset.
+          let indent, insRange, insTextFor;
+          if (styles.length > 0) {
+            const lastSlot = styles[styles.length - 1];
+            const lineText = model.getLineContent(lastSlot.endLine);
+            indent = (lineText.match(/^(\s*)/) || ['', ''])[1];
+            const after = lineText.slice(lastSlot.endCol);
+            const cm = after.match(/^\s*,/);
+            const insCol = lastSlot.endCol + 1 + (cm ? cm[0].length : 0);
+            insRange = { startLineNumber: lastSlot.endLine, startColumn: insCol,
+                         endLineNumber:   lastSlot.endLine, endColumn:   insCol };
+            // With a trailing comma present we land after it and bring our
+            // own; without one (unusual) we supply the separator ourselves.
+            insTextFor = (expr) => cm ? `\n${indent}${expr},` : `,\n${indent}${expr}`;
+          } else if (preset.displayNameRange) {
+            const insertLine = preset.displayNameRange.startLine;
+            indent = (model.getLineContent(insertLine).match(/^(\s*)/) || ['', ''])[1];
+            insRange = { startLineNumber: insertLine, startColumn: 1,
+                         endLineNumber:   insertLine, endColumn:   1 };
+            insTextFor = (expr) => `${indent}${expr},\n`;
+          } else {
+            const insertLine = preset.startLine + 1;
+            indent = '  ';
+            insRange = { startLineNumber: insertLine, startColumn: 1,
+                         endLineNumber:   insertLine, endColumn:   1 };
+            insTextFor = (expr) => `${indent}${expr},\n`;
+          }
+          edit = { range: insRange, text: items.map(insTextFor).join('') };
+        }
+        _atomicEdit(editor, 'add-missing-style', [edit]);
+        editor.focus();
+        _reopenAfterRebuild = { presetIdx: _selectedPresetIndex, slotIdx: i };
+      });
+      return missing;
     }
 
     // ── Blade label abbreviation helpers ──────────────────────────────────────
@@ -57954,6 +57976,11 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
         // verbs - instead of as unrelated features.
         resetBtn.title = `Delete the style in this slot and move the rest up (this preset has more blade styles than your config has blades)`;
         resetBtn.addEventListener('click', e => { e.stopPropagation(); _collapseBladeSlot(slotIdx + 1, presetIdx); });
+      } else if (editor && slot.startLine
+                 && _slotIsEmpty(editor.getModel().getValueInRange(_slotRange(slot)))) {
+        // Already the default: the next step is Missing. (B-355)
+        resetBtn.title = 'Make this slot Missing';
+        resetBtn.addEventListener('click', e => { e.stopPropagation(); _clearSlotToMissing(slot); });
       } else {
         resetBtn.title = 'Reset slot to default style';
         resetBtn.addEventListener('click', e => { e.stopPropagation(); _resetSlot(slot); });
@@ -58000,44 +58027,51 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
       // and moves that blade in every preset. Letting a slot that sits past NUM_BLADES drive that
       // is the confusing operation B-226 is about, not something to enable in passing.
       if (!isMissing && !isExcess) {
-        // Drag to reorder (draggable enabled only via badge mousedown, blocked during editing)
-        tile.addEventListener('dragstart', e => {
-          if (_editingSlot) { e.preventDefault(); tile.draggable = false; return; }
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', `slot:${slotIdx}`);
-          setTimeout(() => tile.classList.add('dragging'), 0);
-        });
-        tile.addEventListener('dragend', () => {
-          tile.draggable = false;
-          tile.classList.remove('dragging');
-          document.querySelectorAll('.preset-slot-tile').forEach(t =>
-            t.classList.remove('slot-drag-over-top', 'slot-drag-over-bottom'));
-        });
-        tile.addEventListener('dragover', e => {
-          if (!e.dataTransfer.types.includes('text/plain')) return;
-          e.preventDefault();
-          const after = (e.clientY - tile.getBoundingClientRect().top) > tile.offsetHeight / 2;
-          tile.classList.toggle('slot-drag-over-bottom', after);
-          tile.classList.toggle('slot-drag-over-top', !after);
-        });
-        tile.addEventListener('dragleave', () => {
-          tile.classList.remove('slot-drag-over-top', 'slot-drag-over-bottom');
-        });
-        tile.addEventListener('drop', e => {
-          e.preventDefault();
-          tile.classList.remove('slot-drag-over-top', 'slot-drag-over-bottom');
-          const raw = e.dataTransfer.getData('text/plain');
-          if (!raw.startsWith('slot:')) return;
-          const fromIdx = parseInt(raw.slice(5), 10);
-          if (Number.isNaN(fromIdx) || fromIdx === slotIdx) return;
-          const after = (e.clientY - tile.getBoundingClientRect().top) > tile.offsetHeight / 2;
-          const insertPos = after ? slotIdx + 1 : slotIdx;
-          const toIdx = fromIdx < insertPos ? insertPos - 1 : insertPos;
-          // Global by construction - no preset index, because a blade is not a per-preset thing.
-          if (toIdx !== fromIdx) _reorderBlades(fromIdx, toIdx);
-        });
+        _wireSlotDragSource(tile, slotIdx, false);
+        _wireSlotDropTarget(tile, slotIdx, presetIdx);
       }
       return tile;
+    }
+
+    // Drag is enabled only through the badge's mousedown, and blocked while a slot is being edited.
+    function _wireSlotDragSource(tile, slotIdx, isPlaceholder) {
+      tile.addEventListener('dragstart', e => {
+        if (_editingSlot) { e.preventDefault(); tile.draggable = false; return; }
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', `slot:${slotIdx}:${isPlaceholder ? 'placeholder' : 'style'}`);
+        setTimeout(() => tile.classList.add('dragging'), 0);
+      });
+      tile.addEventListener('dragend', () => {
+        tile.draggable = false;
+        tile.classList.remove('dragging');
+        document.querySelectorAll('.preset-slot-tile').forEach(t =>
+          t.classList.remove('slot-drag-over-top', 'slot-drag-over-bottom'));
+      });
+    }
+
+    function _wireSlotDropTarget(tile, slotIdx, presetIdx) {
+      tile.addEventListener('dragover', e => {
+        if (!e.dataTransfer.types.includes('text/plain')) return;
+        e.preventDefault();
+        const after = (e.clientY - tile.getBoundingClientRect().top) > tile.offsetHeight / 2;
+        tile.classList.toggle('slot-drag-over-bottom', after);
+        tile.classList.toggle('slot-drag-over-top', !after);
+      });
+      tile.addEventListener('dragleave', () => {
+        tile.classList.remove('slot-drag-over-top', 'slot-drag-over-bottom');
+      });
+      tile.addEventListener('drop', e => {
+        e.preventDefault();
+        tile.classList.remove('slot-drag-over-top', 'slot-drag-over-bottom');
+        const m = /^slot:(\d+):(placeholder|style)$/.exec(e.dataTransfer.getData('text/plain'));
+        if (!m) return;
+        const fromIdx = parseInt(m[1], 10);
+        if (fromIdx === slotIdx) return;
+        const after = (e.clientY - tile.getBoundingClientRect().top) > tile.offsetHeight / 2;
+        const insertPos = after ? slotIdx + 1 : slotIdx;
+        const toIdx = fromIdx < insertPos ? insertPos - 1 : insertPos;
+        if (toIdx !== fromIdx) _moveSlot(presetIdx, fromIdx, toIdx, m[2] === 'placeholder');
+      });
     }
 
     function _colorArgToCSS(arg) {
@@ -60798,6 +60832,17 @@ function _getFreshFieldRange(fieldName) {
       setTimeout(() => editor.focus(), 0);
     }
 
+    /** Replace a default slot with the Missing placeholder. (B-355) */
+    function _clearSlotToMissing(slot) {
+      if (!editor || !slot.startLine) return;
+      const live = _liveSlot(slot);
+      if (!live) return;
+      _atomicEdit(editor, 'slot-missing', [{ range: _slotRange(live), text: presetParser.PLACEHOLDER_STYLE }]);
+      _pendingSlotCommit = null;
+      _closeSlotArgEdit();
+      setTimeout(() => editor.focus(), 0);
+    }
+
     /** Delete range for a slot, swallowing the comma that precedes it. */
     function _slotDeleteRange(model, full, startOff, endOff) {
       // Walk back past whitespace/newlines to find the preceding comma
@@ -63323,21 +63368,40 @@ function _getFreshFieldRange(fieldName) {
     // either: every style still exists, in a different position. So it toasts, with Undo.
 
     /** Rebuild a run of slots with one moved, as ONE edit. Null when the move cannot apply here. */
-    function _reorderSpanEdit(model, full, offs, fromIdx, toIdx) {
-      if (offs.length < 2) return null;
-      if (fromIdx >= offs.length || toIdx >= offs.length) return null;
+    /** Document offsets of each style slot in a parsed preset. */
+    function _presetSlotOffsets(model, preset) {
+      return (preset?.styles || []).map(s => ({
+        start: model.getOffsetAt({ lineNumber: s.startLine, column: s.startCol + 1 }),
+        end:   model.getOffsetAt({ lineNumber: s.endLine,   column: s.endCol   + 1 }),
+      }));
+    }
+
+    /** Edit that moves one preset's slot fromIdx to toIdx, placeholders included, or null. */
+    function _reorderRunEdit(model, full, offs, bladeCount, fromIdx, toIdx) {
+      if (!offs.length) return null;
       const texts = offs.map(o => full.slice(o.start, o.end));
-      // Separators are kept in PLACE rather than moved with their slots, so indentation and any
-      // blank lines between entries survive a reorder untouched.
+      const next  = presetParser.planPresetReorder(texts, bladeCount, fromIdx, toIdx);
+      return next ? _slotRunEdit(model, full, offs, next) : null;
+    }
+
+    /**
+     * Edit that rewrites a preset's run of slots as newTexts.
+     *
+     * Separators stay in place, so indentation and blank lines survive. A slot added past the old
+     * end reuses the last separator, or a newline at the first slot's indent when there was one slot.
+     */
+    function _slotRunEdit(model, full, offs, newTexts) {
       const seps = [];
       for (let i = 0; i < offs.length - 1; i++) seps.push(full.slice(offs[i].end, offs[i + 1].start));
-      const newTexts = [...texts];
-      const [moved] = newTexts.splice(fromIdx, 1);
-      newTexts.splice(toIdx, 0, moved);
+      let extraSep = seps[seps.length - 1];
+      if (extraSep === undefined) {
+        const lineStart = full.lastIndexOf('\n', offs[0].start - 1) + 1;
+        extraSep = ',\n' + (full.slice(lineStart, offs[0].start).match(/^\s*/) || [''])[0];
+      }
       let rebuilt = '';
       for (let i = 0; i < newTexts.length; i++) {
         rebuilt += newTexts[i];
-        if (i < seps.length) rebuilt += seps[i];
+        if (i < newTexts.length - 1) rebuilt += (i < seps.length ? seps[i] : extraSep);
       }
       const s = model.getPositionAt(offs[0].start);
       const e = model.getPositionAt(offs[offs.length - 1].end);
@@ -63346,6 +63410,48 @@ function _getFreshFieldRange(fieldName) {
                  endLineNumber:   e.lineNumber, endColumn:   e.column },
         text: rebuilt,
       };
+    }
+
+    /** True while no preset, live or disabled, has a style in this blade's slot. */
+    function _bladeIsUnfilled(arr, model, full, idx) {
+      for (const preset of arr.presets) {
+        const slot = (preset.styles || [])[idx];
+        if (slot && !presetParser.isPlaceholderSlot(slot)) return false;
+      }
+      const blocks = _scanDisabledPresets(full)
+        .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
+      for (const b of blocks) {
+        const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+        const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+        const slot = presetParser.extractStyleSlots(full.slice(innerStart, innerEnd))[idx];
+        if (slot && !presetParser.isPlaceholderSlot(slot)) return false;
+      }
+      return true;
+    }
+
+    /**
+     * A slot drag. A populated blade moves in every preset. A placeholder moves in every preset only
+     * while its blade is empty everywhere (a new blade); otherwise it moves in this preset alone,
+     * and no names change. (B-355)
+     */
+    function _moveSlot(presetIdx, fromIdx, toIdx, isPlaceholder) {
+      if (!editor || fromIdx === toIdx) return;
+      const model  = editor.getModel();
+      const full   = model.getValue();
+      const parsed = presetParser.parsePresets(full);
+      const arr    = parsed.arrays[_activeArrayIndex];
+      if (!arr) return;
+      if (!isPlaceholder || _bladeIsUnfilled(arr, model, full, fromIdx)) {
+        _reorderBlades(fromIdx, toIdx);
+        return;
+      }
+      const preset = arr.presets[presetIdx];
+      const edit = preset && _reorderRunEdit(model, full, _presetSlotOffsets(model, preset),
+                                             parsed.bladeCount || 0, fromIdx, toIdx);
+      if (!edit) return;
+      _atomicEdit(editor, 'slot-move', [edit]);
+      editor.focus();
+      _scheduleRebuild();
     }
 
     /** Leading whitespace of a 1-based line, so a rewritten comment keeps its indentation. */
@@ -63437,19 +63543,16 @@ function _getFreshFieldRange(fieldName) {
 
       const lines = full.split('\n');
       const edits = [];
+      const bladeCount = parsed.bladeCount || 0;
       let changed = 0, skipped = 0;
 
+      // A short preset moves too: its open slots move as placeholders. A preset with no styles at
+      // all has nothing to anchor an edit to and is reported. (B-355)
       for (const preset of arr.presets) {
-        const styles = preset.styles || [];
-        const offs = styles.map(s => ({
-          start: model.getOffsetAt({ lineNumber: s.startLine, column: s.startCol + 1 }),
-          end:   model.getOffsetAt({ lineNumber: s.endLine,   column: s.endCol   + 1 }),
-        }));
-        const edit = _reorderSpanEdit(model, full, offs, fromIdx, toIdx);
-        // A preset with fewer blades than the one being moved cannot take the move. It is left
-        // alone and REPORTED - it is already short a blade and already flagged, and silently
-        // leaving it in the old order is exactly the desync this feature exists to prevent.
-        if (edit) { edits.push(edit); changed++; } else skipped++;
+        const offs = _presetSlotOffsets(model, preset);
+        if (!offs.length) { skipped++; continue; }
+        const edit = _reorderRunEdit(model, full, offs, bladeCount, fromIdx, toIdx);
+        if (edit) { edits.push(edit); changed++; }
       }
 
       // Disabled presets move too, and it matters MORE here than it does for follow. A missing slot
@@ -63463,8 +63566,9 @@ function _getFreshFieldRange(fieldName) {
         const innerText  = full.slice(innerStart, innerEnd);
         const offs = presetParser.extractStyleSlots(innerText)
           .map(s => ({ start: innerStart + s.startOffset, end: innerStart + s.endOffset }));
-        const edit = _reorderSpanEdit(model, full, offs, fromIdx, toIdx);
-        if (edit) { edits.push(edit); changed++; } else skipped++;
+        if (!offs.length) { skipped++; continue; }
+        const edit = _reorderRunEdit(model, full, offs, bladeCount, fromIdx, toIdx);
+        if (edit) { edits.push(edit); changed++; }
       }
 
       if (!edits.length) return;
@@ -63486,7 +63590,7 @@ function _getFreshFieldRange(fieldName) {
       const name = _bladeDisplayName(arr, fromIdx + 1);
       showToast(
         `${name} moved to position ${toIdx + 1} in ${changed} preset${changed === 1 ? '' : 's'}.`
-        + (skipped ? ` ${skipped} preset${skipped === 1 ? ' has' : 's have'} fewer blades and `
+        + (skipped ? ` ${skipped} preset${skipped === 1 ? ' has' : 's have'} no styles and `
                      + `${skipped === 1 ? 'was' : 'were'} left alone.` : '')
         + (followInfo.dropped ? ` ${followInfo.dropped} follow setting no longer fits the new order `
                                 + `and was turned off.` : ''),

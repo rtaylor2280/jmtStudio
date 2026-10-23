@@ -660,6 +660,37 @@
     return map;
   }
 
+  // A blade a short preset has no style for yet. Written into its slot so a slot's position
+  // stays the blade it drives. Does not compile until filled. (B-355)
+  const PLACEHOLDER_STYLE = 'StylePtr<MISSING_STYLE>()';
+
+  function isPlaceholderText(text) {
+    return sameExpr(text, PLACEHOLDER_STYLE);
+  }
+
+  function isPlaceholderSlot(slot) {
+    return !!slot && slot.type === 'styleptr' && (slot.expr || '').trim() === 'MISSING_STYLE';
+  }
+
+  /**
+   * One preset's slot texts after moving position fromIdx to toIdx.
+   *
+   * The preset is first padded with placeholders to bladeCount, so a short preset's open slots
+   * move like any other slot; trailing placeholders are then dropped, since a missing tail needs
+   * no text. Returns the new list, or null when nothing changed. (B-355)
+   */
+  function planPresetReorder(texts, bladeCount, fromIdx, toIdx) {
+    const len = Math.max(texts.length, bladeCount || 0);
+    if (fromIdx === toIdx || fromIdx >= len || toIdx >= len) return null;
+    const padded = [...texts];
+    while (padded.length < len) padded.push(PLACEHOLDER_STYLE);
+    const [moved] = padded.splice(fromIdx, 1);
+    padded.splice(toIdx, 0, moved);
+    while (padded.length && isPlaceholderText(padded[padded.length - 1])) padded.pop();
+    const same = padded.length === texts.length && padded.every((t, i) => t === texts[i]);
+    return same ? null : padded;
+  }
+
   /**
    * Numbering, names and follow pairs after blade `bladeNum` STOPS EXISTING.
    *
@@ -889,9 +920,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
+    module.exports = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   } else {
-    root.presetParser = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows };
+    root.presetParser = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));
