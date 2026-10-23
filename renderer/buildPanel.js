@@ -2393,10 +2393,25 @@ function appendLog(line, isError) {
   else if (line.startsWith('---') || line.startsWith('✓')) span.classList.add('log-highlight');
   panel.appendChild(span);
   panel.scrollTop = panel.scrollHeight;
+  if (el('bp-log-copy')?.style.display === 'none') _syncBuildLogActions();
 }
 
 function clearLog() {
   el('bp-log-content').innerHTML = '';
+  _syncBuildLogActions();
+}
+
+// Copy and export for Build Output: everything in the panel, compile and flash runs alike.
+function _buildLogLines() {
+  const t = el('bp-log-content')?.textContent || '';
+  return t.replace(/\n$/, '').split('\n').filter((l, i, a) => a.length > 1 || l);
+}
+function _syncBuildLogActions() {
+  const has = !!(el('bp-log-content')?.textContent || '').trim();
+  for (const id of ['bp-log-copy', 'bp-log-export']) {
+    const b = el(id);
+    if (b) b.style.display = has ? '' : 'none';
+  }
 }
 
 function _setLogChevron(open) {
@@ -2963,7 +2978,7 @@ function _syncSerialPauseToCollapse(open) {
   _setSerialPaused(!open);
 }
 
-// ── Copy and export the serial log ─────────────────────
+// ── Copy and export the serial log and Build Output ────
 // Shown whenever the log has history, connected or not. Both take every received line, the ones a
 // filter hides included; the app's own placeholder hints are not part of the log.
 function _serialLogLines() {
@@ -2984,7 +2999,7 @@ function _fieldText(id) {
   if (f.tagName === 'SELECT') return (f.selectedOptions[0]?.textContent || f.value || '').trim();
   return String(f.value || '').trim();
 }
-function _serialLogHeader(lineCount, appVersion) {
+function _logHeader(title, lineCount, appVersion) {
   const now = new Date();
   const rows = [
     ['Saved',          now.toLocaleString()],
@@ -3001,37 +3016,44 @@ function _serialLogHeader(lineCount, appVersion) {
     ['Lines',          String(lineCount)],
   ].filter(([, v]) => v);
   const w = Math.max(...rows.map(([k]) => k.length)) + 2;
-  return ['JMT Studio serial log', ...rows.map(([k, v]) => (k + ':').padEnd(w) + v), '-'.repeat(60)].join('\n');
+  return [title, ...rows.map(([k, v]) => (k + ':').padEnd(w) + v), '-'.repeat(60)].join('\n');
 }
-async function _copySerialLog() {
-  const lines = _serialLogLines();
+// kind: 'serial' (the Serial Monitor) or 'build' (Build Output).
+const _LOG_KINDS = {
+  serial: { name: 'serial log',   title: 'JMT Studio serial log',   suffix: 'serial', lines: () => _serialLogLines() },
+  build:  { name: 'build output', title: 'JMT Studio build output', suffix: 'build',  lines: () => _buildLogLines() },
+};
+async function _copyLog(kind) {
+  const k = _LOG_KINDS[kind];
+  const lines = k.lines();
   if (!lines.length) return;
   try {
     await navigator.clipboard.writeText(lines.join('\n'));
-    window.showToast?.(`Serial log copied (${lines.length} line${lines.length === 1 ? '' : 's'}).`, { kind: 'success' });
+    window.showToast?.(`${k.name[0].toUpperCase() + k.name.slice(1)} copied (${lines.length} line${lines.length === 1 ? '' : 's'}).`, { kind: 'success' });
   } catch (e) {
-    window.showToast?.(`Could not copy the serial log: ${e.message}`, { kind: 'error' });
+    window.showToast?.(`Could not copy the ${k.name}: ${e.message}`, { kind: 'error' });
   }
 }
-async function _exportSerialLog() {
-  const lines = _serialLogLines();
+async function _exportLog(kind) {
+  const k = _LOG_KINDS[kind];
+  const lines = k.lines();
   if (!lines.length) return;
   let appVersion = '';
   try { appVersion = await window.electronAPI.getAppVersion(); } catch {}
   const d = new Date();
   const p2 = (n) => String(n).padStart(2, '0');
   const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
-  const config = (_fieldText('input-filename') || 'serial').replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'serial';
-  const text = _serialLogHeader(lines.length, appVersion) + '\n' + lines.join('\n') + '\n';
+  const config = (_fieldText('input-filename') || k.suffix).replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || k.suffix;
+  const text = _logHeader(k.title, lines.length, appVersion) + '\n' + lines.join('\n') + '\n';
   let r = null;
-  try { r = await window.electronAPI.exportSerialLog({ fileName: `${stamp}_${config}_serial.txt`, text }); } catch (e) { r = { ok: false, error: e.message }; }
+  try { r = await window.electronAPI.exportLog({ fileName: `${stamp}_${config}_${k.suffix}.txt`, text }); } catch (e) { r = { ok: false, error: e.message }; }
   if (r && r.ok) {
-    window.showToast?.(`Serial log saved to Downloads: ${r.fileName}`, {
+    window.showToast?.(`${k.name[0].toUpperCase() + k.name.slice(1)} saved to Downloads: ${r.fileName}`, {
       kind: 'success',
       action: { label: 'Show in folder', onClick: () => window.electronAPI.showItemInFolder(r.path) },
     });
   } else {
-    window.showToast?.(`Could not save the serial log: ${(r && r.error) || 'unknown error'}`, { kind: 'error' });
+    window.showToast?.(`Could not save the ${k.name}: ${(r && r.error) || 'unknown error'}`, { kind: 'error' });
   }
 }
 
@@ -3092,8 +3114,10 @@ function wireSerialMonitor() {
     if (el('bp-log-body').classList.contains('open')) toggleLog();
   });
   el('bp-serial-clear')?.addEventListener('click', _clearSerialLog);
-  el('bp-serial-copy')?.addEventListener('click', _copySerialLog);
-  el('bp-serial-export')?.addEventListener('click', _exportSerialLog);
+  el('bp-serial-copy')?.addEventListener('click', () => _copyLog('serial'));
+  el('bp-serial-export')?.addEventListener('click', () => _exportLog('serial'));
+  el('bp-log-copy')?.addEventListener('click', () => _copyLog('build'));
+  el('bp-log-export')?.addEventListener('click', () => _exportLog('build'));
   el('bp-serial-filters')?.addEventListener('click', () => _toggleSuppressPopover());
   el('bp-serial-filters-clearall')?.addEventListener('click', e => { e.stopPropagation(); _clearAllSuppression(); });
   // Right-click anywhere on a line in the serial log → suppression menu

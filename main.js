@@ -7906,9 +7906,9 @@ ipcMain.handle('shell:openExternal', (_, url) => {
 // hunting for it in a date-sorted folder. Resolve + existence-check first,
 // because showItemInFolder silently does nothing on a bad/relative path; fall
 // back to opening the containing folder so the user always lands somewhere.
-// The serial log, saved straight to Downloads. Never overwrites: a name already taken gets " (2)",
-// " (3)" and so on.
-ipcMain.handle('serial:exportLog', async (_, { fileName, text } = {}) => {
+// A log (Serial Monitor or Build Output), saved straight to Downloads. Never overwrites: a name
+// already taken gets " (2)", " (3)" and so on.
+ipcMain.handle('logs:export', async (_, { fileName, text } = {}) => {
   try {
     const dir = app.getPath('downloads');
     const safe = String(fileName || 'serial.txt').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
