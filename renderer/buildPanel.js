@@ -2307,6 +2307,17 @@ function _startInterruptedWatch() {
     if (!st || st.dataset.interrupted !== '1' || !modal || modal.style.display === 'none') { _stopInterruptedWatch(); return; }
     if (busy || _interruptedHasPort()) return;
     busy = true;
+    // [B-522] In Bootloader Mode the port list is locked, so a board back on a port is seen only
+    // here. Leaving Bootloader Mode reopens the list, and its refresh offers Flash Now on that port.
+    if (isDfuMode) {
+      let p = null;
+      try { p = await window.electronAPI.getRecommendedPort(); } catch {}
+      if (p && p.ok && (p.proffieports || []).length) {
+        busy = false;
+        exitDfuMode();
+        return;
+      }
+    }
     let r = null;
     try { r = await window.electronAPI.detectDFU(); } catch {}
     busy = false;
