@@ -773,7 +773,42 @@ async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNa
   return { ok: true, cancelled: _stopped, added, failed, refused, linkedFiles, pooled };
 }
 
+// Images that landed at the TOP of a location become PNG [B-530]; deeper ones are content and are
+// left alone, as is anything not named in relPaths. `decode(absPath)` returns PNG bytes. The PNG
+// takes the original's name with .png, numbered _2, _3 when that is taken, and the original goes.
+// Returns every top-level image path that landed, as it now is; a failed conversion keeps its file.
+const LANDED_IMAGE_RX = /\.(png|jpe?g|gif|webp|bmp)$/i;
+async function landedImagesToPng({ userData, kind, id, relPaths, decode }) {
+  const out = [];
+  let changed = false;
+  for (const rel of relPaths || []) {
+    const clean = String(rel || '').replace(/\\/g, '/');
+    if (!clean || clean.includes('/') || !LANDED_IMAGE_RX.test(clean)) continue;
+    if (/\.png$/i.test(clean)) { out.push(clean); continue; }
+    try {
+      const abs = _resolve(userData, kind, id, clean);
+      const png = await decode(abs);
+      if (!png || !png.length) { out.push(clean); continue; }
+      const dir = path.dirname(abs);
+      const stem = path.parse(clean).name;
+      let name = `${stem}.png`;
+      for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = `${stem}_${n}.png`;
+      fs.writeFileSync(path.join(dir, name), png);
+      fs.unlinkSync(abs);
+      changed = true;
+      out.push(name);
+    } catch { out.push(clean); }
+  }
+  if (changed) _markLocationDirty(userData, kind, id);
+  return out;
+}
+
+// Where a file in a font or common folder is on disk, checked to stay inside it.
+function locationFilePath(userData, kind, id, subPath) { return _resolve(userData, kind, id, subPath); }
+
 module.exports = {
+  locationFilePath,
+  landedImagesToPng,
   copyAcrossLocations,
   moveWithinLocation,
   deleteFilesAt,

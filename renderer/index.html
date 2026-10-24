@@ -2742,7 +2742,7 @@
   .sf-common-files-header .styles-tag-filter-wrap { display: flex; }
   .sf-common-files-title { font-size: 0.64rem; font-weight: 700; color: var(--c-text-sub); letter-spacing: 0.06em; text-transform: uppercase; flex: 1; min-width: 0; }
   .sf-common-files-add-btn { font-size: 0.64rem; padding: 1px 6px; }
-  .sf-common-files { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 6px; }
+  .sf-common-files { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 28px; }
   .sf-common-files::-webkit-scrollbar { width: 6px; }
   .sf-common-files::-webkit-scrollbar-track { background: transparent; }
   .sf-common-files::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
@@ -3688,6 +3688,9 @@
      when they hit the container edge. Vertical scroll lives on the
      browser container above; this is just the flex grid of items. */
   .sf-entry-files-list { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 1px 8px; }
+  /* A blank row's worth of space under a font's or common folder's files, so there is always somewhere
+     to right-click for Paste here, even when the files fill the last row exactly. */
+  #sf-entry-files-list { padding-bottom: 22px; }
   .sf-entry-files-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; font-size: 0.75rem; cursor: default; user-select: none; width: 140px; flex-shrink: 0; border-radius: 2px; }
   .sf-entry-files-row:hover { background: var(--c-bg-hover); }
   .sf-entry-files-row.is-dir { cursor: pointer; }
@@ -5878,7 +5881,10 @@
 
 <!-- ── Reusable confirm modal (replaces native window.confirm for in-app confirmations) ── -->
 <div class="modal-overlay" id="modal-confirm">
-  <div class="modal">
+  <div class="modal" style="position:relative">
+    <!-- Shown only when a caller passes closeX: a ✕ that cancels the whole action, for a dialog whose
+         buttons are all ways of going ahead. -->
+    <button class="modal-btn-close" id="modal-confirm-x" title="Cancel" style="display:none">&#10005;</button>
     <h2 id="modal-confirm-title">Confirm</h2>
     <p id="modal-confirm-msg"></p>
     <label id="modal-confirm-checkbox-row" style="display:none; margin: 10px 0 20px; font-size: 0.9rem; user-select:none; cursor:pointer;">
@@ -8064,6 +8070,7 @@ function promptConfirm(opts) {
       checkbox    = null,
       checkbox2   = null,
       dropdown    = null,
+      closeX      = false,
     } = opts || {};
     // CLEAR ANY STALE EJECT ROW BEFORE THIS DIALOG RENDERS. [B-424, 2026-10-05]
     // `_sfPlaceEjectRowInButtons()` defaults to `#modal-confirm .modal-btns`, so an import
@@ -8317,6 +8324,11 @@ function promptConfirm(opts) {
     cancelBtn.onclick = () => cleanup(multi ? 'cancel'  : false);
     if (middleBtn) middleBtn.onclick = () => cleanup('middle');
     if (altBtn)    altBtn.onclick    = () => cleanup('alt');
+    const xBtn = document.getElementById('modal-confirm-x');
+    if (xBtn) {
+      xBtn.style.display = closeX ? '' : 'none';
+      xBtn.onclick = closeX ? () => cleanup(multi ? 'close' : false) : null;
+    }
   });
 }
 window.promptConfirm = promptConfirm;
@@ -34888,6 +34900,73 @@ require(['vs/editor/editor.main'], function () {
         try { return await _sfAddImageToItem({ kind, id, subPath, filePath: tmp.filePath }); }
         finally { try { await window.electronAPI.clipboardCleanupTemp({ filePath: tmp.filePath }); } catch {} }
       };
+      // Choose an image and hand back a PNG of it, so every image a user adds is stored as PNG
+      // and is ready to convert for a color display. A pasted image is already PNG.
+      // Returns { ok, filePath, converted } or { ok: false, cancelled | error }.
+      window._sfSelectPictureAsPng = async () => {
+        let s = null;
+        try { s = await window.electronAPI.selectPicture(); } catch {}
+        if (!s || !s.ok) return { ok: false, cancelled: true };
+        let r = null;
+        try { r = await window.electronAPI.pictureToPng({ filePath: s.filePath }); } catch {}
+        return (r && r.ok && r.filePath) ? r : { ok: false, error: (r && r.error) || 'The image could not be read.' };
+      };
+      // An image that landed at the top of a font or common folder through any door is offered the
+      // item's name: Keep original name, Rename, or Always rename (a preference; never asked again).
+      // A name that already is the item's, or its _N, is left alone. [B-530]
+      window.electronAPI?.onPicturesLanded?.(async ({ kind, id, paths, undo } = {}) => {
+        const itemName = kind === 'common' ? (((_sfCommons.find((c) => c.uuid === id) || {}).meta || {}).name) : id;
+        const stem = _sfPastedImageStem(itemName);
+        // The stem is only a-z, 0-9, '.' and '-' (_sfPastedImageStem), so '.' is all that needs escaping.
+        const named = new RegExp('^' + stem.replace(/\./g, '\\.') + '(_\\d+)?\\.png$', 'i');
+        const todo = (paths || []).filter((p) => !named.test(p));
+        if (!todo.length) return;
+        let always = false;
+        try { always = !!(await window.electronAPI.getSetting('imagesAlwaysRename', false)); } catch {}
+        if (!always) {
+          const many = todo.length > 1;
+          const choice = await promptConfirm({
+            title: many ? 'Rename these images?' : 'Rename this image?',
+            messageHtml: `${many ? `${todo.length} images were` : `<strong>${_sfEscape(todo[0])}</strong> was`} added to `
+              + `<strong>${_sfEscape(itemName || '')}</strong>. Name ${many ? 'them' : 'it'} after it, as <strong>${_sfEscape(stem)}.png</strong>?`,
+            cancelText: 'Keep original name',
+            middleText: 'Rename',
+            confirmText: 'Always rename', confirmKind: 'primary',
+            closeX: Array.isArray(undo),
+          });
+          // ✕ cancels the whole paste or add: everything it put in the folder comes back out.
+          if (choice === 'close') {
+            for (const p of undo || []) {
+              try {
+                if (kind === 'common') await window.electronAPI.deleteCommonFile({ uuid: id, subPath: p });
+                else await window.electronAPI.fileOpsDelete({ kind, id, subPaths: [p] });
+              } catch {}
+            }
+            if (kind === 'entry' && _sfDetailOriginalName === id) { try { await _sfAfterEntryPictureChange(); } catch {} }
+            else if (kind === 'common' && typeof _sfRefreshCommons === 'function') { try { _sfRefreshCommons(); } catch {} }
+            return;
+          }
+          if (choice === 'cancel') return;
+          if (choice === 'confirm') { try { await window.electronAPI.setSetting('imagesAlwaysRename', true); } catch {} }
+        }
+        let tree = [];
+        try {
+          const lr = kind === 'common' ? await window.electronAPI.listCommonFiles({ uuid: id })
+                                       : await window.electronAPI.listEntryFiles({ name: id });
+          tree = (lr && lr.ok && lr.files) || [];
+        } catch {}
+        const taken = tree.filter((x) => !x.isDir && /\.png$/i.test(x.name)).map((x) => x.name.slice(0, -4));
+        for (const p of todo) {
+          const free = taken.some((t) => t.toLowerCase() === stem) ? _jmtNumberedName(stem, taken) : stem;
+          taken.push(free);
+          try {
+            if (kind === 'common') await window.electronAPI.renameCommonFile({ uuid: id, subPath: p, newName: `${free}.png` });
+            else await window.electronAPI.fileOpsRename({ kind, id, subPath: p, newName: `${free}.png` });
+          } catch {}
+        }
+        if (kind === 'entry' && _sfDetailOriginalName === id) { try { await _sfAfterEntryPictureChange(); } catch {} }
+        else if (kind === 'common' && typeof _sfRefreshCommons === 'function') { try { _sfRefreshCommons(); } catch {} }
+      });
       const _sfClipboardHasImage = async () => {
         try { return !!(await window.electronAPI.clipboardHasImage()); } catch { return false; }
       };
@@ -34935,6 +35014,13 @@ require(['vs/editor/editor.main'], function () {
       const _sfPasteImageVia = async (setFromFile, btn) => {
         let tmp = null;
         try { tmp = await window.electronAPI.clipboardImageToTemp(); } catch {}
+        // Nothing on the system clipboard: one image copied in the app (from a font, a common folder
+        // or a download) pastes too. An in-app Copy empties the system clipboard on purpose.
+        const copied = _sfFileClipboard && _sfFileClipboard.paths.length === 1
+          && /\.(png|jpe?g|gif|webp|bmp)$/i.test(_sfFileClipboard.paths[0]) ? _sfFileClipboard : null;
+        if ((!tmp || !tmp.ok) && copied) {
+          try { tmp = await window.electronAPI.pictureFromCopied({ kind: copied.kind, id: copied.id, subPath: copied.paths[0] }); } catch {}
+        }
         if (!tmp || !tmp.ok) {
           if (btn) {
             btn.classList.remove('sf-url-paste-invalid');
@@ -35029,9 +35115,10 @@ require(['vs/editor/editor.main'], function () {
         }
       };
       document.getElementById('btn-sf-entry-picture-add')?.addEventListener('click', async () => {
-        let s = null;
-        try { s = await window.electronAPI.selectPicture(); } catch {}
-        if (s && s.ok) await _sfSetEntryPicture(s.filePath);
+        const s = await window._sfSelectPictureAsPng();
+        if (!s.ok) { if (s.error) promptError('Could not add the image', s.error); return; }
+        try { await _sfSetEntryPicture(s.filePath); }
+        finally { if (s.converted) { try { await window.electronAPI.clipboardCleanupTemp({ filePath: s.filePath }); } catch {} } }
       });
       document.getElementById('btn-sf-entry-picture-paste')?.addEventListener('click', (e) => _sfPasteImageVia(_sfSetEntryPicture, e.currentTarget));
 
@@ -35059,6 +35146,7 @@ require(['vs/editor/editor.main'], function () {
         }
         return cur;
       };
+      let _sfPictureRowTree = null;
       const _sfRenderEntryFiles = () => {
         // LIVE, not just on open. [B-304] This runs after every file operation in
         // the modal — add, delete, new folder, reorganize — so the marker follows the
@@ -35069,6 +35157,12 @@ require(['vs/editor/editor.main'], function () {
         // edit would answer from the manifest the edit just invalidated — a live
         // wrong answer, which is worse than a correct late one.
         if (_sfDetailOriginalName) _sfRenderCustomized(_sfDetailOriginalName);
+        // The Image row follows the files the same way: an image added, removed or renamed through
+        // Files shows there at once. Only when the file list itself changed, not on navigation.
+        if (_sfEntryFilesTree !== _sfPictureRowTree) {
+          _sfPictureRowTree = _sfEntryFilesTree;
+          try { _sfRenderEntryPictureRow(); } catch {}
+        }
         const list = document.getElementById('sf-entry-files-list');
         const crumbEl = document.getElementById('sf-entry-files-breadcrumb');
         if (!list || !crumbEl) return;
@@ -36537,27 +36631,32 @@ require(['vs/editor/editor.main'], function () {
         const uuid = _sfSourceOriginalUuid;
         if (!uuid) return;
         const { single, shown, removable } = _sfSourceRowState;
-        if (single) {
-          let fp = filePath;
-          if (!fp) {
-            let s = null;
-            try { s = await window.electronAPI.selectPicture(); } catch {}
-            if (!s || !s.ok) return;
-            fp = s.filePath;
-          }
-          const oldSubPath = removable === 'item' ? shown.subPath : null;
-          if (!(await _sfReplaceItemImage({ kind: single.kind, id: single.id, oldSubPath, filePath: fp }))) return;
-          // The item's image is now the source's; one set on the source earlier would hide it.
-          if (removable === 'source') { try { await window.electronAPI.clearSourcePicture({ uuid }); } catch {} }
-          _sfAfterSourcePictureChange();
-          return;
+        // A chosen file is converted to PNG first; the temp copy goes when this returns.
+        let picked = null;
+        if (!filePath) {
+          picked = await window._sfSelectPictureAsPng();
+          if (!picked.ok) { if (picked.error) promptError('Could not set the image', picked.error); return; }
+          filePath = picked.filePath;
         }
-        let r;
-        try { r = await window.electronAPI.setSourcePicture({ uuid, filePath }); }
-        catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
-        if (r && r.cancelled) return;
-        if (!r || !r.ok) { promptError('Could not set the image', (r && r.error) || 'unknown error'); return; }
-        _sfAfterSourcePictureChange();
+        try {
+          if (single) {
+            const fp = filePath;
+            const oldSubPath = removable === 'item' ? shown.subPath : null;
+            if (!(await _sfReplaceItemImage({ kind: single.kind, id: single.id, oldSubPath, filePath: fp }))) return;
+            // The item's image is now the source's; one set on the source earlier would hide it.
+            if (removable === 'source') { try { await window.electronAPI.clearSourcePicture({ uuid }); } catch {} }
+            _sfAfterSourcePictureChange();
+            return;
+          }
+          let r;
+          try { r = await window.electronAPI.setSourcePicture({ uuid, filePath }); }
+          catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
+          if (r && r.cancelled) return;
+          if (!r || !r.ok) { promptError('Could not set the image', (r && r.error) || 'unknown error'); return; }
+          _sfAfterSourcePictureChange();
+        } finally {
+          if (picked && picked.converted) { try { await window.electronAPI.clipboardCleanupTemp({ filePath }); } catch {} }
+        }
       };
       // Run from the viewer. Returns true when the image went, so the viewer closes.
       const _sfRemoveSourcePicture = async () => {

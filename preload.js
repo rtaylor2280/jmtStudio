@@ -510,6 +510,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearSourcePicture:    (params)     => ipcRenderer.invoke('sources:clearPicture', params),
   getSourceOwnPicture:   (params)     => ipcRenderer.invoke('sources:ownPicture', params),
   selectPicture:         ()           => ipcRenderer.invoke('dialog:selectPicture'),
+  pictureFromCopied:     (params)     => ipcRenderer.invoke('picture:fromCopied', params),
+  pictureToPng:          (params)     => ipcRenderer.invoke('picture:toPng', params),
+  onPicturesLanded: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('pictures:landed', handler);
+    return () => ipcRenderer.removeListener('pictures:landed', handler);
+  },
   commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
   commonMatchesAt:       (params)     => ipcRenderer.invoke('common:matchesAt', params),
   writeCommonMarker:     (params)     => ipcRenderer.invoke('common:writeMarker', params),

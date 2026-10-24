@@ -2552,13 +2552,20 @@ ipcMain.handle('fileOps:copy', async (event, { src, srcPaths, dest, destNames } 
       last = now;
       try { event.sender.send('fileOps:copyProgress', { name, done, total }); } catch {}
     };
-    return await soundFontFileOps.copyAcrossLocations({ userData: app.getPath('userData'), src, srcPaths, dest, destNames, onFile });
+    const r = await soundFontFileOps.copyAcrossLocations({ userData: app.getPath('userData'), src, srcPaths, dest, destNames, onFile });
+    if (r && r.ok && dest && !dest.subPath) await _imagesLanded(dest.kind, dest.id, r.added);
+    return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('fileOps:move', (_, { kind, id, sourcePaths, destSubPath } = {}) => {
-  try { return soundFontFileOps.moveWithinLocation({ userData: app.getPath('userData'), kind, id, sourcePaths, destSubPath }); }
+ipcMain.handle('fileOps:move', async (_, { kind, id, sourcePaths, destSubPath } = {}) => {
+  try {
+    const r = soundFontFileOps.moveWithinLocation({ userData: app.getPath('userData'), kind, id, sourcePaths, destSubPath });
+    // A path reported back unchanged did not move, so it was already there.
+    if (r && r.ok && !destSubPath) await _imagesLanded(kind, id, (r.moved || []).filter((p) => !(sourcePaths || []).includes(p)), false);
+    return r;
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -2592,6 +2599,7 @@ ipcMain.handle('fileOps:addFiles', async (event, { kind, id, subPath, sourceFile
         onBytes: emit.onBytes, shouldStop,
       }));
     emit.flush();
+    if (r && r.ok && !subPath) await _imagesLanded(kind, id, r.added);
     return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -3064,6 +3072,7 @@ ipcMain.handle('common:addFiles', async (event, { uuid, subPath, sourceFilePaths
       soundFontCommon.addFilesToCommon(
         app.getPath('userData'), uuid, subPath, sourceFilePaths, emit.onBytes, shouldStop));
     emit.flush();
+    if (r && r.ok && !subPath) await _imagesLanded('common', uuid, r.added);
     return r;
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
@@ -3084,13 +3093,21 @@ ipcMain.handle('common:createSubfolder', (_, { uuid, parentSubPath, name } = {})
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:copyFiles', (_, { sourceUuid, sourcePaths, destUuid, destSubPath } = {}) => {
-  try { return soundFontCommon.copyCommonFiles(app.getPath('userData'), sourceUuid, sourcePaths, destUuid, destSubPath); }
+ipcMain.handle('common:copyFiles', async (_, { sourceUuid, sourcePaths, destUuid, destSubPath } = {}) => {
+  try {
+    const r = soundFontCommon.copyCommonFiles(app.getPath('userData'), sourceUuid, sourcePaths, destUuid, destSubPath);
+    if (r && r.ok && !destSubPath) await _imagesLanded('common', destUuid, r.added);
+    return r;
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:moveFiles', (_, { uuid, sourcePaths, destSubPath } = {}) => {
-  try { return soundFontCommon.moveCommonFiles(app.getPath('userData'), uuid, sourcePaths, destSubPath); }
+ipcMain.handle('common:moveFiles', async (_, { uuid, sourcePaths, destSubPath } = {}) => {
+  try {
+    const r = soundFontCommon.moveCommonFiles(app.getPath('userData'), uuid, sourcePaths, destSubPath);
+    if (r && r.ok && !destSubPath) await _imagesLanded('common', uuid, (r.moved || []).filter((p) => !(sourcePaths || []).includes(p)), false);
+    return r;
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -3121,6 +3138,90 @@ ipcMain.handle('dialog:selectPicture', async () => {
   if (!r.filePaths || !r.filePaths.length) return { ok: false, cancelled: true };
   return { ok: true, filePath: r.filePaths[0] };
 });
+// AN IMAGE IS STORED AS PNG, so it is ready to convert for a color display. [B-530]
+// nativeImage reads PNG and JPG only; WebP, GIF and BMP are decoded by a hidden window that is
+// made for the job and closed after it.
+async function _decodeToPng(absPath) {
+  const { nativeImage, BrowserWindow } = require('electron');
+  const img = nativeImage.createFromPath(absPath);
+  if (!img.isEmpty()) return img.toPNG();
+  const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
+  try {
+    await w.loadURL('about:blank');
+    const b64 = fs.readFileSync(absPath).toString('base64');
+    const out = await w.webContents.executeJavaScript(`(async () => {
+      const bytes = Uint8Array.from(atob('${b64}'), (c) => c.charCodeAt(0));
+      const bmp = await createImageBitmap(new Blob([bytes]));
+      const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+      canvas.getContext('2d').drawImage(bmp, 0, 0);
+      const png = await canvas.convertToBlob({ type: 'image/png' });
+      return Array.from(new Uint8Array(await png.arrayBuffer()));
+    })()`);
+    return Buffer.from(out);
+  } finally { if (!w.isDestroyed()) w.destroy(); }
+}
+// A chosen file as a PNG: as is when it already is one, otherwise converted into a jmt-clip- temp
+// folder, which clipboard:cleanupTemp removes.
+ipcMain.handle('picture:toPng', async (_, { filePath } = {}) => {
+  try {
+    const p = String(filePath || '');
+    if (/\.png$/i.test(p)) return { ok: true, filePath: p, converted: false };
+    const png = await _decodeToPng(p);
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'jmt-clip-'));
+    const out = path.join(dir, path.parse(p).name + '.png');
+    fs.writeFileSync(out, png);
+    return { ok: true, filePath: out, converted: true };
+  } catch { return { ok: false, error: 'The image could not be read.' }; }
+});
+// The file of the image a source shows, when it is not inside the download: what a source export
+// carries so the imported source shows the same image. [B-530]
+async function _sourceShownPictureFile(userData, uuid) {
+  try {
+    const pic = await soundFontPicture.findSourcePicture(userData, uuid);
+    return soundFontPicture.pictureFilePath(userData, pic);
+  } catch { return null; }
+}
+
+// An image copied in the app (a font's, a common folder's or a download's file) as a PNG in a
+// jmt-clip- temp folder, for the Image rows' Paste: an in-app Copy empties the system clipboard.
+ipcMain.handle('picture:fromCopied', async (_, { kind, id, subPath } = {}) => {
+  try {
+    const ud = app.getPath('userData');
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'jmt-clip-'));
+    const base = path.basename(String(subPath || ''));
+    let abs;
+    if (kind === 'source') {
+      const source = soundFontSources.openSource(ud, id);
+      if (!source) return { ok: false, error: 'Source not found' };
+      abs = path.join(dir, base);
+      fs.writeFileSync(abs, await source.readFile(subPath));
+    } else {
+      abs = soundFontFileOps.locationFilePath(ud, kind, id, subPath);
+    }
+    const out = path.join(dir, path.parse(base).name + '.png');
+    fs.writeFileSync(out, /\.png$/i.test(base) ? fs.readFileSync(abs) : await _decodeToPng(abs));
+    return { ok: true, filePath: out };
+  } catch { return { ok: false, error: 'The image could not be read.' }; }
+});
+
+// Images that reach the TOP of a font or common folder by any door (add, copy, move) become PNG,
+// and the window is told so it can offer to name them after the item. Images already there, or
+// deeper in the folder, are left as they are.
+// `undoable`: the operation put these files there (an add or a paste), so the window may offer to
+// take them all back out. A move passes false: undoing it would mean moving back, not deleting.
+async function _imagesLanded(kind, id, relPaths, undoable = true) {
+  if ((kind !== 'entry' && kind !== 'common') || !id || !relPaths || !relPaths.length) return;
+  try {
+    const paths = await soundFontFileOps.landedImagesToPng({
+      userData: app.getPath('userData'), kind, id, relPaths, decode: _decodeToPng });
+    if (!paths.length || !win || win.isDestroyed()) return;
+    // Everything the operation added, the images under the names they now have.
+    const topImage = (p) => !String(p).includes('/') && /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(p));
+    const undo = undoable ? relPaths.filter((p) => !topImage(p)).concat(paths) : null;
+    win.webContents.send('pictures:landed', { kind, id, paths, undo });
+  } catch {}
+}
+
 // [B-511] A source's own picture. Set from a chosen file, or from a given one (the temp file a
 // paste writes); kept in the attachments store, so the download itself is never touched.
 ipcMain.handle('sources:setPicture', async (_, { uuid, filePath } = {}) => {
