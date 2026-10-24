@@ -294,9 +294,21 @@ function extractConfigId(content) {
 // ── Eviction ───────────────────────────────────────────
 
 /**
- * Reads all configHash subdirectories under a buildPkg directory,
- * groups them by configId (null = legacy), and removes the oldest
- * entries beyond MAX_ENTRIES_PER_LINEAGE within each group.
+ * Keeps each config's MAX_ENTRIES_PER_LINEAGE most recent builds inside one buildPkg directory.
+ *
+ * EVICTION RELEASES A CLAIM; IT DELETES ONLY WHAT NOBODY CLAIMS. [B-209]
+ * One entry can serve several configs (configIds). Counted under its creator alone, config A's
+ * sixth build deleted an entry config B still relied on, and B silently paid a full rebuild for
+ * something that was on disk. Now an entry past a config's limit loses that config's id, and the
+ * directory goes only when its configIds is empty. A shared build counts in every claimant's
+ * lineage, so each config's five are its own five.
+ *
+ * "Empty" must mean every owner released it, not that none was ever recorded. Configs never saved
+ * by JMT Studio have no config_id, so their entries have a null creator and an empty array from
+ * birth. Those keep the old rule, a shared keep-five by age, and never take the release path.
+ *
+ * Age is when the build was last USED (lastUsedAt, stamped by adoptEntry), falling back to when it
+ * was compiled. A build hit this morning is not the oldest thing a config has.
  */
 function evictOldEntries(buildPkgHash) {
   const pkgDir = path.join(getCacheRoot(), buildPkgHash);
@@ -310,32 +322,44 @@ function evictOldEntries(buildPkgHash) {
     if (!fs.existsSync(metaPath)) continue;
     try {
       const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      const creator = meta.configId || null;
+      // Entries from before configIds existed seed it from the creator.
+      const claims = Array.isArray(meta.configIds) ? meta.configIds.filter(Boolean)
+                   : (creator ? [creator] : []);
       entries.push({
-        configHash: entry.name,
-        configId:   meta.configId || null,
-        compiledAt: meta.compiledAt || '',
-        dir:        path.join(pkgDir, entry.name),
+        meta, metaPath, creator, claims,
+        released: false,
+        age:  meta.lastUsedAt || meta.compiledAt || '',
+        dir:  path.join(pkgDir, entry.name),
       });
     } catch {
       // Corrupt metadata — skip
     }
   }
+  const newestFirst = (a, b) => (b.age > a.age ? 1 : b.age < a.age ? -1 : 0);
+  const remove = (e) => { try { fs.rmSync(e.dir, { recursive: true, force: true }); } catch {} };
 
-  // Group by configId (null entries share a single legacy group)
-  const groups = new Map();
-  for (const e of entries) {
-    const key = e.configId || '__legacy__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(e);
-  }
+  // Never owned: the old shared keep-five by age.
+  const unowned = entries.filter(e => !e.creator).sort(newestFirst);
+  for (const e of unowned.slice(MAX_ENTRIES_PER_LINEAGE)) remove(e);
 
-  // Within each group: sort newest-first, delete beyond the limit
-  for (const group of groups.values()) {
-    group.sort((a, b) => (b.compiledAt > a.compiledAt ? 1 : -1)); // newest first
-    const toDelete = group.slice(MAX_ENTRIES_PER_LINEAGE);
-    for (const e of toDelete) {
-      try { fs.rmSync(e.dir, { recursive: true, force: true }); } catch {}
+  // Owned: each claimant releases what falls past its own limit.
+  const owned = entries.filter(e => e.creator);
+  const claimants = new Set(owned.flatMap(e => e.claims));
+  for (const id of claimants) {
+    const lineage = owned.filter(e => e.claims.includes(id)).sort(newestFirst);
+    for (const e of lineage.slice(MAX_ENTRIES_PER_LINEAGE)) {
+      e.claims = e.claims.filter(c => c !== id);
+      e.released = true;
     }
+  }
+  for (const e of owned) {
+    if (!e.claims.length) { remove(e); continue; }
+    if (!e.released) continue;
+    try {
+      e.meta.configIds = e.claims;
+      fs.writeFileSync(e.metaPath, JSON.stringify(e.meta, null, 2));
+    } catch { /* bookkeeping must never fail a build */ }
   }
 }
 
@@ -610,8 +634,8 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
     // never be reconstructed afterwards.
     // `configId` above is kept as the CREATOR and for entries written before this.
     // (2026-08-19: "we need 1 to many and easiest way is to save the config ids
-    // as an array. How we decide to work with those can be later." Deliberately data
-    // only - nothing consumes this yet, and no behaviour changes.)
+    // as an array. How we decide to work with those can be later.") Eviction reads it:
+    // each config releases its own claim, and the entry goes when none is left. [B-209]
     configIds:     meta.configId ? [meta.configId] : [],
     fqbn:          meta.fqbn,
     usb:           meta.usb,
@@ -631,7 +655,7 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
   // to be sent matches the current OS source state.
   writeBuildProvenance(buildOutputPath, meta.proffieOSHash);
 
-  // Evict oldest entries beyond MAX_ENTRIES_PER_LINEAGE for this configId
+  // Release this directory's claims beyond MAX_ENTRIES_PER_LINEAGE per config
   evictOldEntries(buildPkgHash);
 
   return { ok: true, cacheDir };
