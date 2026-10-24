@@ -211,7 +211,7 @@ function makeChooser({ requires }) {
   // RE-ANCHORED 2026-10-16: the end marker is only a slice boundary, and the function it
   // names grew a parameter when [B-425] taught it to take a whole selection. Matched on the
   // name alone now so a future signature change cannot break an unrelated test.
-  const body = extract('const _sfSharedFolderForNewPreset = async () => {',
+  const body = extract('const _sfSharedFolderForNewPreset = async (bankIdx = null) => {',
                        '      const _sfAddPresetWithFont = async (');
   const c = {
     presetParser, console,

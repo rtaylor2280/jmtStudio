@@ -49964,7 +49964,9 @@ require(['vs/editor/editor.main'], function () {
       // into someone's config must never depend on it. (2026-07-30: "defining a
       // common folder is only about the SFL... preflight doesn't care if defined.")
       // Returns the folder NAME to append, or null for none.
-      const _sfSharedFolderForNewPreset = async () => {
+      // With a bank, its majority wins, a tie going to the one its earliest preset uses; a bank
+      // with none falls back to the whole config.
+      const _sfSharedFolderForNewPreset = async (bankIdx = null) => {
         let text = '';
         try { text = (typeof editor !== 'undefined' && editor) ? editor.getValue() : ''; } catch {}
         if (!text) return null;
@@ -49973,7 +49975,14 @@ require(['vs/editor/editor.main'], function () {
         try {
           if (typeof presetParser !== 'undefined' && presetParser) {
             const r = presetParser.parsePresets(text);
+            const bank = Number.isInteger(bankIdx) ? r?.arrays?.[bankIdx] : null;
             const counts = new Map();
+            for (const p of (bank?.presets || [])) {
+              if (!p || !p.font) continue;
+              const parts = String(p.font).split(';').map(s => s.trim()).filter(Boolean);
+              for (const n of parts.slice(1)) counts.set(n, (counts.get(n) || 0) + 1);
+            }
+            if (counts.size) return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
             for (const arr of (r?.arrays || [])) {
               for (const p of (arr.presets || [])) {
                 if (!p || !p.font) continue;
@@ -50006,7 +50015,7 @@ require(['vs/editor/editor.main'], function () {
       // batch is ONE edit so a single Ctrl+Z puts the config back the way it was. Adding five
       // presets that take five undos to remove is its own kind of trap, and the warm path was
       // already a single insert at a single line, so N blocks cost nothing extra there.
-      const _sfAddPresetWithFont = async (fontNameOrNames) => {
+      const _sfAddPresetWithFont = async (fontNameOrNames, bankIdx = null) => {
         const _names = (Array.isArray(fontNameOrNames) ? fontNameOrNames : [fontNameOrNames])
           .filter(Boolean);
         if (!_names.length) return;
@@ -50016,14 +50025,19 @@ require(['vs/editor/editor.main'], function () {
         if (typeof presetParser === 'undefined' || !presetParser) return;
         // The font PATH gets the shared folder; the display NAME must not, or the preset
         // ends up called "Grand_Sentinel;common" in Edit Mode.
-        const shared = await _sfSharedFolderForNewPreset();
+        const _pre = presetParser.parsePresets(editor.getValue());
+        const _bankFor = (Number.isInteger(bankIdx) && _pre.arrays[bankIdx]) ? bankIdx
+          : (typeof _activeArrayIndex !== 'undefined' && _pre.arrays[_activeArrayIndex]) ? _activeArrayIndex : 0;
+        const shared = await _sfSharedFolderForNewPreset(_bankFor);
         const _pathFor = (nm) => {
           const already = String(nm).split(';').map(s => s.trim()).filter(Boolean).length > 1;
           return (shared && !already) ? `${nm};${shared}` : nm;
         };
         const fontPath = _pathFor(fontName);
         const result = presetParser.parsePresets(editor.getValue());
-        const activeIdx = (typeof _activeArrayIndex !== 'undefined' && result.arrays[_activeArrayIndex]) ? _activeArrayIndex : 0;
+        // A bank picked from the menu's submenu wins; otherwise the bank on screen.
+        const activeIdx = (Number.isInteger(bankIdx) && result.arrays[bankIdx]) ? bankIdx
+          : (typeof _activeArrayIndex !== 'undefined' && result.arrays[_activeArrayIndex]) ? _activeArrayIndex : 0;
         const arr = result.arrays[activeIdx];
         // Cold paths: no array OR empty array. Use the existing helpers
         // (they handle scaffolding correctly across all source shapes),
@@ -50061,7 +50075,7 @@ require(['vs/editor/editor.main'], function () {
         // two undo steps rather than one, and only on a config that had no presets at all.
         const _seedRest = () => {
           if (_names.length < 2) return;
-          setTimeout(() => { _sfAddPresetWithFont(_names.slice(1)); }, 160);
+          setTimeout(() => { _sfAddPresetWithFont(_names.slice(1), activeIdx); }, 160);
         };
         if (!arr) {
           await _addFirst(result.bladeCount || 1);
@@ -50170,7 +50184,7 @@ require(['vs/editor/editor.main'], function () {
         try {
           // Resolve the shared folder BEFORE parsing, so the ranges used below are read
           // after the await rather than across it.
-          const shared = await _sfSharedFolderForNewPreset();
+          const shared = await _sfSharedFolderForNewPreset(arrayIdx);
           const r = presetParser.parsePresets(editor.getValue());
           const arr = r.arrays[arrayIdx];
           if (!arr || !arr.presets[presetIdx]) return;
@@ -50399,10 +50413,12 @@ require(['vs/editor/editor.main'], function () {
         const _cfgOpen = !!(typeof editor !== 'undefined' && editor
                             && typeof fileIsOpen !== 'undefined' && fileIsOpen);
         let _presetCount = 0;
+        let _banks = [];
         if (_cfgOpen) {
           try {
             const _r = presetParser.parsePresets(editor.getValue());
-            _presetCount = (_r.arrays || []).reduce((n, a) => n + ((a.presets || []).length), 0);
+            _banks = _r.arrays || [];
+            _presetCount = _banks.reduce((n, a) => n + ((a.presets || []).length), 0);
           } catch { _presetCount = 0; }
         }
 
@@ -50414,7 +50430,49 @@ require(['vs/editor/editor.main'], function () {
           // that used to fail silently.
           // The helper takes the whole selection and writes it as ONE atomic edit, so a single
           // Ctrl+Z removes every preset it added. [B-425]
-          mkItem(`+ Add to config${_sfx(_n)}`, null, () => _sfAddPresetWithFont(_sel));
+          // With more than one bank, a submenu picks which bank the presets go to.
+          if (_banks.length > 1) {
+            const addItem = mkItem(`+ Add to config${_sfx(_n)}`, { cls: 'has-submenu' }, null);
+            const buildBankSubmenu = () => {
+              const sub = _sfPresetCtxSubmenu();
+              sub.innerHTML = '';
+              sub.style.minWidth = '160px';
+              _banks.forEach((arr, arrayIdx) => {
+                const item = document.createElement('div');
+                item.className = 'preset-ctx-item';
+                item.textContent = arr.name || `Array ${arrayIdx + 1}`;
+                item.addEventListener('mousedown', (ev) => {
+                  ev.stopPropagation();
+                  ev.preventDefault();
+                  _sfCloseCardCtxMenus();
+                  _sfAddPresetWithFont(_sel, arrayIdx);
+                });
+                sub.appendChild(item);
+              });
+              const rect = addItem.getBoundingClientRect();
+              sub.style.display = 'block';
+              sub.style.left = `${rect.right - 2}px`;
+              sub.style.top = `${rect.top - 4}px`;
+              requestAnimationFrame(() => {
+                const subRect = sub.getBoundingClientRect();
+                if (subRect.right > window.innerWidth - 8) {
+                  sub.style.left = `${Math.max(8, rect.left - subRect.width + 2)}px`;
+                }
+                if (subRect.bottom > window.innerHeight - 8) {
+                  sub.style.top = `${Math.max(8, window.innerHeight - subRect.height - 8)}px`;
+                }
+              });
+            };
+            addItem.addEventListener('mouseenter', buildBankSubmenu);
+            // The menu can open with the pointer already on this first item, so no mouseenter
+            // arrives; the first movement over it opens the submenu instead.
+            addItem.addEventListener('mousemove', () => {
+              if (_sfPresetCtxSubmenu().style.display !== 'block') buildBankSubmenu();
+            });
+            addItem.addEventListener('mousedown', (ev) => { ev.stopPropagation(); buildBankSubmenu(); });
+          } else {
+            mkItem(`+ Add to config${_sfx(_n)}`, null, () => _sfAddPresetWithFont(_sel));
+          }
         }
         // Item 2: swap this font into an existing preset (submenu of presets).
         // Nothing to replace IN when the config has no presets — that submenu built
