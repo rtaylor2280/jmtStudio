@@ -59471,7 +59471,14 @@ function _getFreshFieldRange(fieldName) {
       // claims. The slot reopens with the committed state ~50ms later (same flow
       // every dropdown change uses), so the user just experiences "click → slot
       // opens with the right values."
+      // The wrapper takes B1's colour along with B1's style, the same as Match B1. [B-519]
       if (_prepopulatedFromB1) {
+        const b1Rgb = _matchColorOf(preset.styles[0]);
+        const wrapped = { expr: composeHelperExpr(), colorArg: slot.colorArg };
+        if (b1Rgb && !_sameRgb(b1Rgb, [0, 0, 0]) && _takesBaseColor(wrapped.expr)
+            && !_sameRgb(_matchColorOf(wrapped) || [], b1Rgb)) {
+          slot.colorArg = window.proffieArgs.writeRegistryArg('BASE_COLOR_ARG', b1Rgb, slot.colorArg || '');
+        }
         commitTemplateArgs();
         return;
       }
