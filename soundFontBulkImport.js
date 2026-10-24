@@ -34,6 +34,7 @@
 // before continuing further.
 
 const fs = require('fs');
+const { fontShapeOf } = require('./proffieFontShape');
 const path = require('path');
 const { cleanSuggestedName } = require('./soundFontNameClean');
 const soundFontSources = require('./soundFontSources');
@@ -85,31 +86,14 @@ function isNoiseName(name) {
   return false;
 }
 
-// Detect Proffie-shape on a folder by reading its direct children.
-// Matches the convention used by soundFontCandidates.looksLikeProffieFont
-// but operates on a real on-disk path instead of an in-memory entries list.
+// Detect Proffie-shape on a folder by reading its direct children, by the shared rule the card
+// report uses (proffieFontShape.js), so the count a card shows and what this scan imports agree. A
+// Xeno font is not a Proffie font even when it holds one plain boot.wav. [B-461]
 function looksLikeProffieDir(absDir) {
-  const EFFECT_FOLDERS = new Set([
-    'boot', 'hum', 'swingh', 'swingl', 'clsh', 'blst', 'lock', 'force', 'in',
-    'out', 'font', 'lb', 'bgnlb', 'endlb', 'bgnlock', 'endlock', 'melt',
-    'bgnmelt', 'endmelt', 'drag', 'bgndrag', 'enddrag', 'swng', 'spin', 'stab',
-    'preon', 'pwroff', 'pstoff',
-  ]);
-  const CORE_EFFECT_FILE = /^(boot|hum|font)\d*\.wav$/i;
   let entries;
   try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
   catch { return false; }
-  for (const e of entries) {
-    if (isNoiseName(e.name)) continue;
-    if (e.isDirectory()) {
-      const lower = e.name.toLowerCase();
-      if (EFFECT_FOLDERS.has(lower)) return true;
-      if (/^alt\d{3}$/i.test(e.name)) return true;
-    } else if (e.isFile()) {
-      if (CORE_EFFECT_FILE.test(e.name)) return true;
-    }
-  }
-  return false;
+  return fontShapeOf(entries.filter(e => !isNoiseName(e.name))) === 'proffie';
 }
 
 // Detect Proffie's "common" shared-wav folder convention. A common folder

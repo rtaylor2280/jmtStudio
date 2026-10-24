@@ -14,6 +14,7 @@ const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip
 const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
+const { fontShapeOf } = require('./proffieFontShape');
 
 const SIDECAR_NAME = '.jmt-sd-id';
 
@@ -231,10 +232,7 @@ function safeReaddir(p) {
 function looksLikeProffieFontDir(dirPath) {
   const ents = safeReaddir(dirPath);
   if (ents.__error) return false;
-  const names = ents.filter(e => e.isFile()).map(e => e.name.toLowerCase());
-  const hasHum = names.some(n => n === 'hum.wav' || /^hum\d*\.wav$/.test(n));
-  const hasEffect = names.some(n => /^(blst|clsh|clash|swng|swing|boot|out|in|preon|font|lock|drag)\d*\.wav$/.test(n));
-  return hasHum && hasEffect;
+  return fontShapeOf(ents) === 'proffie';   // the shared rule [B-461]
 }
 function classifyCard(vol) {
   const rootEnts = safeReaddir(vol.mountPath);
@@ -251,7 +249,6 @@ function classifyCard(vol) {
   const numberedDirs = dirNames.filter(n => /^\d+$/.test(n));            // Xeno/SN/TXQ: 1/ 2/ 3/
   const nNameDirs    = dirNames.filter(n => /^\d+-\S/.test(n));          // CFX: 1-Graflex/
   const namedFontDirs = dirNames.filter(n => !NON_FONT_DIRS.has(n.toLowerCase()) && !/^\d+$/.test(n) && !/^\d+-/.test(n) && !VENDOR_NOTE_DIR_RX.test(n));
-  const provenProffieFonts = namedFontDirs.filter(n => looksLikeProffieFontDir(path.join(vol.mountPath, n))).length;
 
   // Proffie common/ voicepack: known voicepack sounds OR e_*.wav error files.
   let hasCommonVoicepack = false;
@@ -276,32 +273,36 @@ function classifyCard(vol) {
   const meaningfulFiles = files.filter(f => f.name.toLowerCase() !== SIDECAR_NAME);
   const isEmpty = meaningfulDirs.length === 0 && meaningfulFiles.length === 0 && numberedDirs.length === 0;
 
-  // Counts for the report. Font folders = any top-level dir (minus system dirs)
-  // that is a Proffie font: it holds .wav files DIRECTLY (flat layout) OR it
-  // contains Proffie effect subfolders like font/ hum/ clsh/ swng/ (the standard
-  // "unpacked" layout — Starkiller, ObiWan 2, V1-*, Yoda, ... on real cards).
-  // Both are valid fonts and the import scan counts both, so the summary MUST
-  // too — otherwise subfolder-layout fonts silently drop and the card disagrees
-  // with import (was the 47-vs-64 gap). Mirrors looksLikeProffieDir in
-  // soundFontBulkImport.js so the two counts stay in agreement.
-  const EFFECT_DIR_NAMES = new Set([
-    'boot', 'hum', 'swingh', 'swingl', 'clsh', 'blst', 'lock', 'force', 'in',
-    'out', 'font', 'lb', 'bgnlb', 'endlb', 'bgnlock', 'endlock', 'melt',
-    'bgnmelt', 'endmelt', 'drag', 'bgndrag', 'enddrag', 'swng', 'spin', 'stab',
-    'preon', 'pwroff', 'pstoff',
-  ]);
-  // Flat layout must carry a CORE effect file (boot/hum/font.wav) — not just any
-  // .wav — so menu voice-prompt packs (MC: maccept/maffirm/... with no hum) don't
-  // get miscounted as fonts. This is exactly looksLikeProffieDir's rule, so the
-  // summary count and the import scan agree.
-  const CORE_EFFECT_FILE = /^(boot|hum|font)\d*\.wav$/i;
-  const fontFolders = dirNames.filter(n => {
-    if (NON_FONT_DIRS.has(n.toLowerCase()) || VENDOR_NOTE_DIR_RX.test(n)) return false;
+  // Every top-level folder is judged once by the shared rule (proffieFontShape.js): Proffie font,
+  // Xeno font, or neither. The report's font count, the family call and the import scan all read
+  // the same answer, so the card can never print a count beside a claim that contradicts it.
+  // A numbered folder is a Xeno slot OR a Proffie bank; its files say which. [B-461]
+  const fontDirSet = new Set(), xenoDirSet = new Set();
+  for (const n of dirNames) {
+    if (NON_FONT_DIRS.has(n.toLowerCase()) || VENDOR_NOTE_DIR_RX.test(n)) continue;
+    if (/^(set|setting)$/i.test(n)) continue;   // a board's system folder, never a font
     const ents = safeReaddir(path.join(vol.mountPath, n));
-    if (ents.__error) return false;
-    if (ents.some(e => e.isFile() && CORE_EFFECT_FILE.test(e.name))) return true;
-    return ents.some(e => e.isDirectory() && (EFFECT_DIR_NAMES.has(e.name.toLowerCase()) || /^alt\d{3}$/i.test(e.name)));
-  }).length;
+    if (ents.__error) continue;
+    const shape = fontShapeOf(ents);
+    if (shape === 'proffie') fontDirSet.add(n);
+    else if (shape === 'xeno') xenoDirSet.add(n);
+  }
+  const fontFolders = fontDirSet.size;
+  const xenoFonts = xenoDirSet.size;
+  const provenProffieFonts = namedFontDirs.filter(n => fontDirSet.has(n)).length;
+  const numberedProffie = numberedDirs.filter(n => fontDirSet.has(n)).length;
+  // SNV4 (SN-Pixel V4): system_flag.ini at the root, all-lightfile/ (its pre-rendered blade
+  // animations, light1.bin per effect), or a sword*.bin firmware file. Seen on all three SNV4
+  // backups and the E: card, whose 40 light files are byte-identical to an SNV4 Pixel card. Its
+  // fonts use Proffie's format, so the card says SNV4 and still offers them. update.bin alone is
+  // not a tell: Xeno v2 uses it too. [B-461]
+  const snv4 = hasFile('system_flag.ini') || hasDir('all-lightfile') || fileNamesLower.some(n => /^sword\d*\.bin$/.test(n));
+  // Another board's files left at the root of a card that now holds Proffie fonts. They do not
+  // decide what the card is; the verdict names them. global.ini is ProffieOS's own and is not one.
+  const leftovers = [
+    ...['config.ini', 'rgb_config.ini', 'system_flag.ini', 'config.txt', 'colors.txt'].filter(hasFile),
+    ...['set', 'setting'].filter(hasDir).map(d => d + '/'),
+  ];
   const configFiles = files.filter(f => isProffieConfigFile(path.join(vol.mountPath, f.name), f.name)).length;
   const otherFiles = Math.max(0, files.filter(f => f.name.toLowerCase() !== SIDECAR_NAME).length - configFiles);
   // Collection shape ([B-348]): real cards do not carry zip archives in bulk —
@@ -319,13 +320,20 @@ function classifyCard(vol) {
     kind = 'golden-harvest'; confidence = 'high'; matched.push('Golden Harvest layout');
   } else if (nNameDirs.length >= 1 || (hasConfigTxt && hasColorsTxt)) {
     kind = 'cfx'; confidence = 'high'; matched.push('CFX layout (N-name / config.txt+colors.txt)');
-  } else if (namedFontDirs.length >= 1 && !hasConfigTxt && !hasColorsTxt && !hasGeneralTxt && !hasRootConfigIni && (hasCommonVoicepack || provenProffieFonts >= 1)) {
+  } else if (snv4 && xenoFonts === 0) {
+    kind = 'snv4'; confidence = 'medium';
+    matched.push('SNV4: ' + [hasFile('system_flag.ini') && 'system_flag.ini', hasDir('all-lightfile') && 'all-lightfile/'].filter(Boolean).join(' '));
+  } else if (fontFolders >= 1 && xenoFonts === 0) {
+    // The fonts decide it. Root files from another board do not. [B-461]
     kind = 'proffie';
-    confidence = (hasCommonVoicepack && provenProffieFonts >= 1) ? 'high' : 'medium';
-    matched.push('Proffie: named fonts, no foreign config' + (hasCommonVoicepack ? ', common voicepack' : ''));
+    confidence = hasCommonVoicepack ? 'high' : 'medium';
+    matched.push('Proffie: ' + fontFolders + ' Proffie font folder(s)' + (hasCommonVoicepack ? ', common voicepack' : '') + (leftovers.length ? ', leftovers ' + leftovers.join(' ') : ''));
+  } else if (namedFontDirs.length >= 1 && !hasConfigTxt && !hasColorsTxt && !hasGeneralTxt && !hasRootConfigIni && hasCommonVoicepack && xenoFonts === 0) {
+    kind = 'proffie'; confidence = 'medium';
+    matched.push('Proffie: named folders, common voicepack, no foreign config');
   } else if (hasRootConfigIni && looseRootWavs && numberedDirs.length === 0 && !hasSetDir && namedFontDirs.length === 0) {
     kind = 'verso'; confidence = 'medium'; matched.push('Verso: root config.ini + loose wavs');
-  } else if (numberedDirs.length >= 1 && (hasSetDir || hasRootConfigIni)) {
+  } else if (xenoFonts >= 1 || (numberedDirs.length >= 1 && (hasSetDir || hasRootConfigIni))) {
     kind = 'xeno'; confidence = numberedDirs.length >= 3 ? 'high' : 'medium';
     matched.push(hasOtaSnv4 ? 'SN (ota.snv4)' : hasDir('setting') ? 'Xeno v3 (setting/)' : 'Xeno-family (numbered + set/)');
   } else if (isEmpty) {
@@ -337,8 +345,8 @@ function classifyCard(vol) {
 
   // Mixed content: which recognizable content types are present, beyond the primary family.
   const contentTypes = [];
-  if (provenProffieFonts >= 1) contentTypes.push('Proffie');
-  if (numberedDirs.length >= 3) contentTypes.push('Xeno-style');
+  if (fontFolders >= 1) contentTypes.push('Proffie');
+  if (xenoFonts >= 1) contentTypes.push('Xeno-style');
   if (nNameDirs.length >= 1) contentTypes.push('CFX-style');
   const mixed = contentTypes.length > 1;
 
@@ -347,7 +355,8 @@ function classifyCard(vol) {
     counts: { fonts: fontFolders, configs: configFiles, otherFiles, zips: zipFiles },
     collectionShape,
     contentTypes, mixed,
-    signals: { matched, namedFontDirs: namedFontDirs.length, numberedFontDirs: numberedDirs.length, nNameDirs: nNameDirs.length, provenProffieFonts },
+    leftovers: kind === 'proffie' ? leftovers : [],
+    signals: { matched, namedFontDirs: namedFontDirs.length, numberedFontDirs: numberedDirs.length, nNameDirs: nNameDirs.length, provenProffieFonts, numberedProffie, proffieFonts: fontFolders, xenoFonts },
   };
 }
 
@@ -372,14 +381,35 @@ function buildVerdict(card) {
   // one condition, one wording, whichever surface the user meets first.
   if (card.health && card.health !== 'Healthy') return { level: 'bad', headline: 'This card reports a health warning.', detail: 'This card is flagged as needing repair, which usually means it is corrupted. Its contents may be incomplete, including files that appear normal.' };
   if (kind === 'empty') return { level: 'good', headline: `This ${noun} is empty.`, detail: 'There is nothing on it to import yet.' };
+  if (kind === 'snv4') {
+    const n = (cls.signals && cls.signals.proffieFonts) || 0;
+    const detail = n >= 1
+      ? `Some of its sound fonts may still be usable: ${n === 1 ? '1 is' : `${n} are`} in Proffie format and can be added to your library.`
+      : 'No sound fonts in Proffie format were found on it.';
+    return { level: 'info', headline: `This appears to be an SNV4 ${noun}.`, detail };
+  }
   if (kind === 'proffie') {
     const headline = card.isFolder ? 'These look like Proffie fonts.' : 'This is a Proffie card.';
-    const detail = cls.mixed
+    let detail = cls.mixed
       ? 'Mostly Proffie content, with some other-board fonts mixed in. Its Proffie fonts can be added to your library.'
       : 'Its fonts can be added to your library, and any config it carries can be opened.';
+    if (cls.leftovers && cls.leftovers.length) {
+      detail += ` It also carries settings files from another board (${cls.leftovers.join(', ')}). ProffieOS ignores them.`;
+    }
     return { level: 'good', headline, detail };
   }
   if (FAMILY_LABELS[kind]) {
+    // A foreign card body holding Proffie fonts says both, and never "not Proffie" beside a count of
+    // Proffie fonts. [B-461]
+    const sig = cls.signals || {};
+    const proffieHere = sig.proffieFonts || 0;
+    if (proffieHere >= 1) {
+      const fonts = proffieHere === 1 ? '1 Proffie font' : `${proffieHere} Proffie fonts`;
+      const other = sig.xenoFonts || 0;
+      const detail = 'Its Proffie fonts can be added to your library.'
+        + (other >= 1 ? ` Its other ${other === 1 ? 'font is' : `${other} fonts are`} not Proffie. Converting them is planned for a future update.` : '');
+      return { level: 'info', headline: `This is a ${FAMILY_LABELS[kind]} ${noun} holding ${fonts}.`, detail };
+    }
     const detail = (cls.contentTypes && cls.contentTypes.includes('Proffie'))
       ? 'It also has some Proffie fonts. Converting the rest to Proffie is planned for a future update.'
       : 'Converting its fonts to Proffie is planned for a future update.';
