@@ -28,7 +28,7 @@ function card(name, build) {
   return D.assessCard({ drive: root, mountPath: root, fileSystem: 'FAT32', label: null,
     volumeSerial: null, sizeBytes: null, freeBytes: null, health: 'Healthy', isFolder: false });
 }
-// A Proffie saber font, unpacked layout, as on his E: card.
+// A Proffie saber font, unpacked layout, as on the real SNV4 card.
 const proffieFont = (dir) => { file(path.join(dir, 'hum1.wav')); for (const fx of ['clsh', 'font', 'swng', 'in', 'out']) file(path.join(dir, fx, `${fx}1.wav`)); };
 // A real Xeno font: "name (N).wav", a fontconfig.ini, and (in some) one plain boot.wav.
 const xenoFont = (dir, { strayBoot = false, fontconfig = true } = {}) => {
@@ -46,7 +46,7 @@ const leftoverRoot = (root) => {
 
 console.log('which folders are Proffie fonts, and what the card is (B-461)');
 
-// 1. HIS E: CARD, an SNV4 card body (system_flag.ini, all-lightfile/) with Proffie-format fonts.
+// 1. AN SNV4 CARD BODY (system_flag.ini, all-lightfile/) with Proffie-format fonts.
 const c1 = card('e-card', (root) => {
   leftoverRoot(root); file(path.join(root, 'all-lightfile', 'file1', 'light1.bin'));
   for (let i = 1; i <= 5; i++) proffieFont(path.join(root, String(i)));
