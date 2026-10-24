@@ -34003,7 +34003,10 @@ require(['vs/editor/editor.main'], function () {
         const showCloseout = !!(_sfImport && !_sfImport.isExistingReview
           && (successCount > 0 || restoredNames.length > 0));
         const closeoutSrc = _sfImport
-          ? { fromLink: !!_sfImport.fromLink, sourcePath: _sfImport.sourcePath || '' }
+          ? { fromLink: !!_sfImport.fromLink, sourcePath: _sfImport.sourcePath || '',
+              // Duplicate from source and a review of a stored source read the LIBRARY: sourcePath is
+              // then only the original file's name, and there is nothing to eject.
+              stored: !!_sfImport.isExistingReview }
           : null;
         // Captured alongside closeoutSrc, and for the same reason: _sfImport is
         // cleared a few lines below and the close-out renders after that.
@@ -34172,7 +34175,7 @@ require(['vs/editor/editor.main'], function () {
         // `closeoutSrc`, not `_sfImport` - that is cleared before this runs, which is why the
         // close-out already captured a copy. Reusing the capture rather than making a second one.
         // `fromLink` excluded: a temp download is not a card anyone is holding.
-        if (!showCloseout && closeoutSrc && !closeoutSrc.fromLink && closeoutSrc.sourcePath) {
+        if (!showCloseout && closeoutSrc && !closeoutSrc.fromLink && !closeoutSrc.stored && closeoutSrc.sourcePath) {
           const _lead = successCount === 1
             ? 'Imported 1 font'
             : `Imported ${successCount} fonts`;
