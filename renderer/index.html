@@ -1613,6 +1613,11 @@
      speaking; the player itself is unchanged to its right. */
   #modal-sf-audio .modal.sf-audio-modal.has-picture { display: flex; gap: 16px; align-items: stretch; width: 660px; }
   .sf-audio-main { flex: 1; min-width: 0; }
+  /* A picture that arrives after the player is open grows in: the player widens smoothly and the
+     image fades up into the space. [B-528] */
+  #modal-sf-audio .modal.sf-audio-modal.picture-late { transition: width 260ms ease; }
+  #modal-sf-audio .modal.sf-audio-modal.picture-late .sf-audio-picture { animation: sfAudioPictureIn 320ms ease both; }
+  @keyframes sfAudioPictureIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
   .sf-audio-picture { flex: none; align-self: stretch; width: 124px; min-height: 100%; object-fit: cover; object-position: center top; border-radius: 4px; cursor: zoom-in; }
   .sf-audio-name { margin: 0 30px 12px 0; font-size: 0.88rem; color: var(--c-text); font-weight: 600; word-break: break-all; }
   .sf-audio-loading { font-size: 0.74rem; color: var(--c-text-muted); font-style: italic; padding: 18px 0; text-align: center; }
@@ -1620,6 +1625,24 @@
   .sf-audio-body { display: flex; flex-direction: column; gap: 10px; }
   .sf-audio-waveform-wrap { position: relative; background: var(--c-bg-inset); border: 1px solid var(--c-border-faint); border-radius: 4px; overflow: hidden; height: 110px; cursor: pointer; }
   .sf-audio-canvas { display: block; width: 100%; height: 100%; }
+  /* WHILE A FILE LOADS the player is already full size and the waveform area carries a wave of
+     bars travelling left to right, as if the sound is coming in. A deliberate exception to the
+     shared indeterminate bar: this surface is audio, and its own shape says so. No percentage,
+     because the decode reports none. [B-528] */
+  /* The arrival is a crossfade over the same spot: the wave fades out as the real waveform,
+     already drawn underneath, fades in. Nothing moves or resizes. */
+  .sf-audio-incoming { position: absolute; inset: 0; display: flex; align-items: center; gap: 3px; padding: 0 10px;
+                       opacity: 0; visibility: hidden; transition: opacity 450ms ease, visibility 0s linear 450ms; }
+  .sf-audio-body.loading .sf-audio-incoming { opacity: 1; visibility: visible; transition: none; }
+  .sf-audio-canvas, .sf-audio-playhead { transition: opacity 450ms ease; }
+  .sf-audio-body.loading .sf-audio-canvas,
+  .sf-audio-body.loading .sf-audio-playhead { opacity: 0; transition: none; }
+  .sf-audio-body.loading .sf-audio-waveform-wrap { cursor: default; pointer-events: none; }
+  .sf-audio-incoming > span { flex: 1; height: 70%; border-radius: 1px; background: var(--jmt-blue); opacity: 0.45;
+                              transform: scaleY(0.12); animation: sfAudioIncoming 1.3s ease-in-out infinite;
+                              animation-delay: calc((var(--i) - 64) * 30ms); }
+  @keyframes sfAudioIncoming { 0%, 100% { transform: scaleY(0.12); } 50% { transform: scaleY(var(--h)); } }
+  @media (prefers-reduced-motion: reduce) { .sf-audio-incoming > span { animation: none; transform: scaleY(calc(var(--h) * 0.4)); } }
   .sf-audio-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--jmt-blue); box-shadow: 0 0 4px var(--jmt-blue); pointer-events: none; transform: translateX(0); transition: transform 80ms linear; }
   .sf-audio-controls { display: flex; align-items: center; gap: 12px; }
   .sf-audio-play-btn { width: 32px; height: 32px; border-radius: 50%; background: var(--jmt-blue); color: white; border: none; cursor: pointer; font-size: 0.85rem; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: background 0.1s; }
@@ -2456,7 +2479,7 @@
   .vp-file-modal-close {
     background: none;
     border: none;
-    color: var(--c-text-muted);
+    color: var(--c-text-hint);
     font-size: 1.1rem;
     cursor: pointer;
     padding: 2px 6px;
@@ -4460,7 +4483,7 @@
   #detail-notes-input { width: 100%; box-sizing: border-box; font-size: 0.75rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; padding: 5px 7px; outline: none; resize: vertical; min-height: 56px; font-family: inherit; line-height: 1.4; }
   #detail-notes-input:focus { border-color: var(--jmt-blue); }
   #style-detail-editor { flex: 1; min-height: 0; border: 1px solid var(--c-border); border-radius: 4px; overflow: hidden; }
-  .modal-btn-close { position: absolute; top: 12px; right: 14px; font-size: 1.1rem; background: none; border: none; color: var(--c-text-muted); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
+  .modal-btn-close { position: absolute; top: 12px; right: 14px; font-size: 1.1rem; background: none; border: none; color: var(--c-text-hint); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
   .modal-btn-close:hover { color: var(--c-text); background: var(--c-bg-hover); }
 
   /* ── Preset sidecar ── */
@@ -4578,7 +4601,7 @@
   .config-common-name { cursor: default; }
   .config-common-missing { color: #e44; cursor: help; }
   .preset-add-btn { font-size: 0.7rem; padding: 1px 7px; line-height: 1; }
-  .preset-sidecar-close { margin-left: auto; background: none; border: none; cursor: pointer; color: var(--c-text-muted); font-size: 1.25rem; line-height: 1; padding: 0 4px; }
+  .preset-sidecar-close { margin-left: auto; background: none; border: none; cursor: pointer; color: var(--c-text-hint); font-size: 1.25rem; line-height: 1; padding: 0 4px; }
   .preset-sidecar-close:hover { color: var(--c-text); }
 
   .preset-list-top { flex: 0 0 38%; min-height: 60px; overflow-y: auto; padding: 4px 0; }
@@ -6942,6 +6965,7 @@
     <div class="sf-audio-body" id="sf-audio-body" style="display:none">
       <div class="sf-audio-waveform-wrap">
         <canvas id="sf-audio-canvas" class="sf-audio-canvas"></canvas>
+        <div class="sf-audio-incoming" id="sf-audio-incoming" aria-hidden="true"></div>
         <div class="sf-audio-playhead" id="sf-audio-playhead"></div>
       </div>
       <div class="sf-audio-controls">
@@ -19219,6 +19243,9 @@ document.getElementById('btn-create-styles-import').addEventListener('click', as
     const structured = _applyStyleLibraryStructure(_stylesEditorInstance.getValue(), today);
     _stylesEditorInstance.setValue(structured);
     _setStylesDirty(true);
+    // An import is a finished action: the structured library is saved, not left for a Save
+    // click. A library with name conflicts cannot be saved; it stays dirty with them shown. [B-527]
+    if (!_conflictStyleNames.size && !_conflictTemplateNames.size) await window.saveStylesFile();
   }
   if (_stySrc && window._sfOfferEjectInToast) {
     await window._sfOfferEjectInToast(_stySrc, 'Style Library imported', 'from');
@@ -36397,18 +36424,30 @@ require(['vs/editor/editor.main'], function () {
         const img = document.getElementById(imgId);
         const box = document.getElementById(boxId);
         if (!img || !box) return;
-        img.style.display = 'none';
-        box.classList.remove('has-picture');
-        img.onclick = null;
-        if (_sfPictureUrls[imgId]) { URL.revokeObjectURL(_sfPictureUrls[imgId]); _sfPictureUrls[imgId] = null; }
+        // The old picture stays until the new answer is in hand, then is swapped or cleared in one
+        // step, so a modal already on screen never narrows and widens between two of them.
+        const clear = () => {
+          img.style.display = 'none';
+          box.classList.remove('has-picture');
+          img.onclick = null;
+          if (_sfPictureUrls[imgId]) { URL.revokeObjectURL(_sfPictureUrls[imgId]); _sfPictureUrls[imgId] = null; }
+        };
         let pic = null;
         try { const r = await find(); pic = r && r.ok ? r.picture : null; } catch {}
-        if (!pic || !isCurrent()) return;
+        if (!isCurrent()) return;
+        if (!pic) { clear(); return; }
         let res;
-        try { res = await _sfReadPictureBytes(pic); } catch { return; }
-        if (!res || !res.ok || !isCurrent()) return;
-        _sfPictureUrls[imgId] = URL.createObjectURL(new Blob([Uint8Array.from(res.bytes || [])], { type: _sfMimeFor(pic.subPath) }));
-        img.src = _sfPictureUrls[imgId];
+        try { res = await _sfReadPictureBytes(pic); } catch { res = null; }
+        if (!isCurrent()) return;
+        if (!res || !res.ok) { clear(); return; }
+        const url = URL.createObjectURL(new Blob([Uint8Array.from(res.bytes || [])], { type: _sfMimeFor(pic.subPath) }));
+        const next = new Image();
+        next.src = url;
+        try { await next.decode(); } catch {}
+        if (!isCurrent()) { URL.revokeObjectURL(url); return; }
+        if (_sfPictureUrls[imgId]) URL.revokeObjectURL(_sfPictureUrls[imgId]);
+        _sfPictureUrls[imgId] = url;
+        img.src = url;
         img.style.display = '';
         box.classList.add('has-picture');
         img.onclick = () => _sfOpenDocViewer({ kind: pic.kind, id: pic.id, subPath: pic.subPath });
@@ -41428,11 +41467,16 @@ require(['vs/editor/editor.main'], function () {
         const curEl  = document.getElementById('sf-audio-current');
         const totEl  = document.getElementById('sf-audio-total');
         if (nameEl) nameEl.textContent = displayName;
-        if (loadEl) loadEl.style.display = '';
+        // Full size from the first frame: the body shows in its loading state, play disabled,
+        // the incoming wave where the waveform will be. [B-528]
+        if (loadEl) loadEl.style.display = 'none';
         if (errEl)  errEl.style.display = 'none';
-        if (bodyEl) bodyEl.style.display = 'none';
+        if (bodyEl) { bodyEl.style.display = ''; bodyEl.classList.add('loading'); }
+        _sfAudioBuildIncoming();
+        const playBtn = document.getElementById('sf-audio-play');
+        if (playBtn) { playBtn.disabled = true; playBtn.innerHTML = '&#9654;'; }
         if (curEl)  curEl.textContent = '0:00';
-        if (totEl)  totEl.textContent = '0:00';
+        if (totEl)  totEl.textContent = '–:––';
         if (metaEl) metaEl.textContent = '';
         // Loop resets to OFF on every open, even when reopening the
         // same file — fresh-open consistency.
@@ -41443,8 +41487,23 @@ require(['vs/editor/editor.main'], function () {
           : kind === 'entry' ? () => window.electronAPI.findEntryPicture({ name: id })
           : kind === 'source' ? () => window.electronAPI.findSourcePicture({ uuid: id, seed: Math.floor(Math.random() * 1e9) })
           : async () => null;
-        _sfRenderPicture({ imgId: 'sf-audio-picture', boxId: 'sf-audio-box', find: _find,
-          isCurrent: () => token === _sfAudioOpenToken });
+        // The picture gets a short head start so the player usually opens at its final width with
+        // the image in place. Past it the player opens anyway (the wave is the point) and a late
+        // picture grows in rather than popping. [B-528]
+        const boxEl = document.getElementById('sf-audio-box');
+        if (boxEl) boxEl.classList.remove('picture-late');
+        let pictureLate = false;
+        // Asked last right before the picture is placed, so a late one is marked to grow in.
+        const pictureIsCurrent = () => {
+          if (token !== _sfAudioOpenToken) return false;
+          if (pictureLate && boxEl) boxEl.classList.add('picture-late');
+          return true;
+        };
+        const picturePromise = _sfRenderPicture({ imgId: 'sf-audio-picture', boxId: 'sf-audio-box', find: _find,
+          isCurrent: pictureIsCurrent });
+        await Promise.race([picturePromise, new Promise(r => setTimeout(r, SF_AUDIO_PICTURE_WAIT_MS))]);
+        pictureLate = true;
+        if (token !== _sfAudioOpenToken) return;
         modal.classList.add('active');
         try {
           const bytes = await _sfAudioReadBytes({ kind, id, subPath });
@@ -41467,6 +41526,7 @@ require(['vs/editor/editor.main'], function () {
                  (_b0[0] === 0xce && _b0[1] === 0xfa && _b0[2] === 0xed && _b0[3] === 0xfe)));
           if (_isProgramBytes) {
             if (loadEl) loadEl.style.display = 'none';
+            if (bodyEl) bodyEl.style.display = 'none';
             if (errEl) {
               errEl.style.display = '';
               errEl.textContent = 'This is a program file, not audio, despite its name. '
@@ -41480,7 +41540,7 @@ require(['vs/editor/editor.main'], function () {
           if (token !== _sfAudioOpenToken) return;
           _sfAudioBuffer = buffer;
           if (loadEl) loadEl.style.display = 'none';
-          if (bodyEl) bodyEl.style.display = '';
+          if (playBtn) playBtn.disabled = false;
           if (totEl)  totEl.textContent = _sfAudioFmtTime(buffer.duration);
           if (metaEl) {
             const khz = (buffer.sampleRate / 1000).toFixed(1) + ' kHz';
@@ -41492,17 +41552,35 @@ require(['vs/editor/editor.main'], function () {
           requestAnimationFrame(() => {
             if (token !== _sfAudioOpenToken) return;
             _sfAudioDrawWaveform();
+            // Drawn first, while still invisible, then the crossfade starts. [B-528]
+            if (bodyEl) bodyEl.classList.remove('loading');
             _sfAudioPlayFrom(0);
           });
         } catch (err) {
           if (token !== _sfAudioOpenToken) return;
           if (loadEl) loadEl.style.display = 'none';
+          if (bodyEl) { bodyEl.style.display = 'none'; bodyEl.classList.remove('loading'); }
           if (errEl) {
             errEl.style.display = '';
             errEl.textContent = `Could not play: ${err && err.message || err}`;
           }
         }
       };
+      // The incoming wave's bars, built once. Each gets its place in the wave (--i) and a peak
+      // height (--h) from a fixed pseudo-random sequence, so it looks like sound, not a ruler.
+      const SF_AUDIO_PICTURE_WAIT_MS = 150;
+      function _sfAudioBuildIncoming() {
+        const box = document.getElementById('sf-audio-incoming');
+        if (!box || box.childElementCount) return;
+        let seed = 7;
+        for (let i = 0; i < 64; i++) {
+          seed = (seed * 9301 + 49297) % 233280;
+          const b = document.createElement('span');
+          b.style.setProperty('--i', i);
+          b.style.setProperty('--h', (0.35 + 0.65 * (seed / 233280)).toFixed(2));
+          box.appendChild(b);
+        }
+      }
       window._sfOpenAudioPlayer = _sfOpenAudioPlayer; // reachable from the SD browser (kind:'path')
       document.getElementById('sf-audio-close')?.addEventListener('click', _sfCloseAudioPlayer);
       // Backdrop click closes — no dirty state to protect.
