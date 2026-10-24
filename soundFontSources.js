@@ -1777,6 +1777,9 @@ async function _writeSourceMetaAndStamp({ userData, uuidDir, uuid, format, name,
     if (curation.originalName) meta.originalName = curation.originalName;
   }
   fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+  // The source's documents, worked out once: a source never changes, and both the font and the source
+  // windows list them on every open. Walking a bundle took about half a second each time. [B-537]
+  try { updateSourceMeta(userData, uuid, { readmePaths: await walkSourceDocs(userData, uuid) }); } catch {}
   // Curation: apply the source fields and re-store the receipts that rode
   // along. Deliberately AFTER the meta write, because updateSourceMeta patches
   // a file that has to exist. Never fatal - a font that imports without its
@@ -2562,7 +2565,14 @@ function _createFolderSource({ uuid, uuidDir, meta }) {
 //     swamp the doc list.
 // Returns an array of { fileName, size } sorted lexicographically.
 const _SOURCE_AUDIO_EXTENSIONS = /\.(wav|raw|ogg|mp3|aiff?|flac)$/i;
+// The documents saved on the source at import ([B-537]); a source never changes after.
 async function listSourceDocs(userData, uuid) {
+  const meta = readSourceMeta(path.join(sourcesRoot(userData), uuid));
+  return (meta && Array.isArray(meta.readmePaths)) ? meta.readmePaths : [];
+}
+
+// The documents in a source, found by walking it: run once, at import.
+async function walkSourceDocs(userData, uuid) {
   const source = openSource(userData, uuid);
   if (!source) return [];
   const { identifyBoard } = require('./soundFontCandidates');
@@ -2648,6 +2658,31 @@ function _buildFileTreeFromEntries(entries) {
 }
 
 async function listSourceFiles(userData, uuid) {
+  // From the source's file manifest, which already records every file: a source never changes, and
+  // walking a bundle took about 400 ms on every open of the source window. The walk stays for a
+  // source whose manifest is missing. [B-537]
+  try {
+    const fh = require('./soundFontFileHash');
+    const man = fh.readFileHashManifest(fileHashManifestPath(userData, 'sources', uuid));
+    const tree = path.join(sourcesRoot(userData), uuid, 'source');
+    if (man && Array.isArray(man.records) && fs.existsSync(tree)) {
+      // Folders from a names-only walk (no file is opened): the manifest does not record an empty
+      // folder, and a maker's empty folder is still part of what the source holds.
+      const dirs = [];
+      const walk = (abs, rel) => {
+        for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+          if (!e.isDirectory()) continue;
+          const r = rel ? `${rel}/${e.name}` : e.name;
+          dirs.push({ fileName: r, isDir: true });
+          walk(path.join(abs, e.name), r);
+        }
+      };
+      walk(tree, '');
+      return _buildFileTreeFromEntries([...dirs, ...man.records
+        .filter((r) => r.fileHash !== '<empty>')
+        .map((r) => ({ fileName: r.relPath, size: r.size }))]);
+    }
+  } catch { /* fall through to the walk */ }
   const source = openSource(userData, uuid);
   if (!source) return [];
   const all = await source.listAll();
@@ -3424,6 +3459,7 @@ module.exports = {
   updateSourceMeta,
   readSourceMeta,
   listSourceDocs,
+  walkSourceDocs,
   readSourceFileBytes,
   exportSourceFileTo,
   listSourceFiles,

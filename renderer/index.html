@@ -4483,6 +4483,7 @@
   #detail-notes-input { width: 100%; box-sizing: border-box; font-size: 0.75rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; padding: 5px 7px; outline: none; resize: vertical; min-height: 56px; font-family: inherit; line-height: 1.4; }
   #detail-notes-input:focus { border-color: var(--jmt-blue); }
   #style-detail-editor { flex: 1; min-height: 0; border: 1px solid var(--c-border); border-radius: 4px; overflow: hidden; }
+  body.jmt-opening, body.jmt-opening * { cursor: progress !important; }
   .modal-btn-close { position: absolute; top: 12px; right: 14px; font-size: 1.1rem; background: none; border: none; color: var(--c-text-hint); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
   .modal-btn-close:hover { color: var(--c-text); background: var(--c-bg-hover); }
 
@@ -12466,12 +12467,13 @@ function hideBusy()           { _busyOverlay(false); }
 window.showBusy = showBusy;
 window.hideBusy = hideBusy;
 
-// Wait for everything a modal shows before it appears. Under 180 ms nothing is drawn (the shared
-// progress modal's showAfter delay); past it the busy card answers the click. No minimum display:
+// Wait for everything a modal shows before it appears. Under 400 ms nothing is drawn; past it the
+// busy card answers the click. (Was 180 ms, the progress modal's delay: a source window that opened
+// in a little over that flashed the card for a moment.) No minimum display:
 // the modal replaces the card at once, and a hold at a handover is the documented flash bug
 // (ui-conventions, "A minimum-display floor ... becomes a bug at this seam").
 // Resolves { cancelled } - true when the card's Cancel was pressed.
-const BUSY_DELAY_MS = 180;
+const BUSY_DELAY_MS = 400;
 async function waitWithBusy(promises, text) {
   let cancelled = false;
   let shown = false;
@@ -35447,7 +35449,18 @@ require(['vs/editor/editor.main'], function () {
         _sfRenderRemovedToggle();
       };
 
-      const _sfOpenEntryDetail = async (entryName, opts = {}) => {
+      // One font or source window opens at a time: a second click while one is opening (a double
+      // click, say) is ignored. The working cursor shows from the click, so it answers at once even
+      // when the open is too quick for the busy card.
+      let _sfOpening = false;
+      const _sfGuardOpen = (fn) => async (...args) => {
+        if (_sfOpening) return;
+        _sfOpening = true;
+        document.body.classList.add('jmt-opening');
+        try { return await fn(...args); }
+        finally { _sfOpening = false; document.body.classList.remove('jmt-opening'); }
+      };
+      const _sfOpenEntryDetail = _sfGuardOpen(async (entryName, opts = {}) => {
         const entry = _sfAllEntries.find(e => e.name === entryName);
         if (!entry || !_sfEntryDetailEls.modal) return;
         _sfMarkSeen(entryName);              // (1) looked at
@@ -35758,7 +35771,7 @@ require(['vs/editor/editor.main'], function () {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         _sfEntryDetailEls.modal.classList.add('active');
-      };
+      });
       const _sfCloseEntryDetail = () => {
         if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
         // Fire-and-forget resolve of any dirty content hash. No-op when
@@ -37536,7 +37549,7 @@ require(['vs/editor/editor.main'], function () {
       // removed in the same synchronous tick this modal's class is added,
       // so transitions between detail views don't flash the card grid in
       // between async data fetches.
-      const _sfOpenSourceDetail = async (uuid, opts = {}) => {
+      const _sfOpenSourceDetail = _sfGuardOpen(async (uuid, opts = {}) => {
         if (!uuid) return;
         // BACK TO FONT MODE FIRST. The commons branch hides rows and buttons on the shared
         // modal, so a font source opened after a common source would inherit them. Reset on
@@ -37834,7 +37847,7 @@ require(['vs/editor/editor.main'], function () {
           document.getElementById(opts.swapFromModalId)?.classList.remove('active');
         }
         _sfSourceDetailEls.modal?.classList.add('active');
-      };
+      });
       // dismissAll (2026-07-23): the X means "get rid of this window AND
       // whatever was under it" — it skips the return-to-entry hop and lands on
       // the grid. The bottom Close/Discard button keeps the step-back behavior.
