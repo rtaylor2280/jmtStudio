@@ -358,6 +358,56 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex,
 // Returns one of:
 //   { ok: true, name, meta }
 //   { ok: false, error: <string>, existing?: true }
+// [B-536] WHAT A SOURCE EXPORT CARRIED FOR ONE DOWNLOAD FOLDER, applied once its first font exists.
+// Every further copy of that folder is made from it (a Duplicate, then its own name, details and
+// image), then the first font gets its own image. Each record is marked restored on the source, so
+// it happens once: a later Duplicate from source, or importing the folder again, does not repeat it.
+async function _restoreCarriedForFolder(userData, sourceUuid, folderPath, entryName) {
+  const attach = require('./soundFontAttachments');
+  const meta = attach.readSourceMeta(userData, sourceUuid);
+  const cur = meta && meta.curation;
+  if (!cur) return [];
+  const root = entriesRoot(userData);
+  const place = (name, pic) => {
+    if (!pic || !pic.id) return;
+    const abs = attach.attachmentFilePath(userData, pic.id);
+    const dir = path.join(root, name);
+    if (!abs || !fs.existsSync(dir)) return;
+    const have = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name);
+    if (require('./soundFontPicture').pickPicture(have)) return;   // it has one of its own already
+    fs.copyFileSync(abs, path.join(dir, path.basename(String(pic.name || abs))));
+    try { recomputeEntryContentHash(userData, name); } catch {}
+  };
+  const made = [];
+  let changed = false;
+  for (const c of (cur.copies || [])) {
+    if (!c || c.restored || (c.candidatePath == null ? '' : c.candidatePath) !== folderPath) continue;
+    c.restored = true; changed = true;
+    const want = _sanitizeEntryName((c.curation && c.curation.name) || '') || `${entryName}_2`;
+    let name = want;
+    for (let n = 2; fs.existsSync(path.join(root, name)); n++) name = `${want}_${n}`;
+    const r = await duplicateEntry({ userData, sourceName: entryName, newName: name, mode: 'current' });
+    if (!r || !r.ok) continue;
+    try {
+      const dir = path.join(root, r.name);
+      const m = _readEntryMeta(dir) || {};
+      const details = { ...(c.curation || {}) };
+      delete details.name;
+      Object.assign(m, details, c.provenance || {});
+      fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(m, null, 2));
+    } catch {}
+    try { place(r.name, c.picture); } catch {}
+    made.push(r.name);
+  }
+  const first = cur.entryPictures && cur.entryPictures[folderPath];
+  if (first && !first.restored) {
+    try { place(entryName, first); } catch {}
+    first.restored = true; changed = true;
+  }
+  if (changed) { try { attach.writeSourceMeta(userData, sourceUuid, meta); } catch {} }
+  return made;
+}
+
 async function createEntry({ userData, sourceUuid, candidate, name, metadata, onProgress, folderSource }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourceUuid) return { ok: false, error: 'Missing sourceUuid' };
@@ -596,8 +646,11 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
     // its brag gate already read that shape, so matching it means no second idea of what a
     // saving is. `archiveBytes` is 0 because a folder has no archive to have started from, and
     // the close-out already falls back to `contentBytes` when it is.
+    // [B-536] What a source export carried for this download folder: further copies, and images.
+    let restoredCopies = [];
+    try { restoredCopies = await _restoreCarriedForFolder(userData, sourceUuid, candidate.path || '', entryName); } catch {}
     return {
-      ok: true, name: entryName, meta, refused: (result && result.refused) || [],
+      ok: true, name: entryName, meta, refused: (result && result.refused) || [], restoredCopies,
       // Separate from `refused` because the user agreed to these: the damage was named before the
       // add started. Refused files are a finding; stripped files are the receipt for a choice.
       stripped: (result && result.stripped) || [],

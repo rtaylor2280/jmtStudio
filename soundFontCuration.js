@@ -107,6 +107,14 @@ function _hasOwnPicture(dir) {
   } catch { return false; }
 }
 
+// The image file at the top of an item's own folder, or null.
+function _ownPictureFile(dir) {
+  try {
+    const names = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name);
+    return require('./soundFontPicture').pickPicture(names) || null;
+  } catch { return null; }
+}
+
 function _pick(obj, fields) {
   const out = {};
   if (!obj) return out;
@@ -173,8 +181,18 @@ function buildForSource(userData, uuid, appVersion, opts) {
   // and must therefore be rebuilt on import, even when a customized copy rides too. [B-493]
   const importedSubPaths = [];
   const customized = [];
+  // [B-536] ONE RECORD PER FONT, NOT PER DOWNLOAD FOLDER. `entries` holds one block per folder, so
+  // the first font from a folder takes it and every further copy rides in `copies` with its own name,
+  // details and image. And every font's own image travels by itself (`entryPictures` for the first,
+  // `copies[].picture` for the rest), whatever the include-customized choice: an image is not
+  // customization, and carrying it does not need the whole font.
+  const entryPictures = {};
+  const copies = [];
+  const _seenKeys = new Set();
   let entryList = [];
   try { entryList = entriesMod.listEntries(userData) || []; } catch { entryList = []; }
+  // Alphabetical, so the original (Barriss_Inquisitor) comes before its copies (Barriss_Inquisitor_2).
+  entryList = entryList.slice().sort((a, b) => String(a && a.name).localeCompare(String(b && b.name), undefined, { sensitivity: 'base' }));
   for (const e of entryList) {
     const m = e && e.meta;
     if (!m || m.sourceUuid !== uuid) continue;
@@ -195,8 +213,7 @@ function buildForSource(userData, uuid, appVersion, opts) {
     let _cust = null;
     try { _cust = entriesMod.getEntryCustomization(userData, e.name); } catch { _cust = null; }
     const _rides = includeCustomized && customizedKind === 'entry'
-                   && (!!(_cust && _cust.known && _cust.customized)
-                       || _hasOwnPicture(path.join(entriesMod.entriesRoot(userData), e.name)));
+                   && !!(_cust && _cust.known && _cust.customized);
     if (_rides) {
       customized.push({
         entryName: e.name,
@@ -241,6 +258,19 @@ function buildForSource(userData, uuid, appVersion, opts) {
     // candidate (the non-riding ones) may describe it.
     if (_rides) continue;
     const block = _pick(m, ENTRY_FIELDS);
+    const _picName = _ownPictureFile(path.join(entriesMod.entriesRoot(userData), e.name));
+    const _picFor = (slot) => _picName ? {
+      name: _picName,
+      file: `${PAYLOAD_DIR}/pictures/${slot}/${_picName}`,
+      _abs: path.join(entriesMod.entriesRoot(userData), e.name, _picName),
+    } : null;
+    if (_seenKeys.has(key)) {
+      copies.push({ candidatePath: key, curation: block, provenance: _pick(m, ENTRY_PROV_FIELDS),
+                    ...(_picName ? { picture: _picFor(`copy${copies.length}`) } : {}) });
+      continue;
+    }
+    _seenKeys.add(key);
+    if (_picName) entryPictures[key] = _picFor(`first${Object.keys(entryPictures).length}`);
     if (Object.keys(block).length === 0) continue;
     entries[key] = block;
     // Record-level provenance, kept SEPARATE from the curation block above
@@ -389,7 +419,8 @@ function buildForSource(userData, uuid, appVersion, opts) {
   } catch { /* no manifest: identity falls back to the archive hash alone */ }
 
   const hasSource = Object.keys(source).length > 0;
-  const hasEntries = Object.keys(entries).length > 0;
+  const hasEntries = Object.keys(entries).length > 0 || copies.length > 0
+    || Object.keys(entryPictures).length > 0;
   // Provenance alone is worth carrying — an uncurated source that was deleted
   // and re-imported should still come back with its own dates and identity.
   const hasProv = !!(provenance.archiveHash || provenance.purchaseDate);
@@ -414,7 +445,16 @@ function buildForSource(userData, uuid, appVersion, opts) {
     customized,
     provenance,
     ...(picture ? { picture } : {}),
+    ...(Object.keys(entryPictures).length ? { entryPictures } : {}),
+    ...(copies.length ? { copies } : {}),
   };
+}
+
+// Every font image the payload carries, as { file, _abs } records. [B-536]
+function _fontPictureFiles(payload) {
+  const out = Object.values((payload && payload.entryPictures) || {});
+  for (const c of ((payload && payload.copies) || [])) if (c && c.picture) out.push(c.picture);
+  return out.filter((r) => r && r.file && r._abs);
 }
 
 // Record-level provenance for one candidate: the timestamps that make a
@@ -492,6 +532,10 @@ function _cleanSidecar(payload, carriedCustomized, reclaimedPaths) {
     attachments: (payload.attachments || []).map(({ _abs, ...rest }) => rest),
     ...(payload.picture ? { picture: (({ _abs, ...rest }) => rest)(payload.picture) } : {}),
     customized: carriedCustomized.map(({ _absDir, ...rest }) => rest),
+    ...(payload.entryPictures ? { entryPictures: Object.fromEntries(Object.entries(payload.entryPictures)
+      .map(([k, v]) => [k, (({ _abs, ...rest }) => rest)(v)])) } : {}),
+    ...(payload.copies ? { copies: payload.copies.map((c) => c.picture
+      ? { ...c, picture: (({ _abs, ...rest }) => rest)(c.picture) } : c) } : {}),
     ...(reclaimedPaths.length ? {
       importedPaths: [...(payload.importedPaths || []), ...reclaimedPaths],
     } : {}),
@@ -521,6 +565,10 @@ function planForArchive(payload) {
   if (payload.picture && payload.picture._abs) {
     try { if (fs.statSync(payload.picture._abs).isFile()) entries.push({ name: payload.picture.file, absPath: payload.picture._abs }); }
     catch { /* a picture that cannot be read must not fail the export */ }
+  }
+  for (const r of _fontPictureFiles(payload)) {
+    try { if (fs.statSync(r._abs).isFile()) entries.push({ name: r.file, absPath: r._abs }); }
+    catch { /* an image that cannot be read must not fail the export */ }
   }
   const carriedCustomized = [];
   const reclaimedPaths = [];
@@ -579,6 +627,11 @@ function writeIntoTree(treeDir, payload) {
     const dest = path.join(treeDir, ...payload.picture.file.split('/'));
     try { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(payload.picture._abs, dest); }
     catch { /* a picture that cannot be read must not fail the export */ }
+  }
+  for (const r of _fontPictureFiles(payload)) {
+    const dest = path.join(treeDir, ...r.file.split('/'));
+    try { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(r._abs, dest); }
+    catch { /* an image that cannot be read must not fail the export */ }
   }
   const reclaimedPaths = [];
   for (const c of (payload.customized || [])) {
@@ -732,7 +785,10 @@ function applySourceCuration(userData, uuid, payload, attDir) {
       try { picture = !!(attachMod.setSourcePictureSync(userData, uuid, abs) || {}).ok; } catch {}
     }
   }
-  return { ok: true, applied, attachments: attached, picture };
+  // [B-536] The fonts' images wait in the attachment store until the fonts are made.
+  let fontPictures = 0;
+  if (attDir) { try { fontPictures = attachMod.storeCurationPictures(userData, uuid, attDir); } catch {} }
+  return { ok: true, applied, attachments: attached, picture, fontPictures };
 }
 
 // Recreate the customized fonts that rode the export ([B-311]). Runs at

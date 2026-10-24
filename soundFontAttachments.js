@@ -40,7 +40,34 @@ const PICTURE_RX = /\.(png|jpe?g|gif|webp|bmp)$/i;
 function linkedIds(meta) {
   const ids = (meta && Array.isArray(meta.attachments)) ? meta.attachments.slice() : [];
   if (meta && meta.picture && !ids.includes(meta.picture)) ids.push(meta.picture);
+  for (const id of curationPictureIds(meta)) if (!ids.includes(id)) ids.push(id);
   return ids;
+}
+// [B-536] The images a source export carried for the source's fonts, stored here on import and
+// linked from the curation kept on the source, so they wait safely until the fonts are made.
+function _curationPictureRecords(meta) {
+  const cur = meta && meta.curation;
+  if (!cur) return [];
+  const out = Object.values(cur.entryPictures || {});
+  for (const c of (cur.copies || [])) if (c && c.picture) out.push(c.picture);
+  return out.filter(Boolean);
+}
+function curationPictureIds(meta) {
+  return _curationPictureRecords(meta).map((r) => r.id).filter(Boolean);
+}
+// Store each carried font image from the unpacked payload (`attDir`) and record its id on the source.
+function storeCurationPictures(userData, uuid, attDir) {
+  const meta = readSourceMeta(userData, uuid);
+  if (!meta || !attDir) return 0;
+  let stored = 0;
+  for (const r of _curationPictureRecords(meta)) {
+    if (r.id || !r.file) continue;
+    const abs = path.join(attDir, ...String(r.file).split('/'));
+    try { if (!fs.statSync(abs).isFile()) continue; r.id = storeFile(userData, abs, null, 'picture'); stored++; }
+    catch { /* an image that cannot be stored must not fail the import */ }
+  }
+  if (stored) writeSourceMeta(userData, uuid, meta);
+  return stored;
 }
 function isPictureAttachmentDir(dirAbs) {
   try { return JSON.parse(fs.readFileSync(path.join(dirAbs, 'attachment.json'), 'utf8')).role === 'picture'; }
@@ -518,7 +545,8 @@ function sourcePicture(userData, uuid) {
 }
 
 module.exports = {
-  linkedIds, isPictureAttachmentDir, setSourcePicture, setSourcePictureSync, clearSourcePicture, sourcePicture,
+  readSourceMeta, writeSourceMeta,
+  linkedIds, curationPictureIds, storeCurationPictures, isPictureAttachmentDir, setSourcePicture, setSourcePictureSync, clearSourcePicture, sourcePicture,
   pruneDanglingLinks, pruneUnlinkedAttachments, sweepStaging,
   addAttachments, listAttachments, attachmentFilePath, unlinkAttachment,
   listAllAttachments, linkAttachments, readAttachment,

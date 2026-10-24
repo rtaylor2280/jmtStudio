@@ -270,10 +270,14 @@ async function bundle(build) {
     put(path.join(E.entriesRoot(ud2), 'Ahsoka'), 'ahsoka.png', png(15));
     const fc = E.getEntryCustomization(ud2, 'Ahsoka');
     check('precondition: a font\'s picture alone is not customization either', fc && fc.known && !fc.customized, JSON.stringify(fc));
-    const p2 = CU.buildForSource(ud2, uuid, 'test', {});
+    // [B-536] A font's image travels by itself, whatever the include-customized choice; the font
+    // does not ride whole for it.
+    const p2 = CU.buildForSource(ud2, uuid, 'test', { includeCustomized: false });
     const fr = ((p2 && p2.customized) || []).map((c) => c.entryName);
-    check('THE FONT WITH ITS OWN PICTURE RIDES', fr.includes('Ahsoka'), JSON.stringify(fr));
-    check('the untouched font does not', !fr.includes('Obiwan'), JSON.stringify(fr));
+    const carried = (p2 && p2.entryPictures) || {};
+    check('THE FONT\'S OWN PICTURE IS CARRIED, BOX UNTICKED', carried.Ahsoka && carried.Ahsoka.name === 'ahsoka.png', JSON.stringify(carried));
+    check('and the font does not ride whole for it', !fr.includes('Ahsoka'), JSON.stringify(fr));
+    check('the untouched font carries nothing', !carried.Obiwan && !fr.includes('Obiwan'), JSON.stringify(carried));
   }
 
   for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
