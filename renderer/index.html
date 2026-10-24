@@ -49925,6 +49925,7 @@ require(['vs/editor/editor.main'], function () {
         return () => {
           if (!el) {
             el = document.createElement('div');
+            el.id = 'sf-card-ctx-submenu';   // so the shared Escape / click-outside close finds it
             el.className = 'preset-ctx-menu';
             el.style.display = 'none';
             document.body.appendChild(el);
@@ -55806,6 +55807,9 @@ require(['vs/editor/editor.main'], function () {
         const sub2 = document.getElementById('preset-ctx-submenu2');
         if (sub2) { sub2.style.display = 'none'; sub2.innerHTML = ''; }
       } catch {}
+      // And the Sound Fonts card menu's submenu (Add to config, Replace in config preset).
+      const sfSub = document.getElementById('sf-card-ctx-submenu');
+      if (sfSub) { sfSub.style.display = 'none'; sfSub.innerHTML = ''; }
       // Clear any per-use width override (the SF effect-chip menu sets
       // minWidth: 0 for a content-fit dropdown). Subsequent menus that
       // rely on the CSS default min-width: 150px get their breathing
@@ -55815,7 +55819,9 @@ require(['vs/editor/editor.main'], function () {
 
     document.addEventListener('mousedown', e => {
       const menu = document.getElementById('preset-ctx-menu');
-      if (menu && menu.style.display !== 'none' && !menu.contains(e.target)) _hidePresetContextMenu();
+      // A click inside one of the menu's submenus (a bank header, say) is not a click outside it.
+      const inSub = e.target.closest && e.target.closest('#sf-card-ctx-submenu');
+      if (menu && menu.style.display !== 'none' && !menu.contains(e.target) && !inSub) _hidePresetContextMenu();
     });
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') _hidePresetContextMenu();
