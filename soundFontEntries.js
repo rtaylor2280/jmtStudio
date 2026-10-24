@@ -19,7 +19,7 @@ const os = require('os');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
 const soundFontSources = require('./soundFontSources');
-const { copyTreeWithProgress } = require('./sfExportCopy');
+const { copyTreeWithProgress, copyFileWithProgress } = require('./sfExportCopy');
 const { rmWithRetry } = require('./fsRemove');
 const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 
@@ -1249,6 +1249,8 @@ function _libRecordsFor(userData, name, srcDir) {
 // instant and one that paces like a hash.
 // Root `meta.json` is skipped for the same reason the hash walk skips it, so both sides of
 // every comparison agree on what counts as a file of this font.
+const { shownPictureExtra: _shownPictureExtra, dropPictureTemp: _dropPictureTemp } = require('./soundFontPicture');
+
 function _walkDestFolder(folder) {
   const files = [];
   const stack = [{ abs: folder, rel: '' }];
@@ -1286,8 +1288,12 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   // already wrote down. The dirty flag is the app's own signal that they need
   // recomputing, and it is honoured here rather than second-guessed.
   const { hashFile } = require('./soundFontFileHash');
-  const libRecords = _libRecordsFor(userData, name, srcDir);
+  let libRecords = _libRecordsFor(userData, name, srcDir);
   if (!libRecords) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+  // The image the font shows is one of its files at the destination, as in planFolderWrite. [B-534]
+  const _pic = await _shownPictureExtra(userData, 'entry', name);
+  _dropPictureTemp(_pic);
+  if (_pic) libRecords = [...libRecords, { relPath: _pic.relPath, size: _pic.size, fileHash: _pic.fileHash }];
 
   // DESTINATION SIDE. The manifest holds a hash per file; mtime exists only to
   // say whether the user invalidated an entry. We consult ONLY the files the
@@ -1571,6 +1577,8 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
     }
   }
   const targetDir = path.join(destDir, targetName);
+  // The image the font shows when it lives outside the font. [B-534]
+  const _shownPic = await _shownPictureExtra(userData, 'entry', name);
   try {
     fs.mkdirSync(targetDir, { recursive: true });
     // Streamed copy with write-paced byte progress. The internal meta.json at
@@ -1651,6 +1659,12 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
         // The tally the cancel-cleanup rule reads. Owned by the caller's token so one
         // object counts for the whole operation, across every font in a bulk run.
         wrote: opts.wrote || null });
+      // The image the font shows, when it lives outside the font. [B-534]
+      if (_shownPic && (!_writeFilter || _writeFilter(_shownPic.relPath, _shownPic.relPath))) {
+        try { await copyFileWithProgress(_shownPic.abs, path.join(targetDir, _shownPic.relPath), onBytes, opts.shouldStop || null); }
+        finally { _dropPictureTemp(_shownPic); }
+      }
+      _dropPictureTemp(_shownPic);
       // ANYTHING PARKED WHOSE REPLACEMENT NEVER ARRIVED GOES BACK. The copy can decline to
       // write a file it planned to - `refused` blocks a carryable it will not put on a card - and
       // without this the user's copy would be parked, never replaced, and then disposed of with
@@ -1911,6 +1925,7 @@ async function exportEntryToFolder(userData, name, destDir, mode = 'rename', onB
       // written.
       const { collectFileRecordsAsync, breathe } = require('./soundFontFileHash');
       const recs = await collectFileRecordsAsync(srcDir);
+      if (recs && _shownPic) recs.push({ relPath: _shownPic.relPath, size: _shownPic.size, fileHash: _shownPic.fileHash });
       if (recs) {
         // [B-402] RETURNED, NOT WRITTEN — the CALLER commits everything the operation learned in
         // one write at the end. Writing here meant one write per exported item, and it silently
@@ -2833,8 +2848,12 @@ async function planFolderWrite(userData, name, destDir, opts = {}) {
   const targetDir = path.join(destDir, name);
   if (!fs.existsSync(srcDir)) return { ok: false, error: `Entry not found: ${name}` };
 
-  const libRecords = _libRecordsFor(userData, name, srcDir);
+  let libRecords = _libRecordsFor(userData, name, srcDir);
   if (!libRecords) return { ok: false, error: `Cannot read the library copy of ${name}` };
+  // The image the font shows is one of its files on the card. [B-534]
+  const _pic = await _shownPictureExtra(userData, 'entry', name);
+  _dropPictureTemp(_pic);
+  if (_pic) libRecords = [...libRecords, { relPath: _pic.relPath, size: _pic.size, fileHash: _pic.fileHash }];
 
   const { hashFileAsync, breathe } = require('./soundFontFileHash');
   const sync = require('./sfSyncManifest');

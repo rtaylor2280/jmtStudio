@@ -5021,7 +5021,8 @@ async function _sourceExportInventory(userData, uuid, opts = {}) {
   try {
     const cur = require('./soundFontCuration');
     payload = cur.buildForSource(userData, uuid, app.getVersion(),
-                                 { includeAttachments, includeCustomized, customizedKind });
+                                 { includeAttachments, includeCustomized, customizedKind,
+                                   shownPicture: await _sourceShownPictureFile(userData, uuid) });
     const plan = payload ? cur.planForArchive(payload) : null;
     if (plan) {
       payloadBytes = Buffer.byteLength(plan.sidecarJson, 'utf8');
@@ -5181,7 +5182,8 @@ ipcMain.handle('sources:exportToDownloads', async (event, { uuid, destDir, forma
     try {
       curationPayload = require('./soundFontCuration')
         .buildForSource(app.getPath('userData'), uuid, app.getVersion(),
-                        { includeAttachments, includeCustomized, customizedKind });
+                        { includeAttachments, includeCustomized, customizedKind,
+                          shownPicture: await _sourceShownPictureFile(app.getPath('userData'), uuid) });
     } catch { curationPayload = null; }  // a payload we cannot build must never sink the export
     const result = await source.exportToDownloads(target,
       { format, onProgress, shouldStop, curationPayload });

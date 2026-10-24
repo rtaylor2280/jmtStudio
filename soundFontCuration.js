@@ -324,6 +324,17 @@ function buildForSource(userData, uuid, appVersion, opts) {
     const abs = own && attachMod.attachmentFilePath(userData, own.id);
     if (abs) picture = { name: own.name, file: `${PAYLOAD_DIR}/picture/${own.name}`, _abs: abs };
   } catch { picture = null; }
+  // What the source SHOWS rides too, when it is not its own: a font's image it takes as its picture
+  // (one item, or borrowed). Looked up by the caller (opts.shownPicture, an absolute path), since
+  // finding it reads the download. An image from the download travels with the download.
+  if (!picture && opts && opts.shownPicture) {
+    try {
+      if (fs.statSync(opts.shownPicture).isFile()) {
+        const name = path.basename(opts.shownPicture);
+        picture = { name, file: `${PAYLOAD_DIR}/picture/${name}`, _abs: opts.shownPicture };
+      }
+    } catch { picture = null; }
+  }
 
   // ── PROVENANCE ──────────────────────────────────────────────────────────
   // the user's bar, 2026-09-03: "it should for me be identical to what it was

@@ -20,7 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const StreamZip = require('node-stream-zip');
-const { copyTreeWithProgress } = require('./sfExportCopy');
+const { copyTreeWithProgress, copyFileWithProgress } = require('./sfExportCopy');
 const { rmWithRetry } = require('./fsRemove');
 const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 
@@ -1699,7 +1699,12 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
 
   const mine  = _dirSignals(libDir, libFilter);
   const theirs = _dirSignals(cardDir, cardFilter);
-  if (mine.fileCount !== theirs.fileCount || mine.totalBytes !== theirs.totalBytes) {
+  // The image the folder shows is one of its files at the destination (exportCommonToFolder). [B-534]
+  const _picMod = require('./soundFontPicture');
+  const _pic = await _picMod.shownPictureExtra(userData, 'common', uuid);
+  _picMod.dropPictureTemp(_pic);
+  const _mineCount = mine.fileCount + (_pic ? 1 : 0), _mineBytes = mine.totalBytes + (_pic ? _pic.size : 0);
+  if (_mineCount !== theirs.fileCount || _mineBytes !== theirs.totalBytes) {
     return { ok: true, exists: true, identical: false, reason: 'signals' };
   }
 
@@ -1708,8 +1713,9 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
   // supplies a hash per file; mtime says only whether the user invalidated it,
   // and an invalidated or missing entry costs one hash for that file alone.
   const { collectFileRecords, hashFile } = require('./soundFontFileHash');
-  const libRecords = _commonLibRecords(userData, uuid, libDir, libFilter, mine);
+  let libRecords = _commonLibRecords(userData, uuid, libDir, libFilter, mine);
   if (!libRecords) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+  if (_pic) libRecords = [...libRecords, { relPath: _pic.relPath, size: _pic.size, fileHash: _pic.fileHash }];
 
   const sync = require('./sfSyncManifest');
   const item = targetName || 'common';
@@ -2000,6 +2006,9 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
     }
   }
   const targetDir = path.join(destDir, targetName);
+  // The image the folder shows when it lives outside the folder. [B-534]
+  const _pic = require('./soundFontPicture');
+  const _shownPic = await _pic.shownPictureExtra(userData, 'common', uuid);
   try {
     fs.mkdirSync(targetDir, { recursive: true });
     // Streamed copy with write-paced byte progress. srcDir is the common's
@@ -2013,6 +2022,10 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
         // object counts for the whole operation. Without it the offer branch below can never
         // fire, which is a branch that exists and does nothing. [B-005 item 4]
         wrote: opts.wrote || null });
+      if (_shownPic) {
+        try { await copyFileWithProgress(_shownPic.abs, path.join(targetDir, _shownPic.relPath), onBytes, opts.shouldStop || null); }
+        finally { _pic.dropPictureTemp(_shownPic); }
+      }
     } catch (err) {
       // Same rule as a font ([B-005 item 4]): `targetDir` was created by this call - 'replace'
       // removed the old tree first, 'rename' minted a new name - so the partial is ours to take
@@ -2132,6 +2145,7 @@ async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', on
       // per file against the CARD, with nothing yielding in between.
       const { collectFileRecordsAsync, breathe } = require('./soundFontFileHash');
       const recs = await collectFileRecordsAsync(srcDir);
+      if (recs && _shownPic) recs.push({ relPath: _shownPic.relPath, size: _shownPic.size, fileHash: _shownPic.fileHash });
       if (recs) {
         // [B-402] Returned, not written — see the twin in soundFontEntries. One writer, at the
         // end of the whole operation.
