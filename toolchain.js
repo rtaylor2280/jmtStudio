@@ -1198,6 +1198,9 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // of every compile log reads as one aligned run rather than four tidy lines
   // and a ragged one. (2026-08-15)
   onLog(`Config staged to:    ${staged.stagedPath}`, false);
+  const stylesStaged = proffie.stageStylesForCompile();
+  if (!stylesStaged.ok) { onLog(stylesStaged.error, true); return { ok: false, error: stylesStaged.error }; }
+  if (stylesStaged.stagedPath) onLog(`Styles staged to:    ${stylesStaged.stagedPath}`, false);
 
   const sketchPath = proffie.getProffieOSRoot();
   const buildPath  = getBuildOutputPath();

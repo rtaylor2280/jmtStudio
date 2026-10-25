@@ -842,6 +842,27 @@ async function doCompile() {
     if (choice === 'save')   await window.saveStylesFile();
   }
 
+  // THE STYLE LIBRARY'S LINK, MOVED TO THE NEW FORM. [B-542] A config linked before the library was
+  // included by name points at it by its full path on this computer. That is the app's own file, so
+  // there is no reason to keep the old link: this is a notice, not a choice, and Cancel stops the
+  // compile. AFTER the save questions, so the config is saved and the update is saved on its own.
+  if (window.stylesIncludeNeedsUpdate?.()) {
+    const _notice = window.promptConfirm({
+      title: 'Style Library link updated',
+      message: 'JMT Studio now links your Style Library by name (my_styles.h) instead of by its full '
+        + 'path on this computer, so a config also builds on another computer.\n\n'
+        + 'This config still has the old link. It will be updated and saved, then compiled. Configs '
+        + 'you link from now on get the new link automatically.',
+      confirmText: 'Update and compile',
+      confirmKind: 'primary',
+      cancelText: 'Cancel',
+    });
+    hideBusy();
+    // Two buttons, so the answer is a boolean: true is Update and compile.
+    if (await _notice !== true) { setGatePhase(false); return; }
+    if (!await window.updateStylesIncludeAndSave()) { setGatePhase(false); return; }
+  }
+
   // Re-read content in case Save As changed the path / metadata.
   const content = window.getEditorContent();
 

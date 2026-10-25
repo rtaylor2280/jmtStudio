@@ -19130,6 +19130,47 @@ let _stylesFileImported = false;
 let _stylesFilePath     = '';  // forward-slash absolute path to userData/my_styles.h
 let _stylesLinked       = false; // true when config contains #include for the library
 
+// THE LIBRARY IS INCLUDED BY NAME: #include "my_styles.h". Every compile copies the library into
+// the selected ProffieOS version's config folder beside the config, so the name resolves there, and
+// the same config builds on another machine, in another tool, or from the copy on a card. An include of the
+// library by its full path on this computer is the older form: it still counts as linked, and the
+// next compile updates it, with a notice (window.updateStylesIncludeAndSave).
+const STYLES_INCLUDE = '#include "my_styles.h"';
+function _isOwnStylesInclude(line) {
+  const m = String(line).match(/#\s*include\s+"([^"]*)"/);
+  if (!m) return false;
+  return m[1] === 'my_styles.h' || (!!_stylesFilePath && m[1] === _stylesFilePath);
+}
+
+// The live lines of `text` that include the app's own library by its full path: line number
+// (1-based), and where the path starts and ends. A commented-out one is not built, so not counted.
+function _ownStylesFullPathLines(text, stylesPath) {
+  if (!stylesPath) return [];
+  const hits = [];
+  String(text).split('\n').forEach((l, i) => {
+    const m = l.match(/^(\s*#\s*include\s+")([^"]*)("\s*)$/);
+    if (m && m[2] === stylesPath) hits.push({ line: i + 1, col: m[1].length, len: m[2].length });
+  });
+  return hits;
+}
+// The compile asks these two, after its save questions: the config is saved at that point, so the
+// update is saved with nothing else riding along. [B-542]
+window.stylesIncludeNeedsUpdate = () =>
+  !!(fileIsOpen && window._monacoEditor
+     && _ownStylesFullPathLines(window._monacoEditor.getValue(), _stylesFilePath).length);
+window.updateStylesIncludeAndSave = async () => {
+  const ed = window._monacoEditor;
+  if (!ed) return false;
+  const hits = _ownStylesFullPathLines(ed.getValue(), _stylesFilePath);
+  if (!hits.length) return true;
+  _atomicEdit(ed, 'styles-include-update', hits.map(h => ({
+    range: { startLineNumber: h.line, startColumn: h.col + 1, endLineNumber: h.line, endColumn: h.col + h.len + 1 },
+    text: 'my_styles.h',
+  })));
+  _updateStylesLinkBtn();
+  return await doSave();
+};
+
 // THE DIVIDER FOLLOWS THE GROUP AFTER IT, AND NOTHING ELSE. [B-448]
 // It used to be computed inside `_updateStylesLinkBtn` from `btn-styles-import` and the `linked`
 // flag - neither of which is the group it precedes - so it answered a different question from the
@@ -19164,9 +19205,8 @@ function _updateStylesLinkBtn() {
   }
 
   const content  = window._getEditorContent ? window._getEditorContent() : '';
-  const _escaped = _stylesFilePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const linked   = fileIsOpen && _stylesFilePath
-    ? new RegExp(String.raw`^\s*#include\s+"${_escaped}"\s*$`, 'm').test(content)
+    ? content.split('\n').some(l => /^\s*#include\s+"[^"]*"\s*$/.test(l) && _isOwnStylesInclude(l))
     : false;
   _stylesLinked = linked;
   const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
@@ -19398,7 +19438,7 @@ function _doInsertStylesInclude(lines, conflictIdx, action) {
   }
   if (lastJmtIdx !== -1) insertAfter = lastJmtIdx;
 
-  lines.splice(insertAfter + 1, 0, `#include "${_stylesFilePath}"`);
+  lines.splice(insertAfter + 1, 0, STYLES_INCLUDE);
   const insertedLine = insertAfter + 2; // 1-based
   const ed       = window._monacoEditor;
   const model    = ed.getModel();
@@ -19438,7 +19478,7 @@ async function _insertStylesInclude() {
 
   // If our include exists but is commented out, just uncomment it silently
   const commentedIdx = lines.findIndex(l =>
-    /^\s*\/\/+\s*#include/.test(l) && l.includes(_stylesFilePath)
+    /^\s*\/\/+\s*#include/.test(l) && _isOwnStylesInclude(l)
   );
   if (commentedIdx !== -1) {
     lines[commentedIdx] = lines[commentedIdx].replace(/^(\s*)\/\/+\s*/, '$1');
@@ -19453,7 +19493,7 @@ async function _insertStylesInclude() {
   // Check for a conflicting my_styles.h include (any path except our own)
   const conflictIdx = lines.findIndex(l =>
     /^\s*#include\s+"[^"]*my_styles\.h"/.test(l) &&
-    !l.includes(_stylesFilePath)
+    !_isOwnStylesInclude(l)
   );
 
   if (conflictIdx !== -1) {

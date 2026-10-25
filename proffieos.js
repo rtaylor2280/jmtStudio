@@ -536,6 +536,27 @@ function stageConfig(configContent) {
 }
 
 /**
+ * Puts the Style Library beside the staged config, on every compile, so a config's
+ * #include "my_styles.h" finds it. Unconditional: no question of whether this config uses it or
+ * whether it changed, so nothing can drift. With no library, a copy left from an earlier compile
+ * is removed, so an include of it fails as missing instead of building old styles.
+ * Returns { ok, stagedPath } or { ok: false, error }.
+ */
+function stageStylesForCompile() {
+  const dest = path.join(path.dirname(getConfigStagingPath()), STYLES_FILENAME);
+  try {
+    if (hasUserStyles()) {
+      fs.copyFileSync(getUserStylesPath(), dest);
+      return { ok: true, stagedPath: dest };
+    }
+    fs.rmSync(dest, { force: true });
+    return { ok: true, stagedPath: null };
+  } catch (e) {
+    return { ok: false, error: `Failed to stage the Style Library:\n${e.message}` };
+  }
+}
+
+/**
  * Reads the currently staged config back (for verification or display).
  */
 function readStagedConfig() {
@@ -1180,6 +1201,7 @@ module.exports = {
   initWorkspace,
   ensureConfigFileRef,
   stageConfig,
+  stageStylesForCompile,
   readStagedConfig,
   stageStyles,
   readStagedStyles,
