@@ -36125,6 +36125,8 @@ require(['vs/editor/editor.main'], function () {
       });
       const _sfCloseEntryDetail = () => {
         if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
+        // Closing the font stops whatever it was playing.
+        try { window._sfQuickAudioStop?.(); } catch {}
         // Fire-and-forget resolve of any dirty content hash. No-op when
         // the entry isn't flagged; otherwise the rehash runs in the
         // background and the next survey/export reads the fresh value.
@@ -41494,6 +41496,8 @@ require(['vs/editor/editor.main'], function () {
       // reads always reflect the current `let` value (a one-shot copy
       // would freeze at null and never see playback state changes).
       const _sfQuickAudioStop = () => {
+        // A sound still loading is cancelled too, so it cannot start after the stop.
+        _sfQuickAudioToken++;
         if (_sfQuickAudio) {
           try { _sfQuickAudio.pause(); } catch {}
           try { _sfQuickAudio.removeAttribute('src'); _sfQuickAudio.load(); } catch {}
