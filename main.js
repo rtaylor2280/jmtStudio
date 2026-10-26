@@ -2569,6 +2569,11 @@ ipcMain.handle('fileOps:move', async (_, { kind, id, sourcePaths, destSubPath } 
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+ipcMain.handle('fileOps:sameFile', (_, { a, b } = {}) => {
+  try { return { ok: true, state: soundFontFileOps.sameFileAt(app.getPath('userData'), a, b) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('fileOps:delete', (_, { kind, id, subPaths } = {}) => {
   try { return soundFontFileOps.deleteFilesAt({ userData: app.getPath('userData'), kind, id, subPaths }); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }

@@ -423,6 +423,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sfProgramDelete:       (params)     => ipcRenderer.invoke('sfProgram:delete', params),
   sfProgramQuarantine:   (params)     => ipcRenderer.invoke('sfProgram:quarantine', params),
   fileOpsCopy:           (params)     => ipcRenderer.invoke('fileOps:copy', params),
+  fileOpsSameFile:       (params)     => ipcRenderer.invoke('fileOps:sameFile', params),
   fileOpsMove:           (params)     => ipcRenderer.invoke('fileOps:move', params),
   fileOpsDelete:         (params)     => ipcRenderer.invoke('fileOps:delete', params),
   fileOpsRename:         (params)     => ipcRenderer.invoke('fileOps:rename', params),

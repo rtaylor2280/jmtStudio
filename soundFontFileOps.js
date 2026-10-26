@@ -806,8 +806,25 @@ async function landedImagesToPng({ userData, kind, id, relPaths, decode }) {
 // Where a file in a font or common folder is on disk, checked to stay inside it.
 function locationFilePath(userData, kind, id, subPath) { return _resolve(userData, kind, id, subPath); }
 
+// Whether location `b` already holds the file at location `a` ({ kind, id, subPath } each):
+// 'same' when it is the same file (one hard link, or equal bytes), 'different' when another file
+// sits at that path, 'absent' when nothing does. Lets a caller reuse a file rather than add a second
+// copy under a variant name.
+function sameFileAt(userData, a, b) {
+  const pa = _resolve(userData, a.kind, a.id, a.subPath);
+  const pb = _resolve(userData, b.kind, b.id, b.subPath);
+  let sb;
+  try { sb = fs.statSync(pb); } catch { return 'absent'; }
+  if (!sb.isFile()) return 'different';
+  const sa = fs.statSync(pa);
+  if (sa.ino && sa.ino === sb.ino && sa.dev === sb.dev) return 'same';
+  if (sa.size !== sb.size) return 'different';
+  return fs.readFileSync(pa).equals(fs.readFileSync(pb)) ? 'same' : 'different';
+}
+
 module.exports = {
   locationFilePath,
+  sameFileAt,
   landedImagesToPng,
   copyAcrossLocations,
   moveWithinLocation,

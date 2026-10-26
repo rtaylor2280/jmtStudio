@@ -32003,7 +32003,14 @@ require(['vs/editor/editor.main'], function () {
           const d = document.createElement('div');
           d.className = 'preset-ctx-item' + (cls ? ' ' + cls : '');
           d.textContent = text;
-          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; fn(); });
+          d.addEventListener('mousedown', (e2) => {
+            e2.stopPropagation();
+            menu.style.display = 'none';
+            // The "Use as track for…" list goes with it, if it was hovered open.
+            const sub = _sfPresetCtxSubmenu();
+            sub.style.display = 'none'; sub.innerHTML = '';
+            fn();
+          });
           menu.appendChild(d);
         };
         const mkSep = () => { const s = document.createElement('div'); s.className = 'preset-ctx-separator'; menu.appendChild(s); };
@@ -32023,6 +32030,18 @@ require(['vs/editor/editor.main'], function () {
           const count = _sfSharedTracksSelected.size;
           if (count === 1) {
             mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'sharedTracks', id: '', subPath: name, label: name }));
+            // A shared track is set as tracks/<name>; the folder goes to the card with the export. [B-152]
+            if (typeof editor !== 'undefined' && editor && typeof fileIsOpen !== 'undefined' && fileIsOpen) {
+              const trackItem = document.createElement('div');
+              trackItem.className = 'preset-ctx-item has-submenu';
+              trackItem.textContent = 'Use as track for…';
+              menu.appendChild(trackItem);
+              const open = () => _sfOpenTrackPresetSubmenu(trackItem,
+                (ai, pi) => { _sfUseAsTrack({ kind: 'sharedTracks', id: '', subPath: name }, ai, pi); });
+              trackItem.addEventListener('mouseenter', open);
+              trackItem.addEventListener('mousemove', () => { if (_sfPresetCtxSubmenu().style.display !== 'block') open(); });
+              trackItem.addEventListener('mousedown', (ev) => { ev.stopPropagation(); open(); });
+            }
             mkSep();
           }
           // No Paste on a file row: it reads as "replace this file"
@@ -43221,81 +43240,17 @@ require(['vs/editor/editor.main'], function () {
           if (count === 1) {
             if (_sfIsWavPath(p)) {
               mkItem('▶ Play', '', () => _sfOpenAudioPlayer({ kind: 'entry', id: _sfDetailOriginalName, subPath: p, label: p.split('/').pop() }));
-              // "Use as track for… ▸" — same submenu shape as the SF
-              // card's "Replace in config preset…", but track-only (no
-              // "new preset" sibling since a track needs an existing
-              // preset to attach to). The track value combines the
-              // entry name with the wav's relative path, producing the
-              // canonical Proffie-style path "Father/tracks/track1.wav".
-              const trackValue = `${_sfDetailOriginalName}/${p}`;
+              // "Use as track for… ▸": the preset list by bank. Where the track has to live, and
+              // whether it is put into the preset's own font first, is _sfUseAsTrack's. [B-152]
               const trackItem = document.createElement('div');
               trackItem.className = 'preset-ctx-item has-submenu';
               trackItem.textContent = 'Use as track for…';
               menu.appendChild(trackItem);
-              const buildTrackSubmenu = () => {
-                const sub = _sfPresetCtxSubmenu();
-                sub.innerHTML = '';
-                sub.style.minWidth = '240px';
-                sub.classList.add('preset-ctx-submenu-sized');
-                let arrays = [];
-                try {
-                  const result = presetParser.parsePresets(editor.getValue());
-                  arrays = result.arrays || [];
-                } catch {}
-                let anyPreset = false;
-                arrays.forEach((arr, arrayIdx) => {
-                  if (!arr.presets || !arr.presets.length) return;
-                  const head = document.createElement('div');
-                  head.className = 'preset-ctx-submenu-section';
-                  head.textContent = arr.name || `Array ${arrayIdx + 1}`;
-                  sub.appendChild(head);
-                  arr.presets.forEach((preset, presetIdx) => {
-                    anyPreset = true;
-                    const number = presetIdx + 1;
-                    const name = preset.displayName || `(unnamed ${number})`;
-                    const item = document.createElement('div');
-                    item.className = 'preset-ctx-item';
-                    item.textContent = `${number}. ${name}`;
-                    item.dataset.sfArrayIdx = String(arrayIdx);
-                    item.dataset.sfPresetIdx = String(presetIdx);
-                    item.dataset.sfTrackValue = trackValue;
-                    item.addEventListener('mousedown', (ev) => {
-                      ev.stopPropagation();
-                      ev.preventDefault();
-                      const ai = parseInt(item.dataset.sfArrayIdx, 10);
-                      const pi = parseInt(item.dataset.sfPresetIdx, 10);
-                      const tv = item.dataset.sfTrackValue;
-                      _sfCloseCardCtxMenus();
-                      if (Number.isFinite(ai) && Number.isFinite(pi) && tv) {
-                        _sfSetPresetTrack(ai, pi, tv);
-                        // Pulse the wav row that was just picked — same
-                        // amber-highlight signal the SF card flow uses.
-                        _sfFlashEntryFileRow(p);
-                      }
-                    });
-                    sub.appendChild(item);
-                  });
-                });
-                if (!anyPreset) {
-                  const empty = document.createElement('div');
-                  empty.className = 'preset-ctx-submenu-empty';
-                  empty.textContent = 'No presets yet';
-                  sub.appendChild(empty);
+              const buildTrackSubmenu = () => _sfOpenTrackPresetSubmenu(trackItem, async (ai, pi) => {
+                if (await _sfUseAsTrack({ kind: 'entry', id: _sfDetailOriginalName, subPath: p }, ai, pi)) {
+                  _sfFlashEntryFileRow(p);
                 }
-                const rect = trackItem.getBoundingClientRect();
-                sub.style.display = 'block';
-                sub.style.left = `${rect.right - 2}px`;
-                sub.style.top = `${rect.top - 4}px`;
-                requestAnimationFrame(() => {
-                  const subRect = sub.getBoundingClientRect();
-                  if (subRect.right > window.innerWidth - 8) {
-                    sub.style.left = `${Math.max(8, rect.left - subRect.width + 2)}px`;
-                  }
-                  if (subRect.bottom > window.innerHeight - 8) {
-                    sub.style.top = `${Math.max(8, window.innerHeight - subRect.height - 8)}px`;
-                  }
-                });
-              };
+              });
               trackItem.addEventListener('mouseenter', buildTrackSubmenu);
               trackItem.addEventListener('mousedown', (ev) => {
                 ev.stopPropagation();
@@ -50615,6 +50570,163 @@ require(['vs/editor/editor.main'], function () {
           window._commitFieldEdit(preset.trackRange, trackValue);
         }
       };
+      // ── "Use as track for…": where the track has to live ────────────── [B-152]
+      // ProffieOS finds a track by its path from the card's root, and a card carries the folders its
+      // presets use. So a track in ANOTHER font would only play if that font happened to be on the
+      // card too. The rule:
+      //   · a shared track (the Tracks folder) is set as tracks/<name>, nothing moved: that folder
+      //     goes to the card with the export;
+      //   · a wav already in the preset's own font is set as <font>/<path>, nothing moved;
+      //   · a wav from another font: asked where it goes, the Tracks folder or the preset's font.
+      //     Either way it is a hard link (no second copy on disk; a font it lands in reads as
+      //     customized). The same file already there is reused; a different file with the name
+      //     leaves the new one beside it under the next free name. The X cancels.
+      // `from` is { kind: 'entry' | 'sharedTracks', id, subPath }. Returns true when the track was set.
+      const _sfUseAsTrack = async (from, arrayIdx, presetIdx) => {
+        if (typeof editor === 'undefined' || !editor || !from || !from.subPath) return false;
+        if (from.kind === 'sharedTracks') {
+          _sfSetPresetTrack(arrayIdx, presetIdx, `tracks/${from.subPath}`);
+          return true;
+        }
+        const r = presetParser.parsePresets(editor.getValue());
+        const preset = r.arrays?.[arrayIdx]?.presets?.[presetIdx];
+        if (!preset) return false;
+        const target = String(preset.font || '').split(';')[0].trim();
+        if (!target || target === from.id) {
+          _sfSetPresetTrack(arrayIdx, presetIdx, `${from.id}/${from.subPath}`);
+          return true;
+        }
+        const file = from.subPath.split('/').pop();
+        // A preset font that is not in the library has no folder here to put the track in, so the
+        // Tracks folder is the one place offered; copying "into" it would make a stray library folder.
+        const inLib = (_sfAllEntries || []).some(e => e && e.name === target);
+        // Names in bold in the sentence, short labels on the buttons: a font name can be long.
+        // THE DEFAULT FOLLOWS WHERE THEY KEEP TRACKS. With "always include tracks" on, Tracks is the
+        // primary button; otherwise the font is. Either reaches the card: an SD Export always takes the
+        // Tracks folder when the config uses a tracks/ path.
+        const b = (t) => `<strong>${_sfEscape(t)}</strong>`;
+        const tracksFirst = !inLib || window._sfIncludeTracksPrefValue === true;
+        const where = await promptConfirm({
+          title: 'Where should the track go?',
+          messageHtml: `A track for ${b(target)} belongs in that font or in the Tracks folder. `
+            + (inLib
+              ? 'Choose where to add it in your library.'
+              : `${b(target)} is not in your library, so it can go in Tracks.`),
+          confirmText: tracksFirst ? 'Add to Tracks' : 'Add to font',
+          confirmKind: 'primary',
+          middleText: !inLib ? null : (tracksFirst ? 'Add to font' : 'Add to Tracks'),
+          hideCancel: true,
+          closeX: true,
+        });
+        // With one button the answer is a boolean (true = that button); with two it is a word.
+        const choice = where === true ? 'confirm' : where;
+        if (choice !== 'confirm' && choice !== 'middle') return false;
+        const toTracks = (choice === 'confirm') === tracksFirst;
+        // The Tracks folder is flat: the file lands by its name. In a font a track goes in its tracks
+        // folder, made if there is none; a font with only a singular "track" folder gets it there,
+        // and the rename to the convention is offered once the track is set.
+        let trackDir = 'tracks', singular = null;
+        if (!toTracks) {
+          try {
+            const lr = await window.electronAPI.listEntryFiles({ name: target });
+            const dirs = ((lr && lr.ok && lr.files) || []).filter(f => f && f.isDir).map(f => f.name);
+            const plural = dirs.find(d => d.toLowerCase() === 'tracks');
+            singular = plural ? null : (dirs.find(d => d.toLowerCase() === 'track') || null);
+            trackDir = plural || singular || 'tracks';
+          } catch {}
+        }
+        const destSub = toTracks ? file : `${trackDir}/${file}`;
+        const dest = toTracks ? { kind: 'sharedTracks', id: '' } : { kind: 'entry', id: target };
+        let landed = null;
+        try {
+          const same = await window.electronAPI.fileOpsSameFile({
+            a: { kind: 'entry', id: from.id, subPath: from.subPath },
+            b: { ...dest, subPath: destSub },
+          });
+          if (same && same.ok && same.state === 'same') landed = destSub;
+        } catch {}
+        if (!landed) {
+          const cut = destSub.lastIndexOf('/');
+          const res = await window.electronAPI.fileOpsCopy({
+            src: { kind: 'entry', id: from.id },
+            srcPaths: [from.subPath],
+            dest: { ...dest, subPath: cut < 0 ? '' : destSub.slice(0, cut) },
+          });
+          if (!res || !res.ok || !(res.added || []).length) {
+            promptError('Track not set', `It could not be added to ${toTracks ? 'the Tracks folder' : target}: `
+              + `${(res && res.error) || 'the copy failed'}.`);
+            return false;
+          }
+          landed = res.added[0];
+          showToast(`Added ${landed.split('/').pop()} to ${toTracks ? 'the Tracks folder' : target}.`);
+          try { await window.refreshSoundFontsView?.(); } catch {}
+        }
+        _sfSetPresetTrack(arrayIdx, presetIdx, toTracks ? `tracks/${landed}` : `${target}/${landed}`);
+        if (singular && typeof window._renameFontTrackFolder === 'function') {
+          const fix = await promptConfirm({
+            title: `Rename "${singular}/" to "tracks/"?`,
+            messageHtml: `The track went into <strong>${_sfEscape(target)}</strong>'s ${_sfEscape(singular)} folder. `
+              + 'The convention is "tracks" (plural): track players only look there, so a track in '
+              + `"${_sfEscape(singular)}" plays as this preset's track but is skipped when cycling tracks.`
+              + '<br><br>Rename the folder and update every preset\'s track that points into it?',
+            confirmText: 'Rename to tracks/',
+            confirmKind: 'primary',
+            cancelText: 'Leave it',
+          });
+          if (fix === 'confirm' || fix === true) {
+            if (await window._renameFontTrackFolder(target, singular, 'tracks')) {
+              try { await window.refreshSoundFontsView?.(); } catch {}
+            }
+          }
+        }
+        return true;
+      };
+      // The preset list a "Use as track for…" item opens, by bank, beside `anchor`. Shared by the
+      // font's Files list and the Tracks folder.
+      const _sfOpenTrackPresetSubmenu = (anchor, onPick) => {
+        const sub = _sfPresetCtxSubmenu();
+        sub.innerHTML = '';
+        sub.style.minWidth = '240px';
+        sub.classList.add('preset-ctx-submenu-sized');
+        let arrays = [];
+        try { arrays = presetParser.parsePresets(editor.getValue()).arrays || []; } catch {}
+        let anyPreset = false;
+        arrays.forEach((arr, arrayIdx) => {
+          if (!arr.presets || !arr.presets.length) return;
+          const head = document.createElement('div');
+          head.className = 'preset-ctx-submenu-section';
+          head.textContent = arr.name || `Array ${arrayIdx + 1}`;
+          sub.appendChild(head);
+          arr.presets.forEach((preset, presetIdx) => {
+            anyPreset = true;
+            const item = document.createElement('div');
+            item.className = 'preset-ctx-item';
+            item.textContent = `${presetIdx + 1}. ${preset.displayName || `(unnamed ${presetIdx + 1})`}`;
+            item.addEventListener('mousedown', (ev) => {
+              ev.stopPropagation();
+              ev.preventDefault();
+              _sfCloseCardCtxMenus();
+              onPick(arrayIdx, presetIdx);
+            });
+            sub.appendChild(item);
+          });
+        });
+        if (!anyPreset) {
+          const empty = document.createElement('div');
+          empty.className = 'preset-ctx-submenu-empty';
+          empty.textContent = 'No presets yet';
+          sub.appendChild(empty);
+        }
+        const rect = anchor.getBoundingClientRect();
+        sub.style.display = 'block';
+        sub.style.left = `${rect.right - 2}px`;
+        sub.style.top = `${rect.top - 4}px`;
+        requestAnimationFrame(() => {
+          const subRect = sub.getBoundingClientRect();
+          if (subRect.right > window.innerWidth - 8) sub.style.left = `${Math.max(8, rect.left - subRect.width + 2)}px`;
+          if (subRect.bottom > window.innerHeight - 8) sub.style.top = `${Math.max(8, window.innerHeight - subRect.height - 8)}px`;
+        });
+      };
       // Pulse the entry-file row that just got picked as a track. Same
       // amber animation the SF card uses for "+ Add to config" and
       // "Replace in config preset" so the visible-feedback vocabulary
@@ -57299,43 +57411,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           cancelText: 'Leave it',
         });
         if (!ok) return;
-        // Rename the folder on disk.
-        const renameRes = await window.electronAPI.fileOpsRename({
-          kind: 'entry', id: fontName, subPath: oldFolder, newName: newFolder,
-        });
-        if (!renameRes || !renameRes.ok) {
-          promptError('Rename failed', (renameRes && renameRes.error) || 'unknown');
-          return;
-        }
-        // Cascade: every preset whose track value starts with
-        // "<fontName>/<oldFolder>/" gets its path rewritten to the new
-        // folder. One atomic edit across all matches so monaco applies
-        // them as a single undo step + line-shift math stays consistent.
-        try {
-          const parseResult = presetParser.parsePresets(editor.getValue());
-          const oldPrefix = `${fontName}/${oldFolder}/`;
-          const newPrefix = `${fontName}/${newFolder}/`;
-          const edits = [];
-          for (const arr of parseResult.arrays || []) {
-            for (const p of arr.presets || []) {
-              const tv = p.track || '';
-              if (tv.toLowerCase().startsWith(oldPrefix.toLowerCase()) && p.trackRange) {
-                const tail = tv.slice(oldPrefix.length);
-                const newVal = newPrefix + tail;
-                edits.push({
-                  range: {
-                    startLineNumber: p.trackRange.startLine,
-                    startColumn: p.trackRange.startCol + 1,
-                    endLineNumber: p.trackRange.endLine,
-                    endColumn: p.trackRange.endCol + 1,
-                  },
-                  text: '"' + newVal + '"',
-                });
-              }
-            }
-          }
-          if (edits.length) _atomicEdit(editor, 'fix-track-folder-typo', edits);
-        } catch {}
+        await _renameFontTrackFolder(fontName, oldFolder, newFolder);
         // Re-validate so the warning disappears (or stays if something
         // else flags) and the field's title updates.
         try { validateValue(); } catch {}
@@ -63106,6 +63182,48 @@ function _getFreshFieldRange(fieldName) {
         document.removeEventListener('mousedown', _libPickerOutside);
       }
     }
+
+    // ── A font's track folder renamed to the convention, with every track path into it ──
+    // Renames <font>/<oldFolder> to <font>/<newFolder> on disk, then rewrites every preset's track
+    // that pointed into the old folder, as one undo step. The Track field's singular-folder fix and
+    // "Use as track for…" [B-152] both use it. Returns true when the folder was renamed.
+    async function _renameFontTrackFolder(fontName, oldFolder, newFolder = 'tracks') {
+      const renameRes = await window.electronAPI.fileOpsRename({
+        kind: 'entry', id: fontName, subPath: oldFolder, newName: newFolder,
+      });
+      if (!renameRes || !renameRes.ok) {
+        promptError('Rename failed', (renameRes && renameRes.error) || 'unknown');
+        return false;
+      }
+      // Cascade: every preset whose track value starts with "<fontName>/<oldFolder>/" gets its path
+      // rewritten to the new folder. One atomic edit across all matches so monaco applies them as a
+      // single undo step + line-shift math stays consistent.
+      try {
+        const parseResult = presetParser.parsePresets(editor.getValue());
+        const oldPrefix = `${fontName}/${oldFolder}/`;
+        const newPrefix = `${fontName}/${newFolder}/`;
+        const edits = [];
+        for (const arr of parseResult.arrays || []) {
+          for (const p of arr.presets || []) {
+            const tv = p.track || '';
+            if (tv.toLowerCase().startsWith(oldPrefix.toLowerCase()) && p.trackRange) {
+              edits.push({
+                range: {
+                  startLineNumber: p.trackRange.startLine,
+                  startColumn: p.trackRange.startCol + 1,
+                  endLineNumber: p.trackRange.endLine,
+                  endColumn: p.trackRange.endCol + 1,
+                },
+                text: '"' + newPrefix + tv.slice(oldPrefix.length) + '"',
+              });
+            }
+          }
+        }
+        if (edits.length) _atomicEdit(editor, 'fix-track-folder-typo', edits);
+      } catch {}
+      return true;
+    }
+    window._renameFontTrackFolder = _renameFontTrackFolder;
 
     // ── Add preset ─────────────────────────────────────────────────────────────
     // A preset created here should carry the same shared folder one created from the
