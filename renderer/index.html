@@ -3866,6 +3866,10 @@
   /* Media preview (image / PDF) fills the body with no monospace padding. */
   .sf-doc-viewer-body.sf-doc-viewer-media { padding: 0; display: flex; align-items: center; justify-content: center; background: var(--c-bg-inset); overflow: hidden; }
   .sf-doc-viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  /* An image hugs the window to its own size (_jmtFitViewerImage sets the image's pixels). */
+  #modal-sf-doc-viewer .modal.is-image, .modal.sd-doc-modal.is-image { width: auto; height: auto; max-width: 96vw; }
+  .modal.is-image .sf-doc-viewer-body { flex: none; }
+  .modal.is-image .sf-doc-viewer-img { max-width: none; max-height: none; }
   .sf-doc-viewer-frame { width: 100%; height: 100%; border: none; background: #fff; }
   .sf-doc-viewer-nopreview { color: var(--c-text-dim); font-family: inherit; text-align: center; padding: 24px; }
   .sf-doc-viewer-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
@@ -8340,6 +8344,39 @@ function promptConfirm(opts) {
   });
 }
 window.promptConfirm = promptConfirm;
+// The file viewers show an image at its own shape: the window hugs it, a large one is scaled down to fit
+// the screen, a small one is scaled up until its longer side is about 480px. Text and PDFs keep the
+// fixed-size window, so `modalEl` loses the class whenever something else is shown. [B-511]
+function _jmtFitViewerImage(modalEl, img) {
+  if (!modalEl) return;
+  modalEl.classList.toggle('is-image', !!img);
+  if (!img) return;
+  const fit = () => {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return;
+    const maxW = window.innerWidth * 0.92 - 60;
+    const maxH = window.innerHeight * 0.86 - 130;
+    const s = Math.min(maxW / w, maxH / h, Math.max(1, 480 / Math.max(w, h)));
+    img.style.width = `${Math.round(w * s)}px`;
+    img.style.height = `${Math.round(h * s)}px`;
+  };
+  if (img.complete && img.naturalWidth) fit(); else img.addEventListener('load', fit, { once: true });
+}
+window._jmtFitViewerImage = _jmtFitViewerImage;
+// A press that starts inside a dialog and is released on its backdrop (selecting text off the side of a
+// field, say) lands as a click on the backdrop. Every backdrop closes on click, so that click is dropped
+// here, before any of them sees it: a backdrop closes only when the press began on it too. [B-559]
+{
+  let _pressedOn = null;
+  document.addEventListener('mousedown', (e) => { _pressedOn = e.target; }, true);
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains('modal-overlay') && _pressedOn !== t) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }
+  }, true);
+}
 // [B-146] Free content means the creator offers it free of charge, publicly, to anyone. The user
 // confirms that whenever they mark something free themselves; Cancel leaves it unmarked.
 // "all 5" for a count, and "both" for two, which is how the sentence reads. `cap` starts a sentence;
@@ -13973,7 +14010,9 @@ function _sdShowDoc(name, { size, text, imageSrc, action } = {}) {
     body.classList.add('sf-doc-viewer-media');
     body.innerHTML = '<img class="sf-doc-viewer-img" alt="">';
     body.querySelector('img').src = imageSrc;
+    _jmtFitViewerImage(body.closest('.modal'), body.querySelector('img'));
   } else {
+    _jmtFitViewerImage(body.closest('.modal'), null);
     body.classList.remove('sf-doc-viewer-media');
     body.textContent = text != null ? text : '';
   }
@@ -49715,10 +49754,12 @@ require(['vs/editor/editor.main'], function () {
         const body = _sfDocViewerEls.body;
         if (body) {
           body.classList.toggle('sf-doc-viewer-media', kind === 'image' || kind === 'pdf');
+          if (kind !== 'image') _jmtFitViewerImage(body.closest('.modal'), null);
           if (kind === 'image') {
             _sfDocViewerBlobUrl = opts.blobUrl || null;
             body.innerHTML = '<img class="sf-doc-viewer-img" alt="">';
             const img = body.querySelector('img'); if (img && opts.blobUrl) img.src = opts.blobUrl;
+            _jmtFitViewerImage(body.closest('.modal'), img);
           } else if (kind === 'pdf') {
             _sfDocViewerBlobUrl = opts.blobUrl || null;
             body.innerHTML = '<iframe class="sf-doc-viewer-frame" title="preview"></iframe>';
