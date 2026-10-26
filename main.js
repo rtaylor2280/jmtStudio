@@ -6153,12 +6153,16 @@ let _captureFonts = [];   // the review's checked fonts, kept current by linkCap
 ipcMain.on('linkCapture:fonts', (_e, { fonts } = {}) => {
   _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
 });
-ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel } = {}) => {
+let _captureFor = '';      // the font or source the window was opened for, shown ahead of the page title
+const _captureTitle = (pageTitle) => (_captureFor ? `${_captureFor}  ·  ${pageTitle || ''}` : pageTitle);
+ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName } = {}) => {
   const os = require('os');
   const { session } = require('electron');
   if (!url || !/^https?:\/\//i.test(url)) return { ok: false };
   _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
+  _captureFor = typeof forName === 'string' ? forName.trim() : '';
   if (_captureBrowser && !_captureBrowser.isDestroyed()) {
+    if (_captureFor) _captureBrowser.setTitle(_captureFor);
     _captureBrowser.loadURL(url).catch(() => {});
     _captureBrowser.show();
     _captureBrowser.focus();
@@ -6181,6 +6185,12 @@ ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel } = {}) 
     webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js') },
   });
   _captureBrowser = bw;
+  if (_captureFor) bw.setTitle(_captureFor);
+  bw.on('page-title-updated', (ev, pageTitle) => {
+    if (!_captureFor) return;
+    ev.preventDefault();
+    bw.setTitle(_captureTitle(pageTitle));
+  });
   const noDownloads = (_e, item, wc) => { if (wc === bw.webContents) { try { item.cancel(); } catch {} } };
   ses.on('will-download', noDownloads);
   _attachFindBar(bw);

@@ -44076,7 +44076,8 @@ require(['vs/editor/editor.main'], function () {
         if (firstName && names.includes(firstName)) names.splice(names.indexOf(firstName), 1), names.unshift(firstName);
         _sfCapture = { uuid, names };
         window._sfCaptureTarget = 'source';
-        try { await window.electronAPI.linkCaptureOpen({ url, fonts: names }); } catch {}
+        const forName = firstName || (_sfSourceEdit && (_sfSourceEdit.bundleName || _sfSourceEdit.originalName)) || '';
+        try { await window.electronAPI.linkCaptureOpen({ url, fonts: names, forName }); } catch {}
       };
       for (const [el, ctx] of [
         [_sfEntryDetailEls.websiteDisplay, () => _sfDetailEdit && { url: _sfDetailEdit.vendorWebsite, uuid: _sfDetailSourceUuid(), first: _sfDetailOriginalName }],
