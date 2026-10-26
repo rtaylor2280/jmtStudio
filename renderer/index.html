@@ -160,7 +160,7 @@
 
   /* ── Common folder picture on hover (same card as the port tip) ── */
   .sf-common-picture-pop {
-    position: fixed; z-index: 9999; display: none; pointer-events: none;
+    position: fixed; z-index: 20000; display: none; pointer-events: none;
     background: var(--c-bg-elevated); border: 1px solid var(--c-border-heavy);
     border-radius: 5px; padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
   }
@@ -28071,8 +28071,10 @@ require(['vs/editor/editor.main'], function () {
               const r = anchor.getBoundingClientRect();
               const side = (beside || anchor).getBoundingClientRect();
               pop.style.display = 'block';
-              const h = pop.offsetHeight;
-              pop.style.left = `${Math.round(side.right + 8)}px`;
+              const h = pop.offsetHeight, w = pop.offsetWidth;
+              // Right of `beside`, or left of it when that would run off the window.
+              const left = side.right + 8 + w > window.innerWidth - 8 ? side.left - 8 - w : side.right + 8;
+              pop.style.left = `${Math.round(Math.max(8, left))}px`;
               pop.style.top = `${Math.round(Math.max(8, Math.min(r.top, window.innerHeight - h - 8)))}px`;
             };
             img.src = url;
@@ -28093,6 +28095,28 @@ require(['vs/editor/editor.main'], function () {
           if (head && !head.contains(e.relatedTarget)) _sfImageCard.hide();
         });
         list?.addEventListener('mousedown', () => _sfImageCard.hide());
+      }
+      // The font name on a library card, and on a row under "Fonts from this source": the name only,
+      // never the card or the row. [B-511]
+      // A library card is narrow, so the image sits beside the card; a source row spans the window, so
+      // it sits beside the name.
+      for (const [boxId, nameSel, holderSel, nameOf, besideName] of [
+        ['sf-cards', '.sf-card-name', '.sf-card[data-font]', (h) => h.dataset.font, false],
+        ['sf-source-entries-list', '.ent-name-txt', '.sf-source-entry-row[data-entry-name]:not(.editing)', (h) => h.dataset.entryName, true],
+      ]) {
+        const box = document.getElementById(boxId);
+        const nameAt = (t) => { const n = t.closest && t.closest(nameSel); const h = n && n.closest(holderSel); return h ? { n, h } : null; };
+        box?.addEventListener('mouseover', (e) => {
+          const hit = nameAt(e.target);
+          if (!hit) return;
+          const name = nameOf(hit.h);
+          if (name) _sfImageCard.show(hit.n, () => window.electronAPI.findEntryPicture({ name }), besideName ? hit.n : hit.h);
+        });
+        box?.addEventListener('mouseout', (e) => {
+          const hit = nameAt(e.target);
+          if (hit && !hit.n.contains(e.relatedTarget)) _sfImageCard.hide();
+        });
+        box?.addEventListener('mousedown', () => _sfImageCard.hide());
       }
       // For Config Manager, whose code cannot see this scope: hovering `el` shows the image of the
       // library font named by getName(), when there is one. A name not in the library shows nothing.
