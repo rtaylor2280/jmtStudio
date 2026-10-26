@@ -574,6 +574,7 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
         return { effects, unknownEffects };
       })(),
       effectsDirty: false,
+      effectsVocab: EFFECTS_VOCAB,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -2365,8 +2366,19 @@ function resolveEntryContentDirty(userData, entryName) {
 // post-import maintenance loop when the user adds/deletes/renames
 // files in the entry.
 
+// Which effect list an entry's effects were computed with. An entry stamped with an older number is
+// recomputed once by restampStaleEffects. 2: every EFFECT in ProffieOS 8.10 counts as known. [B-557]
+const EFFECTS_VOCAB = 2;
+
 function computeEntryEffects(entryDir) {
-  const { EFFECT_NAMES, EFFECT_DIR_EXCLUSIONS, effectStemFromFile } = require('./soundFontCandidates');
+  const { EFFECT_NAMES: CAND_NAMES, EFFECT_DIR_EXCLUSIONS } = require('./soundFontCandidates');
+  // Known = every ProffieOS 8.10 effect (proffieFontShape) plus the utility names the candidate
+  // list adds (choosefont, trloop). Missing is decided elsewhere, against the saber-font list.
+  const EFFECT_NAMES = new Set([...require('./proffieFontShape').EFFECT_NAMES, ...CAND_NAMES]);
+  const effectStemFromFile = (name) => {
+    const m = String(name).match(/^([a-zA-Z]+)(?:\s*\(\d+\)|[_\s]?\d+)?\.wav$/i);
+    return m && EFFECT_NAMES.has(m[1].toLowerCase()) ? m[1].toLowerCase() : null;
+  };
   // Two sets are tracked in parallel: `known` is the canonical Proffie
   // vocabulary that drives "missing" detection, and `unknown` is the
   // safety-net catch-all for any folder that looks effect-shaped but
@@ -2444,9 +2456,27 @@ function recomputeEntryEffects(userData, entryName) {
   meta.effects = effects;
   meta.unknownEffects = unknownEffects;
   meta.effectsDirty = false;
+  meta.effectsVocab = EFFECTS_VOCAB;
   try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
   catch {}
   return { effects, unknownEffects };
+}
+
+// Recompute the effects of every entry stamped with an older effect list. Idempotent: a recomputed
+// entry carries the current number and is skipped next time. [B-557]
+function restampStaleEffects(userData) {
+  const root = entriesRoot(userData);
+  if (!fs.existsSync(root)) return { restamped: 0 };
+  let restamped = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const metaPath = path.join(root, entry.name, 'meta.json');
+    let meta;
+    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { continue; }
+    if (meta.effectsVocab === EFFECTS_VOCAB) continue;
+    if (recomputeEntryEffects(userData, entry.name)) restamped++;
+  }
+  return { restamped };
 }
 
 function markEntryEffectsDirty(userData, entryName) {
@@ -3043,6 +3073,8 @@ module.exports = {
   resolveEntryContentDirty,
   computeEntryEffects,
   recomputeEntryEffects,
+  restampStaleEffects,
+  EFFECTS_VOCAB,
   markEntryEffectsDirty,
   resolveEntryEffectsDirty,
 };

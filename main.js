@@ -2253,6 +2253,11 @@ ipcMain.handle('entries:list', () => {
           console.log(`[seen] one-time backfill stamped ${r.stamped} entries`);
         }
       } catch {}
+      // Effects computed with an older effect list are recomputed once. [B-557]
+      try {
+        const r = soundFontEntries.restampStaleEffects(app.getPath('userData'));
+        if (r.restamped) console.log(`[effects] recomputed ${r.restamped} entries against the current effect list`);
+      } catch {}
     }
     return { ok: true, entries: soundFontEntries.listEntries(app.getPath('userData')) };
   }
