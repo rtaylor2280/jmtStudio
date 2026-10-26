@@ -4972,6 +4972,14 @@
   .preset-slot-unlinked-label { font-size: 0.62rem; color: #e44; font-style: italic; opacity: 0.85; }
   .preset-slot-color { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--c-text-muted); }
   .preset-slot-color-swatch { flex-shrink: 0; }
+  /* A B2+ colour that matches B1 is shown at the follow mute, closed and open; an overridden one at
+     full strength. Not inside a followed tile, which is already muted as a whole. Hover restores. */
+  .preset-slot-tile:not(.slot-following) .preset-slot-color.color-matched,
+  .preset-slot-tile:not(.slot-following) .slot-arg-row.color-matched > .slot-arg-swatch,
+  .preset-slot-tile:not(.slot-following) .slot-arg-row.color-matched > .slot-arg-name { opacity: 0.55; transition: opacity 0.12s; }
+  .preset-slot-tile:not(.slot-following):hover .preset-slot-color.color-matched,
+  .preset-slot-tile:not(.slot-following) .slot-arg-row.color-matched:hover > .slot-arg-swatch,
+  .preset-slot-tile:not(.slot-following) .slot-arg-row.color-matched:hover > .slot-arg-name { opacity: 0.9; }
   /* [B-078] A fact about the numbers, not a warning about them — nothing is wrong with
      a 16-bit colour. Fainter and smaller than the colour label it qualifies. */
   .preset-slot-color-scale { font-size: 0.58rem; color: var(--c-text-faint); border: 1px solid var(--c-border-faint);
@@ -58555,6 +58563,10 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
           const _rgb8 = [Math.round(_rgb16[0]/257), Math.round(_rgb16[1]/257), Math.round(_rgb16[2]/257)];
           const colorRow = document.createElement('span');
           colorRow.className = 'preset-slot-color';
+          if (slotIdx > 0 && !isMissing && !isExcess) {
+            const _b1 = _resolveSlotColor(preset?.styles?.[0]);
+            if (_b1 && [0, 1, 2].every(i => (_b1[i] || 0) === (_rgb16[i] || 0))) colorRow.classList.add('color-matched');
+          }
           // Swatch wrapper exists so the mismatch can sit at the corner via absolute
           // positioning without disturbing the existing swatch layout.
           const _swWrap = document.createElement('span');
@@ -59858,6 +59870,7 @@ function _getFreshFieldRange(fieldName) {
         const _argRead  = readFn  || ((n, p) => window.proffieArgs.readRegistryArg(n, p));
         const _argWrite = writeFn || ((n, v, p) => window.proffieArgs.writeRegistryArg(n, v, p));
         const row = document.createElement('div');
+        row.className = 'slot-arg-row';
         row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:1px 0;';
         const result  = _argRead(regArg.name, currentParens());
         let curVals   = result.isDefault ? null : result.values.map(v => v != null ? v : 0);
@@ -59870,6 +59883,7 @@ function _getFreshFieldRange(fieldName) {
         if (regArg.kind === 'RgbArg') {
           // Host span is the click target and anchor for the color popup.
           swatch = document.createElement('span');
+          swatch.className = 'slot-arg-swatch';
           swatch.style.cssText = 'width:20px;height:20px;border-radius:50%;display:inline-block;overflow:hidden;flex-shrink:0;cursor:pointer;';
           const _r8 = Math.round((dispVals[0]||0)/257);
           const _g8 = Math.round((dispVals[1]||0)/257);
@@ -59921,6 +59935,7 @@ function _getFreshFieldRange(fieldName) {
         }
 
         const lbl = document.createElement('span');
+        lbl.className = 'slot-arg-name';
         lbl.style.cssText = 'font-size:0.68rem;color:var(--c-text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;';
         // Tooltip is just the human description (enum line-comment or legacy
         // label). The arg name is already visible in the row, so repeating it in
@@ -59961,6 +59976,7 @@ function _getFreshFieldRange(fieldName) {
                           (eff[2]||0) === (b1Rgb[2]||0);
           matchBtn.style.display = matches ? 'none' : '';
           if (matchedLbl) matchedLbl.style.display = matches ? '' : 'none';
+          row.classList.toggle('color-matched', matches);
         }
         if (regArg.kind === 'RgbArg' && slotIdx > 0 && preset?.styles?.[0]) {
           b1Rgb = _resolveSlotColor(preset.styles[0]);
