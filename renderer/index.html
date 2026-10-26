@@ -56368,6 +56368,7 @@ require(['vs/editor/editor.main'], function () {
 
       mkSep();
 
+      if (liveCount > 0) mkItem(`⧉ Duplicate${liveCount > 1 ? ` (${liveCount})` : ''}`, '', _duplicateSelectedPresets);
       mkItem(`× Delete${total > 1 ? ` (${total})` : ''}`, 'danger', _batchDelete);
 
       _jmtPlaceMenu(menu, e.clientX, e.clientY);
@@ -64134,6 +64135,65 @@ function _getFreshFieldRange(fieldName) {
       } else if (firstName) {
         showToast(`Moved "${firstName}" to ${dst.name}.`);
       }
+      _scheduleRebuild();
+    }
+
+    // Each selected live preset gets a copy directly after it, named by _jmtNumberedName, with the
+    // blank line between presets (B-547). One undoable edit.
+    function _duplicateSelectedPresets() {
+      if (!editor) return;
+      const result = presetParser.parsePresets(editor.getValue());
+      const arr    = result.arrays[_activeArrayIndex];
+      if (!arr) return;
+      const model   = editor.getModel();
+      const sources = [..._selectedLive].sort((a, b) => a - b)
+        .map(i => ({ i, p: arr.presets[i] })).filter(x => x.p);
+      if (!sources.length) return;
+
+      const taken = result.arrays.flatMap(a => a.presets.map(p => p.displayName || ''));
+      const withComma = (t) => (t.trimEnd().endsWith(',') ? t.trimEnd() : t.trimEnd() + ',');
+      const edits = [];
+      for (const { p } of sources) {
+        const endCol = model.getLineMaxColumn(p.endLine);
+        let block;
+        const r = p.displayNameRange;
+        if (r) {
+          const newName = _jmtNumberedName(p.displayName || 'Preset', taken);
+          taken.push(newName);
+          block = model.getValueInRange({ startLineNumber: p.startLine, startColumn: 1,
+                                          endLineNumber: r.startLine, endColumn: r.startCol + 1 })
+                + '"' + newName + '"'
+                + model.getValueInRange({ startLineNumber: r.endLine, startColumn: r.endCol + 1,
+                                          endLineNumber: p.endLine, endColumn: endCol });
+        } else {
+          block = model.getValueInRange({ startLineNumber: p.startLine, startColumn: 1,
+                                          endLineNumber: p.endLine, endColumn: endCol });
+        }
+        const lead = model.getLineContent(p.endLine).trimEnd().endsWith(',') ? '' : ',';
+        edits.push({
+          range: { startLineNumber: p.endLine, startColumn: endCol, endLineNumber: p.endLine, endColumn: endCol },
+          text: lead + '\n\n' + withComma(block),
+        });
+      }
+      _atomicEdit(editor, 'preset-duplicate', edits);
+
+      // Land on the first copy, selected and scrolled into view, as a move does.
+      const landingIdx = sources[0].i + 1;
+      _parseResult = presetParser.parsePresets(editor.getValue());
+      _selectedPresetIndex    = landingIdx;
+      _selectedDisabledPreset = null;
+      _refreshStrip();
+      if (!_sidecarOpen) _openSidecar();
+      else _rebuildSidecar();
+      _selectPreset(_parseResult.arrays[_activeArrayIndex], landingIdx);
+      const _landed = _parseResult.arrays[_activeArrayIndex]?.presets[landingIdx];
+      if (_landed) _navigateToLine(_landed.startLine, _landed.endLine);
+      setTimeout(() => {
+        const row = document.querySelector(
+          `#preset-list-top .preset-row[data-live-idx="${landingIdx}"]`);
+        if (row) requestAnimationFrame(() => row.scrollIntoView({ block: 'center', behavior: 'auto' }));
+      }, 50);
+      if (sources.length > 1) showToast(`Duplicated ${sources.length} presets.`);
       _scheduleRebuild();
     }
 
