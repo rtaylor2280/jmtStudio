@@ -64069,10 +64069,14 @@ function _getFreshFieldRange(fieldName) {
       const anchorCol  = model.getLineMaxColumn(anchorLine);
       const anchorText = model.getLineContent(anchorLine).trimEnd();
       const lead = (dst.presets.length && !anchorText.endsWith(',')) ? ',' : '';
+      // A BLANK LINE BETWEEN PRESETS IS THE APP'S STANDARD, and every other path that adds a preset
+      // writes one. This one joined the moved blocks bare, so they ran into each other. (B-547)
+      const sep = '\n\n';
       edits.push({
         range: { startLineNumber: anchorLine, startColumn: anchorCol,
                  endLineNumber:   anchorLine, endColumn:   anchorCol },
-        text: lead + '\n' + blocks.join('\n'),
+        // No blank right under the bank's opening line when the target was empty.
+        text: lead + (dst.presets.length ? sep : '\n') + blocks.join(sep),
       });
 
       const landingIdx = dst.presets.length;
