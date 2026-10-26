@@ -21596,6 +21596,11 @@ async function _loadFacetSort() {
   } catch {}
 }
 window.loadFacetSort = _loadFacetSort;
+// The named-colour list's order (colour or A-Z), remembered the same way.
+window._namedColorSort = 'color';
+(async () => {
+  try { if (await window.electronAPI.getSetting('namedColorSort', 'color') === 'name') window._namedColorSort = 'name'; } catch {}
+})();
 
 // Shared comparator. Selected-at-top is NOT part of the toggle and never moves:
 // an active filter you cannot find is worse than an unsorted list.
@@ -60983,15 +60988,20 @@ function _getFreshFieldRange(fieldName) {
           else                h = (r - g) / chroma + 4;
           return { ach: false, h: h / 6, l };
         };
-        const nameEntries = Object.entries(_pa.namedColors)
+        // In colour order by default, or A-Z; the choice is remembered (namedColorSort).
+        const _byColor = (a, b) => {
+          if (a.order.ach !== b.order.ach) return a.order.ach ? 1 : -1;
+          if (a.order.ach) return a.order.l - b.order.l;
+          if (a.order.h !== b.order.h) return a.order.h - b.order.h;
+          return a.order.l - b.order.l;
+        };
+        const _namedBase = Object.entries(_pa.namedColors)
           .filter(([name, vals]) => _pa.colorLabel(vals[0], vals[1], vals[2]) === name)
-          .map(([name, vals]) => ({ name, vals, order: _colorOrder(vals[0], vals[1], vals[2]) }))
-          .sort((a, b) => {
-            if (a.order.ach !== b.order.ach) return a.order.ach ? 1 : -1;
-            if (a.order.ach) return a.order.l - b.order.l;
-            if (a.order.h !== b.order.h) return a.order.h - b.order.h;
-            return a.order.l - b.order.l;
-          })
+          .map(([name, vals]) => ({ name, vals, order: _colorOrder(vals[0], vals[1], vals[2]) }));
+        const _namedEntries = () => _namedBase.slice()
+          .sort(window._namedColorSort === 'name'
+            ? (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+            : _byColor)
           .map(o => [o.name, o.vals]);
         const _dot = (r, g, b) =>
           `display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;` +
@@ -61027,26 +61037,78 @@ function _getFreshFieldRange(fieldName) {
         phRow.addEventListener('mouseenter', () => { phRow.style.background = 'var(--c-bg-hover)'; });
         phRow.addEventListener('mouseleave', () => { phRow.style.background = ''; });
         phRow.addEventListener('click', e => { e.stopPropagation(); list.style.display = 'none'; });
-        list.appendChild(phRow);
-
-        nameEntries.forEach(([name, vals]) => {
-          const r = Math.round(vals[0]/257), g = Math.round(vals[1]/257), b = Math.round(vals[2]/257);
-          const row = document.createElement('div');
-          row.style.cssText = 'display:flex;align-items:center;padding:3px 6px;font-size:0.68rem;cursor:pointer;white-space:nowrap;';
-          const sw = document.createElement('span'); sw.style.cssText = _dot(r,g,b);
-          const lbl = document.createElement('span'); lbl.textContent = name;
-          row.appendChild(sw); row.appendChild(lbl);
-          row.addEventListener('mouseenter', () => { row.style.background = 'var(--c-bg-hover)'; });
-          row.addEventListener('mouseleave', () => { row.style.background = ''; });
-          row.addEventListener('click', e => {
-            e.stopPropagation();
-            cr = r; cg = g; cb = b;
-            rIn.value = cr; gIn.value = cg; bIn.value = cb;
-            list.style.display = 'none';
-            emit();
-          });
-          list.appendChild(row);
+        // The sort switch, in the filter dropdowns' look: Colour | A-Z.
+        const sortBar = document.createElement('div');
+        sortBar.className = 'facet-sort-bar';
+        const _drawSortBar = () => {
+          const byName = window._namedColorSort === 'name';
+          sortBar.innerHTML = `<button type="button" class="facet-sort-btn${byName ? '' : ' active'}" data-sort="color" title="Sort by colour">Colour</button>`
+            + `<button type="button" class="facet-sort-btn${byName ? ' active' : ''}" data-sort="name" title="Sort by name">A–Z</button>`;
+        };
+        sortBar.addEventListener('click', e => {
+          e.stopPropagation();
+          const b = e.target.closest('[data-sort]');
+          if (!b || window._namedColorSort === (b.dataset.sort === 'name' ? 'name' : 'color')) return;
+          window._namedColorSort = b.dataset.sort === 'name' ? 'name' : 'color';
+          try { window.electronAPI.setSetting('namedColorSort', window._namedColorSort); } catch {}
+          _drawSortBar(); _drawRows();
         });
+        list.appendChild(sortBar);
+        list.appendChild(phRow);
+        _drawSortBar();
+
+        const rowsBox = document.createElement('div');
+        list.appendChild(rowsBox);
+        let _typedRow = null;
+        const _mark = (row) => {
+          if (_typedRow && _typedRow !== row) _typedRow.style.background = '';
+          _typedRow = row;
+          if (row) { row.style.background = 'var(--c-bg-hover)'; row.scrollIntoView({ block: 'nearest' }); }
+        };
+        const _drawRows = () => {
+          rowsBox.innerHTML = '';
+          _typedRow = null;
+          _namedEntries().forEach(([name, vals]) => {
+            const r = Math.round(vals[0]/257), g = Math.round(vals[1]/257), b = Math.round(vals[2]/257);
+            const row = document.createElement('div');
+            row.dataset.colorName = name;
+            row.style.cssText = 'display:flex;align-items:center;padding:3px 6px;font-size:0.68rem;cursor:pointer;white-space:nowrap;';
+            const sw = document.createElement('span'); sw.style.cssText = _dot(r,g,b);
+            const lbl = document.createElement('span'); lbl.textContent = name;
+            row.appendChild(sw); row.appendChild(lbl);
+            row.addEventListener('mouseenter', () => { row.style.background = 'var(--c-bg-hover)'; });
+            row.addEventListener('mouseleave', () => { if (row !== _typedRow) row.style.background = ''; });
+            row.addEventListener('click', e => {
+              e.stopPropagation();
+              cr = r; cg = g; cb = b;
+              rIn.value = cr; gIn.value = cg; bIn.value = cb;
+              list.style.display = 'none';
+              emit();
+            });
+            rowsBox.appendChild(row);
+          });
+        };
+        _drawRows();
+
+        // Type to jump while the list is open: letters build a prefix ("O", then "Or" -> Orange),
+        // a pause of 800 ms starts a new one; Enter picks the marked colour, Escape closes.
+        let _typed = '', _typedAt = 0;
+        const _onKey = (e) => {
+          if (!document.body.contains(list)) { document.removeEventListener('keydown', _onKey, true); return; }
+          if (list.style.display !== 'block') return;
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); list.style.display = 'none'; return; }
+          if (e.key === 'Enter' && _typedRow) { e.preventDefault(); e.stopPropagation(); _typedRow.click(); return; }
+          if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+          e.preventDefault(); e.stopPropagation();
+          const now = Date.now();
+          _typed = (now - _typedAt > 800 ? '' : _typed) + e.key.toLowerCase();
+          _typedAt = now;
+          const rows = [...rowsBox.children];
+          const hit = rows.find((r) => r.dataset.colorName.toLowerCase().startsWith(_typed))
+            || rows.find((r) => r.dataset.colorName.toLowerCase().startsWith(e.key.toLowerCase()));
+          if (hit) _mark(hit);
+        };
+        document.addEventListener('keydown', _onKey, true);
 
         trigger.addEventListener('click', e => {
           e.stopPropagation();
