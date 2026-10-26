@@ -3528,6 +3528,13 @@ ipcMain.handle('soundFonts:recordFolderAt', async (event, { name, destDir } = {}
 // A cancelled operation simply never calls this, which is the whole point: a question leaves
 // nothing behind, and a completed operation records everything it saw — including items it only
 // LOOKED at, which the per-item write used to drop.
+// Whether the destination carries a usable sync manifest: 'ok', 'absent', 'unreadable' or
+// 'incompatible'. One file read, memoised, so the scan that follows reuses it.
+ipcMain.handle('syncManifest:state', (_, { destDir } = {}) => {
+  try { return { ok: true, state: require('./sfSyncManifest').readState(destDir).state }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('syncManifest:commit', (_, { destDir, items, complete } = {}) => {
   try {
     if (!destDir || !items) return { ok: false, error: 'Missing destDir or items' };

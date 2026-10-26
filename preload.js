@@ -475,6 +475,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mediaVocabulary:       ()           => ipcRenderer.invoke('media:vocabulary'),
   mediaNote:             (params)     => ipcRenderer.invoke('media:note', params),
   // [B-402] One manifest write per operation, called at the very end. See main.js.
+  syncManifestState:     (params)     => ipcRenderer.invoke('syncManifest:state', params),
   syncManifestCommit:    (params)     => ipcRenderer.invoke('syncManifest:commit', params),
   // [B-229] SD Export only — the readme, plus the config when the setting allows it.
   writeProvenance:       (params)     => ipcRenderer.invoke('provenance:write', params),

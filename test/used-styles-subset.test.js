@@ -223,5 +223,43 @@ ok('an empty config yields nothing', build(LIB, '') === null);
      'this is what makes the transitive loop necessary rather than decorative');
 }
 
+// ── the card file's own header ───────────────────────────────────────────────
+// The library's header names the library and carries its dates; the card's file is new on each
+// export, so it gets a header of its own.
+{
+  const reSrc = (html.match(/const _SL_JMT_HEADER_RE\s*=\s*(\/[^\n]*\/m);/) || [])[1];
+  const fnSrc = lift('_sfCardStylesFile');
+  ok('lifted _sfCardStylesFile and the library header regex', !!reSrc && !!fnSrc);
+  if (reSrc && fnSrc) {
+    const card = new Function(`const _SL_JMT_HEADER_RE = ${reSrc};\n${fnSrc}\nreturn _sfCardStylesFile;`)();
+    // The library header from the app's own writer, so a change to its shape shows up here.
+    const libHeader = new Function(`const _jmtLocalDateString = () => '2026-10-24';\n`
+      + `${lift('_buildStyleLibraryJmtHeader')}\nreturn _buildStyleLibraryJmtHeader;`)();
+    const LIB_HEADER = libHeader('2026-10-23') + '\n\n';
+    const body = 'using BlueBlade = StylePtr<Blue>();\n';
+    const CFG = '// Configuration edited with JMT Studio (jmtfoundry.com)\r\n'
+      + '// @jmt:description AZ Sabers Duum w/ Crystal Chamnber + Board Accent\r\n'
+      + '// @jmt:board       Proffieboard V3\r\n';
+    const out = card(LIB_HEADER + body, 'az_duum_test2.h', '2026-10-25', CFG);
+    ok('CONTROL the fixture carries the library header', LIB_HEADER.includes('// @jmt:updated'));
+    ok('names the config as the readme does',
+       out.includes('// Styles used by my_config.h (az_duum_test2.h)  ·  JMT Studio'), out.split('\n')[1]);
+    ok("carries the config's description, without the CR",
+       out.includes('// @jmt:description AZ Sabers Duum w/ Crystal Chamnber + Board Accent\n'));
+    ok('created is the export date', out.includes('// @jmt:created     2026-10-25'));
+    const plain = card(body, 'my_config.h', '2026-10-25', '');
+    ok('no description line when the config has none', !plain.includes('@jmt:description'));
+    ok('no brackets when the source is already my_config.h',
+       plain.includes('// Styles used by my_config.h  ·  JMT Studio'));
+    ok("the library's header and dates are gone",
+       !out.includes('Style Library  ·') && !out.includes('2026-10-23') && !out.includes('@jmt:updated'));
+    ok('the styles follow, after one blank line', out.endsWith('=====\n\n' + body), JSON.stringify(out.slice(-80)));
+    const crlf = card(LIB_HEADER.replace(/\n/g, '\r\n') + body, 'x.h', '2026-10-25');
+    ok('a CRLF library header is replaced too', !crlf.includes('Style Library  ·') && crlf.includes('2026-10-25'));
+    const bare = card(body, 'x.h', '2026-10-25');
+    ok('with no library header, the new one is added', bare.startsWith('// =====') && bare.endsWith(body));
+  }
+}
+
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);
