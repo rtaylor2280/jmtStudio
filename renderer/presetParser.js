@@ -914,6 +914,22 @@
       };
     });
 
+    // Blade names and follows are the saber's, not a bank's: every bank drives the same NUM_BLADES
+    // blades, and both are app-side only. A bank that does not say something about a blade takes
+    // what the first bank saying it gives. `ownLabels` / `ownFollows` are the bank's own lines.
+    const saber = (key) => {
+      const all = {};
+      for (const a of arrays) for (const n of Object.keys(a[key])) if (!(n in all)) all[n] = a[key][n];
+      return all;
+    };
+    const saberLabels = saber('labels'), saberFollows = saber('follows');
+    for (const a of arrays) {
+      a.ownLabels = a.labels;
+      a.labels = Object.assign({}, saberLabels, a.ownLabels);
+      a.ownFollows = a.follows;
+      a.follows = Object.assign({}, saberFollows, a.ownFollows);
+    }
+
     return { arrays, bladeCount, warnings };
   }
 

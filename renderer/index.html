@@ -22664,6 +22664,157 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
   _updateHelperEditorButtons();
 });
 
+// Right-click on a Style Library card: "+ Add to config" and "Replace in config preset…", the
+// Sound Fonts card menu's two config verbs with a style in place of a font. [B-541]
+// Both are absent with no config open; with several banks Add opens a bank list on hover, and
+// Replace lists every preset by bank, then that preset's blades. The writes are the preset
+// sidecar's (_addPresetWithStyle, _replaceBladeWithStyle), so the same rules hold as adding or
+// copying a style there.
+function _styleCardContextMenu(e, styleName) {
+  const menu = document.getElementById('preset-ctx-menu');
+  if (!menu || !styleName) return;
+  if (!(typeof editor !== 'undefined' && editor && typeof fileIsOpen !== 'undefined' && fileIsOpen)) return;
+  if (typeof window._addPresetWithStyle !== 'function' || typeof window._replaceBladeWithStyle !== 'function'
+      || typeof window._presetBladeNames !== 'function') {
+    console.error('[B-541] preset sidecar bridges are missing; the style card menu cannot write.');
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  let banks = [];
+  try { banks = presetParser.parsePresets(editor.getValue()).arrays || []; } catch {}
+  const presetCount = banks.reduce((n, a) => n + ((a.presets || []).length), 0);
+
+  // The submenu element is shared with the Sound Fonts card menu, so the one close path finds it.
+  let sub = document.getElementById('sf-card-ctx-submenu');
+  if (!sub) {
+    sub = document.createElement('div');
+    sub.id = 'sf-card-ctx-submenu';
+    sub.className = 'preset-ctx-menu';
+    sub.style.display = 'none';
+    document.body.appendChild(sub);
+  }
+  // The blade list is a third level, on the preset menu's own second-level element, which the
+  // shared close path already takes down.
+  let sub2 = document.getElementById('preset-ctx-submenu2');
+  if (!sub2) {
+    sub2 = document.createElement('div');
+    sub2.id = 'preset-ctx-submenu2';
+    sub2.className = 'preset-ctx-menu preset-ctx-submenu-sized';
+    sub2.style.display = 'none';
+    document.body.appendChild(sub2);
+  }
+  const closeAll = () => {
+    menu.style.display = 'none'; menu.style.minWidth = '';
+    sub.style.display = 'none'; sub.innerHTML = '';
+    sub2.style.display = 'none'; sub2.innerHTML = '';
+  };
+  // After a write: the cards re-read which styles are in use, and this one flashes.
+  const afterWrite = () => {
+    setTimeout(() => {
+      try { _buildStylesVisual(); } catch {}
+      const card = document.querySelector(`#styles-visual-list .style-card[data-name="${CSS.escape(styleName)}"]`);
+      if (!card) return;
+      card.classList.remove('highlight');
+      void card.offsetWidth;
+      card.classList.add('highlight');
+      setTimeout(() => card.classList.remove('highlight'), 1200);
+    }, 120);
+  };
+  const subItem = (text, fn, into = sub) => {
+    const d = document.createElement('div');
+    d.className = 'preset-ctx-item';
+    d.textContent = text;
+    d.addEventListener('mousedown', (ev) => { ev.stopPropagation(); ev.preventDefault(); closeAll(); fn(); });
+    // A plain row in the second level closes the third, as moving off a submenu row does.
+    if (into === sub) d.addEventListener('mouseenter', () => { sub2.style.display = 'none'; });
+    into.appendChild(d);
+    return d;
+  };
+  const openSub = (anchor, minWidth, fill, el = sub) => {
+    el.innerHTML = '';
+    if (el === sub) { el.classList.remove('preset-ctx-submenu-sized'); sub2.style.display = 'none'; }
+    el.style.minWidth = minWidth;
+    fill();
+    const rect = anchor.getBoundingClientRect();
+    el.style.display = 'block';
+    el.style.left = `${rect.right - 2}px`;
+    el.style.top = `${rect.top - 4}px`;
+    requestAnimationFrame(() => {
+      const r = el.getBoundingClientRect();
+      if (r.right > window.innerWidth - 8) el.style.left = `${Math.max(8, rect.left - r.width + 2)}px`;
+      if (r.bottom > window.innerHeight - 8) el.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
+    });
+  };
+  // Hover opens a submenu; the first movement does too, for a menu that opens under the pointer.
+  const hoverOpens = (item, open) => {
+    item.addEventListener('mouseenter', open);
+    item.addEventListener('mousemove', () => { if (sub.style.display !== 'block') open(); });
+    item.addEventListener('mousedown', (ev) => { ev.stopPropagation(); open(); });
+  };
+  const add = (idx) => { window._addPresetWithStyle(idx, styleName).then(afterWrite); };
+
+  menu.innerHTML = '';
+  menu.style.minWidth = '220px';
+  const addItem = document.createElement('div');
+  addItem.className = 'preset-ctx-item' + (banks.length > 1 ? ' has-submenu' : '');
+  addItem.textContent = '+ Add to config';
+  menu.appendChild(addItem);
+  if (banks.length > 1) {
+    const open = () => openSub(addItem, '160px', () => {
+      banks.forEach((arr, idx) => subItem(arr.name || `Array ${idx + 1}`, () => add(idx)));
+    });
+    hoverOpens(addItem, open);
+  } else {
+    addItem.addEventListener('mouseenter', () => { sub.style.display = 'none'; });
+    addItem.addEventListener('mousedown', (ev) => { ev.stopPropagation(); closeAll(); add(0); });
+  }
+
+  const repItem = document.createElement('div');
+  repItem.className = 'preset-ctx-item has-submenu';
+  repItem.textContent = 'Replace in config preset…';
+  menu.appendChild(repItem);
+  if (!presetCount) {
+    repItem.classList.add('disabled');
+    repItem.title = 'This config has no presets yet. Use "Add to config" to create one.';
+  } else {
+    const open = () => openSub(repItem, '240px', () => {
+      sub.classList.add('preset-ctx-submenu-sized');
+      banks.forEach((arr, arrayIdx) => {
+        if (!(arr.presets || []).length) return;
+        const head = document.createElement('div');
+        head.className = 'preset-ctx-submenu-section';
+        head.textContent = arr.name || `Array ${arrayIdx + 1}`;
+        sub.appendChild(head);
+        arr.presets.forEach((preset, presetIdx) => {
+          const name = preset.displayName || `(unnamed ${presetIdx + 1})`;
+          const replace = (n) => { if (window._replaceBladeWithStyle(arrayIdx, presetIdx, n, styleName)) afterWrite(); };
+          const blades = window._presetBladeNames(arrayIdx, presetIdx);
+          // One blade: the preset row replaces it. More: the row opens the blade list, named as the
+          // blade tiles' Copy to blade names them. The note: "list the blades by name Blade 1 (B1),
+          // Blade 2 (B2) etc or their actual name".
+          if (blades.length <= 1) { subItem(`${presetIdx + 1}. ${name}`, () => replace(1)); return; }
+          const row = document.createElement('div');
+          row.className = 'preset-ctx-item has-submenu';
+          row.textContent = `${presetIdx + 1}. ${name}`;
+          sub.appendChild(row);
+          const openBlades = () => openSub(row, '0', () => {
+            for (const b of blades) subItem(b.name, () => replace(b.n), sub2);
+          }, sub2);
+          row.addEventListener('mouseenter', openBlades);
+          row.addEventListener('mousedown', (ev) => { ev.stopPropagation(); ev.preventDefault(); openBlades(); });
+        });
+      });
+    });
+    hoverOpens(repItem, open);
+  }
+
+  menu.style.display = 'block';
+  const w = menu.offsetWidth || 220, h = menu.offsetHeight || 60;
+  menu.style.left = `${Math.min(e.clientX, window.innerWidth - w - 8)}px`;
+  menu.style.top = `${Math.min(e.clientY, window.innerHeight - h - 8)}px`;
+}
+
 function _buildStylesVisual() {
   const list        = document.getElementById('styles-visual-list');
   const helpersList = document.getElementById('styles-helpers-list');
@@ -22936,6 +23087,7 @@ function _buildStylesVisual() {
       if (!await _guardHelperAdd('Discard this new helper?')) return;
       _openStyleDetail(entry);
     });
+    card.addEventListener('contextmenu', e => _styleCardContextMenu(e, name));
     list.appendChild(card);
   });
 
@@ -50411,12 +50563,13 @@ require(['vs/editor/editor.main'], function () {
           } catch {}
           return 'StylePtr<Black>()';
         };
+        // The other blades follow the bank's pattern, the same rule as every other way of adding one.
         const _blockFor = (nm, withLeadIn) => {
-          const styleLines = [];
           const b1 = _blade1For(nm);
-          for (let i = 0; i < bladeCount; i++) {
-            styleLines.push(`${inner}${i === 0 ? b1 : 'StylePtr<Black>()'},`);
-          }
+          const slots = (typeof window._newPresetSlotTexts === 'function')
+            ? window._newPresetSlotTexts(arr, bladeCount, b1)
+            : Array.from({ length: bladeCount }, (_, i) => (i === 0 ? b1 : 'StylePtr<Black>()'));
+          const styleLines = slots.map(t => `${inner}${t},`);
           return [
             ...(withLeadIn ? [''] : []),
             `${indent}{ "${_pathFor(nm)}", "",`,
@@ -61512,52 +61665,58 @@ function _getFreshFieldRange(fieldName) {
       // the app already treats as fillable, and a slot that still matches what it follows is a
       // derived copy - deleting either destroys nothing. Same three buckets the turn-on scan uses,
       // deliberately, so "what counts as losing something" has one definition in this feature.
-      const targetOf  = arr.follows?.[bladeNum] || null;
       const collapses = [];
       let authored = 0;
       let hereEdit = null;                                  // the clicked preset's own deletion
 
-      for (let pi = 0; pi < arr.presets.length; pi++) {
-        const preset = arr.presets[pi];
-        const styles = preset.styles || [];
-        if (styles.length <= limit) continue;              // not over-count: leave it alone
-        const slot = styles[bladeNum - 1];
-        if (!slot || !slot.startLine) continue;
-        const sOff = model.getOffsetAt({ lineNumber: slot.startLine, column: slot.startCol + 1 });
-        const eOff = model.getOffsetAt({ lineNumber: slot.endLine,   column: slot.endCol   + 1 });
-        const text = model.getValueInRange(_slotRange(slot));
-        if (Number.isInteger(clickedIdx) && pi === clickedIdx) {
-          hereEdit = { range: _slotDeleteRange(model, full, sOff, eOff), text: '' };
+      // EVERY BANK, because a blade is the saber's: "A blade is a blade and it shared for the
+      // entire config." Deleting the position here and not in the next bank would leave the names
+      // pointing one blade off there. (B-541)
+      const disabled = _scanDisabledPresets(full);
+      for (const bank of parsed.arrays) {
+        const targetOf  = bank.follows?.[bladeNum] || null;
+        for (let pi = 0; pi < bank.presets.length; pi++) {
+          const preset = bank.presets[pi];
+          const styles = preset.styles || [];
+          if (styles.length <= limit) continue;              // not over-count: leave it alone
+          const slot = styles[bladeNum - 1];
+          if (!slot || !slot.startLine) continue;
+          const sOff = model.getOffsetAt({ lineNumber: slot.startLine, column: slot.startCol + 1 });
+          const eOff = model.getOffsetAt({ lineNumber: slot.endLine,   column: slot.endCol   + 1 });
+          const text = model.getValueInRange(_slotRange(slot));
+          if (bank === arr && Number.isInteger(clickedIdx) && pi === clickedIdx) {
+            hereEdit = { range: _slotDeleteRange(model, full, sOff, eOff), text: '' };
+          }
+          const tgt  = targetOf ? styles[targetOf - 1] : null;
+          const derived = tgt && tgt.startLine
+            && presetParser.sameExpr(text, model.getValueInRange(_slotRange(tgt)));
+          collapses.push({ range: _slotDeleteRange(model, full, sOff, eOff) });
+          if (!_slotIsEmpty(text) && !derived) authored++;
         }
-        const tgt  = targetOf ? styles[targetOf - 1] : null;
-        const derived = tgt && tgt.startLine
-          && presetParser.sameExpr(text, model.getValueInRange(_slotRange(tgt)));
-        collapses.push({ range: _slotDeleteRange(model, full, sOff, eOff) });
-        if (!_slotIsEmpty(text) && !derived) authored++;
-      }
 
-      // Disabled presets are over-count too, and they are text like any other. Skipping them would
-      // leave a preset that comes back looking fine and holding a blade the config no longer has.
-      const blocks = _scanDisabledPresets(full)
-        .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
-      for (const b of blocks) {
-        const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
-        const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
-        const innerText  = full.slice(innerStart, innerEnd);
-        const slots      = presetParser.extractStyleSlots(innerText);
-        if (slots.length <= limit) continue;
-        const slot = slots[bladeNum - 1];
-        if (!slot) continue;
-        const text = innerText.slice(slot.startOffset, slot.endOffset);
-        const tgt  = targetOf ? slots[targetOf - 1] : null;
-        const derived = tgt
-          && presetParser.sameExpr(text, innerText.slice(tgt.startOffset, tgt.endOffset));
-        collapses.push({
-          range: _slotDeleteRange(model, full,
-                                  innerStart + slot.startOffset,
-                                  innerStart + slot.endOffset),
-        });
-        if (!_slotIsEmpty(text) && !derived) authored++;
+        // Disabled presets are over-count too, and they are text like any other. Skipping them would
+        // leave a preset that comes back looking fine and holding a blade the config no longer has.
+        const blocks = disabled
+          .filter(b => b.startLine > bank.startLine && b.endLine < bank.endLine);
+        for (const b of blocks) {
+          const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+          const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+          const innerText  = full.slice(innerStart, innerEnd);
+          const slots      = presetParser.extractStyleSlots(innerText);
+          if (slots.length <= limit) continue;
+          const slot = slots[bladeNum - 1];
+          if (!slot) continue;
+          const text = innerText.slice(slot.startOffset, slot.endOffset);
+          const tgt  = targetOf ? slots[targetOf - 1] : null;
+          const derived = tgt
+            && presetParser.sameExpr(text, innerText.slice(tgt.startOffset, tgt.endOffset));
+          collapses.push({
+            range: _slotDeleteRange(model, full,
+                                    innerStart + slot.startOffset,
+                                    innerStart + slot.endOffset),
+          });
+          if (!_slotIsEmpty(text) && !derived) authored++;
+        }
       }
 
       if (!collapses.length) return false;
@@ -61710,7 +61869,7 @@ function _getFreshFieldRange(fieldName) {
       }
 
       // THIS PRESET ONLY: no renumbering, and that is not an omission. The labels and follow lines
-      // describe the ARRAY, and every other preset still holds the old numbering, so rewriting them
+      // describe the saber's blades, and every other preset still holds the old numbering, so rewriting them
       // to suit one preset would break them for all the rest.
       //
       // THIS PRESET ONLY: NO TOAST AT ALL, DELIBERATELY. (2026-08-27)
@@ -61734,15 +61893,14 @@ function _getFreshFieldRange(fieldName) {
       // The numbering rides in the SAME edit as the deletions. Split apart there is a reachable
       // state where the slots have closed up and the names and follow pairs still point at the old
       // positions - which is the invisible-failure class this whole area is built to avoid.
-      const count = Math.max(limit, ...arr.presets.map(p => (p.styles || []).length));
+      const count = Math.max(limit, ...parsed.arrays.flatMap(a => a.presets.map(p => (p.styles || []).length)));
       const plan  = presetParser.planBladeDelete(count, bladeNum, arr.labels, arr.follows);
-      const arrAfter   = Object.assign({}, arr, { labels: plan.labels, follows: plan.follows });
-      const labelEdit  = _renumberLabelsEdit(arrAfter, lines, plan.map);
-      const followInfo = _renumberFollowsEdit(arrAfter, lines, plan.map);
 
       const edits = collapses.map(c => ({ range: c.range, text: '' }));
-      if (labelEdit)       edits.push(labelEdit);
-      if (followInfo.edit) edits.push(followInfo.edit);
+      edits.push(..._bladeLinesEdits(parsed, lines, {
+        labels:  presetParser.renumberLabels(plan.labels, plan.map),
+        follows: presetParser.renumberFollows(plan.follows, plan.map).kept,
+      }));
 
       _atomicEdit(editor, 'blade-collapse', edits);
       editor.focus();
@@ -61910,15 +62068,6 @@ function _getFreshFieldRange(fieldName) {
       return parsed.arrays[_activeArrayIndex] || null;
     }
 
-    /** Update the Bn="label" pair text in an existing @jmt-labels: comment line. */
-    function _updateLabelPairInLine(lineText, bladeNum, newLabel) {
-      const pairRe = new RegExp(`B${bladeNum}\\s*=\\s*"[^"]*"`);
-      const newPair = `B${bladeNum}="${newLabel}"`;
-      return pairRe.test(lineText)
-        ? lineText.replace(pairRe, newPair)
-        : lineText.trimEnd() + ' ' + newPair;
-    }
-
     /** Patch all visible tile num badges to reflect current _parseResult labels without a full rebuild. */
     function _refreshTileAbbreviations() {
       const arr = _parseResult?.arrays[_activeArrayIndex];
@@ -61936,77 +62085,102 @@ function _getFreshFieldRange(fieldName) {
       });
     }
 
-    /** Add or change a blade label. Writes to editor; does NOT trigger rebuild (done on slot close). */
-    function _setBladeLabel(bladeNum, newLabel) {
-      if (!editor) return;
-      const arr = _getLabelArray();
-      if (!arr) return;
+    // Blade names and follows are the saber's, not a bank's: every bank drives the same blades, so
+    // every bank's @jmt-labels and @jmt-follow lines say the same thing, written together in one
+    // undo step. A Z-blade or a dual saber is two blades given one style by how they are built, and
+    // that holds in every bank. The parser gives a bank with no line of its own what another bank
+    // holds, so a config set up one bank at a time reads right and comes into line on its next
+    // change. (B-541: "A blade is a blade and it shared for the entire config.")
 
-      if (arr.labelLine !== null) {
-        // Update existing comment line in place
-        const lines    = editor.getValue().split('\n');
-        const lineIdx  = arr.labelLine - 1;
-        const oldText  = lines[lineIdx] || '';
-        const newText  = _updateLabelPairInLine(oldText, bladeNum, newLabel);
-        _atomicEdit(editor,'blade-label', [{
-          range: { startLineNumber: arr.labelLine, startColumn: 1,
-                   endLineNumber:   arr.labelLine, endColumn: oldText.length + 1 },
-          text: newText,
-        }]);
-      } else {
-        // Insert new comment before first preset entry (or after opening { if no presets yet)
-        const insertLine = arr.presets.length > 0
-          ? arr.presets[0].startLine
-          : arr.bodyStartLine + 1;
-        _atomicEdit(editor,'blade-label', [{
-          range: { startLineNumber: insertLine, startColumn: 1,
-                   endLineNumber:   insertLine,  endColumn: 1 },
-          text: `// @jmt-labels: B${bladeNum}="${newLabel}"\n\n`,
-        }]);
+    /**
+     * The edits that leave every bank's lines saying exactly `labels` and `follows`. Either may be
+     * left out, and that line is not touched. Both are written in one pass because a bank missing
+     * both lines takes them at the same spot, and two inserts there would land in either order.
+     */
+    function _bladeLinesEdits(parsed, lines, { labels, follows } = {}) {
+      const sorted = (o) => Object.keys(o).map(Number).sort((a, b) => a - b);
+      const wantL = labels  === undefined ? undefined
+        : sorted(labels).map(n => `B${n}="${labels[n]}"`).join(' ');
+      const wantF = follows === undefined ? undefined
+        : sorted(follows).map(n => `B${n}=B${follows[n]}`).join(' ');
+      // The line's text, '' for the line to go, undefined to leave it.
+      const textL = wantL === undefined ? undefined : wantL ? `// @jmt-labels: ${wantL}` : '';
+      const textF = wantF === undefined ? undefined : wantF ? `// @jmt-follow: ${wantF}` : '';
+      const whole = (n, text) => ({ range: { startLineNumber: n, startColumn: 1,
+                                             endLineNumber: n, endColumn: (lines[n - 1] || '').length + 1 }, text });
+      const blank = (n) => (lines[n - 1] ?? 'x').trim() === '';
+      const edits = [];
+
+      for (const arr of parsed.arrays) {
+        const L = arr.labelLine, F = arr.followLine;
+        const ind = (n) => _lineIndent(lines, n);
+        const has = [[L, textL], [F, textF]].filter(([n]) => n !== null);
+        const add = [[L, textL], [F, textF]].filter(([n, t]) => n === null && t).map(([, t]) => t);
+
+        if (!has.length) {
+          // Neither line yet: before the first preset (or after the array opens if no presets yet),
+          // with a blank after the block.
+          if (!add.length) continue;
+          const at = arr.presets.length > 0 ? arr.presets[0].startLine : arr.bodyStartLine + 1;
+          edits.push({ range: { startLineNumber: at, startColumn: 1, endLineNumber: at, endColumn: 1 },
+                       text: add.map(t => ind(at) + t).join('\n') + '\n\n' });
+          continue;
+        }
+
+        if (add.length) {
+          // One line here and the other to add. The new one goes with the existing one so the two
+          // read as a block, labels first: it takes the existing line's place when that line is
+          // going, and otherwise joins it in the same edit.
+          const [n, t] = has[0];
+          const keep = t === undefined ? (lines[n - 1] || '').trim() : t;
+          const block = L === null ? [add[0], keep] : [keep, add[0]];
+          edits.push(whole(n, block.filter(Boolean).map(x => ind(n) + x).join('\n')));
+          continue;
+        }
+
+        // Each existing line rewritten or dropped. The blank after the block goes only when the
+        // whole block goes, so a line left standing keeps its separator from the first preset.
+        const goes = has.filter(([, t]) => t === '').map(([n]) => n).sort((a, b) => a - b);
+        const allGo = goes.length === has.length;
+        for (const [n, t] of has) {
+          if (t === undefined) continue;
+          if (t === '') {
+            const last = n === goes[goes.length - 1];
+            const end = allGo && last && blank(n + 1) ? n + 2 : n + 1;
+            edits.push({ range: { startLineNumber: n, startColumn: 1, endLineNumber: end, endColumn: 1 }, text: '' });
+          } else if (ind(n) + t !== lines[n - 1]) {
+            edits.push(whole(n, ind(n) + t));
+          }
+        }
       }
+      return edits;
+    }
+
+    /** Change the saber's blade names and write them to every bank. Does NOT trigger rebuild (done on slot close). */
+    function _writeBladeLabels(change) {
+      if (!editor) return;
+      const full   = editor.getValue();
+      const parsed = presetParser.parsePresets(full);
+      const arr    = parsed.arrays[_activeArrayIndex];
+      if (!arr) return;
+      const labels = Object.assign({}, arr.labels);
+      change(labels);
+      const edits = _bladeLinesEdits(parsed, full.split('\n'), { labels });
+      if (edits.length) _atomicEdit(editor, 'blade-label', edits);
       editor.focus();
       // Update parseResult immediately so label is visible if slot editor reopens before rebuild fires
       _parseResult = presetParser.parsePresets(editor.getValue());
       _refreshTileAbbreviations();
     }
 
-    /** Remove a blade label pair. If last pair, removes the entire comment line + trailing blank. */
+    /** Add or change a blade label. */
+    function _setBladeLabel(bladeNum, newLabel) {
+      _writeBladeLabels(labels => { labels[bladeNum] = newLabel; });
+    }
+
+    /** Remove a blade label. The last one takes the comment line with it, in every bank. */
     function _removeBladeLabel(bladeNum) {
-      if (!editor) return;
-      const arr = _getLabelArray();
-      if (!arr || arr.labelLine === null) return;
-
-      const lines   = editor.getValue().split('\n');
-      const lineIdx = arr.labelLine - 1;
-      const oldText = lines[lineIdx] || '';
-
-      // Remove just this blade's pair
-      const pairRe  = new RegExp(`\\s*B${bladeNum}\\s*=\\s*"[^"]*"`);
-      const newText = oldText.replace(pairRe, '');
-
-      // If no pairs remain in the comment, remove the whole line + trailing blank line
-      const hasMore = /B\d+\s*=\s*"[^"]*"/.test(newText.replace('// @jmt-labels:', ''));
-      if (!hasMore) {
-        // Remove comment line and one blank line after it (if blank)
-        const nextLine = lines[lineIdx + 1];
-        const endLine  = (nextLine !== undefined && nextLine.trim() === '')
-          ? arr.labelLine + 2
-          : arr.labelLine + 1;
-        _atomicEdit(editor,'blade-label', [{
-          range: { startLineNumber: arr.labelLine, startColumn: 1,
-                   endLineNumber:   endLine,        endColumn: 1 },
-          text: '',
-        }]);
-      } else {
-        _atomicEdit(editor,'blade-label', [{
-          range: { startLineNumber: arr.labelLine, startColumn: 1,
-                   endLineNumber:   arr.labelLine, endColumn: oldText.length + 1 },
-          text: newText,
-        }]);
-      }
-      editor.focus();
-      _parseResult = presetParser.parsePresets(editor.getValue());
-      _refreshTileAbbreviations();
+      _writeBladeLabels(labels => { delete labels[bladeNum]; });
     }
 
     // ── Blade follow writers ───────────────────────────────────────────────────
@@ -62023,39 +62197,8 @@ function _getFreshFieldRange(fieldName) {
     // Monaco are all free, and turning the feature off is deleting one line, because every preset
     // already holds the right text. (B-219)
 
-    /** Update or insert the Bn=Bm pair in an existing @jmt-follow: line. */
-    function _updateFollowPairInLine(lineText, followerNum, targetNum) {
-      const pairRe  = new RegExp(`B${followerNum}\\s*=\\s*B\\d+`);
-      const newPair = `B${followerNum}=B${targetNum}`;
-      return pairRe.test(lineText)
-        ? lineText.replace(pairRe, newPair)
-        : lineText.trimEnd() + ' ' + newPair;
-    }
-
-    /** The single edit that declares `followerNum` a follower of `targetNum`. */
-    function _followDeclEdit(arr, followerNum, targetNum) {
-      if (arr.followLine !== null) {
-        const oldText = (editor.getValue().split('\n')[arr.followLine - 1]) || '';
-        return {
-          range: { startLineNumber: arr.followLine, startColumn: 1,
-                   endLineNumber:   arr.followLine, endColumn: oldText.length + 1 },
-          text: _updateFollowPairInLine(oldText, followerNum, targetNum),
-        };
-      }
-      // Sit directly under the labels line when there is one, so the two read as a block.
-      // Otherwise take the same slot the labels line would have taken.
-      const insertLine = arr.labelLine !== null
-        ? arr.labelLine + 1
-        : (arr.presets.length > 0 ? arr.presets[0].startLine : arr.bodyStartLine + 1);
-      return {
-        range: { startLineNumber: insertLine, startColumn: 1,
-                 endLineNumber:   insertLine,  endColumn: 1 },
-        text: `// @jmt-follow: B${followerNum}=B${targetNum}\n`,
-      };
-    }
-
     /**
-     * Set (or change) which blade a follower mirrors. Writes to the editor only.
+     * Set (or change) which blade a follower mirrors, in every bank. Writes to the editor only.
      *
      * `extraEdits` exists so the bulk copy can land in the SAME undo step as the declaration.
      * Separating them would leave a reachable state where the line says B3 follows B1 while no
@@ -62067,49 +62210,38 @@ function _getFreshFieldRange(fieldName) {
       // Structural guard, not a validation message: a follower may only mirror a LOWER-numbered
       // blade. Cycles become impossible rather than detectable, and "never offered on B1" falls out.
       if (!(targetNum < followerNum)) return;
-      const arr = _getLabelArray();
+      const full   = editor.getValue();
+      const parsed = presetParser.parsePresets(full);
+      const arr    = parsed.arrays[_activeArrayIndex];
       if (!arr) return;
+      const follows = Object.assign({}, arr.follows, { [followerNum]: targetNum });
 
       _atomicEdit(editor, 'blade-follow',
-        [_followDeclEdit(arr, followerNum, targetNum), ...extraEdits]);
+        [..._bladeLinesEdits(parsed, full.split('\n'), { follows }), ...extraEdits]);
       editor.focus();
       _parseResult = presetParser.parsePresets(editor.getValue());
     }
 
     /**
-     * Stop a blade following. Removes the whole line with the last pair.
+     * Stop a blade following, in every bank. Removes the whole line with the last pair.
      *
      * Every preset KEEPS the text it has. That is not a convenience, it is what makes the feature
      * safe to turn off: the styles were written to the file as they were adopted, so removing the
      * declaration removes only the future propagation.
      */
-    /** The single edit that drops one Bn=Bm pair, or the whole line when it was the last one. */
-    function _followPairRemovalEdit(arr, followerNum) {
-      if (!editor || !arr || arr.followLine === null) return null;
-      const lines   = editor.getValue().split('\n');
-      const lineIdx = arr.followLine - 1;
-      const oldText = lines[lineIdx] || '';
-      const pairRe  = new RegExp(`\\s*B${followerNum}\\s*=\\s*B\\d+`);
-      if (!pairRe.test(oldText)) return null;
-      const newText = oldText.replace(pairRe, '');
-
-      const hasMore = /B\d+\s*=\s*B\d+/.test(newText.replace('// @jmt-follow:', ''));
-      if (!hasMore) {
-        const nextLine = lines[lineIdx + 1];
-        const endLine  = (nextLine !== undefined && nextLine.trim() === '')
-          ? arr.followLine + 2
-          : arr.followLine + 1;
-        return {
-          range: { startLineNumber: arr.followLine, startColumn: 1,
-                   endLineNumber:   endLine,        endColumn: 1 },
-          text: '',
-        };
-      }
-      return {
-        range: { startLineNumber: arr.followLine, startColumn: 1,
-                 endLineNumber:   arr.followLine, endColumn: oldText.length + 1 },
-        text: newText,
-      };
+    function _removeBladeFollow(followerNum) {
+      if (!editor) return;
+      const full   = editor.getValue();
+      const parsed = presetParser.parsePresets(full);
+      const arr    = parsed.arrays[_activeArrayIndex];
+      if (!arr || !arr.follows?.[followerNum]) return;
+      const follows = Object.assign({}, arr.follows);
+      delete follows[followerNum];
+      const edits = _bladeLinesEdits(parsed, full.split('\n'), { follows });
+      if (!edits.length) return;
+      _atomicEdit(editor, 'blade-follow', edits);
+      editor.focus();
+      _parseResult = presetParser.parsePresets(editor.getValue());
     }
 
     // Put ONE preset back under a follow it had stepped out of.
@@ -62134,17 +62266,6 @@ function _getFreshFieldRange(fieldName) {
       _pendingSlotCommit = null;
       _commitSlotEdit(follower, targetText);
       _closeSlotArgEdit();
-    }
-
-    function _removeBladeFollow(followerNum) {
-      if (!editor) return;
-      const arr = _getLabelArray();
-      if (!arr || arr.followLine === null) return;
-      const edit = _followPairRemovalEdit(arr, followerNum);
-      if (!edit) return;
-      _atomicEdit(editor, 'blade-follow', [edit]);
-      editor.focus();
-      _parseResult = presetParser.parsePresets(editor.getValue());
     }
 
     // WHEN A FOLLOW PAIR IS DEAD, and the old answer here was wrong.
@@ -62178,9 +62299,11 @@ function _getFreshFieldRange(fieldName) {
     // missing-slot tile. Overwriting it costs the user nothing they wrote, so it is counted as
     // filling an empty blade rather than as replacing a style. Matched exactly, not by pattern: a
     // style that merely CONTAINS Black is a real style someone built.
+    // The red Missing placeholder a reorder leaves mid-preset is empty too: nobody wrote it either,
+    // and counting it made turning follow on warn about replacing blades that held nothing.
     const EMPTY_SLOT_EXPR = 'StylePtr<Black>()';
     function _slotIsEmpty(text) {
-      return presetParser.sameExpr(text, EMPTY_SLOT_EXPR);
+      return presetParser.sameExpr(text, EMPTY_SLOT_EXPR) || presetParser.isPlaceholderText(text);
     }
 
     function _bulkFollowEdits(arr, followerNum, targetNum) {
@@ -62257,8 +62380,8 @@ function _getFreshFieldRange(fieldName) {
       if (!editor || !arr) return out;
       const model = editor.getModel();
       const full  = model.getValue();
-      // Only the blocks inside THIS bank. A config with two preset arrays has its own disabled
-      // blocks in each, and blade numbering is per-array.
+      // Only the blocks inside THIS bank; the caller walks every bank, and a block counted under
+      // two banks would be written twice.
       const blocks = _scanDisabledPresets(full)
         .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
 
@@ -62318,11 +62441,26 @@ function _getFreshFieldRange(fieldName) {
      */
     async function _enableBladeFollow(followerNum, targetNum) {
       if (!editor || !(targetNum < followerNum)) return false;
-      const arr = _getLabelArray();
+      const parsed = presetParser.parsePresets(editor.getValue());
+      const arr = parsed.arrays[_activeArrayIndex];
       if (!arr) return false;
 
-      const live     = _bulkFollowEdits(arr, followerNum, targetNum);
-      const disabled = _disabledFollowEdits(arr, followerNum, targetNum);
+      // EVERY BANK. A follow is the saber's (a Z-blade, a dual saber: two blades one style by how
+      // they are built), so turning it on copies in every bank, and the dialog names the banks
+      // when more than one has a style to replace. (B-541)
+      const live = { replace: [], fill: [], matched: 0 };
+      const disabled = { replace: [], fill: [], matched: 0 };
+      const perBank = [];
+      for (const bank of parsed.arrays) {
+        const l = _bulkFollowEdits(bank, followerNum, targetNum);
+        const d = _disabledFollowEdits(bank, followerNum, targetNum);
+        for (const [into, from] of [[live, l], [disabled, d]]) {
+          into.replace.push(...from.replace); into.fill.push(...from.fill); into.matched += from.matched;
+        }
+        perBank.push([bank.name, l.replace.length + d.replace.length]);
+      }
+      const hit = perBank.filter(([, k]) => k > 0);
+      const byBank = hit.length > 1 ? ` (${hit.map(([b, k]) => `${b} ${k}`).join(', ')})` : '';
       const replace  = [...live.replace, ...disabled.replace];
       const fill     = [...live.fill,    ...disabled.fill];
       const bulk     = [...replace, ...fill];
@@ -62369,7 +62507,7 @@ function _getFreshFieldRange(fieldName) {
             // "from the same preset" trails the noun, so it reads as one particular preset rather
             // than each preset's own. Establishing the per-preset frame FIRST - "in each one" -
             // fixes it without a possessive that would give the preset ownership it has not got.
-            message: `${n === 1 ? 'The 1 preset has' : `${_allOf(n, { cap: true })} presets have`} a different style on ${follower}`
+            message: `${n === 1 ? 'The 1 preset has' : `${_allOf(n, { cap: true })} presets${byBank} have`} a different style on ${follower}`
                    + (dAll ? `, including ${dAll} disabled` : '') + '. '
                    + (n === 1 ? `It will be replaced by that preset's ${target} style.`
                               : `In each one, ${follower} will be replaced by that preset's ${target} style.`)
@@ -62403,7 +62541,7 @@ function _getFreshFieldRange(fieldName) {
           // meaning is directional, and the flat promise is not true of a preset that keeps a
           // different style, because a preset only follows while the two expressions match. Stating
           // the RULE is true in every case and teaches what the mute in the tile is showing.
-          message: `${n} preset${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} a different style on ${follower}. `
+          message: `${n} preset${n === 1 ? '' : 's'}${byBank} ${n === 1 ? 'has' : 'have'} a different style on ${follower}. `
                  + `Replacing uses that preset's own ${target} style in each case.`
                  + `\n\nBoth choices turn on following. ${follower} then follows ${target} `
                  + `in any preset where their styles match.`,
@@ -62497,6 +62635,45 @@ function _getFreshFieldRange(fieldName) {
       if (presetParser.sameExpr(srcBladeExpr, srcB1Expr)) return srcText;
       return presetParser.retargetStyleText(srcText, srcB1Expr, tgtB1Expr);
     }
+
+    /**
+     * The blade texts for a preset added to `arr`, B1 first. B1 is `b1Text`; every other blade takes
+     * what most of the bank's presets have there, a tie going to the earliest. Only live presets
+     * count: a disabled one is commented out, and the charge preset is not a pattern anyone chose.
+     * A wrapper around its own preset's B1 counts as one pattern across presets and lands around the
+     * new B1, its matched colour moved to B1's, exactly as copy-to writes it. No presets: all Black.
+     * Every way of adding a preset to a bank with presets in it builds its blades here.
+     */
+    function _newPresetSlotTexts(arr, bladeCount, b1Text) {
+      const out = [b1Text || EMPTY_SLOT_EXPR];
+      for (let i = 1; i < bladeCount; i++) out.push(EMPTY_SLOT_EXPR);
+      if (!editor || !arr || !(arr.presets || []).length) return out;
+      const model = editor.getModel();
+      const full = model.getValue();
+      const live = arr.presets.slice(0, _jmtAppendPresetIndex(full, arr.presets.length)
+        - (_jmtChargeStyleDefined(full) && arr.presets.length === 1 ? 1 : 0));
+      const tgtB1 = (presetParser.extractStyleSlots(out[0]) || [])[0] || null;
+      for (let n = 2; n <= bladeCount; n++) {
+        const seen = new Map();   // pattern -> { count, sample }, in preset order
+        for (const p of live) {
+          const slot = p.styles?.[n - 1];
+          if (!slot || !slot.startLine) continue;
+          const text = model.getValueInRange(_slotRange(slot));
+          const b1 = p.styles[0] || null;
+          // The pattern is the text as it would land in a preset whose B1 is the plain placeholder:
+          // a wrapper of its own B1 then reads the same in every preset, and so does its matched colour.
+          const key = _copyTextFor(text, slot.expr, b1, { expr: 'Black' }, n).replace(/\s+/g, '');
+          const hit = seen.get(key);
+          if (hit) hit.count++;
+          else seen.set(key, { count: 1, sample: { text, expr: slot.expr, b1 } });
+        }
+        let best = null;
+        for (const v of seen.values()) if (!best || v.count > best.count) best = v;
+        if (best) out[n - 1] = _copyTextFor(best.sample.text, best.sample.expr, best.sample.b1, tgtB1, n);
+      }
+      return out;
+    }
+    window._newPresetSlotTexts = _newPresetSlotTexts;
 
     /**
      * Edits writing `src` (a live preset and blade) into the same blade of each target. A target is
@@ -63303,7 +63480,9 @@ function _getFreshFieldRange(fieldName) {
       return '';
     }
 
-    async function _addPreset(arrayIndex, insertAtIndex) {
+    // `b1Text` is a slot text for blade 1; omitted, B1 is the empty placeholder. `quiet` adds it
+    // without taking focus or selecting it, for a caller in another view (the Style Library).
+    async function _addPreset(arrayIndex, insertAtIndex, b1Text, { quiet = false } = {}) {
       if (!editor) return;
       // Resolved BEFORE the parse below, so every line number this function uses is
       // read after the last await rather than across one.
@@ -63312,13 +63491,13 @@ function _getFreshFieldRange(fieldName) {
       const arr = result.arrays[arrayIndex];
       if (!arr) {
         // No array at this index — create a fresh scaffold (handles "no banks at all")
-        await _addFirstPreset(result.bladeCount || 1);
+        await _addFirstPreset(result.bladeCount || 1, b1Text);
         return;
       }
       if (!arr.presets.length) {
         // Active array exists but is empty — insert the first entry into THIS specific array
         // (not into whatever Preset block appears first in source)
-        await _insertFirstEntryIntoArray(arr, arrayIndex, result.bladeCount || 1);
+        await _insertFirstEntryIntoArray(arr, arrayIndex, result.bladeCount || 1, b1Text);
         return;
       }
 
@@ -63340,8 +63519,7 @@ function _getFreshFieldRange(fieldName) {
       const indent  = (refLine.match(/^(\s*)/) || ['', ''])[1];
       const inner   = indent + '  ';
 
-      const styleLines = [];
-      for (let i = 0; i < bladeCount; i++) styleLines.push(`${inner}StylePtr<Black>(),`);
+      const styleLines = _newPresetSlotTexts(arr, bladeCount, b1Text || EMPTY_SLOT_EXPR).map(t => `${inner}${t},`);
       const newText = [
         `${indent}{ "${seed}", "",`,
         ...styleLines,
@@ -63354,6 +63532,7 @@ function _getFreshFieldRange(fieldName) {
         range: { startLineNumber: insertLine, startColumn: 1, endLineNumber: insertLine, endColumn: 1 },
         text: newText,
       }]);
+      if (quiet) { _scheduleRebuild(); return; }
       editor.focus();
       _selectedPresetIndex = Math.min(insertAtIndex, arr.presets.length);
 
@@ -63387,14 +63566,55 @@ function _getFreshFieldRange(fieldName) {
       }, 50);
     }
 
+    // ── The Style Library card menu's two verbs ─────────────────────────────── [B-541]
+    // Add: a new preset at the end of the bank, the style on B1, the other blades in the bank's
+    // pattern (_newPresetSlotTexts). Replace: the style onto the chosen blade as copy-to writes it, so
+    // the preset keeps its colour and its wrappers and matched colours follow.
+    window._addPresetWithStyle = async (arrayIdx, styleName) => {
+      if (!editor || !styleName) return;
+      const r = presetParser.parsePresets(editor.getValue());
+      const arr = r.arrays[arrayIdx];
+      await _addPreset(arrayIdx, arr ? _jmtAppendPresetIndex(editor.getValue(), arr.presets.length) : 0,
+                       _jmtStyleSlotExpr(styleName), { quiet: true });
+    };
+    // Replace takes the blade: the style card's menu lists them under each preset. A preset's blades
+    // are named as the blade tiles' Copy to blade names them: "Blade 1 (B1)", or the blade's name and
+    // badge once named ("Main Blade (MB)").
+    window._presetBladeNames = (arrayIdx, presetIdx) => {
+      if (!editor) return [];
+      const arr = presetParser.parsePresets(editor.getValue()).arrays[arrayIdx];
+      const styles = arr?.presets?.[presetIdx]?.styles || [];
+      const abbrs = _computeAbbreviations(arr?.labels || {}, styles.length);
+      return styles.map((st, i) => ({ n: i + 1, has: !!(st && st.startLine),
+        name: `${arr?.labels?.[i + 1] || `Blade ${i + 1}`} (${abbrs[i] || `B${i + 1}`})` }))
+        .filter(b => b.has).map(({ n, name }) => ({ n, name }));
+    };
+    window._replaceBladeWithStyle = (arrayIdx, presetIdx, bladeNum, styleName) => {
+      if (!editor || !styleName) return false;
+      const r = presetParser.parsePresets(editor.getValue());
+      const arr = r.arrays[arrayIdx];
+      const preset = arr?.presets?.[presetIdx];
+      const slot = preset?.styles?.[bladeNum - 1];
+      if (!slot || !slot.startLine) return false;
+      const here = { arr, preset, bladeNum };
+      const text = _keepMatchedColor(here, _jmtStyleSlotExpr(styleName));
+      if (presetParser.sameExpr(editor.getModel().getValueInRange(_slotRange(slot)), text)) {
+        showToast('Already has this style.');
+        return false;
+      }
+      _atomicEdit(editor, 'copy-style', [{ range: _slotRange(slot), text }, ..._propagationAt(here, text)]);
+      _scheduleRebuild();
+      return true;
+    };
+
     // ── Insert the first entry into a specific (empty) Preset array ───────────
     // Used when the active bank exists but has no entries — picks THAT bank specifically
     // rather than falling back to a regex match (which would find the first Preset block).
-    async function _insertFirstEntryIntoArray(arr, arrayIndex, bladeCount) {
+    async function _insertFirstEntryIntoArray(arr, arrayIndex, bladeCount, b1Text) {
       const seed = await _newPresetFontSeed();
       const indent = '  ';
       const styleLines = [];
-      for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
+      for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}${(i === 0 && b1Text) || EMPTY_SLOT_EXPR},`);
       const entryText = [
         `{ "${seed}", "",`,
         ...styleLines,
@@ -63451,12 +63671,12 @@ function _getFreshFieldRange(fieldName) {
     }
 
     // ── Add first preset when no Preset[] block exists or it's empty ───────────
-    async function _addFirstPreset(bladeCount) {
+    async function _addFirstPreset(bladeCount, b1Text) {
       const seed = await _newPresetFontSeed();
       if (!editor) return;
       const indent = '  ';
       const styleLines = [];
-      for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}StylePtr<Black>(),`);
+      for (let i = 0; i < bladeCount; i++) styleLines.push(`${indent}${(i === 0 && b1Text) || EMPTY_SLOT_EXPR},`);
       const entryText = [
         `{ "${seed}", "",`,
         ...styleLines,
@@ -64113,80 +64333,7 @@ function _getFreshFieldRange(fieldName) {
       return ((lines[lineNo - 1] || '').match(/^\s*/) || [''])[0];
     }
 
-    /**
-     * Rewrite the @jmt-labels line under the new numbering.
-     *
-     * The NAME FOLLOWS THE BLADE, never the slot - but names are stored BY POSITION, so a move has
-     * to rewrite which number holds which name. Get this wrong and every blade is silently
-     * mislabelled, which is the same invisible-failure class as the reorder itself.
-     */
-    function _renumberLabelsEdit(arr, lines, map) {
-      if (arr.labelLine === null) return null;
-      const renumbered = presetParser.renumberLabels(arr.labels || {}, map);
-      const pairs = Object.keys(renumbered)
-        .map(Number)
-        .sort((a, b) => a - b)
-        .map(n => `B${n}="${renumbered[n]}"`);
-      if (!pairs.length) return null;
-      const old = lines[arr.labelLine - 1] || '';
-      return {
-        range: { startLineNumber: arr.labelLine, startColumn: 1,
-                 endLineNumber:   arr.labelLine, endColumn: old.length + 1 },
-        text: `${_lineIndent(lines, arr.labelLine)}// @jmt-labels: ${pairs.join(' ')}`,
-      };
-    }
-
-    /**
-     * Rewrite the @jmt-follow line under the new numbering, dropping any pair the move inverted.
-     *
-     * A follower may only mirror a LOWER-numbered blade - that is what makes cycles impossible by
-     * construction rather than by detection. A reorder can violate it: move a follower above its
-     * target and the pair becomes a forward reference, which the parser drops anyway.
-     *
-     * So the pair is dropped HERE, deliberately and reported. Nothing is lost but future
-     * propagation: every preset keeps the text it already has, exactly as it does when following is
-     * switched off, and the user can turn it back on in the new direction with one click. The
-     * alternative - permitting forward references - would trade a structural guarantee for a class
-     * of cycle bugs, to save that one click. (2026-08-24)
-     */
-    function _renumberFollowsEdit(arr, lines, map) {
-      if (arr.followLine === null) return { edit: null, dropped: 0 };
-      const { kept: keptMap, dropped } = presetParser.renumberFollows(arr.follows || {}, map);
-      const kept = Object.keys(keptMap).map(f => [Number(f), keptMap[f]]);
-      const old = lines[arr.followLine - 1] || '';
-      if (!kept.length) {
-        // Nothing left to declare, so the line goes rather than sitting there empty.
-        //
-        // THE TRAILING BLANK GOES ONLY IF REMOVING THIS LINE WOULD LEAVE TWO BLANKS TOUCHING.
-        // (2026-08-29) It used to go whenever it existed, which is right when the follow line is
-        // alone - `{`, blank, follow, blank, preset collapses to one separator - and wrong when a
-        // labels line sits above it, where that blank is the separator between the comment block
-        // and the first preset. Deleting a lone pair then left `// @jmt-labels: ...` butting
-        // straight into `{ "Jinn_EP1;common", ...`.
-        const prevBlank = (lines[arr.followLine - 2] || '').trim() === '';
-        const nextLine  = lines[arr.followLine];
-        const endLine   = (nextLine !== undefined && nextLine.trim() === '' && prevBlank)
-          ? arr.followLine + 2
-          : arr.followLine + 1;
-        return {
-          edit: { range: { startLineNumber: arr.followLine, startColumn: 1,
-                           endLineNumber:   endLine,        endColumn: 1 }, text: '' },
-          dropped,
-        };
-      }
-      kept.sort((a, b) => a[0] - b[0]);
-      return {
-        edit: {
-          range: { startLineNumber: arr.followLine, startColumn: 1,
-                   endLineNumber:   arr.followLine, endColumn: old.length + 1 },
-          text: `${_lineIndent(lines, arr.followLine)}// @jmt-follow: `
-              + kept.map(([f, t]) => `B${f}=B${t}`).join(' '),
-        },
-        dropped,
-      };
-    }
-
-    /** Move a blade from one position to another, in every preset in the bank. */
+    /** Move a blade from one position to another, in every preset in every bank. */
     function _reorderBlades(fromIdx, toIdx) {
       if (!editor || fromIdx === toIdx) return;
       const model  = editor.getModel();
@@ -64200,42 +64347,52 @@ function _getFreshFieldRange(fieldName) {
       const bladeCount = parsed.bladeCount || 0;
       let changed = 0, skipped = 0;
 
-      // A short preset moves too: its open slots move as placeholders. A preset with no styles at
-      // all has nothing to anchor an edit to and is reported. (B-355)
-      for (const preset of arr.presets) {
-        const offs = _presetSlotOffsets(model, preset);
-        if (!offs.length) { skipped++; continue; }
-        const edit = _reorderRunEdit(model, full, offs, bladeCount, fromIdx, toIdx);
-        if (edit) { edits.push(edit); changed++; }
-      }
+      // EVERY BANK MOVES. A blade is the saber's, and the names are too: "A blade is a blade and it
+      // shared for the entire config." Moving it in one bank left every other bank lighting it in
+      // the old order under names that had moved. (B-541)
+      const disabled = _scanDisabledPresets(full);
+      for (const bank of parsed.arrays) {
+        // A short preset moves too: its open slots move as placeholders. A preset with no styles at
+        // all has nothing to anchor an edit to and is reported. (B-355)
+        for (const preset of bank.presets) {
+          const offs = _presetSlotOffsets(model, preset);
+          if (!offs.length) { skipped++; continue; }
+          const edit = _reorderRunEdit(model, full, offs, bladeCount, fromIdx, toIdx);
+          if (edit) { edits.push(edit); changed++; }
+        }
 
-      // Disabled presets move too, and it matters MORE here than it does for follow. A missing slot
-      // comes back flagged in red; a preset left in the OLD ORDER comes back looking perfectly fine
-      // and lighting the wrong blade.
-      const blocks = _scanDisabledPresets(full)
-        .filter(b => b.startLine > arr.startLine && b.endLine < arr.endLine);
-      for (const b of blocks) {
-        const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
-        const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
-        const innerText  = full.slice(innerStart, innerEnd);
-        const offs = presetParser.extractStyleSlots(innerText)
-          .map(s => ({ start: innerStart + s.startOffset, end: innerStart + s.endOffset }));
-        if (!offs.length) { skipped++; continue; }
-        const edit = _reorderRunEdit(model, full, offs, bladeCount, fromIdx, toIdx);
-        if (edit) { edits.push(edit); changed++; }
+        // Disabled presets move too, and it matters MORE here than it does for follow. A missing
+        // slot comes back flagged in red; a preset left in the OLD ORDER comes back looking
+        // perfectly fine and lighting the wrong blade.
+        const blocks = disabled
+          .filter(b => b.startLine > bank.startLine && b.endLine < bank.endLine);
+        for (const b of blocks) {
+          const innerStart = model.getOffsetAt({ lineNumber: b.startLine + 1, column: 1 });
+          const innerEnd   = model.getOffsetAt({ lineNumber: b.endLine,       column: 1 });
+          const innerText  = full.slice(innerStart, innerEnd);
+          const offs = presetParser.extractStyleSlots(innerText)
+            .map(s => ({ start: innerStart + s.startOffset, end: innerStart + s.endOffset }));
+          if (!offs.length) { skipped++; continue; }
+          const edit = _reorderRunEdit(model, full, offs, bladeCount, fromIdx, toIdx);
+          if (edit) { edits.push(edit); changed++; }
+        }
       }
 
       if (!edits.length) return;
 
       // Renumbering rides along in the SAME edit. Split into two undo steps there would be a
       // reachable state where the styles have moved and the names still point at the old positions.
-      const count      = Math.max(parsed.bladeCount || 0,
-                                  ...arr.presets.map(p => (p.styles || []).length));
-      const map        = presetParser.planBladeReorder(count, fromIdx, toIdx);
-      const labelEdit  = _renumberLabelsEdit(arr, lines, map);
-      const followInfo = _renumberFollowsEdit(arr, lines, map);
-      if (labelEdit)       edits.push(labelEdit);
-      if (followInfo.edit) edits.push(followInfo.edit);
+      const count = Math.max(parsed.bladeCount || 0,
+                             ...parsed.arrays.flatMap(a => a.presets.map(p => (p.styles || []).length)));
+      const map   = presetParser.planBladeReorder(count, fromIdx, toIdx);
+      // A follow pair the move inverts (follower now above its target) is dropped, deliberately and
+      // reported: a follower only ever mirrors a lower-numbered blade, which keeps cycles
+      // impossible. Every preset keeps the text it has; only future propagation goes.
+      const followInfo = presetParser.renumberFollows(arr.follows, map);
+      edits.push(..._bladeLinesEdits(parsed, lines, {
+        labels:  presetParser.renumberLabels(arr.labels, map),
+        follows: followInfo.kept,
+      }));
 
       _atomicEdit(editor, 'blade-reorder', edits);
       editor.focus();
