@@ -32462,6 +32462,14 @@ require(['vs/editor/editor.main'], function () {
       // knows the paste fired but was rejected (vs. nothing happening
       // because the click didn't register). onSuccess receives the
       // pasted URL string for any post-paste bookkeeping.
+      // The × in a link box: the same as selecting the text and deleting it. The box is left open and
+      // changed; ✓ commits it and Escape puts it back.
+      const _sfClearUrlInput = (inputEl) => {
+        if (!inputEl) return;
+        inputEl.value = '';
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.focus();
+      };
       const _sfTryPasteUrlInto = async (inputEl, onSuccess) => {
         if (!inputEl) return false;
         // Read via the main process (Electron clipboard) — the renderer's
@@ -38596,14 +38604,7 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfSourceEdit?.downloadUrl) return;
         window.electronAPI.openExternal(_sfSourceEdit.downloadUrl);
       });
-      _sfSourceDetailEls.downloadClear?.addEventListener('click', () => {
-        if (!_sfSourceEdit) return;
-        if (_sfSourceEdit.downloadUrl) {
-          _sfSourceEdit.downloadUrl = '';
-          _sfMarkSourceDirty();
-        }
-        if (_sfSourceDetailEls.downloadInput) _sfSourceDetailEls.downloadInput.value = '';
-      });
+      _sfSourceDetailEls.downloadClear?.addEventListener('click', () => _sfClearUrlInput(_sfSourceDetailEls.downloadInput));
       _sfSourceDetailEls.downloadPaste?.addEventListener('click', async () => {
         if (!_sfSourceEdit || !_sfSourceDetailEls.downloadInput) return;
         await _sfTryPasteUrlInto(_sfSourceDetailEls.downloadInput, (url) => {
@@ -38611,22 +38612,8 @@ require(['vs/editor/editor.main'], function () {
           _sfMarkSourceDirty();
         });
       });
-      _sfSourceDetailEls.websiteClear?.addEventListener('click', () => {
-        if (!_sfSourceEdit) return;
-        if (_sfSourceEdit.vendorWebsite) {
-          _sfSourceEdit.vendorWebsite = '';
-          _sfMarkSourceDirty();
-        }
-        if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = '';
-      });
-      _sfSourceDetailEls.linkClearBtn?.addEventListener('click', () => {
-        if (!_sfSourceEdit) return;
-        if (_sfSourceEdit.linkUrl) {
-          _sfSourceEdit.linkUrl = '';
-          _sfMarkSourceDirty();
-        }
-        if (_sfSourceDetailEls.linkInput) _sfSourceDetailEls.linkInput.value = '';
-      });
+      _sfSourceDetailEls.websiteClear?.addEventListener('click', () => _sfClearUrlInput(_sfSourceDetailEls.websiteInput));
+      _sfSourceDetailEls.linkClearBtn?.addEventListener('click', () => _sfClearUrlInput(_sfSourceDetailEls.linkInput));
       _sfSourceDetailEls.websitePaste?.addEventListener('click', async () => {
         if (!_sfSourceEdit || !_sfSourceDetailEls.websiteInput) return;
         await _sfTryPasteUrlInto(_sfSourceDetailEls.websiteInput, (url) => {
@@ -44135,24 +44122,8 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfDetailEdit?.linkUrl) return;
         window.electronAPI.openExternal(_sfDetailEdit.linkUrl);
       });
-      _sfEntryDetailEls.demoClear?.addEventListener('click', () => {
-        if (!_sfDetailEdit) return;
-        if (_sfDetailEdit.demoUrl) {
-          _sfDetailEdit.demoUrl = '';
-          _sfMarkDetailDirty();
-        }
-        if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = '';
-        _sfSyncLinkDisplay();
-      });
-      _sfEntryDetailEls.linkClearBtn?.addEventListener('click', () => {
-        if (!_sfDetailEdit) return;
-        if (_sfDetailEdit.linkUrl) {
-          _sfDetailEdit.linkUrl = '';
-          _sfMarkDetailDirty();
-        }
-        if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = '';
-        _sfSyncLinkDisplay();
-      });
+      _sfEntryDetailEls.demoClear?.addEventListener('click', () => _sfClearUrlInput(_sfEntryDetailEls.demoInput));
+      _sfEntryDetailEls.linkClearBtn?.addEventListener('click', () => _sfClearUrlInput(_sfEntryDetailEls.linkInput));
       // Inline paste buttons. Read clipboard, overwrite the input on
       // a valid URL (committing into the in-memory edit so Save catches
       // it), flash the input red on an invalid clipboard.
