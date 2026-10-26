@@ -51210,6 +51210,85 @@ require(['vs/editor/editor.main'], function () {
         // It already edits the tags the selection shares (remove one from all, add one to all),
         // and the menu has already made the right-clicked card the selection, so delegating to
         // the button is the whole feature, same as Duplicate below.
+        // Paste an image, a Demo or a Link onto this one font, the same as the font window's Paste
+        // buttons, without opening it. Commits at once; "Replace" when one is already set. The Link
+        // is the source's, so on a bundle it says how many fonts share it. Greyed with the reason
+        // once the clipboard turns out to hold nothing usable. [B-558]
+        if (!_many) {
+          const _ent = (_sfAllEntries || []).find((x) => x && x.name === fontName) || {};
+          const _m = _ent.meta || {};
+          const _srcU = _m.sourceUuid || null;
+          const _shares = _srcU ? (_sfAllEntries || []).filter((x) => x.meta && x.meta.sourceUuid === _srcU).length : 0;
+          const _srcLink = _srcU ? (((_sfAllSourcesByUuid[_srcU] || {}).meta || {}).linkUrl || '') : '';
+          const _after = async () => { try { await window.refreshSoundFontsView(); } catch {} };
+          const _clipUrl = async () => {
+            let t = '';
+            try { t = String(await window.electronAPI.readClipboard() || '').trim(); } catch {}
+            return _sfIsHttpUrl(t) ? t : '';
+          };
+          const _grey = (el, why) => { if (!el) return; el.classList.add('disabled'); el.title = why; el.dataset.off = '1'; };
+          let _ownPic = null;
+          const imgItem = mkItem('Paste image', null, async () => {
+            if (imgItem.dataset.off) return;
+            await _sfPasteImageVia(async (fp) => {
+              if (await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: _ownPic && _ownPic.subPath, filePath: fp })) await _after();
+            }, null);
+          });
+          const linksItem = mkItem('Update links', { cls: 'has-submenu' }, null);
+          const _linkRows = [
+            { label: _m.demoUrl ? 'Replace Demo with paste' : 'Paste as Demo',
+              run: async (url) => window.electronAPI.updateEntryMeta({ currentName: fontName, updates: { demoUrl: url } }) },
+          ];
+          if (_srcU) _linkRows.push({
+            label: (_srcLink ? 'Replace Link with paste' : 'Paste as Link') + (_shares > 1 ? ` (${_allOf(_shares)} fonts from its source)` : ''),
+            run: async (url) => window.electronAPI.updateSourceMeta({ uuid: _srcU, updates: { linkUrl: url } }),
+          });
+          let _urlOk = true;
+          const buildLinksSubmenu = () => {
+            const sub = _sfPresetCtxSubmenu();
+            sub.innerHTML = '';
+            sub.style.minWidth = '180px';
+            for (const row of _linkRows) {
+              const item = document.createElement('div');
+              item.className = 'preset-ctx-item' + (_urlOk ? '' : ' disabled');
+              if (!_urlOk) item.title = 'There is no web link on the clipboard';
+              item.textContent = row.label;
+              item.addEventListener('mousedown', async (ev) => {
+                ev.stopPropagation();
+                ev.preventDefault();
+                if (!_urlOk) return;
+                _sfCloseCardCtxMenus();
+                const url = await _clipUrl();
+                if (!url) return;
+                try { await row.run(url); } catch (err) { promptError('Could not save the link', String(err && err.message || err)); return; }
+                await _after();
+              });
+              sub.appendChild(item);
+            }
+            const rect = linksItem.getBoundingClientRect();
+            sub.style.display = 'block';
+            sub.style.left = `${rect.right - 2}px`;
+            sub.style.top = `${rect.top - 4}px`;
+            requestAnimationFrame(() => {
+              const subRect = sub.getBoundingClientRect();
+              if (subRect.right > window.innerWidth - 8) sub.style.left = `${Math.max(8, rect.left - subRect.width + 2)}px`;
+              if (subRect.bottom > window.innerHeight - 8) sub.style.top = `${Math.max(8, window.innerHeight - subRect.height - 8)}px`;
+            });
+          };
+          linksItem.addEventListener('mouseenter', buildLinksSubmenu);
+          linksItem.addEventListener('mousedown', (ev) => { ev.stopPropagation(); buildLinksSubmenu(); });
+          (async () => {
+            let hasImg = false;
+            try { hasImg = !!(await window.electronAPI.clipboardHasImage()); } catch {}
+            const _copied = _sfFileClipboard && _sfFileClipboard.paths.length === 1
+              && /\.(png|jpe?g|gif|webp|bmp)$/i.test(_sfFileClipboard.paths[0]);
+            try { const r = await window.electronAPI.findEntryPicture({ name: fontName }); _ownPic = r && r.ok && r.picture && r.picture.origin === 'own' ? r.picture : null; } catch {}
+            if (_ownPic && !imgItem.dataset.off) imgItem.textContent = 'Replace image with paste';
+            if (!hasImg && !_copied) _grey(imgItem, 'There is no image on the clipboard');
+            _urlOk = !!(await _clipUrl());
+            if (!_urlOk) linksItem.title = 'There is no web link on the clipboard';
+          })();
+        }
         mkItem(`Tags${_sfx(_n)}…`, null, () => {
           document.getElementById('btn-sf-bulk-tag')?.click();
         });
@@ -51630,8 +51709,10 @@ require(['vs/editor/editor.main'], function () {
         // Hide submenu when hovering a sibling item that isn't the
         // submenu parent. (The submenu itself stays visible while the
         // user moves into it.)
+        // Every item that opens a submenu is skipped, or its own hover opens the submenu and this
+        // closes it in the same moment, leaving only a click to open it.
         menu.querySelectorAll('.preset-ctx-item').forEach(item => {
-          if (item === replaceItem) return;
+          if (item === replaceItem || item.classList.contains('has-submenu')) return;
           item.addEventListener('mouseenter', () => {
             const sub = _sfPresetCtxSubmenu();
             if (sub) { sub.style.display = 'none'; sub.innerHTML = ''; }
