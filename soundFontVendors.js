@@ -18,9 +18,7 @@ const vendors = [
   {
     id: 'jmtsabers',
     displayName: 'JMT Sabers',
-    website: 'https://jmtsabers.com',
-    purchasedDefault: false,
-    patterns: [
+    website: 'https://jmtsabers.com',    patterns: [
       {
         type: 'readmeContent',
         fileMatch: /(^|\/)readme\.txt$/i,
@@ -43,9 +41,7 @@ const vendors = [
   {
     id: 'nosloppy',
     displayName: 'Brian Conner (NoSloppy)',
-    website: 'https://www.buymeacoffee.com/BrianConner',
-    purchasedDefault: false,
-    patterns: [
+    website: 'https://www.buymeacoffee.com/BrianConner',    patterns: [
       {
         type: 'readmeContent',
         fileMatch: /(^|\/)a_ReadMe\.txt$/i,
@@ -167,9 +163,7 @@ const vendors = [
   {
     id: 'orlandodove',
     displayName: 'Orlando Dove',
-    website: null,
-    purchasedDefault: false, // Distributed free via YouTube
-    patterns: [
+    website: null,    patterns: [
       {
         type: 'structuralAll',
         requireAll: [
@@ -310,9 +304,7 @@ const vendors = [
   {
     id: 'dayadjocen',
     displayName: 'Dayad Jocen',
-    website: 'http://therebelarmory.com/user/1738', // from TthCrstl readme
-    purchasedDefault: false, // default SD font (TthCrstl), free
-    patterns: [
+    website: 'http://therebelarmory.com/user/1738', // from TthCrstl readme    patterns: [
       {
         type: 'readmeContent',
         fileMatch: /(^|\/)(read[\s_-]?me)[^/]*\.(txt|rtf|md)$/i,
@@ -323,9 +315,7 @@ const vendors = [
   {
     id: 'thexter',
     displayName: 'Thexter',
-    website: 'http://therebelarmory.com/user/2475', // from TthCrstl readme
-    purchasedDefault: false, // default SD fonts (RgueCmdr, SmthFuzz/Grey/Jedi), free
-    patterns: [
+    website: 'http://therebelarmory.com/user/2475', // from TthCrstl readme    patterns: [
       {
         // "Smoothswing sound font for ProffieOS by Thexter." — anchored on
         // "font [for OS] by Thexter" so the algorithm-credit phrasing
@@ -343,9 +333,7 @@ const vendors = [
   {
     id: 'lordblako',
     displayName: 'Lord Blako',
-    website: 'https://www.krsabers.com', // TeensySF copyright names KRSABERS.COM
-    purchasedDefault: false, // default SD font (TeensySF), free
-    patterns: [
+    website: 'https://www.krsabers.com', // TeensySF copyright names KRSABERS.COM    patterns: [
       {
         // "Teensy - a SmoothSwing V2 font by Lord Blako."
         type: 'readmeContent',
@@ -359,9 +347,7 @@ const vendors = [
     displayName: 'Lord Nikahn',
     // Credited at BlueForce Company but no standalone maker site is known,
     // so fall back to the canonical profezzorn default-set release page.
-    website: 'https://github.com/profezzorn/SoundFonts/releases/tag/v2.0',
-    purchasedDefault: false, // default SD font (LiquidStatic), free
-    patterns: [
+    website: 'https://github.com/profezzorn/SoundFonts/releases/tag/v2.0',    patterns: [
       {
         // '"Liquid Static" by Lord Nikahn at BlueForce Company' — "Lord
         // Nikahn" is distinctive enough that the bare "by" idiom is safe,
@@ -381,7 +367,7 @@ const vendors = [
   // readme content, then two structural file/shape checks) so even
   // most Greyscale fonts skip the broad scan.
   {
-    // BVM Sabers — 26 free fonts and one paid (£5), all shipping a readme that
+    // BVM Sabers — mostly free fonts and some paid, all shipping a readme that
     // names the creator. Added 2026-10-07 after an import came through with no
     // creator match at all: the table was seeded from the 2026-06-11 archive
     // crawl and this creator was not in it. [B-484]
@@ -398,10 +384,6 @@ const vendors = [
     // handle ("facebook.com/BVMsabers"). A pattern written against the paid
     // readme's wording matches none of the 26 free fonts.
     //
-    // purchasedDefault is false because 26 of 27 are free. It is only a default,
-    // and a single boolean cannot express a mixed catalogue — the paid font needs
-    // the box changed by hand.
-    //
     // WHY A HARDCODED ROW WHEN LEARNED MATCHING ALREADY FINDS THIS CREATOR:
     // the learned layer only fires once the user has already labelled a source
     // from them by hand, and it is deliberately a SUGGESTION. A curated row makes
@@ -414,9 +396,7 @@ const vendors = [
     // was seeded with a deep link to the font listing, which is where a crawl lands rather than
     // where a creator would say their site is. A vendor website is an identity, not a route into
     // their catalogue, and a deep path is the part most likely to rot.
-    website: 'https://www.bvm-sabers.co.uk/',
-    purchasedDefault: false,
-    patterns: [
+    website: 'https://www.bvm-sabers.co.uk/',    patterns: [
       {
         type: 'readmeContent',
         fileMatch: /(^|\/)read\s?me\.txt$/i,

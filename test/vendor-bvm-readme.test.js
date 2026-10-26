@@ -38,8 +38,10 @@ if (!row) { console.log(`\n${failed} failure(s)`); process.exit(1); }
 
 ok('display name is the one he entered himself', row.displayName === 'BVM Sabers',
    `got ${JSON.stringify(row.displayName)} — his own export of this source records "BVM Sabers"`);
-ok('free is the default for a 26-free / 1-paid catalogue', row.purchasedDefault === false,
+ok('no free default: free comes only from the word in the name or the user', row.purchasedDefault !== false,
    `got ${JSON.stringify(row.purchasedDefault)}`);
+const freeRows = vendors.filter(v => v.purchasedDefault === false).map(v => v.id);
+ok('no creator in the table defaults to free', freeRows.length === 0, `free by default: ${freeRows.join(', ')}`);
 ok('the row carries a website', /^https?:\/\/.+/.test(row.website || ''),
    `got ${JSON.stringify(row.website)}`);
 
