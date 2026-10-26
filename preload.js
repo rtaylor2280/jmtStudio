@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeSerial: (text)                  => ipcRenderer.invoke('serial:write',  { text }),
   isSerialOpen: ()                     => ipcRenderer.invoke('serial:isOpen'),
   probeBoardVersion: (port)            => ipcRenderer.invoke('serial:probeVersion', { port }),
+  restartBoardAfterEject: (boardSerial, portPath) => ipcRenderer.invoke('board:restartAfterEject', { boardSerial, portPath }),
+  boardPortForSerial: (boardSerial) => ipcRenderer.invoke('board:portForSerial', { boardSerial }),
+  boardSdSharedInApp: (portPath) => ipcRenderer.invoke('board:sdSharedInApp', { portPath }),
   onSerialData: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('serial:data', handler);

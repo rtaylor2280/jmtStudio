@@ -3641,9 +3641,12 @@ ipcMain.handle('fs:removeSetAside', async (_, { target } = {}) => {
 // (`E:\`, `/Volumes/NAME`, `/media/<user>/NAME`). Changing this now, while only Windows is
 // implemented, is what makes the macOS and Linux ports additions behind an unchanged seam
 // rather than a signature change that would force the Windows paths to be retested.
-ipcMain.handle('media:eject', async (_, { destDir, timeoutMs } = {}) => {
+ipcMain.handle('media:eject', async (_, { destDir, timeoutMs, stableMs } = {}) => {
   try {
-    const r = await require('./safeEject').ejectVolume(destDir, { timeoutMs });
+    const se = require('./safeEject');
+    // Only ever SHORTER than the default watch; see ejectVolume.
+    const st = Number.isFinite(stableMs) ? Math.max(0, Math.min(stableMs, se.STABLE_MS)) : undefined;
+    const r = await se.ejectVolume(destDir, { timeoutMs, ...(st === undefined ? {} : { stableMs: st }) });
     return { ok: true, result: r };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
@@ -6808,6 +6811,17 @@ function _closeSerialMonitor() {
   try { if (sp.isOpen) sp.close(() => {}); } catch {}
 }
 
+// THE JMT STUDIO WAY IS FIRST CLASS. When `sd 1` goes through this monitor and the board answers
+// "SD Access ON", two things are KNOWN rather than assumed: the board has MOUNT_SD_SETTING (the
+// command does not exist without it), and its card reached the computer because it was asked to.
+// Such a card cannot come back on its own after an eject, so the eject skips its stay-gone watch
+// and the board's reset goes out at once. The note: "first class for following the JMT Studio
+// way... if we did it in app then we know. and we know it was accepted". By port; outlives the
+// monitor closing, since the answer is about the board.
+const _sdSharedInApp = new Map();
+ipcMain.handle('board:sdSharedInApp', (_, { portPath } = {}) =>
+  ({ ok: true, shared: !!portPath && _sdSharedInApp.get(String(portPath).toUpperCase()) === true }));
+
 ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
   if (!port) return { ok: false, error: 'No port specified' };
   await _abortVersionProbe?.();  // the monitor owns the port; a probe must not block it
@@ -6823,8 +6837,13 @@ ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
       sp.open(err => err ? reject(err) : resolve());
     });
     _serialMonitorPort = sp;
+    let _sdTail = '';
     sp.on('data', chunk => {
-      _broadcastSerial('serial:data', { text: chunk.toString('utf8') });
+      const text = chunk.toString('utf8');
+      _sdTail = (_sdTail + text).slice(-64);   // a reply can arrive split across chunks
+      const m = _sdTail.match(/SD Access (ON|OFF)(?![\s\S]*SD Access (?:ON|OFF))/);
+      if (m) { _sdSharedInApp.set(String(port).toUpperCase(), m[1] === 'ON'); _sdTail = ''; }
+      _broadcastSerial('serial:data', { text });
     });
     sp.on('close', () => {
       // Could be intentional (we asked) or external (board unplugged). Either
@@ -6866,6 +6885,111 @@ ipcMain.handle('serial:write', async (_, { text }) => {
     }
   });
 });
+
+// Restarts the board with this serial number by sending `reset`, after its card was ejected, so
+// the board mounts its card again. Through the Serial Monitor's connection when it is open on
+// that board; otherwise the port is opened, written and closed, as the version probe does.
+// Status: 'restarted' (with `back` / `ready`, see _boardPortCameBack), 'busy'
+// (another program holds the port), 'no-port' (no serial port with that serial number), 'failed'.
+// The board's port, by serial number. ~2 s (arduino-cli's list is the only one carrying the board's
+// serial), so the eject surfaces ask BEFORE the eject and hand the answer to the restart below.
+async function _boardPortForSerial(boardSerial) {
+  const sn = String(boardSerial || '').toUpperCase();
+  if (!sn) return null;
+  try {
+    const lp = await portDetect.listPorts();
+    const hit = ((lp && lp.ports) || []).find(p => String(p.serialNumber || '').toUpperCase() === sn);
+    return hit ? hit.path : null;
+  } catch { return null; }
+}
+ipcMain.handle('board:portForSerial', async (_, { boardSerial } = {}) =>
+  ({ ok: true, port: await _boardPortForSerial(boardSerial) }));
+
+// `portPath`, when the caller already has it, skips the lookup: the reset has to go out before
+// someone who followed Windows' notice unplugs the board. Checked against the cheap port list.
+ipcMain.handle('board:restartAfterEject', async (_, { boardSerial, portPath: known } = {}) => {
+  const sn = String(boardSerial || '').toUpperCase();
+  if (!sn) return { ok: true, status: 'no-port' };
+  let portPath = null;
+  if (known) {
+    try {
+      const { SerialPort } = require('serialport');
+      const want = String(known).toUpperCase();
+      if ((await SerialPort.list()).some(p => String(p.path).toUpperCase() === want)) portPath = known;
+    } catch {}
+  }
+  if (!portPath) portPath = await _boardPortForSerial(sn);
+  if (!portPath) return { ok: true, status: 'no-port' };
+  _sdSharedInApp.delete(String(portPath).toUpperCase());   // a restarted board boots with access off
+
+  const sameAsMonitor = _serialMonitorPort && _serialMonitorPort.isOpen
+    && String(_serialMonitorPort.path).toUpperCase() === portPath.toUpperCase();
+  if (sameAsMonitor) {
+    const r = await new Promise(resolve => {
+      try {
+        _serialMonitorPort.write('reset\n', err => resolve(err
+          ? { ok: true, status: 'failed', error: err.message }
+          : { ok: true, status: 'restarted', via: 'monitor', port: portPath }));
+      } catch (e) { resolve({ ok: true, status: 'failed', error: String((e && e.message) || e) }); }
+    });
+    return r.status === 'restarted' ? { ...r, ...(await _boardPortCameBack(portPath)) } : r;
+  }
+
+  await _abortVersionProbe?.();
+  const { SerialPort } = require('serialport');
+  const sp = new SerialPort({ path: portPath, baudRate: 115200, autoOpen: false });
+  sp.on('error', () => {});   // the board drops the port as it restarts
+  const openErr = await new Promise(res => sp.open(e => res(e || null)));
+  if (openErr) {
+    const busy = /access denied|busy|EBUSY|EACCES|in use/i.test(openErr.message || '');
+    return { ok: true, status: busy ? 'busy' : 'failed', error: openErr.message, port: portPath };
+  }
+  const writeErr = await new Promise(res => {
+    try { sp.write('\nreset\n', e => (e ? res(e) : sp.drain(() => res(null)))); }
+    catch (e) { res(e); }
+  });
+  await new Promise(res => { try { sp.isOpen ? sp.close(() => res()) : res(); } catch { res(); } });
+  if (writeErr) return { ok: true, status: 'failed', error: writeErr.message, port: portPath };
+  return { ok: true, status: 'restarted', via: 'port', port: portPath, ...(await _boardPortCameBack(portPath)) };
+});
+
+// A restarting board drops its port and brings it back: `back` once both were seen. `ready` waits
+// further, until the port can be opened. Being listed again is not that: on the bench (2026-10-25)
+// the port was listed within a second but refused to open ("Unknown error code 433") for 15 s or
+// more in 2 of 5 restarts, and in use the listed-is-ready version always said ready
+// before Windows announced the device. Opening it is harmless: ProffieOS does not reset on open,
+// and nothing in the app reconnects to the port on its own.
+async function _boardPortCameBack(portPath) {
+  const { SerialPort } = require('serialport');
+  const want = String(portPath).toUpperCase();
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const here = async () => {
+    try { return (await SerialPort.list()).some(p => String(p.path).toUpperCase() === want); }
+    catch { return null; }
+  };
+  const opens = async () => {
+    const sp = new SerialPort({ path: portPath, baudRate: 115200, autoOpen: false });
+    sp.on('error', () => {});
+    const e = await new Promise(r => { try { sp.open(x => r(x || null)); } catch (x) { r(x); } });
+    if (!e) await new Promise(r => { try { sp.close(() => r()); } catch { r(); } });
+    return !e;
+  };
+  const t0 = Date.now();
+  let left = false, back = false;
+  while (!back && Date.now() - t0 < 8000) {
+    const h = await here();
+    if (h === false) left = true;
+    else if (h === true && left) back = true;
+    else if (!left && Date.now() - t0 > 2000) break;   // never dropped: no restart seen
+    if (!back) await sleep(50);
+  }
+  if (!back) return { back: false, ready: false };
+  while (Date.now() - t0 < 45000) {
+    if (await opens()) return { back: true, ready: true };
+    await sleep(250);
+  }
+  return { back: true, ready: false };
+}
 
 ipcMain.handle('serial:isOpen', () => {
   return { ok: true, isOpen: !!(_serialMonitorPort && _serialMonitorPort.isOpen) };

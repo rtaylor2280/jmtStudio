@@ -46327,6 +46327,7 @@ require(['vs/editor/editor.main'], function () {
           const TOAST_ID = 'sf-eject-ending';
           const base = `${lead} ${prep} ${t.label}.`;
           const setStatus = (status) => showToast(`${base} ${status}`, { id: TOAST_ID });
+          const boardP = _sfBoardOfMount(t.mountPath);
           const run = async () => {
             setStatus('Ejecting...');
             let res = null;
@@ -46335,7 +46336,9 @@ require(['vs/editor/editor.main'], function () {
               // reader is a different device, and swapping hardware between exports is exactly
               // what testing does - an inherited identity would report the old board.
               _sfDestIdentity.forget();
-              const r = await window.electronAPI.ejectMedia({ destDir: t.mountPath });
+              const inApp = await _sfSharedInApp(boardP);   // see the row: the JMT Studio way
+              const r = await window.electronAPI.ejectMedia({ destDir: t.mountPath,
+                ...(inApp ? { stableMs: 0 } : {}) });
               res = (r && r.ok && r.result) || null;
             } catch { res = null; }
             if (!res || res.status === 'unsupported') {
@@ -46344,9 +46347,12 @@ require(['vs/editor/editor.main'], function () {
             if (res.status === 'ejected') {
               // The same two words the eject row uses, so one state has one phrasing wherever it
               // is reported.
-              setStatus(res.alreadyGone ? 'Already removed.' : 'Safe to remove.');
+              const onBoard = !res.alreadyGone && await _sfIsBoardCard(boardP);
+              setStatus(res.alreadyGone ? 'Already removed.'
+                : onBoard ? `${SF_BOARD_RESTARTING}...` : 'Safe to remove.');
               // Any path on that volume printed elsewhere on screen now opens nothing.
-              _sfRetirePathLinks(target && target.mountPath);
+              _sfRetirePathLinks(t.mountPath);
+              if (onBoard) setStatus(await _sfRestartBoardAfterEject(boardP));
               return;
             }
             if (res.status === 'returned') {
@@ -46463,11 +46469,60 @@ require(['vs/editor/editor.main'], function () {
       // Wires the row up. `auto` is the checkbox having been ticked - it presses the button.
       // `onEjected` is optional and only the card report uses it today - see the note at the
       // 'ejected' branch below for why a surface that stays on screen needs it.
+      // A card ejected from a Proffieboard stays unusable to the saber until the board restarts,
+      // so after the eject the board is sent `reset`. Which board is looked up while the card is
+      // still mounted (`_sfBoardOfMount`, before the eject drops the volume; it has long resolved
+      // by the time the eject returns). Returns the whole status for a board card.
+      // A BOARD CARD IS NEVER "SAFE TO REMOVE". It stays in the board, so its statuses say Ejected
+      // and what the board is doing. The notes: "It says safe to remove. Technically not";
+      // "saber can use its" is personification; and "ready" must wait for Windows, which announces
+      // the device after the port is merely listed again (main waits until it opens).
+      // The board's PORT is looked up here too, for the same reason: it costs ~2 s, and after the
+      // eject that is long enough for someone following Windows' notice to unplug the board first.
+      const _sfBoardOfMount = (mountPath) =>
+        Promise.resolve().then(() => _sfDestIdentity.boardCard(mountPath))
+          .then(d => (d && d.transport === 'proffieboard'
+            ? { ...d, portP: Promise.resolve()
+                .then(() => window.electronAPI.boardPortForSerial(d.boardSerial || ''))
+                .then(r => (r && r.port) || null).catch(() => null) }
+            : d))
+          .catch(() => null);
+      const _sfIsBoardCard = async (boardP) => {
+        const d = await boardP;
+        return !!(d && d.transport === 'proffieboard');
+      };
+      // True only when `sd 1` was sent from this app's Serial Monitor and the board accepted it
+      // (main watches for "SD Access ON"): the case where the eject may skip its stay-gone watch.
+      const _sfSharedInApp = async (boardP) => {
+        const d = await boardP;
+        if (!d || d.transport !== 'proffieboard' || !d.portP) return false;
+        const port = await d.portP;
+        if (!port) return false;
+        try { const r = await window.electronAPI.boardSdSharedInApp(port); return !!(r && r.shared); }
+        catch { return false; }
+      };
+      const SF_BOARD_RESTARTING = 'Ejected. Board restarting';
+      const _sfRestartBoardAfterEject = async (boardP) => {
+        const d = await boardP;
+        let r = null;
+        const port = d && d.portP ? await d.portP : null;
+        try { r = await window.electronAPI.restartBoardAfterEject((d && d.boardSerial) || '', port); } catch {}
+        const st = r && r.status;
+        if (st === 'restarted' && r.ready) return 'Board restarted and ready to use.';
+        if (st === 'restarted' && r.back) return 'Board restarted.';
+        if (st === 'busy') return 'Ejected. Another program has the board’s serial port open, so it was not restarted. '
+          + 'Send reset from that program, or turn the saber off and on.';
+        return 'Ejected. Turn the saber off and on before using it.';
+      };
+      window._sfBoardOfMount = _sfBoardOfMount;
+      window._sfRestartBoardAfterEject = _sfRestartBoardAfterEject;
+
       const _sfWireEjectRow = ({ target, vocab, auto, onEjected }) => {
         const btn = document.getElementById('sf-eject-btn');
         const status = document.getElementById('sf-eject-status');
         if (!btn || !target) return;
         let busy = false;
+        const boardP = _sfBoardOfMount(target.mountPath);
         btn.addEventListener('click', async () => {
           if (busy) return;
           busy = true;
@@ -46479,8 +46534,12 @@ require(['vs/editor/editor.main'], function () {
           if (status) { status.textContent = 'Ejecting'; status.classList.add('busy-dots'); }
           let res = null;
           try {
+            // Shared from this app's monitor: skip the stay-gone watch (see ejectVolume), so the
+            // board's reset goes out before anyone following Windows' notice unplugs it.
+            const inApp = await _sfSharedInApp(boardP);
             _sfDestIdentity.forget();   // see the note on the toast path: a new card is a new device
-            const r = await window.electronAPI.ejectMedia({ destDir: target.mountPath });
+            const r = await window.electronAPI.ejectMedia({ destDir: target.mountPath,
+              ...(inApp ? { stableMs: 0 } : {}) });
             res = (r && r.ok && r.result) || null;
           } catch { res = null; }
 
@@ -46511,9 +46570,11 @@ require(['vs/editor/editor.main'], function () {
             // * Microsoft's own wording for this state is "Safe To Remove Hardware" and it
             // explains nothing further. A status line beside a button is not the place for a
             // paragraph about drive-letter behaviour.
+            const onBoard = !res.alreadyGone && await _sfIsBoardCard(boardP);
             if (status) {
-              status.classList.remove('busy-dots');
-              status.textContent = res.alreadyGone ? 'Already removed.' : 'Safe to remove.';
+              status.classList.toggle('busy-dots', onBoard);
+              status.textContent = res.alreadyGone ? 'Already removed.'
+                : onBoard ? SF_BOARD_RESTARTING : 'Safe to remove.';
               status.style.color = 'var(--c-ok, var(--c-text-sub))';
             }
             // [B-424, 2026-09-30] TELL THE CALLER THE VOLUME IS GONE. A summary dialog can
@@ -46526,6 +46587,10 @@ require(['vs/editor/editor.main'], function () {
             // thing - the volume is not there any more - and only reacting to a FRESH eject would
             // leave the stale listing up in the one case where it is most certainly wrong.
             try { if (typeof onEjected === 'function') onEjected(res); } catch {}
+            if (onBoard) {
+              const said = await _sfRestartBoardAfterEject(boardP);
+              if (status) { status.classList.remove('busy-dots'); status.textContent = said; }
+            }
             return;
           }
           if (res.status === 'returned') {

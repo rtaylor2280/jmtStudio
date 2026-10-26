@@ -318,7 +318,7 @@ const DEFAULT_EJECT_TIMEOUT_MS = 60000;
 // leave at all - so the caller, which has to choose between "never left" and "left and came
 // back", had no way to tell them apart and guessed from whether the card was present at that
 // instant. A card that releases and is re-mounted is present, so it was always "never left".
-async function waitForMediaGone(mountPath, timeoutMs = DEFAULT_EJECT_TIMEOUT_MS) {
+async function waitForMediaGone(mountPath, timeoutMs = DEFAULT_EJECT_TIMEOUT_MS, stableMs = STABLE_MS) {
   const t0 = Date.now();
   let goneSince = null;
   let everGone = false;
@@ -326,7 +326,7 @@ async function waitForMediaGone(mountPath, timeoutMs = DEFAULT_EJECT_TIMEOUT_MS)
     if (!mediaPresent(mountPath)) {
       everGone = true;    // latched: a bounce is still a release
       if (goneSince === null) goneSince = Date.now();
-      if (Date.now() - goneSince >= STABLE_MS) {
+      if (Date.now() - goneSince >= stableMs) {
         return { gone: true, ms: Date.now() - t0, everGone: true };
       }
     } else {
@@ -357,7 +357,11 @@ function resolveTarget(destDir) {
 //
 // 'busy' IS THE CASE THE FEATURE EXISTS FOR. It is the one where pulling the card WOULD have
 // been unsafe, and it is precisely what a reassuring "safe to remove" message hides.
-async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_MS } = {}) {
+// `stableMs` shortens the stay-gone watch for a card that cannot come back on its own: a card
+// behind a Proffieboard, which only reaches the computer again on `sd 1` or a boot. The watch is
+// there for readers that re-mount; there it only delays the board's restart, and in use,
+// following Windows' notice, the board is unplugged before the reset is ever sent.
+async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_MS, stableMs = STABLE_MS } = {}) {
   const p = plat();
   if (!p) return { status: 'unsupported', reason: `no platform support: ${process.platform}` };
 
@@ -387,7 +391,7 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
   // the very thing it watches for. That was tested while the eject was broken for an unrelated
   // reason, so it never got a clean answer. With the eject working, a `busy` from this line
   // means the poll really is the blocker.
-  const res = await waitForMediaGone(t.mountPath, timeoutMs);
+  const res = await waitForMediaGone(t.mountPath, timeoutMs, stableMs);
   if (res.gone) return { status: 'ejected', ...t, ms: res.ms, raw: inv.raw };
 
   // "WE COULD NOT ASK" IS NOT "SOMETHING HAS IT OPEN". When the volume offered no Eject verb
