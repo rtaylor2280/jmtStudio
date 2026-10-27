@@ -3730,18 +3730,12 @@
   .sf-entry-name-wrap > .detail-pencil,
   .sf-entry-name-wrap > .detail-confirm { flex: 0 0 auto; margin-right: auto; }
   /* Chromium browser autofill applies its own white background that
-     overrides custom CSS. Counter it across every SF modal so dark-
-     theme inputs stay dark when the browser tries to be helpful. The
+     overrides custom CSS (picking a suggestion from a datalist does it too).
+     Countered in every modal so inputs keep the theme's colours. The
      30px inset shadow draws over the browser's autofill highlight. */
-  #modal-sf-entry-detail input:-webkit-autofill,
-  #modal-sf-entry-detail input:-webkit-autofill:hover,
-  #modal-sf-entry-detail input:-webkit-autofill:focus,
-  #modal-sf-source-detail input:-webkit-autofill,
-  #modal-sf-source-detail input:-webkit-autofill:hover,
-  #modal-sf-source-detail input:-webkit-autofill:focus,
-  #modal-sf-import input:-webkit-autofill,
-  #modal-sf-import input:-webkit-autofill:hover,
-  #modal-sf-import input:-webkit-autofill:focus {
+  .modal input:-webkit-autofill,
+  .modal input:-webkit-autofill:hover,
+  .modal input:-webkit-autofill:focus {
     -webkit-box-shadow: 0 0 0 30px var(--c-bg-raised) inset !important;
     -webkit-text-fill-color: var(--c-text) !important;
     caret-color: var(--c-text) !important;
