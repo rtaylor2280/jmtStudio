@@ -10352,6 +10352,20 @@ function jmtOneAtATime(fn) {
   };
 }
 
+// Picking a suggestion in a tag box adds the tag, as Enter does. A pick fires an input event that is not
+// typing (no inputType, or insertReplacementText); a keystroke that happens to spell a tag adds nothing.
+// Each box's own Enter handler runs, so its rules (spelling, the free confirmation) apply. [B-565]
+const JMT_TAG_SUGGESTION_LISTS = ['sf-all-tags-datalist', 'style-all-tags-datalist'];
+document.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!el || el.tagName !== 'INPUT' || !JMT_TAG_SUGGESTION_LISTS.includes(el.getAttribute('list'))) return;
+  if (e.inputType && e.inputType !== 'insertReplacementText') return;
+  const v = String(el.value || '').trim().toLowerCase();
+  if (!v || !el.list) return;
+  if (!Array.from(el.list.options).some((o) => String(o.value).trim().toLowerCase() === v)) return;
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+}, true);
+
 function _preflightEsc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
