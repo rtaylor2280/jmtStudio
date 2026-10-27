@@ -11783,7 +11783,7 @@ function showDiff(visible) {
 
 async function startCompare(filePath) {
   const res = await window.electronAPI.readFile(filePath);
-  if (!res) { promptError('Compare', 'Could not read that file.'); return; }
+  if (!res) { promptError('Could not read that file', `${String(filePath).split(/[\\/]/).pop()} may have been moved, renamed or deleted.`); return; }
 
   _compareMode     = true;
   _compareFilePath = filePath;
@@ -13520,7 +13520,7 @@ async function _sdOpenConfigCopy(name, filePath) {
 async function _sdImportFontsFromCard() {
   const root = _sdActiveRoot();
   if (!root) return;
-  if (!window._sfBulkImportFromPath) { await promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  if (!window._sfBulkImportFromPath) { await promptConfirm({ title: 'Could not start the import', message: 'Restart JMT Studio and try again.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
   // The review's corrupt flags (unchecked-by-default + strip-on-import) ride
   // the root's dirs map, so it must be COMPLETE before the review opens
   // ([B-348]). If the browse badge job already finished this is instant;
@@ -13868,7 +13868,7 @@ async function _sdRenderBrowse() {
 function _sdImportTracksFolder(entry) {
   if (!entry || !entry.path) return;
   if (!window._sfTracksImportFromPath) {
-    promptConfirm({ title: 'Importer unavailable', message: 'The track importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+    promptConfirm({ title: 'Could not start the import', message: 'Restart JMT Studio and try again.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
     return;
   }
   const sdOv = document.getElementById('sd-report-overlay');
@@ -13887,7 +13887,7 @@ function _sdImportTracksFolder(entry) {
 function _sdImportCommonFolder(entry) {
   if (!entry || !entry.path) return;
   if (!window._sfBulkImportFromPath) {
-    promptConfirm({ title: 'Importer unavailable', message: 'The importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+    promptConfirm({ title: 'Could not start the import', message: 'Restart JMT Studio and try again.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
     return;
   }
   const sdOv = document.getElementById('sd-report-overlay');
@@ -13904,7 +13904,7 @@ async function _sdImportFolderToLibrary(entry) {
   if (!entry || !entry.path) return;
   // A single folder is NOT a bulk import — route it through the normal
   // single-source import (folder review), not the bulk modal.
-  if (!window._sfImportSourceFromPath) { promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  if (!window._sfImportSourceFromPath) { promptConfirm({ title: 'Could not start the import', message: 'Restart JMT Studio and try again.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
   // DAMAGE IS NO LONGER CHECKED HERE, AND THE REASON IS THAT THE PREMISE EXPIRED.
   //
   // This ran a subtree-health pass behind a progress overlay and REFUSED a corrupt font,
@@ -13962,7 +13962,7 @@ async function _sdImportSelected() {
     _sdImportFolderToLibrary({ path: p, name });
     return;
   }
-  if (!window._sfBulkImportFromPaths) { promptConfirm({ title: 'Importer unavailable', message: 'The font importer could not be reached.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
+  if (!window._sfBulkImportFromPaths) { promptConfirm({ title: 'Could not start the import', message: 'Restart JMT Studio and try again.', confirmText: 'OK', confirmKind: 'primary', hideCancel: true }); return; }
   const sdOv = document.getElementById('sd-report-overlay');
   const impModal = document.getElementById('modal-sf-bulk-import');
   sdOv.classList.remove('active');
