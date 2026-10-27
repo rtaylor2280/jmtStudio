@@ -1609,6 +1609,9 @@
   /* Above any underlying detail / reorganize modal (10000/10010), still
      below confirm-style prompts (10015) and the context menu (10020). */
   #modal-sf-audio { z-index: 10012; }
+  /* The file viewer opens from the same windows the player does (Add files from the library at 10010,
+     Reorganize), so it takes the player's layer: above them, below confirms and prompts (10015). [B-567] */
+  #modal-sf-doc-viewer { z-index: 10012; }
   #modal-sf-audio .modal.sf-audio-modal { position: relative; width: 520px; max-width: 92vw; padding: 18px 20px; }
   /* The pack's picture at the left, the full height of the player, as if the character is
      speaking; the player itself is unchanged to its right. */
@@ -3336,6 +3339,11 @@
   .sf-review-candidate-row .cand-demo-input:focus, .sf-guided-row .cand-demo-input:focus { border-color: var(--jmt-blue); }
   .sf-review-candidate-row .cand-demo-clear, .sf-guided-row .cand-demo-clear { background: transparent; border: none; color: var(--c-text-sub); cursor: pointer; padding: 4px 6px; opacity: 0.45; font-size: 0.85rem; }
   .sf-review-candidate-row .cand-demo-clear:hover, .sf-guided-row .cand-demo-clear:hover { opacity: 1; color: var(--c-text); }
+  /* A font image saved from the browser, held until Import [B-563]: a thumbnail the size of the Demo toggle, and its ×. */
+  .sf-review-candidate-row .cand-image { display: flex; align-items: center; gap: 0; align-self: center; flex-shrink: 0; }
+  .sf-review-candidate-row .cand-image-thumb { width: 26px; height: 26px; object-fit: cover; border-radius: 3px; border: 1px solid var(--c-border-faint); display: block; }
+  .sf-review-candidate-row .cand-image-clear { background: transparent; border: none; color: var(--c-text-sub); cursor: pointer; padding: 4px 6px; opacity: 0.45; font-size: 0.85rem; }
+  .sf-review-candidate-row .cand-image-clear:hover { opacity: 1; color: var(--c-text); }
   .sf-review-candidate-row.disabled { opacity: 0.55; }
   .sf-review-candidate-row.already-imported { opacity: 0.6; }
   .sf-review-candidate-row.already-imported .cand-status { color: var(--jmt-blue); font-style: italic; }
@@ -6427,6 +6435,7 @@
             <span class="sf-doc-chips" id="sf-entry-picture-chip" style="display:none"></span>
             <span class="sf-pop-actions">
               <button class="sf-pop-action" id="btn-sf-entry-picture-add" type="button" title="Choose an image for this font from your computer">+ Add</button>
+              <button class="sf-pop-action" id="btn-sf-entry-picture-find" type="button" title="Search Google Images in the app browser, then right-click an image to save it as this font's image">Find</button>
               <button class="sf-pop-action" id="btn-sf-entry-picture-paste" type="button" title="Use the image on your clipboard">Paste</button>
             </span>
           </div>
@@ -6613,6 +6622,7 @@
             <span class="sf-doc-chips" id="sf-source-picture-chip" style="display:none"></span>
             <span class="sf-pop-actions">
               <button class="sf-pop-action" id="btn-sf-source-picture-add" type="button" title="Choose an image for this source from your computer">+ Add</button>
+              <button class="sf-pop-action" id="btn-sf-source-picture-find" type="button" title="Search Google Images in the app browser, then right-click an image to save it as a font image for this source's fonts">Find</button>
               <button class="sf-pop-action" id="btn-sf-source-picture-paste" type="button" title="Use the image on your clipboard">Paste</button>
             </span>
           </div>
@@ -10329,6 +10339,19 @@ function _vpkScanPresets(text) {
 // than borrowing a name from a neighbour that can move.
 // Findings carry preset names and folder names straight out of the user's config,
 // so escaping is not optional here.
+// Wraps an action a button starts so a second press while it is running is ignored, whatever fired
+// it (a double click, a slow frame over Remote Desktop). Each wrapped action has its own flag, and it
+// clears when the action ends, however it ends. [B-437]
+function jmtOneAtATime(fn) {
+  let running = false;
+  return async (...args) => {
+    if (running) return undefined;
+    running = true;
+    try { return await fn(...args); }
+    finally { running = false; }
+  };
+}
+
 function _preflightEsc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -20771,6 +20794,8 @@ let _detailSource          = '';
 let _detailUrl             = '';
 let _detailNotes           = '';
 let _activeFilterTags      = new Set();
+// Tags left out (right-click a tag row), as _activeFilterEffectsMissing is for effects. [B-564]
+let _activeFilterTagsMissing = new Set();
 let _activeFilterEffects   = new Set();
 // [B-286] Effects a style must NOT have, set by right-click, as on Sound Fonts. Setting one polarity
 // of an effect clears the other.
@@ -21705,6 +21730,7 @@ function _stylesClearAllFilters() {
   const sc = document.getElementById('styles-search-clear');
   if (sc) sc.style.display = 'none';
   _activeFilterTags    = new Set();
+  _activeFilterTagsMissing = new Set();
   _activeFilterEffects = new Set();
   _activeFilterEffectsMissing = new Set();
   _stylesInUseFilter   = '';
@@ -21764,7 +21790,7 @@ function _applyStylesSearch() {
   // this was originally reported. Matches the Sound Fonts list, which already had
   // all three cases; this side had none of them.
   const listEl     = document.getElementById('styles-visual-list');
-  const isFiltering = !!q || _activeFilterTags.size > 0 || _activeFilterEffects.size > 0
+  const isFiltering = !!q || _activeFilterTags.size > 0 || _activeFilterTagsMissing.size > 0 || _activeFilterEffects.size > 0
     || _activeFilterEffectsMissing.size > 0 || !!_stylesInUseFilter;
   const autoClear  = _stylesAutoClearOnEmpty;
   _stylesAutoClearOnEmpty = false;
@@ -21803,10 +21829,15 @@ function _applyStylesSearch() {
 function _styleHas(card, sel, attr, value) {
   return !!card.querySelector(`${sel}[${attr}="${CSS.escape(value)}"]`);
 }
+// Picked tags OR; left-out tags AND-NOT, as effects.
 function _styleInTagScope(card) {
-  if (!_activeFilterTags.size) return true;
-  for (const tag of _activeFilterTags) if (_styleHas(card, '.style-tag', 'data-tag', tag)) return true;
-  return false;
+  if (_activeFilterTags.size) {
+    let any = false;
+    for (const tag of _activeFilterTags) if (_styleHas(card, '.style-tag', 'data-tag', tag)) { any = true; break; }
+    if (!any) return false;
+  }
+  for (const tag of _activeFilterTagsMissing) if (_styleHas(card, '.style-tag', 'data-tag', tag)) return false;
+  return true;
 }
 function _styleInEffectScope(card) {
   if (_activeFilterEffects.size) {
@@ -21842,8 +21873,8 @@ function _computeAvailableTagsWithCounts() {
     });
   });
   return Array.from(counts.entries()).sort((a, b) =>
-    _facetSortCompare(a[0], a[1], _activeFilterTags.has(a[0]),
-                      b[0], b[1], _activeFilterTags.has(b[0])));   // [B-285]
+    _facetSortCompare(a[0], a[1], _activeFilterTags.has(a[0]) || _activeFilterTagsMissing.has(a[0]),
+                      b[0], b[1], _activeFilterTags.has(b[0]) || _activeFilterTagsMissing.has(b[0])));   // [B-285]
 }
 
 // Same shape as _computeAvailableTagsWithCounts, but for the effect facet.
@@ -21940,23 +21971,35 @@ function _renderTagFilterDropdown() {
     list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags available</div>';
     return;
   }
+  const tip = 'Left click: filter for styles with this tag.\nRight click: filter for styles without this tag.';
   list.innerHTML = _facetSortBarHtml() + tags.map(([tag, count]) => {
-    const sel = _activeFilterTags.has(tag);
-    return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-tag="${tag}">`
-      + `<span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>`
+    const present = _activeFilterTags.has(tag);
+    const absent  = _activeFilterTagsMissing.has(tag);
+    const state   = present ? ' selected sf-effect-state-present' : absent ? ' selected sf-effect-state-absent' : '';
+    return `<button class="styles-tag-dropdown-item${state}" data-tag="${tag}" title="${tip}">`
+      + `<span class="styles-tag-dropdown-check">${present ? '&#10003;' : absent ? '&#10005;' : ''}</span>`
       + `<span class="styles-tag-dropdown-name">${tag}</span>`
       + `<span class="styles-tag-dropdown-count">${count}</span>`
       + `</button>`;
   }).join('');
   _wireFacetSortBar(list, _renderTagFilterDropdown);   // [B-285]
+  // Left click toggles "has it", right click toggles "does not have it"; either clears the other, as the
+  // effect rows. Stays open: a multi-select, as on Sound Fonts.
+  const flip = (tag, on, off) => {
+    if (on.has(tag)) on.delete(tag);
+    else { off.delete(tag); on.add(tag); }
+    _applyStylesSearch();
+    _renderTagFilterDropdown();
+  };
   list.querySelectorAll('.styles-tag-dropdown-item').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      const tag = btn.dataset.tag;
-      if (_activeFilterTags.has(tag)) _activeFilterTags.delete(tag);
-      else _activeFilterTags.add(tag);
-      _applyStylesSearch();
-      _renderTagFilterDropdown();   // stays open: a multi-select, as on Sound Fonts
+      flip(btn.dataset.tag, _activeFilterTags, _activeFilterTagsMissing);
+    });
+    btn.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      flip(btn.dataset.tag, _activeFilterTagsMissing, _activeFilterTags);
     });
   });
 }
@@ -21967,11 +22010,12 @@ function _renderActiveFilterChips() {
   const tagBtn     = document.getElementById('btn-styles-tag-filter');
   const fxBadge    = document.getElementById('styles-effect-filter-badge');
   const fxBtn      = document.getElementById('btn-styles-effect-filter');
+  const tagCount = _activeFilterTags.size + _activeFilterTagsMissing.size;
   if (tagBadge) {
-    if (_activeFilterTags.size) { tagBadge.textContent = _activeFilterTags.size; tagBadge.style.display = ''; }
+    if (tagCount) { tagBadge.textContent = tagCount; tagBadge.style.display = ''; }
     else tagBadge.style.display = 'none';
   }
-  if (tagBtn) tagBtn.classList.toggle('has-active', _activeFilterTags.size > 0);
+  if (tagBtn) tagBtn.classList.toggle('has-active', tagCount > 0);
   const fxCount = _activeFilterEffects.size + _activeFilterEffectsMissing.size;
   if (fxBadge) {
     if (fxCount) { fxBadge.textContent = fxCount; fxBadge.style.display = ''; }
@@ -21981,7 +22025,7 @@ function _renderActiveFilterChips() {
   if (!strip) return;
   // Search counts as a filter here, same as on the Sound Fonts side (B-156).
   const searchQ = (document.getElementById('styles-search')?.value || '').trim();
-  const totalActive = _activeFilterTags.size + _activeFilterEffects.size + _activeFilterEffectsMissing.size
+  const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + _activeFilterEffects.size + _activeFilterEffectsMissing.size
     + (searchQ ? 1 : 0) + (_stylesInUseFilter ? 1 : 0);
   if (!totalActive) {
     strip.style.display = 'none';
@@ -22003,6 +22047,8 @@ function _renderActiveFilterChips() {
   const groups = [
     group('search',  searchQ ? [chip('“' + searchQ + '”', 'search', '')] : [],                              'or'),
     group('tag',     Array.from(_activeFilterTags).map(t => chip(t, 'tag', t)),                               'or'),
+    group('without', Array.from(_activeFilterTagsMissing).map(t =>
+      chip(t, 'tag-without', t, ' sf-active-filter-effect-missing')),                                         'and'),
     group('effect',  Array.from(_activeFilterEffects).map(fx => chip(fx, 'effect', fx)),                      'or'),
     group('without', Array.from(_activeFilterEffectsMissing).map(fx =>
       chip(fx, 'without', fx, ' sf-active-filter-effect-missing')),                                           'and'),
@@ -22029,6 +22075,7 @@ function _renderActiveFilterChips() {
           break;
         }
         case 'tag':     _activeFilterTags.delete(v); break;
+        case 'tag-without': _activeFilterTagsMissing.delete(v); break;
         case 'effect':  _activeFilterEffects.delete(v); break;
         case 'without': _activeFilterEffectsMissing.delete(v); break;
         case 'in-use':  _stylesInUseFilter = ''; break;
@@ -26490,6 +26537,9 @@ require(['vs/editor/editor.main'], function () {
       let _sfSearchQuery = '';
       let _sfActiveFilterTags = new Set();
       let _sfActiveFilterCreators = new Set();
+      // WITHOUT, as Effects has it: right-click a tag or creator to leave out the fonts that have it. [B-564]
+      let _sfActiveFilterTagsWithout = new Set();
+      let _sfActiveFilterCreatorsWithout = new Set();
       let _sfActiveFilterEffects = new Set();
       // Inverse polarity of the Effects filter — entries that match
       // these are EXCLUDED from results. Lets the user say "fonts with
@@ -26927,20 +26977,33 @@ require(['vs/editor/editor.main'], function () {
         return visible;
       };
 
+      // A tag or creator row's look and hover, from its two polarities (the Effects rows' classes).
+      const _sfFacetRowState = (isIn, isOut, noun) => {
+        const tip = ` title="${_sfEscape(`Left click: filter for fonts with this ${noun}.\nRight click: filter for fonts without this ${noun}.`)}"`;
+        if (isIn) return { cls: ' selected sf-effect-state-present', mark: '&#10003;', tip };
+        if (isOut) return { cls: ' selected sf-effect-state-absent', mark: '&#10005;', tip };
+        return { cls: '', mark: '', tip };
+      };
+      // Picked tags OR; WITHOUT tags AND-NOT, the same asymmetry as effects.
       const _sfInTagScope = (f) => {
-        if (_sfActiveFilterTags.size === 0) return true;
+        if (_sfActiveFilterTags.size === 0 && _sfActiveFilterTagsWithout.size === 0) return true;
         const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
-        for (const ft of _sfActiveFilterTags) if (t.has(String(ft).toLowerCase())) return true;
-        return false;
+        if (_sfActiveFilterTags.size) {
+          let any = false;
+          for (const ft of _sfActiveFilterTags) if (t.has(String(ft).toLowerCase())) { any = true; break; }
+          if (!any) return false;
+        }
+        for (const ft of _sfActiveFilterTagsWithout) if (t.has(String(ft).toLowerCase())) return false;
+        return true;
       };
       // CREATORS ARE OR AND IT IS FORCED: meta.author is a single string, so ANDing two
       // asks for a font by two people and is always zero. Do not "fix" for consistency.
       const _sfInCreatorScope = (f) => {
-        if (_sfActiveFilterCreators.size === 0) return true;
-        const lower = Array.from(_sfActiveFilterCreators).map(c => String(c).toLowerCase());
-        const a = ((f.meta && f.meta.author) || '').toLowerCase();
-        if (!a) return lower.includes(_SF_NO_CREATOR_KEY);
-        return lower.includes(a);
+        if (_sfActiveFilterCreators.size === 0 && _sfActiveFilterCreatorsWithout.size === 0) return true;
+        const a = ((f.meta && f.meta.author) || '').toLowerCase() || _SF_NO_CREATOR_KEY;
+        if (_sfActiveFilterCreators.size && !Array.from(_sfActiveFilterCreators).some(c => String(c).toLowerCase() === a)) return false;
+        if (Array.from(_sfActiveFilterCreatorsWithout).some(c => String(c).toLowerCase() === a)) return false;
+        return true;
       };
       // PRESENT effects OR; ABSENT effects AND-NOT. The asymmetry is deliberate -
       // exclusions are conjunctive, OR is for choosing among things you want.
@@ -26990,6 +27053,8 @@ require(['vs/editor/editor.main'], function () {
         if (_sc) _sc.style.display = 'none';
         _sfActiveFilterTags = new Set();
         _sfActiveFilterCreators = new Set();
+        _sfActiveFilterTagsWithout = new Set();
+        _sfActiveFilterCreatorsWithout = new Set();
         _sfActiveFilterEffects = new Set();
         _sfActiveFilterEffectsMissing = new Set();
         _sfActiveFilterNames = new Set();       // [B-390]
@@ -27017,7 +27082,7 @@ require(['vs/editor/editor.main'], function () {
       // so there is one definition of what the badge says.
       const _sfSyncFilterBadges = () => {
         const pairs = [
-          ['sf-creator-filter-badge', 'btn-sf-creator-filter', _sfActiveFilterCreators.size],
+          ['sf-creator-filter-badge', 'btn-sf-creator-filter', _sfActiveFilterCreators.size + _sfActiveFilterCreatorsWithout.size],
           ['sf-effects-filter-badge', 'btn-sf-effects-filter',
             _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size],
         ];
@@ -27123,7 +27188,7 @@ require(['vs/editor/editor.main'], function () {
           (_sfSelectedNames.has(f.name) ||
             (matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f) && matchesNewFilter(f)))
         );
-        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfActiveFilterNames.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterTagsWithout.size > 0 || _sfActiveFilterCreatorsWithout.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfActiveFilterNames.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
         // Needs Review filter button: visible only when at least one entry
         // has the flag. Badge shows the count; button gets the active style
         // when the filter is on.
@@ -30451,15 +30516,16 @@ require(['vs/editor/editor.main'], function () {
         const list = document.getElementById('sf-tag-dropdown-list');
         const badge = document.getElementById('sf-tag-filter-badge');
         const btn = document.getElementById('btn-sf-tag-filter');
+        const _tagN = _sfActiveFilterTags.size + _sfActiveFilterTagsWithout.size;
         if (badge) {
-          if (_sfActiveFilterTags.size > 0) {
-            badge.textContent = String(_sfActiveFilterTags.size);
+          if (_tagN > 0) {
+            badge.textContent = String(_tagN);
             badge.style.display = '';
           } else {
             badge.style.display = 'none';
           }
         }
-        if (btn) btn.classList.toggle('has-active', _sfActiveFilterTags.size > 0);
+        if (btn) btn.classList.toggle('has-active', _tagN > 0);
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
         const filterCreatorsLower = Array.from(_sfActiveFilterCreators).map(c => c.toLowerCase());
@@ -30483,19 +30549,21 @@ require(['vs/editor/editor.main'], function () {
             else counts.set(key, { display: tag, count: 1 });
           }
         }
-        const _tagActive = (k) => Array.from(_sfActiveFilterTags).some(t => t.toLowerCase() === k);
+        const _tagIn = (k) => Array.from(_sfActiveFilterTags).some(t => t.toLowerCase() === k);
+        const _tagOut = (k) => Array.from(_sfActiveFilterTagsWithout).some(t => t.toLowerCase() === k);
+        const _tagActive = (k) => _tagIn(k) || _tagOut(k);
         const entries = _sfFreezeFacetRows('tag', Array.from(counts.entries())
           .sort((a, b) => _facetSortCompare(   // [B-285]
-            a[1].display, a[1].count, _sfActiveFilterTags.has(a[1].display),
-            b[1].display, b[1].count, _sfActiveFilterTags.has(b[1].display))), _tagActive);
+            a[1].display, a[1].count, _tagActive(a[0]),
+            b[1].display, b[1].count, _tagActive(b[0]))), _tagActive);
         if (entries.length === 0) {
           list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags on current results.</div>';
           return;
         }
         list.innerHTML = _facetSortBarHtml() + entries.map(([key, info]) => {
-          const sel = _sfActiveFilterTags.has(info.display);
-          return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-tag="${_sfEscape(info.display)}">
-            <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+          const st = _sfFacetRowState(_tagIn(key), _tagOut(key), 'tag');
+          return `<button class="styles-tag-dropdown-item${st.cls}" data-tag="${_sfEscape(info.display)}"${st.tip}>
+            <span class="styles-tag-dropdown-check">${st.mark}</span>
             <span class="styles-tag-dropdown-name">${_sfEscape(info.display)}</span>
             <span class="styles-tag-dropdown-count">${info.count}</span>
           </button>`;
@@ -30519,7 +30587,7 @@ require(['vs/editor/editor.main'], function () {
         // would push `total` past the >= 2 threshold below and show "Clear all" beside
         // a single chip.
         const namesActive = _sfActiveFilterNames.size ? 1 : 0;
-        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + namesActive + needsReviewActive + inUseActive + newActive;
+        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterTagsWithout.size + _sfActiveFilterCreatorsWithout.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + namesActive + needsReviewActive + inUseActive + newActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -30542,6 +30610,13 @@ require(['vs/editor/editor.main'], function () {
         }).join('');
         const creatorChips = Array.from(_sfActiveFilterCreators).map(c =>
           `<span class="styles-active-filter-chip" data-creator="${_sfEscape(c)}">${_sfEscape(c)}<button class="styles-active-filter-remove" data-filter-remove-creator="${_sfEscape(c)}" title="Remove">&#10005;</button></span>`
+        ).join('');
+        // WITHOUT chips for tags and creators look like the effects' ones (red).
+        const tagWithoutChips = Array.from(_sfActiveFilterTagsWithout).map(tag =>
+          `<span class="styles-active-filter-chip sf-active-filter-effect-missing" data-tag="${_sfEscape(tag)}">${_sfEscape(tag)}<button class="styles-active-filter-remove" data-filter-remove-tag="${_sfEscape(tag)}" title="Remove">&#10005;</button></span>`
+        ).join('');
+        const creatorWithoutChips = Array.from(_sfActiveFilterCreatorsWithout).map(c =>
+          `<span class="styles-active-filter-chip sf-active-filter-effect-missing" data-creator="${_sfEscape(c)}">${_sfEscape(c)}<button class="styles-active-filter-remove" data-filter-remove-creator="${_sfEscape(c)}" title="Remove">&#10005;</button></span>`
         ).join('');
         // [B-382] THE TWO POLARITIES ARE NOW TWO GROUPS, and they had to be.
         // Present effects OR; absent effects AND-NOT. They used to render as ONE
@@ -30598,10 +30673,13 @@ require(['vs/editor/editor.main'], function () {
           _group('search',  searchChip,   searchActive,                        'or'),
           // [B-382] Tags are OR: matchesTagFilter returns true on ANY selected tag.
           _group('tag',     tagChips,     _sfActiveFilterTags.size,            'or'),
+          // WITHOUT groups sit right after their facet and AND-NOT, as the effects one does.
+          _group('without', tagWithoutChips, _sfActiveFilterTagsWithout.size, 'and'),
           // Creators OR, and it is FORCED: meta.author is a single string, so ANDing
           // two creators asks for a font by two people and is always zero. Do not
           // "fix" this into consistency with tags.
           _group('creator', creatorChips, _sfActiveFilterCreators.size,        'or'),
+          _group('without', creatorWithoutChips, _sfActiveFilterCreatorsWithout.size, 'and'),
           // [B-382] Present effects OR. Absent effects are their own group and stay
           // AND-NOT — "no preon and no melt" means neither, never either.
           _group('effect',  effectChips,        _sfActiveFilterEffects.size,        'or'),
@@ -30615,16 +30693,22 @@ require(['vs/editor/editor.main'], function () {
                         + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
                         + flags + clearAll;
       };
-      const _sfToggleFilterTag = (tag) => {
+      // Left click toggles the picked polarity and right click the WITHOUT one; setting either clears the
+      // other, so a value is never both. The chip's x clears both. [B-564]
+      const _sfDropCI = (set, v) => {
+        for (const existing of set) if (existing.toLowerCase() === String(v).toLowerCase()) { set.delete(existing); return true; }
+        return false;
+      };
+      const _sfTogglePolarity = (value, own, other) => {
+        if (!value) return;
+        if (!_sfDropCI(own, value)) { _sfDropCI(other, value); own.add(value); }
+        _sfRenderGrid();
+      };
+      const _sfToggleFilterTag = (tag) => _sfTogglePolarity(tag, _sfActiveFilterTags, _sfActiveFilterTagsWithout);
+      const _sfRightToggleFilterTag = (tag) => _sfTogglePolarity(tag, _sfActiveFilterTagsWithout, _sfActiveFilterTags);
+      const _sfRemoveTagFilter = (tag) => {
         if (!tag) return;
-        for (const existing of _sfActiveFilterTags) {
-          if (existing.toLowerCase() === tag.toLowerCase()) {
-            _sfActiveFilterTags.delete(existing);
-            _sfRenderGrid();
-            return;
-          }
-        }
-        _sfActiveFilterTags.add(tag);
+        _sfDropCI(_sfActiveFilterTags, tag); _sfDropCI(_sfActiveFilterTagsWithout, tag);
         _sfRenderGrid();
       };
       // Creator-filter dropdown mirrors the tag dropdown: shows available
@@ -30713,18 +30797,20 @@ require(['vs/editor/editor.main'], function () {
           const dd = document.getElementById('sf-creator-dropdown');
           if (dd) dd.style.display = 'none';
           if (_sfActiveFilterCreators.size > 0) _sfActiveFilterCreators.clear();
+          if (_sfActiveFilterCreatorsWithout.size > 0) _sfActiveFilterCreatorsWithout.clear();
           return;
         }
         if (btn) btn.style.display = '';
+        const _creN = _sfActiveFilterCreators.size + _sfActiveFilterCreatorsWithout.size;
         if (badge) {
-          if (_sfActiveFilterCreators.size > 0) {
-            badge.textContent = String(_sfActiveFilterCreators.size);
+          if (_creN > 0) {
+            badge.textContent = String(_creN);
             badge.style.display = '';
           } else {
             badge.style.display = 'none';
           }
         }
-        if (btn) btn.classList.toggle('has-active', _sfActiveFilterCreators.size > 0);
+        if (btn) btn.classList.toggle('has-active', _creN > 0);
         if (!list) return;
         const q = (_sfSearchQuery || '').toLowerCase();
         const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
@@ -30752,11 +30838,13 @@ require(['vs/editor/editor.main'], function () {
           if (ent) ent.count++;
           else counts.set(key, { display: a, count: 1 });
         }
-        const _creActive = (k) => Array.from(_sfActiveFilterCreators).some(c => c.toLowerCase() === k);
+        const _creIn = (k) => Array.from(_sfActiveFilterCreators).some(c => c.toLowerCase() === k);
+        const _creOut = (k) => Array.from(_sfActiveFilterCreatorsWithout).some(c => c.toLowerCase() === k);
+        const _creActive = (k) => _creIn(k) || _creOut(k);
         const entries = _sfFreezeFacetRows('creator', Array.from(counts.entries())
           .sort((a, b) => _facetSortCompare(   // [B-285]
-            a[1].display, a[1].count, _sfActiveFilterCreators.has(a[1].display),
-            b[1].display, b[1].count, _sfActiveFilterCreators.has(b[1].display))), _creActive);
+            a[1].display, a[1].count, _creActive(a[0]),
+            b[1].display, b[1].count, _creActive(b[0]))), _creActive);
         // Append the "(no creator)" pseudo-row when ANY entry in the library
         // is missing a creator. Showing it even when filtered down to zero
         // empties in the current matchSet would be confusing (the count
@@ -30767,18 +30855,18 @@ require(['vs/editor/editor.main'], function () {
           return;
         }
         const namedRows = entries.map(([key, info]) => {
-          const sel = _sfActiveFilterCreators.has(info.display);
-          return `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-creator="${_sfEscape(info.display)}">
-            <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+          const st = _sfFacetRowState(_creIn(key), _creOut(key), 'creator');
+          return `<button class="styles-tag-dropdown-item${st.cls}" data-creator="${_sfEscape(info.display)}"${st.tip}>
+            <span class="styles-tag-dropdown-check">${st.mark}</span>
             <span class="styles-tag-dropdown-name">${_sfEscape(info.display)}</span>
             <span class="styles-tag-dropdown-count">${info.count}</span>
           </button>`;
         }).join('');
         let noCreatorRow = '';
         if (emptyCount > 0) {
-          const sel = _sfActiveFilterCreators.has(_SF_NO_CREATOR_KEY);
-          noCreatorRow = `<button class="styles-tag-dropdown-item${sel ? ' selected' : ''}" data-creator="${_sfEscape(_SF_NO_CREATOR_KEY)}" style="font-style:italic;opacity:0.85">
-            <span class="styles-tag-dropdown-check">${sel ? '&#10003;' : ''}</span>
+          const st = _sfFacetRowState(_creIn(_SF_NO_CREATOR_KEY), _creOut(_SF_NO_CREATOR_KEY), 'creator');
+          noCreatorRow = `<button class="styles-tag-dropdown-item${st.cls}" data-creator="${_sfEscape(_SF_NO_CREATOR_KEY)}" style="font-style:italic;opacity:0.85"${st.tip}>
+            <span class="styles-tag-dropdown-check">${st.mark}</span>
             <span class="styles-tag-dropdown-name">${_sfEscape(_SF_NO_CREATOR_KEY)}</span>
             <span class="styles-tag-dropdown-count">${emptyCount}</span>
           </button>`;
@@ -30786,16 +30874,11 @@ require(['vs/editor/editor.main'], function () {
         list.innerHTML = _facetSortBarHtml() + namedRows + noCreatorRow;
         _wireFacetSortBar(list, _sfRenderCreatorDropdown);   // [B-285]
       };
-      const _sfToggleFilterCreator = (creator) => {
+      const _sfToggleFilterCreator = (creator) => _sfTogglePolarity(creator, _sfActiveFilterCreators, _sfActiveFilterCreatorsWithout);
+      const _sfRightToggleFilterCreator = (creator) => _sfTogglePolarity(creator, _sfActiveFilterCreatorsWithout, _sfActiveFilterCreators);
+      const _sfRemoveCreatorFilter = (creator) => {
         if (!creator) return;
-        for (const existing of _sfActiveFilterCreators) {
-          if (existing.toLowerCase() === creator.toLowerCase()) {
-            _sfActiveFilterCreators.delete(existing);
-            _sfRenderGrid();
-            return;
-          }
-        }
-        _sfActiveFilterCreators.add(creator);
+        _sfDropCI(_sfActiveFilterCreators, creator); _sfDropCI(_sfActiveFilterCreatorsWithout, creator);
         _sfRenderGrid();
       };
       // ── Effects filter (Step 6 of the effects-catalog slice) ──────
@@ -31871,6 +31954,14 @@ require(['vs/editor/editor.main'], function () {
       }
       window._sfWireDemoLink = _sfWireDemoLink;
       let _sfImport = null; // { sourcePath, uuid, vendor, candidates }
+      // Font images saved from the browser onto review rows, held as temp files until Import. Whatever
+      // is still here when the review closes (imported, cancelled, unchecked, replaced) is deleted. [B-563]
+      const _sfReviewImages = new Set();
+      const _sfDropReviewImage = (filePath) => {
+        if (!filePath) return;
+        _sfReviewImages.delete(filePath);
+        try { window.electronAPI.linkImportCleanup({ filePath }); } catch {}
+      };
       let _sfImportProgressUnsub = null;
       let _sfCreateProgressUnsub = null;
       // When set, closing or confirming the import modal returns the user to
@@ -32737,6 +32828,7 @@ require(['vs/editor/editor.main'], function () {
           && _sfImport.customizedPayload.curationTmp) || null;
         if (_sfImportEls.modal) _sfImportEls.modal.classList.remove('active');
         try { window.electronAPI.linkCaptureClose(); } catch {}
+        for (const f of Array.from(_sfReviewImages)) _sfDropReviewImage(f);
         _sfImport = null;
         if (uuidToClean) {
           _sfDiscardSource(uuidToClean, 'an import cancel');
@@ -32808,6 +32900,14 @@ require(['vs/editor/editor.main'], function () {
         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
         inputEl.focus();
       };
+      // For a link box in the font and source windows: a paste only fills the box and puts the cursor
+      // there; ✓ or Enter commits it and Escape drops it, the same as typing and the ×. [B-553]
+      const _sfPasteWaitsForCheck = (_url, inputEl) => {
+        if (!inputEl) return;
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.focus();
+        inputEl.setSelectionRange?.(inputEl.value.length, inputEl.value.length);
+      };
       const _sfTryPasteUrlInto = async (inputEl, onSuccess) => {
         if (!inputEl) return false;
         // Read via the main process (Electron clipboard) — the renderer's
@@ -32836,7 +32936,7 @@ require(['vs/editor/editor.main'], function () {
           return false;
         }
         inputEl.value = trimmed;
-        if (typeof onSuccess === 'function') onSuccess(trimmed);
+        if (typeof onSuccess === 'function') onSuccess(trimmed, inputEl);
         return true;
       };
       // TRUNCATES, IT DOES NOT ROUND, AND THAT IS ABOUT CREDIBILITY RATHER THAN PRECISION.
@@ -34039,6 +34139,10 @@ require(['vs/editor/editor.main'], function () {
                     <div class="cand-badges">${badges.join('')}</div>
                     <div>${_sfEscape(wavLine)}</div>
                   </div>
+                  <span class="cand-image" style="display:none" title="Font image, added when this font is imported">
+                    <img class="cand-image-thumb" alt="">
+                    <button class="cand-image-clear" title="Remove this font image">&#10005;</button>
+                  </span>
                   <button class="cand-link-toggle" title="Add demo link" data-cand-link-toggle="${i}">&#128279;</button>
                 </div>
                 <div class="cand-demo-row" data-cand-demo-row="${i}" style="display:none">
@@ -34330,6 +34434,7 @@ require(['vs/editor/editor.main'], function () {
             candidate: _sfImport.candidates[idx],
             name: _sfSanitizeName(nameEl?.value || ''),
             demoUrl,
+            image: row.dataset.image || '',
           });
         }
         // A customized-only commit is a legitimate import — it is exactly the
@@ -34595,6 +34700,16 @@ require(['vs/editor/editor.main'], function () {
             },
           });
           if (!res || !res.ok) failures.push({ name: pick.name, error: (res && res.error) || 'unknown error' });
+          else if (pick.image) {
+            // The row's font image, now that the font has a folder: the font window's Paste path.
+            const fontName = res.name || pick.name;
+            try {
+              let own = null;
+              try { const r = await window.electronAPI.findEntryPicture({ name: fontName }); own = r && r.ok && r.picture && r.picture.origin === 'own' ? r.picture : null; } catch {}
+              await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: own && own.subPath, filePath: pick.image });
+            } catch {}
+            _sfDropReviewImage(pick.image);
+          }
         }
         if (_sfCreateProgressUnsub) { try { _sfCreateProgressUnsub(); } catch {} _sfCreateProgressUnsub = null; }
         if (_sfImportEls.createBar) _sfImportEls.createBar.style.width = '100%';
@@ -37429,7 +37544,9 @@ require(['vs/editor/editor.main'], function () {
         if (!/^https?:\/\//i.test(url)) return;
         _sfCaptureOpen = true;
         window._sfCaptureTarget = 'import';
-        try { await window.electronAPI.linkCaptureOpen({ url, fonts: _sfCaptureFontList(), allLabel: 'All checked fonts' }); } catch {}
+        for (const b of _sfImportCaptureBefore.values()) { if (b && b.copy) { try { window.electronAPI.clipboardCleanupTemp({ filePath: b.copy }); } catch {} } }
+        _sfImportCaptureBefore = new Map();
+        try { await window.electronAPI.linkCaptureOpen({ url, fonts: _sfCaptureFontList(), allLabel: 'All checked fonts', images: true }); } catch {}
       });
       // The fonts the Demo submenu offers: the checked ones, in order. Re-sent as rows are ticked,
       // unticked or renamed while the browser is open.
@@ -37444,29 +37561,106 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfCaptureOpen) return;
         try { window.electronAPI.linkCaptureFonts(_sfCaptureFontList()); } catch {}
       };
+      _sfImportEls.candList?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.cand-image-clear');
+        if (!btn) return;
+        const row = btn.closest('.sf-review-candidate-row');
+        if (!row) return;
+        _sfDropReviewImage(row.dataset.image);
+        delete row.dataset.image;
+        const box = row.querySelector('.cand-image');
+        if (box) box.style.display = 'none';
+      });
       _sfImportEls.candList?.addEventListener('change', _sfCaptureResendFonts);
       _sfImportEls.candList?.addEventListener('input', _sfCaptureResendFonts);
+      // What each kind of browser save replaced on the review, before this browser session's first save of
+      // it, for Undo on the browser's strip. Reset each time the review opens the browser. [B-563]
+      let _sfImportCaptureBefore = new Map();
+      const _sfImportSetDemo = (row, value) => {
+        row.dataset.demourl = value;
+        const dRow = row.querySelector('.cand-demo-row');
+        const dInput = row.querySelector('.cand-demo-input');
+        if (dInput) dInput.value = value;
+        if (dRow) dRow.style.display = value ? '' : 'none';
+      };
+      const _sfImportSetImage = (row, filePath, thumbSrc) => {
+        const box = row.querySelector('.cand-image');
+        const thumb = row.querySelector('.cand-image-thumb');
+        if (filePath) {
+          row.dataset.image = filePath;
+          if (thumb) thumb.src = thumbSrc || '';
+          if (box) box.style.display = '';
+        } else {
+          delete row.dataset.image;
+          if (box) box.style.display = 'none';
+        }
+      };
       window.electronAPI.onLinkCapturePick?.(async ({ key, value } = {}) => {
         if (window._sfCaptureTarget !== 'import') return;
         if (!_sfImport || !_sfImportEls.modal?.classList.contains('active')) return;
+        const before = _sfImportCaptureBefore;
         if (key === 'linkUrl') {
+          if (!before.has(key)) before.set(key, (_sfImportEls.link && _sfImportEls.link.value) || '');
           if (_sfImportEls.link) _sfImportEls.link.value = value;
         } else if (typeof key === 'string' && key.startsWith('demo:')) {
           const row = _sfCaptureRows[parseInt(key.slice(5), 10)];
           if (!row || !row.isConnected) return;
-          row.dataset.demourl = value;
-          const dRow = row.querySelector('.cand-demo-row');
-          const dInput = row.querySelector('.cand-demo-input');
-          if (dInput) dInput.value = value;
-          if (dRow) dRow.style.display = '';
+          if (!before.has(key)) before.set(key, { row, value: row.dataset.demourl || '' });
+          _sfImportSetDemo(row, value);
+        } else if (typeof key === 'string' && key.startsWith('image:') && value && value.filePath) {
+          const row = _sfCaptureRows[parseInt(key.slice(6), 10)];
+          if (!row || !row.isConnected) { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} return; }
+          const thumbEl = row.querySelector('.cand-image-thumb');
+          if (!before.has(key)) before.set(key, { row, filePath: row.dataset.image || '', thumb: (row.dataset.image && thumbEl && thumbEl.src) || '' });
+          // The image held before this session stays for Undo; one saved earlier in this session goes.
+          if (row.dataset.image && row.dataset.image !== before.get(key).filePath) _sfDropReviewImage(row.dataset.image);
+          _sfReviewImages.add(value.filePath);
+          _sfImportSetImage(row, value.filePath, value.thumb);
+        } else if (key === 'sourceImage' && value && value.filePath) {
+          try {
+            if (_sfImport.uuid) {
+              await window._sfCaptureSourceImage(_sfImport.uuid, before, value.filePath);
+              const b = before.get('sourceImage');
+              if (b) b.uuid = _sfImport.uuid;
+            }
+          } finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
         } else if (key === 'proof' && value && value.filePath) {
           try {
             if (_sfImport.uuid) {
-              await window.electronAPI.addAttachmentToSources({ filePath: value.filePath, label: '', uuids: [_sfImport.uuid] });
+              const uuid = _sfImport.uuid;
+              let had = [];
+              try { const l = await window.electronAPI.listAttachments({ uuid }); had = ((l && l.ok && l.attachments) || []).map((a) => a.id); } catch {}
+              const r = await window.electronAPI.addAttachmentToSources({ filePath: value.filePath, label: '', uuids: [uuid] });
+              if (r && r.ok && r.id && !had.includes(r.id)) {
+                const b = before.get(key) || { uuid, ids: [] };
+                b.ids.push(r.id);
+                before.set(key, b);
+              }
               _sfRenderReviewPop();
             }
           } catch {}
           finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
+        }
+      });
+      window.electronAPI.onLinkCaptureUndo?.(async ({ key } = {}) => {
+        if (window._sfCaptureTarget !== 'import') return;
+        const before = _sfImportCaptureBefore;
+        if (!before.has(key)) return;
+        const b = before.get(key);
+        before.delete(key);
+        if (key === 'linkUrl') {
+          if (_sfImportEls.link) _sfImportEls.link.value = b;
+        } else if (typeof key === 'string' && key.startsWith('demo:')) {
+          if (b.row && b.row.isConnected) _sfImportSetDemo(b.row, b.value);
+        } else if (typeof key === 'string' && key.startsWith('image:')) {
+          if (!b.row || !b.row.isConnected) return;
+          if (b.row.dataset.image && b.row.dataset.image !== b.filePath) _sfDropReviewImage(b.row.dataset.image);
+          _sfImportSetImage(b.row, b.filePath, b.thumb);
+        } else if (key === 'sourceImage') {
+          if (b.uuid) await window._sfUndoSourceImage(b.uuid, b);
+        } else if (key === 'proof') {
+          for (const id of b.ids) { try { await window.electronAPI.unlinkAttachment({ uuid: b.uuid, id }); } catch {} }
+          if (_sfImport && _sfImport.uuid === b.uuid) _sfRenderReviewPop();
         }
       });
       _sfImportEls.addPopBtn?.addEventListener('click', () => {
@@ -39010,26 +39204,17 @@ require(['vs/editor/editor.main'], function () {
       _sfSourceDetailEls.downloadClear?.addEventListener('click', () => _sfClearUrlInput(_sfSourceDetailEls.downloadInput));
       _sfSourceDetailEls.downloadPaste?.addEventListener('click', async () => {
         if (!_sfSourceEdit || !_sfSourceDetailEls.downloadInput) return;
-        await _sfTryPasteUrlInto(_sfSourceDetailEls.downloadInput, (url) => {
-          _sfSourceEdit.downloadUrl = url;
-          _sfMarkSourceDirty();
-        });
+        await _sfTryPasteUrlInto(_sfSourceDetailEls.downloadInput, _sfPasteWaitsForCheck);
       });
       _sfSourceDetailEls.websiteClear?.addEventListener('click', () => _sfClearUrlInput(_sfSourceDetailEls.websiteInput));
       _sfSourceDetailEls.linkClearBtn?.addEventListener('click', () => _sfClearUrlInput(_sfSourceDetailEls.linkInput));
       _sfSourceDetailEls.websitePaste?.addEventListener('click', async () => {
         if (!_sfSourceEdit || !_sfSourceDetailEls.websiteInput) return;
-        await _sfTryPasteUrlInto(_sfSourceDetailEls.websiteInput, (url) => {
-          _sfSourceEdit.vendorWebsite = url;
-          _sfMarkSourceDirty();
-        });
+        await _sfTryPasteUrlInto(_sfSourceDetailEls.websiteInput, _sfPasteWaitsForCheck);
       });
       _sfSourceDetailEls.linkPaste?.addEventListener('click', async () => {
         if (!_sfSourceEdit || !_sfSourceDetailEls.linkInput) return;
-        await _sfTryPasteUrlInto(_sfSourceDetailEls.linkInput, (url) => {
-          _sfSourceEdit.linkUrl = url;
-          _sfMarkSourceDirty();
-        });
+        await _sfTryPasteUrlInto(_sfSourceDetailEls.linkInput, _sfPasteWaitsForCheck);
       });
       const _sfSourceLinkKeydown = (e) => {
         if (e.key === 'Enter') {
@@ -44451,11 +44636,20 @@ require(['vs/editor/editor.main'], function () {
         try { const r = await window.electronAPI.listEntriesBySource({ sourceUuid: uuid }); entries = (r && r.ok && r.entries) || []; } catch {}
         const names = entries.map(x => x.name).sort((a, b) => a.localeCompare(b));
         if (firstName && names.includes(firstName)) names.splice(names.indexOf(firstName), 1), names.unshift(firstName);
-        _sfCapture = { uuid, names };
+        _sfCaptureForget(_sfCapture);
+        _sfCapture = { uuid, names, before: new Map() };
         window._sfCaptureTarget = 'source';
         const forName = firstName || (_sfSourceEdit && (_sfSourceEdit.bundleName || _sfSourceEdit.originalName)) || '';
-        try { await window.electronAPI.linkCaptureOpen({ url, fonts: names, forName }); } catch {}
+        try { await window.electronAPI.linkCaptureOpen({ url, fonts: names, forName, images: true }); } catch {}
       };
+      // Find, on the font and source windows' Image rows: the same app browser, opened on Google Images.
+      const SF_IMAGE_SEARCH_URL = 'https://images.google.com/';
+      document.getElementById('btn-sf-entry-picture-find')?.addEventListener('click', (e) => {
+        if (_sfDetailEdit) _sfOpenSourceCapture(e, SF_IMAGE_SEARCH_URL, _sfDetailSourceUuid(), _sfDetailOriginalName);
+      });
+      document.getElementById('btn-sf-source-picture-find')?.addEventListener('click', (e) => {
+        if (_sfSourceEdit) _sfOpenSourceCapture(e, SF_IMAGE_SEARCH_URL, _sfSourceOriginalUuid, null);
+      });
       for (const [el, ctx] of [
         [_sfEntryDetailEls.websiteDisplay, () => _sfDetailEdit && { url: _sfDetailEdit.vendorWebsite, uuid: _sfDetailSourceUuid(), first: _sfDetailOriginalName }],
         [_sfSourceDetailEls.websiteDisplay, () => _sfSourceEdit && { url: _sfSourceEdit.vendorWebsite, uuid: _sfSourceOriginalUuid, first: null }],
@@ -44478,44 +44672,146 @@ require(['vs/editor/editor.main'], function () {
           _jmtPlaceMenu(menu, e.clientX, e.clientY);
         });
       }
+      // Saving from the browser and Undo on its strip go through the same steps. [B-563]
+      // A source's own image from the browser: keep a copy of the one it had (for Undo) on the first save
+      // of a session, then set the new one. Undo sets the copy back, or clears it when there was none.
+      const _sfCaptureSourceImage = async (uuid, before, filePath) => {
+        if (!before.has('sourceImage')) {
+          let copy = null;
+          try { const c = await window.electronAPI.sourcePictureToTemp({ uuid }); copy = c && c.ok ? c.filePath : null; } catch {}
+          before.set('sourceImage', { copy });
+        }
+        try { await window.electronAPI.setSourcePicture({ uuid, filePath }); } catch {}
+      };
+      const _sfUndoSourceImage = async (uuid, b) => {
+        try {
+          if (b.copy) await window.electronAPI.setSourcePicture({ uuid, filePath: b.copy });
+          else await window.electronAPI.clearSourcePicture({ uuid });
+        } catch {}
+        finally { if (b.copy) { try { await window.electronAPI.clipboardCleanupTemp({ filePath: b.copy }); } catch {} } }
+      };
+      window._sfCaptureSourceImage = _sfCaptureSourceImage;
+      window._sfUndoSourceImage = _sfUndoSourceImage;
+      const _sfCaptureApplyLink = async (uuid, value) => {
+        if (_sfSourceEdit && _sfSourceOriginalUuid === uuid) {
+          _sfSourceEdit.linkUrl = value;
+          if (_sfSourceDetailEls.linkInput) _sfSourceDetailEls.linkInput.value = _sfSourceDetailEls.linkInput.dataset.openValue = value;
+          _sfRefreshSourceDisplayValues();
+          _sfMarkSourceDirty();
+        } else {
+          await window.electronAPI.updateSourceMeta({ uuid, updates: { linkUrl: value } });
+        }
+        // An open font window from this source shows the source's Link and writes it back on its
+        // next commit, so it takes the new one too.
+        if (_sfDetailEdit && _sfDetailSourceUuid() === uuid) {
+          _sfDetailEdit.linkUrl = value;
+          if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = _sfEntryDetailEls.linkInput.dataset.openValue = value;
+          _sfRefreshDisplayValues();
+        }
+      };
+      const _sfCaptureApplyDemo = async (name, value) => {
+        if (_sfDetailEdit && _sfDetailOriginalName === name) {
+          _sfDetailEdit.demoUrl = value;
+          if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = _sfEntryDetailEls.demoInput.dataset.openValue = value;
+          _sfRefreshDisplayValues();
+          _sfMarkDetailDirty();
+        } else {
+          await window.electronAPI.updateEntryMeta({ currentName: name, updates: { demoUrl: value } });
+        }
+      };
+      const _sfEntryOwnImage = async (name) => {
+        try { const r = await window.electronAPI.findEntryPicture({ name }); return r && r.ok && r.picture && r.picture.origin === 'own' ? r.picture : null; }
+        catch { return null; }
+      };
+      // The state before this browser session's first save of each kind, for Undo: a value, a copy of the
+      // font's own image (or none), or the proofs this session attached. Copies go when the session ends.
+      const _sfCaptureForget = (capture) => {
+        for (const b of (capture && capture.before ? capture.before.values() : [])) {
+          if (b && b.copy) { try { window.electronAPI.clipboardCleanupTemp({ filePath: b.copy }); } catch {} }
+        }
+      };
       window.electronAPI.onLinkCapturePick?.(async ({ key, value } = {}) => {
         if (window._sfCaptureTarget !== 'source' || !_sfCapture) return;
-        const { uuid, names } = _sfCapture;
+        const { uuid, names, before } = _sfCapture;
         const sourceOpen = !!(_sfSourceEdit && _sfSourceOriginalUuid === uuid);
         try {
           if (key === 'linkUrl') {
-            if (sourceOpen) {
-              _sfSourceEdit.linkUrl = value;
-              if (_sfSourceDetailEls.linkInput) _sfSourceDetailEls.linkInput.value = _sfSourceDetailEls.linkInput.dataset.openValue = value;
-              _sfRefreshSourceDisplayValues();
-              _sfMarkSourceDirty();
-            } else {
-              await window.electronAPI.updateSourceMeta({ uuid, updates: { linkUrl: value } });
+            if (!before.has(key)) {
+              before.set(key, sourceOpen ? (_sfSourceEdit.linkUrl || '') : ((((_sfAllSourcesByUuid[uuid] || {}).meta) || {}).linkUrl || ''));
             }
-            // An open font window from this source shows the source's Link and writes it back on its
-            // next commit, so it takes the new one too.
-            if (_sfDetailEdit && _sfDetailSourceUuid() === uuid) {
-              _sfDetailEdit.linkUrl = value;
-              if (_sfEntryDetailEls.linkInput) _sfEntryDetailEls.linkInput.value = _sfEntryDetailEls.linkInput.dataset.openValue = value;
-              _sfRefreshDisplayValues();
-            }
+            await _sfCaptureApplyLink(uuid, value);
           } else if (typeof key === 'string' && key.startsWith('demo:')) {
             const name = names[parseInt(key.slice(5), 10)];
             if (!name) return;
-            if (_sfDetailEdit && _sfDetailOriginalName === name) {
-              _sfDetailEdit.demoUrl = value;
-              if (_sfEntryDetailEls.demoInput) _sfEntryDetailEls.demoInput.value = _sfEntryDetailEls.demoInput.dataset.openValue = value;
-              _sfRefreshDisplayValues();
-              _sfMarkDetailDirty();
-            } else {
-              await window.electronAPI.updateEntryMeta({ currentName: name, updates: { demoUrl: value } });
+            if (!before.has(key)) {
+              before.set(key, (_sfDetailEdit && _sfDetailOriginalName === name) ? (_sfDetailEdit.demoUrl || '')
+                : ((((_sfAllEntries || []).find((e) => e.name === name) || {}).meta || {}).demoUrl || ''));
             }
+            await _sfCaptureApplyDemo(name, value);
           } else if (key === 'proof' && value && value.filePath) {
             try {
-              await window.electronAPI.addAttachmentToSources({ filePath: value.filePath, label: '', uuids: [uuid] });
+              let had = [];
+              try { const l = await window.electronAPI.listAttachments({ uuid }); had = ((l && l.ok && l.attachments) || []).map((a) => a.id); } catch {}
+              const r = await window.electronAPI.addAttachmentToSources({ filePath: value.filePath, label: '', uuids: [uuid] });
+              if (r && r.ok && r.id && !had.includes(r.id)) {
+                const b = before.get(key) || { ids: [] };
+                b.ids.push(r.id);
+                before.set(key, b);
+              }
               if (sourceOpen) _sfRenderSourcePop();
             } finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
             return;
+          } else if (key === 'sourceImage' && value && value.filePath) {
+            try {
+              await _sfCaptureSourceImage(uuid, before, value.filePath);
+              if (sourceOpen) _sfAfterSourcePictureChange();
+            } finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
+          } else if (typeof key === 'string' && key.startsWith('image:') && value && value.filePath) {
+            // The font's own image, replaced the way the font window's Paste does it.
+            const name = names[parseInt(key.slice(6), 10)];
+            try {
+              if (!name) return;
+              const own = await _sfEntryOwnImage(name);
+              if (!before.has(key)) {
+                let copy = null;
+                if (own) { try { const c = await window.electronAPI.pictureFromCopied({ kind: 'entry', id: name, subPath: own.subPath }); copy = c && c.ok ? c.filePath : null; } catch {} }
+                before.set(key, { name, copy });
+              }
+              const changed = await _sfReplaceItemImage({ kind: 'entry', id: name, oldSubPath: own && own.subPath, filePath: value.filePath });
+              if (changed && _sfDetailEdit && _sfDetailOriginalName === name) await _sfAfterEntryPictureChange();
+            } finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
+          }
+          try { await window.refreshSoundFontsView(); } catch {}
+        } catch {}
+      });
+      // Undo on the browser's strip: put back what that kind of save replaced this session.
+      window.electronAPI.onLinkCaptureUndo?.(async ({ key } = {}) => {
+        if (window._sfCaptureTarget !== 'source' || !_sfCapture) return;
+        const { uuid, names, before } = _sfCapture;
+        if (!before.has(key)) return;
+        const b = before.get(key);
+        before.delete(key);
+        try {
+          if (key === 'linkUrl') {
+            await _sfCaptureApplyLink(uuid, b);
+          } else if (typeof key === 'string' && key.startsWith('demo:')) {
+            const name = names[parseInt(key.slice(5), 10)];
+            if (name) await _sfCaptureApplyDemo(name, b);
+          } else if (key === 'proof') {
+            for (const id of b.ids) { try { await window.electronAPI.unlinkAttachment({ uuid, id }); } catch {} }
+            if (_sfSourceEdit && _sfSourceOriginalUuid === uuid) _sfRenderSourcePop();
+          } else if (key === 'sourceImage') {
+            await _sfUndoSourceImage(uuid, b);
+            if (_sfSourceEdit && _sfSourceOriginalUuid === uuid) _sfAfterSourcePictureChange();
+          } else if (typeof key === 'string' && key.startsWith('image:')) {
+            const own = await _sfEntryOwnImage(b.name);
+            if (b.copy) {
+              try { await _sfReplaceItemImage({ kind: 'entry', id: b.name, oldSubPath: own && own.subPath, filePath: b.copy }); }
+              finally { try { await window.electronAPI.clipboardCleanupTemp({ filePath: b.copy }); } catch {} }
+            } else if (own) {
+              try { await window.electronAPI.fileOpsDelete({ kind: 'entry', id: b.name, subPaths: [own.subPath] }); } catch {}
+            }
+            if (_sfDetailEdit && _sfDetailOriginalName === b.name) await _sfAfterEntryPictureChange();
           }
           try { await window.refreshSoundFontsView(); } catch {}
         } catch {}
@@ -44530,22 +44826,15 @@ require(['vs/editor/editor.main'], function () {
       });
       _sfEntryDetailEls.demoClear?.addEventListener('click', () => _sfClearUrlInput(_sfEntryDetailEls.demoInput));
       _sfEntryDetailEls.linkClearBtn?.addEventListener('click', () => _sfClearUrlInput(_sfEntryDetailEls.linkInput));
-      // Inline paste buttons. Read clipboard, overwrite the input on
-      // a valid URL (committing into the in-memory edit so Save catches
-      // it), flash the input red on an invalid clipboard.
+      // Inline paste buttons: a valid URL on the clipboard fills the box, an invalid one flashes it
+      // red. The pasted value waits for the check, as a typed one does.
       _sfEntryDetailEls.demoPaste?.addEventListener('click', async () => {
         if (!_sfDetailEdit || !_sfEntryDetailEls.demoInput) return;
-        await _sfTryPasteUrlInto(_sfEntryDetailEls.demoInput, (url) => {
-          _sfDetailEdit.demoUrl = url;
-          _sfMarkDetailDirty();
-        });
+        await _sfTryPasteUrlInto(_sfEntryDetailEls.demoInput, _sfPasteWaitsForCheck);
       });
       _sfEntryDetailEls.linkPaste?.addEventListener('click', async () => {
         if (!_sfDetailEdit || !_sfEntryDetailEls.linkInput) return;
-        await _sfTryPasteUrlInto(_sfEntryDetailEls.linkInput, (url) => {
-          _sfDetailEdit.linkUrl = url;
-          _sfMarkDetailDirty();
-        });
+        await _sfTryPasteUrlInto(_sfEntryDetailEls.linkInput, _sfPasteWaitsForCheck);
       });
       const _sfLinkKeydown = (e) => {
         if (e.key === 'Enter') {
@@ -46828,12 +47117,13 @@ require(['vs/editor/editor.main'], function () {
           const run = async () => {
             setStatus('Ejecting...');
             let res = null;
+            let inApp = false;
             try {
               // THE CACHED IDENTITY DIES WITH THE EJECT. [B-005 item 4] The next card in that
               // reader is a different device, and swapping hardware between exports is exactly
               // what testing does - an inherited identity would report the old board.
               _sfDestIdentity.forget();
-              const inApp = await _sfSharedInApp(boardP);   // see the row: the JMT Studio way
+              inApp = await _sfSharedInApp(boardP);   // see the row: the JMT Studio way
               const r = await window.electronAPI.ejectMedia({ destDir: t.mountPath,
                 ...(inApp ? { stableMs: 0 } : {}) });
               res = (r && r.ok && r.result) || null;
@@ -46846,10 +47136,10 @@ require(['vs/editor/editor.main'], function () {
               // is reported.
               const onBoard = !res.alreadyGone && await _sfIsBoardCard(boardP);
               setStatus(res.alreadyGone ? 'Already removed.'
-                : onBoard ? `${SF_BOARD_RESTARTING}...` : 'Safe to remove.');
+                : onBoard ? (inApp ? `${SF_BOARD_RESTARTING}...` : SF_BOARD_POWER_CYCLE) : 'Safe to remove.');
               // Any path on that volume printed elsewhere on screen now opens nothing.
               _sfRetirePathLinks(t.mountPath);
-              if (onBoard) setStatus(await _sfRestartBoardAfterEject(boardP));
+              if (onBoard) setStatus(await _sfRestartBoardAfterEject(boardP, inApp));
               return;
             }
             if (res.status === 'returned') {
@@ -46999,7 +47289,12 @@ require(['vs/editor/editor.main'], function () {
         catch { return false; }
       };
       const SF_BOARD_RESTARTING = 'Ejected. Board restarting';
-      const _sfRestartBoardAfterEject = async (boardP) => {
+      const SF_BOARD_POWER_CYCLE = 'Ejected. Turn the saber off and on before using it.';
+      // `inApp`: read before the eject (_sfSharedInApp). The reset is sent only when this app's
+      // monitor shared the card with `sd 1`, which proves the board has MOUNT_SD_SETTING; without it
+      // a reset boots the board straight back onto the computer as a drive. [B-545]
+      const _sfRestartBoardAfterEject = async (boardP, inApp) => {
+        if (!inApp) return SF_BOARD_POWER_CYCLE;
         const d = await boardP;
         let r = null;
         const port = d && d.portP ? await d.portP : null;
@@ -47009,7 +47304,7 @@ require(['vs/editor/editor.main'], function () {
         if (st === 'restarted' && r.back) return 'Board restarted.';
         if (st === 'busy') return 'Ejected. Another program has the board’s serial port open, so it was not restarted. '
           + 'Send reset from that program, or turn the saber off and on.';
-        return 'Ejected. Turn the saber off and on before using it.';
+        return SF_BOARD_POWER_CYCLE;
       };
       window._sfBoardOfMount = _sfBoardOfMount;
       window._sfRestartBoardAfterEject = _sfRestartBoardAfterEject;
@@ -47030,10 +47325,11 @@ require(['vs/editor/editor.main'], function () {
           // style guide."
           if (status) { status.textContent = 'Ejecting'; status.classList.add('busy-dots'); }
           let res = null;
+          let inApp = false;
           try {
             // Shared from this app's monitor: skip the stay-gone watch (see ejectVolume), so the
             // board's reset goes out before anyone following Windows' notice unplugs it.
-            const inApp = await _sfSharedInApp(boardP);
+            inApp = await _sfSharedInApp(boardP);
             _sfDestIdentity.forget();   // see the note on the toast path: a new card is a new device
             const r = await window.electronAPI.ejectMedia({ destDir: target.mountPath,
               ...(inApp ? { stableMs: 0 } : {}) });
@@ -47069,9 +47365,9 @@ require(['vs/editor/editor.main'], function () {
             // paragraph about drive-letter behaviour.
             const onBoard = !res.alreadyGone && await _sfIsBoardCard(boardP);
             if (status) {
-              status.classList.toggle('busy-dots', onBoard);
+              status.classList.toggle('busy-dots', onBoard && inApp);
               status.textContent = res.alreadyGone ? 'Already removed.'
-                : onBoard ? SF_BOARD_RESTARTING : 'Safe to remove.';
+                : onBoard ? (inApp ? SF_BOARD_RESTARTING : SF_BOARD_POWER_CYCLE) : 'Safe to remove.';
               status.style.color = 'var(--c-ok, var(--c-text-sub))';
             }
             // [B-424, 2026-09-30] TELL THE CALLER THE VOLUME IS GONE. A summary dialog can
@@ -47085,7 +47381,7 @@ require(['vs/editor/editor.main'], function () {
             // leave the stale listing up in the one case where it is most certainly wrong.
             try { if (typeof onEjected === 'function') onEjected(res); } catch {}
             if (onBoard) {
-              const said = await _sfRestartBoardAfterEject(boardP);
+              const said = await _sfRestartBoardAfterEject(boardP, inApp);
               if (status) { status.classList.remove('busy-dots'); status.textContent = said; }
             }
             return;
@@ -50076,8 +50372,13 @@ require(['vs/editor/editor.main'], function () {
       // pop } for richer previews. kind: 'text' (default) | 'image' | 'pdf' |
       // 'none' (unpreviewable — show a note + rely on Open externally). When
       // opts.pop = {id, uuid} is set, the Open-externally / Remove actions show.
+      // An image is decoded before the viewer shows, so it opens at its size instead of as an empty frame
+      // that grows a moment later. A newer show while one is decoding wins. [B-511]
+      let _sfDocViewerShowToken = 0;
       const _sfShowDocViewer = (fileName, size, content, opts = {}) => {
         if (!_sfDocViewerEls.modal) return;
+        const token = ++_sfDocViewerShowToken;
+        let imgToDecode = null;
         const fmtSize = (n) => {
           if (!n) return '';
           if (n < 1024) return `${n} B`;
@@ -50097,7 +50398,7 @@ require(['vs/editor/editor.main'], function () {
             _sfDocViewerBlobUrl = opts.blobUrl || null;
             body.innerHTML = '<img class="sf-doc-viewer-img" alt="">';
             const img = body.querySelector('img'); if (img && opts.blobUrl) img.src = opts.blobUrl;
-            _jmtFitViewerImage(body.closest('.modal'), img);
+            imgToDecode = img;
           } else if (kind === 'pdf') {
             _sfDocViewerBlobUrl = opts.blobUrl || null;
             body.innerHTML = '<iframe class="sf-doc-viewer-frame" title="preview"></iframe>';
@@ -50119,18 +50420,29 @@ require(['vs/editor/editor.main'], function () {
         }
         // Hide any SF modals currently open so the viewer is the only thing
         // on screen. They get restored on close.
-        _sfDocViewerStashedModalIds = [];
-        const candidates = ['modal-sf-entry-detail', 'modal-sf-source-detail', 'modal-sf-reorganize', 'modal-sf-audio'];
-        for (const id of candidates) {
-          const el = document.getElementById(id);
-          if (el && el.classList.contains('active')) {
-            el.classList.remove('active');
-            _sfDocViewerStashedModalIds.push(id);
+        const reveal = () => {
+          if (token !== _sfDocViewerShowToken) return;
+          _sfDocViewerStashedModalIds = [];
+          const candidates = ['modal-sf-entry-detail', 'modal-sf-source-detail', 'modal-sf-reorganize', 'modal-sf-audio'];
+          for (const id of candidates) {
+            const el = document.getElementById(id);
+            if (el && el.classList.contains('active')) {
+              el.classList.remove('active');
+              _sfDocViewerStashedModalIds.push(id);
+            }
           }
-        }
-        _sfDocViewerEls.modal.classList.add('active');
+          _sfDocViewerEls.modal.classList.add('active');
+        };
+        if (!imgToDecode) { reveal(); return; }
+        const decoded = imgToDecode.decode ? imgToDecode.decode() : Promise.resolve();
+        decoded.catch(() => {}).then(() => {
+          if (token !== _sfDocViewerShowToken) return;
+          _jmtFitViewerImage(body && body.closest('.modal'), imgToDecode);
+          reveal();
+        });
       };
       const _sfHideDocViewer = () => {
+        _sfDocViewerShowToken++;   // an image still decoding does not open after this
         _sfDocViewerEls.modal?.classList.remove('active');
         if (_sfDocViewerBlobUrl) { URL.revokeObjectURL(_sfDocViewerBlobUrl); _sfDocViewerBlobUrl = null; }
         if (_sfDocViewerEls.body) { _sfDocViewerEls.body.innerHTML = ''; _sfDocViewerEls.body.classList.remove('sf-doc-viewer-media'); }
@@ -52250,6 +52562,23 @@ require(['vs/editor/editor.main'], function () {
         _sfRefreshOpenFacet(_sfCreatorDropdown, 'sf-creator-dropdown-list', _sfRenderCreatorDropdown);
         // [B-305/B-382] stays open - multi-select. See the tag handler above.
       });
+      // Right-click a tag or creator row: WITHOUT, as on the Effects rows. Stays open. [B-564]
+      _sfTagDropdown?.addEventListener('contextmenu', (e) => {
+        const item = e.target.closest('.styles-tag-dropdown-item');
+        if (!item) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (item.dataset.tag) _sfRightToggleFilterTag(item.dataset.tag);
+        _sfRefreshOpenFacet(_sfTagDropdown, 'sf-tag-dropdown-list', _sfRenderTagDropdown);
+      });
+      _sfCreatorDropdown?.addEventListener('contextmenu', (e) => {
+        const item = e.target.closest('.styles-tag-dropdown-item');
+        if (!item) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (item.dataset.creator) _sfRightToggleFilterCreator(item.dataset.creator);
+        _sfRefreshOpenFacet(_sfCreatorDropdown, 'sf-creator-dropdown-list', _sfRenderCreatorDropdown);
+      });
       _sfEffectsFilterBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!_sfEffectsDropdown) return;
@@ -52324,14 +52653,14 @@ require(['vs/editor/editor.main'], function () {
         if (tagRemove) {
           e.stopPropagation();
           const tag = tagRemove.getAttribute('data-filter-remove-tag');
-          if (tag) _sfToggleFilterTag(tag);
+          if (tag) _sfRemoveTagFilter(tag);
           return;
         }
         const creatorRemove = e.target.closest('[data-filter-remove-creator]');
         if (creatorRemove) {
           e.stopPropagation();
           const c = creatorRemove.getAttribute('data-filter-remove-creator');
-          if (c) _sfToggleFilterCreator(c);
+          if (c) _sfRemoveCreatorFilter(c);
           return;
         }
         const effectRemove = e.target.closest('[data-filter-remove-effect]');
@@ -55062,9 +55391,10 @@ require(['vs/editor/editor.main'], function () {
           .map(en => en.name);
         await _sfMarkSeenBulk(names, 'as seen');
       });
+      const _sfBulkSaveOnce = jmtOneAtATime(_sfBulkSave);
       document.getElementById('btn-sf-bulk-save')?.addEventListener('click', async (e) => {
         e.stopPropagation();
-        await _sfBulkSave();
+        await _sfBulkSaveOnce();
       });
       // Bulk duplicate — the only surface that duplicates the whole selection
       // (the card right-click stays single). Each copy shares its original's

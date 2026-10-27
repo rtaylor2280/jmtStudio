@@ -156,21 +156,21 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
   check('the row looks the board up when it is wired, before any eject',
     row.indexOf('const boardP = _sfBoardOfMount(target.mountPath);') > -1
     && row.indexOf('const boardP = _sfBoardOfMount(target.mountPath);') < row.indexOf('ejectMedia('));
-  check('the row restarts it after a fresh eject', /if \(onBoard\) \{\s*const said = await _sfRestartBoardAfterEject\(boardP\);/.test(row));
+  check('the row restarts it after a fresh eject', /if \(onBoard\) \{\s*const said = await _sfRestartBoardAfterEject\(boardP, inApp\);/.test(row));
   const toastAt = html.indexOf("const TOAST_ID = 'sf-eject-ending';");
   const toast = html.slice(toastAt, toastAt + 3000);
   check('the toast looks the board up before its eject',
     toast.indexOf('const boardP = _sfBoardOfMount(t.mountPath);') > -1
     && toast.indexOf('const boardP = _sfBoardOfMount(t.mountPath);') < toast.indexOf('ejectMedia('));
-  check('the toast restarts it after a fresh eject', /if \(onBoard\) setStatus\(await _sfRestartBoardAfterEject\(boardP\)\);/.test(toast));
+  check('the toast restarts it after a fresh eject', /if \(onBoard\) setStatus\(await _sfRestartBoardAfterEject\(boardP, inApp\)\);/.test(toast));
   check("the toast retires links through its own variable (it named an unbound 'target')",
     toast.includes('_sfRetirePathLinks(t.mountPath);') && !toast.includes('_sfRetirePathLinks(target'));
   check('only a board card is restarted', /return !!\(d && d\.transport === 'proffieboard'\);/.test(html));
   check('ready is said only when the port opened again', /if \(st === 'restarted' && r\.ready\) return 'Board restarted and ready to use\.';/.test(html));
   check('back but not opening: restarted, without ready', /if \(st === 'restarted' && r\.back\) return 'Board restarted\.';/.test(html));
   check('the row says Ejected and restarting, with the dots, for a board card',
-    /onBoard \? SF_BOARD_RESTARTING : 'Safe to remove\.'/.test(row) && row.includes("classList.toggle('busy-dots', onBoard)"));
-  check('the toast says it too', /onBoard \? `\$\{SF_BOARD_RESTARTING\}\.\.\.` : 'Safe to remove\.'/.test(toast));
+    /onBoard \? \(inApp \? SF_BOARD_RESTARTING : SF_BOARD_POWER_CYCLE\) : 'Safe to remove\.'/.test(row) && row.includes("classList.toggle('busy-dots', onBoard && inApp)"));
+  check('the toast says it too', /onBoard \? \(inApp \? `\$\{SF_BOARD_RESTARTING\}\.\.\.` : SF_BOARD_POWER_CYCLE\) : 'Safe to remove\.'/.test(toast));
   check('a board card is never told Safe to remove', !/Safe to remove\. \$\{/.test(html) && !/'Safe to remove\. Board/.test(html));
   check('no personification left', !/saber can use its card/.test(html));
 
@@ -197,6 +197,26 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
     (html.match(/\.\.\.\(inApp \? \{ stableMs: 0 \} : \{\}\)/g) || []).length === 2);
   check('the board and its port are looked up before the eject', /boardPortForSerial\(d\.boardSerial/.test(html));
   check('preload exposes the share answer', /boardSdSharedInApp:/.test(pre));
+
+  // B-545: the reset goes out only when the card was shared from this app (which proves
+  // MOUNT_SD_SETTING). Runs the renderer function itself with the IPC stubbed.
+  {
+    const from = html.indexOf("const SF_BOARD_RESTARTING = 'Ejected. Board restarting';");
+    const end = html.indexOf('return SF_BOARD_POWER_CYCLE;\n      };', from);
+    const src = from > -1 && end > from ? html.slice(from, end + 'return SF_BOARD_POWER_CYCLE;\n      };'.length) : '';
+    check('the restart function was located', src.length > 400, 're-anchor: an empty slice runs nothing');
+    const calls = [];
+    const window = { electronAPI: { restartBoardAfterEject: async (s, p) => { calls.push([s, p]); return { status: 'restarted', ready: true }; } } };
+    const run = new Function('window', `${src}; return _sfRestartBoardAfterEject;`)(window);
+    const board = Promise.resolve({ transport: 'proffieboard', boardSerial: 'ABC', portP: Promise.resolve('COM18') });
+    const notShared = await run(board, false);
+    check('not shared from the app: no reset is sent, and it says turn the saber off and on',
+      calls.length === 0 && notShared === 'Ejected. Turn the saber off and on before using it.', JSON.stringify({ calls, notShared }));
+    const shared = await run(board, true);
+    check('shared from the app: the reset is sent to that board',
+      calls.length === 1 && calls[0][0] === 'ABC' && calls[0][1] === 'COM18' && shared === 'Board restarted and ready to use.',
+      JSON.stringify({ calls, shared }));
+  }
 
   console.log(failures ? `\n${failures} failing` : '\nall passed');
   process.exit(failures ? 1 : 0);

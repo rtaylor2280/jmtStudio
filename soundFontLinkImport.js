@@ -445,4 +445,21 @@ function highlightLink(pageUrl, selection) {
   return `${base}#${anchor}:~:text=${directive}`;
 }
 
-module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams, highlightLink };
+// The rectangle a video's picture fills on the page: the picture inside its element (the letterbox bars
+// left out), moved by the element's frame offset, inset on every side, and kept on screen. `video` is
+// { x, y, w, h, vw, vh } (element box and the video's own size). Null when too little is left.
+function videoFrameRect(video, offset, view, inset) {
+  const v = video || {};
+  if (!(v.w > 0) || !(v.h > 0) || !(v.vw > 0) || !(v.vh > 0)) return null;
+  const o = offset || { x: 0, y: 0 };
+  const s = Math.min(v.w / v.vw, v.h / v.vh);
+  const cw = v.vw * s, ch = v.vh * s;
+  const d = inset || 0;
+  let x1 = o.x + v.x + (v.w - cw) / 2 + d, y1 = o.y + v.y + (v.h - ch) / 2 + d;
+  let x2 = o.x + v.x + (v.w + cw) / 2 - d, y2 = o.y + v.y + (v.h + ch) / 2 - d;
+  if (view) { x1 = Math.max(0, x1); y1 = Math.max(0, y1); x2 = Math.min(view.w, x2); y2 = Math.min(view.h, y2); }
+  const rect = { x: Math.ceil(x1), y: Math.ceil(y1), width: Math.floor(x2) - Math.ceil(x1), height: Math.floor(y2) - Math.ceil(y1) };
+  return rect.width >= 32 && rect.height >= 32 ? rect : null;
+}
+
+module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams, highlightLink, videoFrameRect };

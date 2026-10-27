@@ -2407,7 +2407,7 @@ ipcMain.handle('sources:listDocs', async (_, { uuid } = {}) => {
 ipcMain.handle('sources:readDocBytes', async (_, { uuid, path: subPath } = {}) => {
   try {
     const buf = await soundFontSources.readSourceFileBytes(app.getPath('userData'), uuid, subPath);
-    return { ok: true, bytes: Array.from(buf) };
+    return { ok: true, bytes: buf };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -2693,7 +2693,7 @@ ipcMain.handle('entries:listDocs', (_, { name } = {}) => {
 ipcMain.handle('entries:readDocBytes', (_, { name, path: subPath } = {}) => {
   try {
     const buf = soundFontEntries.readEntryFileBytes(app.getPath('userData'), name, subPath);
-    return { ok: true, bytes: Array.from(buf) };
+    return { ok: true, bytes: buf };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -3133,7 +3133,7 @@ ipcMain.handle('common:moveFiles', async (_, { uuid, sourcePaths, destSubPath } 
 ipcMain.handle('common:readFileBytes', (_, { uuid, subPath } = {}) => {
   try {
     const buf = soundFontCommon.readCommonFileBytes(app.getPath('userData'), uuid, subPath);
-    return { ok: true, bytes: Array.from(buf) };
+    return { ok: true, bytes: buf };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -3257,6 +3257,20 @@ ipcMain.handle('sources:setPicture', async (_, { uuid, filePath } = {}) => {
       p = r.filePaths[0];
     }
     return await soundFontAttachments.setSourcePicture(app.getPath('userData'), uuid, p);
+  } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+// A copy of the source's own image in a temp folder (removed by clipboard:cleanupTemp), so a change from the
+// app browser can be undone: setting a new one releases the old from the store. filePath null when none.
+ipcMain.handle('sources:pictureToTemp', (_, { uuid } = {}) => {
+  try {
+    const userData = app.getPath('userData');
+    const pic = soundFontAttachments.sourcePicture(userData, uuid);
+    if (!pic) return { ok: true, filePath: null };
+    const src = soundFontAttachments.attachmentFilePath(userData, pic.id);
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'jmt-clip-'));
+    const filePath = path.join(dir, pic.name || path.basename(src));
+    fs.copyFileSync(src, filePath);
+    return { ok: true, filePath };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 ipcMain.handle('sources:clearPicture', (_, { uuid } = {}) => {
@@ -3899,7 +3913,7 @@ ipcMain.handle('sharedTracks:readFileBytes', (_, { name } = {}) => {
   try {
     const buf = soundFontSharedTracks.readFileBytes(app.getPath('userData'), name);
     if (!buf) return { ok: false, error: 'File not found' };
-    return { ok: true, bytes: Array.from(buf) };
+    return { ok: true, bytes: buf };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -3915,8 +3929,8 @@ ipcMain.handle('voicepack:downloadSample', async (_, { id } = {}) => {
   try {
     const result = await soundFontVoicepack.downloadSample(id, app.getAppPath());
     if (!result.ok) return result;
-    // Convert Buffer to ArrayBuffer-compatible payload for the renderer
-    return { ok: true, bytes: Array.from(result.bytes) };
+    // A Buffer crosses IPC as raw bytes (a Uint8Array in the renderer).
+    return { ok: true, bytes: result.bytes };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
@@ -5762,14 +5776,31 @@ async function _pdfAllowed(page) {
 }
 // onSave(key, value) receives each save: key is 'linkUrl', 'demoUrl' or 'proof' ({ filePath, fileName }),
 // and with `fonts` (a function returning the font names) a Demo is saved per font as 'demo:<index>'. getDir() returns the capture's temp
-// folder, creating it on first use.
-function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', onSave }) {
+// folder, creating it on first use. With `images` (a function returning true when the opener can take them)
+// an image is saved per font as 'image:<index>' ({ filePath, fileName, thumb }, a PNG in its own temp folder).
+// onUndo(key), when given, puts back what that key's save replaced; the strip's Undo on a row calls it
+// and removes the row. Undo lasts while the browser is open.
+function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', onSave, onUndo = null, images = null }) {
   const { Menu, clipboard } = require('electron');
   const shown = new Map();   // row key -> { label, hint, value }, most recently saved first
   let strip = null;
   let stripReady = false;
   let proofPath = null;
-  const rows = () => Array.from(shown.values()).reverse();
+  // What Undo on a row puts back, by the kind of save.
+  const undoHint = (key) => key === 'proof' ? 'Removes this proof of purchase'
+    : key === 'sourceImage' ? 'Puts back the source image from before'
+    : key.startsWith('image:') ? 'Puts back the font image from before'
+    : key.startsWith('demo') ? 'Puts back the Demo from before' : 'Puts back the Link from before';
+  const rows = () => Array.from(shown.entries()).reverse()
+    .map(([key, r]) => ({ ...r, key, undo: typeof onUndo === 'function' ? undoHint(key) : '' }));
+  const undo = (key) => {
+    if (!shown.has(key)) return;
+    shown.delete(key);
+    if (key === 'proof') proofPath = null;
+    try { onUndo(key); } catch {}
+    if (!shown.size) { try { strip.hide(); } catch {} return; }
+    show();
+  };
   const place = () => {
     if (!strip || strip.isDestroyed() || page.isDestroyed()) return;
     const b = page.getContentBounds();
@@ -5787,6 +5818,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       webPreferences: { preload: path.join(__dirname, 'linkPicksPreload.js'), sandbox: true, contextIsolation: true },
     });
     strip.loadFile(path.join(__dirname, 'renderer', 'link-picks.html'));
+    strip.webContents.ipc.on('linkpicks:undo', (_e, { key } = {}) => { if (typeof onUndo === 'function') undo(String(key || '')); });
     strip.once('ready-to-show', () => { stripReady = true; push(); });
     strip.on('closed', () => { strip = null; stripReady = false; });
   };
@@ -5797,7 +5829,8 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
     shown.delete(key);
     shown.set(key, { label, hint, value: shownValue || value });
     try { onSave(key, value); } catch {}
-    show(toast);
+    // The row is the confirmation; a toast would cover the row's Undo. Only failures toast. [B-563]
+    show();
   };
   const savePdf = async () => {
     try {
@@ -5835,7 +5868,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
         { label: names.length === 2 ? allLabel.replace(/^All\b/, 'Both') : allLabel, click: () => {
           const cleanUrl = soundFontLinkImport.stripSessionParams(demoUrl);
           names.forEach((n, i) => { shown.delete(`demo:${i}`); shown.set(`demo:${i}`, { label: `Demo · ${n}`, hint: DEMO_HINT, value: cleanUrl }); try { onSave(`demo:${i}`, cleanUrl); } catch {} });
-          show(`Saved as Demo for ${names.length} fonts`);
+          show();
         } },
         { type: 'separator' },
         ...names.map((n, i) => ({ label: n, click: () => one(i) })),
@@ -5843,6 +5876,49 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
     };
     const highlight = soundFontLinkImport.highlightLink(
       soundFontLinkImport.stripSessionParams(page.webContents.getURL()), params.selectionText);
+    // One picture item: straight to the font, or a submenu of the fonts with the all-fonts row first.
+    // Each font gets its own copy, since each is cleaned up once used.
+    const PICTURE_HINT = "The font's image";
+    const pictureItem = (label, take) => {
+      const toFont = async (idxs) => {
+        const pic = await take();
+        if (!pic) { show('Could not get that image'); return; }
+        // A small preview for a window that holds the image before it is used (import review).
+        let thumb = '';
+        try { thumb = require('electron').nativeImage.createFromPath(pic.filePath).resize({ height: 52 }).toDataURL(); } catch {}
+        idxs.forEach((i, n) => {
+          let value = pic;
+          if (n > 0) {
+            const dir = _pagePictureDir();
+            const filePath = path.join(dir, pic.fileName);
+            try { fs.copyFileSync(pic.filePath, filePath); value = { filePath, fileName: pic.fileName }; } catch { return; }
+          }
+          value = { ...value, thumb };
+          shown.delete(`image:${i}`);
+          shown.set(`image:${i}`, { label: `Font image · ${names[i]}`, hint: PICTURE_HINT, value: 'Saved' });
+          try { onSave(`image:${i}`, value); } catch {}
+        });
+        show();
+      };
+      if (names.length === 1) return { label, click: () => toFont([0]) };
+      return { label, submenu: [
+        { label: names.length === 2 ? allLabel.replace(/^All\b/, 'Both') : allLabel, click: () => toFont(names.map((_n, i) => i)) },
+        { type: 'separator' },
+        ...names.map((n, i) => ({ label: n, click: () => toFont([i]) })),
+      ] };
+    };
+    // The source's own image: a bundle's, set apart from its fonts' images. A one-font source shows its
+    // font's image, so it has only the font item.
+    const sourceImageItem = (take) => ({ label: 'Save as source image', click: async () => {
+      const pic = await take();
+      if (!pic) { show('Could not get that image'); return; }
+      let thumb = '';
+      try { thumb = require('electron').nativeImage.createFromPath(pic.filePath).resize({ height: 52 }).toDataURL(); } catch {}
+      shown.delete('sourceImage');
+      shown.set('sourceImage', { label: 'Source image', hint: "The source's image", value: 'Saved' });
+      try { onSave('sourceImage', { ...pic, thumb }); } catch {}
+      show();
+    } });
     const items = [
       { label: link ? 'Copy link URL' : 'Copy page URL', click: () => clipboard.writeText(soundFontLinkImport.stripSessionParams(url)) },
       ...(highlight ? [{ label: 'Copy link to highlight', click: () => clipboard.writeText(highlight) }] : []),
@@ -5855,12 +5931,118 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       const moment = await _youtubeMoment(page);
       if (moment) items.push(demoItem(`Save as Demo at ${moment.label}`, moment.url));
     }
+    if (names && names.length && typeof images === 'function' && images()) {
+      const imgSrc = params.mediaType === 'image' && /^(https?:|data:image\/)/i.test(params.srcURL || '') ? params.srcURL : null;
+      const frame = await _youtubeFrame(page);
+      if (imgSrc) {
+        items.push({ type: 'separator' }, pictureItem('Save as font image', () => _imageFromPage(page, imgSrc)));
+        if (names.length > 1) items.push(sourceImageItem(() => _imageFromPage(page, imgSrc)));
+      }
+      if (frame) {
+        if (!imgSrc) items.push({ type: 'separator' });
+        items.push(pictureItem('Save video frame as font image', () => _captureYoutubeFrame(page, frame)));
+        if (names.length > 1) items.push({ ...sourceImageItem(() => _captureYoutubeFrame(page, frame)), label: 'Save video frame as source image' });
+      }
+    }
     if (await _pdfAllowed(page)) {
       items.push({ type: 'separator' }, { label: 'Save page as proof of purchase (PDF)', click: savePdf });
     }
     if (page.isDestroyed()) return;
     Menu.buildFromTemplate(items).popup({ window: page });
   });
+}
+// A picture taken from the page, written as a PNG in its own temp folder (linkImport:cleanup removes
+// that folder once the picture is used). Returns { filePath, fileName } or null.
+function _pagePictureDir() {
+  return fs.mkdtempSync(path.join(require('os').tmpdir(), 'jmt-linkimport-'));
+}
+// An image on the page, fetched with the page's own session, so a site that needs its cookies works.
+async function _imageFromPage(page, srcURL) {
+  try {
+    const res = await page.webContents.session.fetch(srcURL);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const dir = _pagePictureDir();
+    const raw = path.join(dir, 'image');
+    fs.writeFileSync(raw, buf);
+    const filePath = path.join(dir, 'picture.png');
+    fs.writeFileSync(filePath, buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? buf : await _decodeToPng(raw));
+    try { fs.unlinkSync(raw); } catch {}
+    return { filePath, fileName: 'picture.png' };
+  } catch { return null; }
+}
+// YouTube's own controls and overlays, hidden while a frame is captured. The channel watermark stays.
+const _YT_FRAME_HIDE = '.ytp-chrome-top,.ytp-chrome-bottom,.ytp-gradient-top,.ytp-gradient-bottom,.ytp-pause-overlay,'
+  + '.ytp-large-play-button,.ytp-ce-element,.ytp-cards-teaser,.ytp-paid-content-overlay,.ytp-tooltip,.ytp-spinner,'
+  + '.ytp-autonav-endscreen-countdown-overlay{opacity:0!important;transition:none!important}';
+// Inset from each edge of the frame, in page pixels, so YouTube's rounded corners (12 px) are not captured.
+const _YT_FRAME_INSET = 6;
+// Where a paused YouTube video on the page shows its picture: the YouTube page itself, or a player
+// embedded directly in the page. The rectangle is the video's picture inside its element (not the
+// letterbox bars), inset, and kept on screen. Null when there is no paused YouTube video.
+async function _youtubeFrame(page) {
+  let frames = [];
+  const main = page.webContents.mainFrame;
+  try { frames = main.framesInSubtree || []; } catch { return null; }
+  for (const f of frames) {
+    const id = soundFontLinkImport.youtubeVideoId(f.url);
+    if (!id) continue;
+    let r = null;
+    try {
+      r = await f.executeJavaScript("(() => { const v = document.querySelector('video'); if (!v || !v.paused || !v.videoWidth) return null;"
+        + ' const b = v.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, vw: v.videoWidth, vh: v.videoHeight }; })()');
+    } catch { r = null; }
+    if (!r || !(r.w > 0) || !(r.h > 0)) continue;
+    let ox = 0, oy = 0;
+    if (f !== main) {
+      if (f.parent !== main) continue;
+      let o = null;
+      try {
+        o = await main.executeJavaScript(`(() => { for (const el of document.querySelectorAll('iframe')) {
+          if (String(el.src || '').includes(${JSON.stringify(id)})) { const b = el.getBoundingClientRect();
+            return { x: b.x + el.clientLeft, y: b.y + el.clientTop }; } } return null; })()`);
+      } catch { o = null; }
+      if (!o) continue;
+      ox = o.x; oy = o.y;
+    }
+    let view = null;
+    try { view = await main.executeJavaScript('({ w: window.innerWidth, h: window.innerHeight })'); } catch {}
+    const rect = soundFontLinkImport.videoFrameRect(r, { x: ox, y: oy }, view, _YT_FRAME_INSET);
+    if (!rect) continue;
+    return { frame: f, rect };
+  }
+  return null;
+}
+// Captures the frame found by _youtubeFrame as a PNG, with YouTube's controls hidden for the capture.
+async function _captureYoutubeFrame(page, found) {
+  const { frame, rect } = found;
+  const id = 'jmt-frame-grab';
+  try {
+    await frame.executeJavaScript(`(() => { const s = document.createElement('style'); s.id = ${JSON.stringify(id)};
+      s.textContent = ${JSON.stringify(_YT_FRAME_HIDE)}; document.documentElement.appendChild(s); })()`);
+    await new Promise((r) => setTimeout(r, 150));
+    const img = await page.webContents.capturePage(rect);
+    const dir = _pagePictureDir();
+    const filePath = path.join(dir, 'picture.png');
+    fs.writeFileSync(filePath, img.toPNG());
+    return { filePath, fileName: 'picture.png' };
+  } catch { return null; }
+  finally {
+    try { await frame.executeJavaScript(`document.getElementById(${JSON.stringify(id)})?.remove()`); } catch {}
+  }
+}
+// The app's browser windows belong to Studio: no taskbar button of their own (Studio's brings both), and
+// Studio takes no clicks while one is showing (a click on it brings the browser forward). Studio is
+// enabled again whenever the browser hides, closes or is destroyed, and closing it gives Studio the focus,
+// so another app never comes forward in its place. [B-566]
+function _keepWithStudio(bw) {
+  const studio = (on) => { try { if (win && !win.isDestroyed()) win.setEnabled(on); } catch {} };
+  try { bw.setSkipTaskbar(true); } catch {}
+  if (bw.isVisible()) studio(false);
+  bw.on('show', () => studio(false));
+  bw.on('hide', () => studio(true));
+  bw.on('close', () => { studio(true); try { if (win && !win.isDestroyed()) win.focus(); } catch {} });
+  bw.on('closed', () => studio(true));
 }
 // Where a YouTube player on the page is in its video, as a link that opens at that moment. Reads the
 // page itself and any embedded player frame; a playing video wins over a paused one. Null when there
@@ -6066,6 +6248,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, sav
       ...WINDOW_ICON,
       webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js') },
     });
+    _keepWithStudio(bw);
     _attachFindBar(bw);
     if (savePicks) {
       _attachLinkPicks(bw, {
@@ -6074,6 +6257,11 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, sav
           return destDir;
         },
         onSave: (key, value) => { picks[key] = value; },
+        onUndo: (key) => {
+          const v = picks[key];
+          delete picks[key];
+          if (key === 'proof' && v && v.filePath) { try { fsL.unlinkSync(v.filePath); } catch {} }
+        },
       });
     }
     // Auto-hidden mode: we already have the vendor's session cookies, so try to
@@ -6162,18 +6350,20 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, sav
 // PDF while the review is open. Each save goes straight to the review. Downloads here are cancelled:
 // this window gathers details, it does not import.
 let _captureBrowser = null;
+let _captureImages = false;   // the opener takes pictures (the font and source windows; not import review yet)
 let _captureFonts = [];   // the review's checked fonts, kept current by linkCapture:fonts
 ipcMain.on('linkCapture:fonts', (_e, { fonts } = {}) => {
   _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
 });
 let _captureFor = '';      // the font or source the window was opened for, shown ahead of the page title
 const _captureTitle = (pageTitle) => (_captureFor ? `${_captureFor}  ·  ${pageTitle || ''}` : pageTitle);
-ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName } = {}) => {
+ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName, images } = {}) => {
   const os = require('os');
   const { session } = require('electron');
   if (!url || !/^https?:\/\//i.test(url)) return { ok: false };
   _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
   _captureFor = typeof forName === 'string' ? forName.trim() : '';
+  _captureImages = images === true;
   if (_captureBrowser && !_captureBrowser.isDestroyed()) {
     if (_captureFor) _captureBrowser.setTitle(_captureFor);
     _captureBrowser.loadURL(url).catch(() => {});
@@ -6198,6 +6388,7 @@ ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName
     webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js') },
   });
   _captureBrowser = bw;
+  _keepWithStudio(bw);
   if (_captureFor) bw.setTitle(_captureFor);
   bw.on('page-title-updated', (ev, pageTitle) => {
     if (!_captureFor) return;
@@ -6209,6 +6400,7 @@ ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName
   _attachFindBar(bw);
   _attachLinkPicks(bw, {
     fonts: () => _captureFonts,
+    images: () => _captureImages,
     allLabel: typeof allLabel === 'string' && allLabel ? allLabel : 'All fonts',
     getDir: () => {
       // The review removes the folder once it has attached a PDF, so a second save makes a new one.
@@ -6216,6 +6408,7 @@ ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName
       return dir;
     },
     onSave: (key, value) => { try { event.sender.send('linkCapture:pick', { key, value }); } catch {} },
+    onUndo: (key) => { try { event.sender.send('linkCapture:undo', { key }); } catch {} },
   });
   bw.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
     try { if (popupUrl && popupUrl !== 'about:blank') bw.loadURL(popupUrl); } catch {}

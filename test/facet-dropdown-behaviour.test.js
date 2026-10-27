@@ -79,10 +79,11 @@ function ok(name, cond, extra) {
 // ── 2. a pick refreshes the counts, and keeps your place ───────────────────
 {
   const calls = (html.match(/^\s*_sfRefreshOpenFacet\(/gm) || []).length;
-  ok('every pick refreshes its own open dropdown', calls === 4,
-     `${calls} call sites - expect exactly four: left-click on tag, creator and effect, ` +
-     'plus the effects right-click. More than four means it landed somewhere it does not ' +
-     'belong; a first-occurrence replace put the tag one in the card chip-click handler.');
+  ok('every pick refreshes its own open dropdown', calls === 6,
+     `${calls} call sites - expect exactly six: left-click on tag, creator and effect, ` +
+     'plus right-click (Without) on each of the three [B-564]. More than six means it landed ' +
+     'somewhere it does not belong; a first-occurrence replace put the tag one in the card ' +
+     'chip-click handler.');
   ok('and the tag refresh is in the DROPDOWN handler, not the card chip handler',
      /if \(tag\) _sfToggleFilterTag\(tag\);\n\s*_sfRefreshOpenFacet\(_sfTagDropdown/.test(html)
      && !/const chip = e\.target\.closest\('\.sf-card-tag'\);[\s\S]{0,300}_sfRefreshOpenFacet/.test(html),

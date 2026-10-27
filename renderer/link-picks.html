@@ -14,12 +14,16 @@
     font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
   body { padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--c-border-heavy); border-radius: 6px;
     position: relative; }
-  #rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px;
+  #rows { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; column-gap: 14px;
     grid-auto-rows: 34px; align-items: center; height: 100%; overflow-y: auto; }
   .row { display: contents; }
   .label { color: var(--c-text); }
   .value { min-width: 0; background: #111111; border: 1px solid var(--c-border-heavy); border-radius: 4px;
     padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+  /* Undo on a row: the app's primary button (.modal-btn-primary), sized to the row. */
+  .undo { background: var(--jmt-blue); color: #ffffff; border: 1px solid #036bb8; border-radius: 4px;
+    padding: 3px 10px; font: inherit; cursor: pointer; }
+  .undo:hover { background: #036bb8; }
   /* The app's scrollbar, as index.html sets it for every element. */
   *::-webkit-scrollbar { width: 6px; height: 6px; }
   *::-webkit-scrollbar-track { background: transparent; }
@@ -38,7 +42,7 @@
   const toast = document.getElementById('toast');
   let hideTimer = null;
   window.linkPicks.onUpdate(({ rows, toast: msg }) => {
-    rowsEl.replaceChildren(...rows.map(({ label, hint, value }) => {
+    rowsEl.replaceChildren(...rows.map(({ key, label, hint, value, undo }) => {
       const row = document.createElement('div');
       row.className = 'row';
       const l = document.createElement('div');
@@ -49,7 +53,16 @@
       v.className = 'value';
       v.textContent = value;
       v.title = value;
-      row.append(l, v);
+      const u = document.createElement('div');
+      if (undo) {
+        const b = document.createElement('button');
+        b.className = 'undo';
+        b.textContent = 'Undo';
+        b.title = undo;
+        b.addEventListener('click', () => window.linkPicks.undo(key));
+        u.append(b);
+      }
+      row.append(l, v, u);
       return row;
     }));
     rowsEl.scrollTop = 0;

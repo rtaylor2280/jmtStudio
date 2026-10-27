@@ -337,6 +337,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('linkCapture:pick', h);
     return () => ipcRenderer.removeListener('linkCapture:pick', h);
   },
+  onLinkCaptureUndo: (cb) => {
+    const h = (_e, p) => cb(p);
+    ipcRenderer.on('linkCapture:undo', h);
+    return () => ipcRenderer.removeListener('linkCapture:undo', h);
+  },
   onLinkImportProgress: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('linkImport:progress', handler);
@@ -514,6 +519,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   findSourcePicture:     (params)     => ipcRenderer.invoke('sources:findPicture', params),
   setSourcePicture:      (params)     => ipcRenderer.invoke('sources:setPicture', params),
   clearSourcePicture:    (params)     => ipcRenderer.invoke('sources:clearPicture', params),
+  sourcePictureToTemp:   (params)     => ipcRenderer.invoke('sources:pictureToTemp', params),
   getSourceOwnPicture:   (params)     => ipcRenderer.invoke('sources:ownPicture', params),
   selectPicture:         ()           => ipcRenderer.invoke('dialog:selectPicture'),
   pictureFromCopied:     (params)     => ipcRenderer.invoke('picture:fromCopied', params),

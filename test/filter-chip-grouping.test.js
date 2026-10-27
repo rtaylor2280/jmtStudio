@@ -57,6 +57,7 @@ const render = (counts) => {
     'namesChip', 'needsReviewChip', 'newChip', 'inUseChip', 'clearAll', 'searchActive',
     '_sfActiveFilterTags', '_sfActiveFilterCreators', '_sfActiveFilterEffects',
     '_sfActiveFilterEffectsMissing', 'strip',
+    'tagWithoutChips', 'creatorWithoutChips', '_sfActiveFilterTagsWithout', '_sfActiveFilterCreatorsWithout',   // [B-564]
     body + '; return strip.innerHTML;');
   const chip = (t) => `<span class="styles-active-filter-chip">${t}</span>`;
   const many = (n, p) => Array.from({ length: n }, (_, k) => chip(`${p}${k}`)).join('');
@@ -74,7 +75,9 @@ const render = (counts) => {
     counts.search ? 1 : 0,
     { size: counts.tags || 0 }, { size: counts.creators || 0 },
     { size: counts.effects || 0 }, { size: counts.effectsMissing || 0 },
-    strip);
+    strip,
+    many(counts.tagsOut || 0, 'tx'), many(counts.creatorsOut || 0, 'cx'),
+    { size: counts.tagsOut || 0 }, { size: counts.creatorsOut || 0 });
 };
 
 {
@@ -158,12 +161,14 @@ const render = (counts) => {
      && !/for \(const e of filterEffectsLower\) if \(!effSet\.has\(e\)\) return false;/.test(html),
      'an inlined copy is how this shipped half-done twice');
 
-  const tagPred = html.slice(html.indexOf('const _sfInTagScope'), html.indexOf('const _sfInTagScope') + 400);
+  const tagPred = html.slice(html.indexOf('const _sfInTagScope'), html.indexOf('const _sfInTagScope') + 600);
+  // [B-564] Picked values OR; Without AND-NOT. test/facet-without.test.js runs both predicates.
   ok('tags are OR',
-     /for \(const ft of _sfActiveFilterTags\) if \(t\.has\(String\(ft\)\.toLowerCase\(\)\)\) return true;/.test(tagPred), tagPred);
+     /for \(const ft of _sfActiveFilterTags\) if \(t\.has\(String\(ft\)\.toLowerCase\(\)\)\) \{ any = true; break; \}\s*if \(!any\) return false;/.test(tagPred), tagPred);
 
   const crePred = html.slice(html.indexOf('const _sfInCreatorScope'), html.indexOf('const _sfInCreatorScope') + 500);
-  ok('creators are OR, and it is forced', /return lower\.includes\(a\);/.test(crePred), crePred);
+  ok('creators are OR, and it is forced',
+     /if \(_sfActiveFilterCreators\.size && !Array\.from\(_sfActiveFilterCreators\)\.some\(c => String\(c\)\.toLowerCase\(\) === a\)\) return false;/.test(crePred), crePred);
 
   const fxPred = html.slice(html.indexOf('const _sfInEffectScope'), html.indexOf('const _sfInEffectScope') + 800);
   ok('present effects are OR',
