@@ -5841,10 +5841,14 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
         ...names.map((n, i) => ({ label: n, click: () => one(i) })),
       ] };
     };
+    const highlight = soundFontLinkImport.highlightLink(
+      soundFontLinkImport.stripSessionParams(page.webContents.getURL()), params.selectionText);
     const items = [
       { label: link ? 'Copy link URL' : 'Copy page URL', click: () => clipboard.writeText(soundFontLinkImport.stripSessionParams(url)) },
+      ...(highlight ? [{ label: 'Copy link to highlight', click: () => clipboard.writeText(highlight) }] : []),
       { type: 'separator' },
       { label: 'Save as Link', click: () => save('linkUrl', 'Link', url, null, 'Saved as Link', LINK_HINT) },
+      ...(highlight ? [{ label: 'Save as Link to highlight', click: () => save('linkUrl', 'Link', highlight, null, 'Saved as Link', LINK_HINT) }] : []),
     ];
     if (!names || names.length) {
       items.push(demoItem('Save as Demo', url));

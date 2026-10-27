@@ -422,4 +422,27 @@ function youtubeMoment(id, seconds) {
   return { label, url: `https://www.youtube.com/watch?v=${id}&t=${t}s` };
 }
 
-module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams };
+// A link that opens the page scrolled to the selected text and highlights it (a text fragment,
+// #:~:text=, as Chrome's Copy link to highlight). A short selection on one line is matched whole; a
+// long one, or one spanning lines, by its first and last few words. Any earlier text fragment on the
+// address is replaced; a #section anchor is kept. Null when nothing usable is selected.
+function highlightLink(pageUrl, selection) {
+  const lines = String(selection || '').split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (!lines.length || !/^https?:\/\//i.test(String(pageUrl || ''))) return null;
+  // ',', '-' and '&' are part of the fragment's own syntax, so they are escaped too.
+  const enc = (s) => encodeURIComponent(s).replace(/-/g, '%2D').replace(/,/g, '%2C').replace(/&/g, '%26');
+  const whole = lines.join(' ');
+  let directive;
+  if (lines.length === 1 && whole.length <= 80) {
+    directive = enc(whole);
+  } else {
+    const first = lines[0].split(' ').slice(0, 5).join(' ');
+    const last = lines[lines.length - 1].split(' ').slice(-5).join(' ');
+    directive = `${enc(first)},${enc(last)}`;
+  }
+  const [base, hash = ''] = String(pageUrl).split('#');
+  const anchor = hash.split(':~:')[0];
+  return `${base}#${anchor}:~:text=${directive}`;
+}
+
+module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams, highlightLink };
