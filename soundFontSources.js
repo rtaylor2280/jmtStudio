@@ -1220,6 +1220,13 @@ function cleanupPartialSource(uuidDir) {
 // the read the import already performs. Callers no longer have to know in advance
 // that a font is damaged — which they could only learn from a full pre-walk of
 // the card, the cost this entry removed.
+// Every formerNames in a curation payload, wherever its blocks keep them (entries, copies, customized).
+function _dropFormerNames(node) {
+  if (!node || typeof node !== 'object') return;
+  if (!Array.isArray(node)) delete node.formerNames;
+  for (const v of Object.values(node)) _dropFormerNames(v);
+}
+
 async function importSource({ userData, sourcePath, originalName, metadata, onProgress, forceNewSource, prepareOnly, knownHash, deferCustomized, shouldStop = null }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!sourcePath) return { ok: false, error: 'Missing sourcePath' };
@@ -1318,6 +1325,9 @@ async function importSource({ userData, sourcePath, originalName, metadata, onPr
     try {
       const cur = require('./soundFontCuration');
       curation = isZip ? await cur.peekZip(sourcePath) : cur.peekDir(sourcePath);
+      // Imported again as a new copy of a font already owned, it is its own thing: it keeps the
+      // export's tags and notes, but not the former names that belong to the one already here. [B-561]
+      if (curation && forceNewSource) _dropFormerNames(curation);
       if (curation) {
         // NOTHING IS UNPACKED HERE ANY MORE. [B-427] This used to call
         // `stripAndRepackage`: a full extract of the archive to a temp tree, a full re-compress of

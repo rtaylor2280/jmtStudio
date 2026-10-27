@@ -102,7 +102,7 @@ for (const [label, anchor, why] of EXITS) {
 // unwired, which is how the first version of this fix looked like a success: no flash, because the
 // stranded review was covering the hole.
 {
-  const s = html.indexOf('const onApply = () => {');
+  const s = html.indexOf('const onApply = () => {', html.indexOf('const _sfPromptSaveConflicts = ('));
   const e = s >= 0 ? html.indexOf('const onBackdrop', s) : -1;
   const block = s >= 0 && e > s ? html.slice(s, e) : '';
   ok('the review\'s apply and cancel were located', block.length > 0,

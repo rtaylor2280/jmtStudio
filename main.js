@@ -2327,14 +2327,23 @@ ipcMain.handle('entries:listBySource', (_, { sourceUuid } = {}) => {
   }
 });
 
-ipcMain.handle('entries:updateMeta', (_, { currentName, newName, updates } = {}) => {
+ipcMain.handle('entries:updateMeta', (_, { currentName, newName, updates, visitName } = {}) => {
   try {
     return soundFontEntries.updateEntryMeta({
       userData: app.getPath('userData'),
       currentName,
       newName,
       updates,
+      visitName,
     });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
+ipcMain.handle('entries:forgetFormerName', (_, { entryName, oldName } = {}) => {
+  try {
+    return soundFontEntries.forgetFormerName(app.getPath('userData'), entryName, oldName);
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }

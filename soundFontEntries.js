@@ -554,6 +554,9 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
       description: initialDescription,
       demoUrl: (metadata && metadata.demoUrl) || '',
       userNotes: (metadata && metadata.userNotes) || '',
+      // A re-import from our own export brings its former names back with it. [B-561]
+      ...(metadata && Array.isArray(metadata.formerNames) && metadata.formerNames.length
+        ? { formerNames: _withFormerName(metadata.formerNames.slice(1), metadata.formerNames[0], entryName) } : {}),
       addedFromSource: [],
       contentFileCount: result.fileCount,
       contentTotalBytes: result.totalBytes,
@@ -758,6 +761,9 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
       // here beside the other per-entry fields rather than in the caller,
       // because every caller of a duplicate wants the same answer. [B-312]
       delete meta.seenAt;
+      // A duplicate is a new font: the original's former names stay the original's, and its own
+      // _2 name is its first name, not a rename. [B-561]
+      delete meta.formerNames;
       // Drop the source's stamped hash — content matches now, but
       // recomputing keeps fileCount/totalBytes/contentHashedAt accurate
       // for this duplicate.
@@ -826,7 +832,38 @@ async function duplicateEntry({ userData, sourceName, newName, mode = 'current' 
 const _ENTRY_META_IMMUTABLE = new Set([
   'schemaVersion', 'entryUuid', 'sourceUuid', 'candidatePath', 'multiBoard',
   'otherFlavors', 'nested', 'contentFileCount', 'contentTotalBytes', 'createdAt',
+  'formerNames',   // written only by a rename [B-561]
 ]);
+
+// A font's former names, newest first, so a config still naming it by an old name can be offered the
+// new one. Kept on the font itself: a delete takes them with it, a backup and an export carry them.
+// Five at most; a name equal to the new one (any case) is dropped, so renaming back un-lists it and a
+// case-only rename adds nothing. [B-561]
+const FORMER_NAMES_MAX = 5;
+function _withFormerName(list, oldName, newName) {
+  const lc = (s) => String(s).toLowerCase();
+  const all = [oldName, ...(Array.isArray(list) ? list : [])]
+    .filter((n) => typeof n === 'string' && n && lc(n) !== lc(newName));
+  return all.filter((n, i) => all.findIndex((m) => lc(m) === lc(n)) === i).slice(0, FORMER_NAMES_MAX);
+}
+
+// Removes one former name (any case) from one font. The font's name and its other former names
+// are untouched. [B-561]
+function forgetFormerName(userData, entryName, oldName) {
+  if (!userData || !entryName || !oldName) return { ok: false, error: 'Missing argument' };
+  const metaPath = path.join(entriesRoot(userData), entryName, 'meta.json');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch (err) { return { ok: false, error: `Cannot read meta: ${err.message}` }; }
+  const lc = String(oldName).toLowerCase();
+  const before = Array.isArray(meta.formerNames) ? meta.formerNames : [];
+  const after = before.filter((n) => String(n).toLowerCase() !== lc);
+  if (after.length === before.length) return { ok: true, changed: false };
+  if (after.length) meta.formerNames = after; else delete meta.formerNames;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true, changed: true };
+}
 
 // Source-level fields that the entry-detail UI presents as if they were
 // entry fields, but that actually live on the source meta. The single
@@ -963,6 +1000,7 @@ function _applyRenames(root, plan) {
 function _stampEntryName(dir, name) {
   const metaPath = path.join(dir, 'meta.json');
   const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  if (meta.name && meta.name !== name) meta.formerNames = _withFormerName(meta.formerNames, meta.name, name);
   meta.name = name;
   meta.updatedAt = new Date().toISOString();
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
@@ -1004,7 +1042,9 @@ function finishInterruptedRenames(userData) {
   return { finished };
 }
 
-function updateEntryMeta({ userData, currentName, newName, updates }) {
+// `visitName`: the font's name when its window opened. A rename from any other name is an in-between
+// name of the same visit and is not recorded as a former name. [B-561]
+function updateEntryMeta({ userData, currentName, newName, updates, visitName }) {
   if (!userData) return { ok: false, error: 'Missing userData' };
   if (!currentName) return { ok: false, error: 'Missing currentName' };
   const sanitizedNew = newName != null ? _sanitizeEntryName(newName) : null;
@@ -1061,6 +1101,9 @@ function updateEntryMeta({ userData, currentName, newName, updates }) {
     if (done.failures.length) return { ok: false, error: `Rename failed: ${done.failures[0].error}` };
     finalDir = path.join(root, sanitizedNew);
     finalName = sanitizedNew;
+    const inBetween = visitName != null && visitName !== currentName;
+    meta.formerNames = _withFormerName(meta.formerNames, inBetween ? null : currentName, finalName);
+    if (!meta.formerNames.length) delete meta.formerNames;
     meta.name = finalName;
   }
   meta.updatedAt = new Date().toISOString();
@@ -3084,4 +3127,7 @@ module.exports = {
   EFFECTS_VOCAB,
   markEntryEffectsDirty,
   resolveEntryEffectsDirty,
+  _withFormerName,
+  forgetFormerName,
+  FORMER_NAMES_MAX,
 };

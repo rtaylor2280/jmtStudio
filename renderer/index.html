@@ -1449,6 +1449,7 @@
      next surface is actually in front. 10010 is the same step the detail-view modals already
      use, and stays below the confirm at 10015. */
   #modal-sf-save-conflict { z-index: 10010; }
+  #modal-sf-former-names { z-index: 10010; }
   /* Confirm modal can carry longer explanatory copy and up to four action
      buttons (the SD-card guard), so give it more room than the 380px default so
      the text does not wrap into cramped lines. */
@@ -1815,6 +1816,9 @@
   #modal-about .settings-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--c-border-faint); }
   #modal-about .settings-item:last-child { border-bottom: none; }
   #modal-about .settings-item-label { font-size: 0.82rem; color: var(--c-text-muted); flex: 1; min-width: 0; }
+  #modal-about .settings-disclosure { font-size: 0.78rem; color: var(--c-text-faint); border: none; background: none; padding: 1px 0; cursor: pointer; user-select: none; }
+  #modal-about .settings-disclosure:hover { color: var(--c-text-muted); }
+  #modal-about .settings-remembered-body .settings-item { padding-left: 16px; }
   #modal-about .settings-item-btn { background: var(--c-border); border: 1px solid var(--c-border-heavy); color: var(--c-text-sub); border-radius: 3px; padding: 4px 10px; font-size: 0.75rem; cursor: not-allowed; opacity: 0.5; }
   #modal-about .settings-item-btn.enabled { cursor: pointer; opacity: 1; }
   #modal-about .settings-item-btn.enabled:hover { background: var(--c-border-strong); }
@@ -3908,6 +3912,9 @@
      lines (the selected voice pack and the one being replaced), and pack names
      are long. At 560px those wrapped mid-name. */
   #modal-sf-save-conflict .modal { width: 680px; max-width: 96vw; max-height: min(80vh, 600px); display: flex; flex-direction: column; }
+  /* Renamed-fonts review [B-561]: the conflict dialog's list and rows, three choices per row. */
+  #modal-sf-former-names .modal { width: 680px; max-width: 96vw; max-height: min(80vh, 600px); display: flex; flex-direction: column; }
+  #modal-sf-former-names .sf-former-pick { margin-left: 4px; padding: 1px 4px; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 3px; font-size: 0.74rem; font-weight: 400; }
   .sf-save-conflict-bulk { display: flex; gap: 8px; margin: 6px 0 10px; }
   .sf-save-conflict-bulk-btn { font-size: 0.74rem; background: none; border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text-sub); padding: 3px 9px; cursor: pointer; }
   .sf-save-conflict-bulk-btn:hover { color: var(--jmt-blue); border-color: var(--jmt-blue); }
@@ -7127,6 +7134,22 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-sf-former-names">
+  <div class="modal">
+    <h2 id="sf-former-names-title">Fonts in this config were renamed</h2>
+    <p class="sf-import-hint" id="sf-former-names-desc"></p>
+    <div class="sf-save-conflict-bulk">
+      <button class="sf-save-conflict-bulk-btn" data-former-all="update">Set all to Update</button>
+      <button class="sf-save-conflict-bulk-btn" data-former-all="ignore">Set all to Ignore</button>
+    </div>
+    <div class="sf-save-conflict-list" id="sf-former-names-list"></div>
+    <div class="modal-btns" style="margin-top: 16px">
+      <button class="modal-btn-cancel" id="sf-former-names-cancel">Not now</button>
+      <button class="modal-btn-primary" id="sf-former-names-apply">Apply</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Include-common-folder courtesy modal: shown at Save time when the open
      config does NOT reference ";common" but the user has multiple common
      folders available. Dropdown forces an explicit pick (no pre-select),
@@ -7765,6 +7788,14 @@
          whether it IS the pattern is the most repeated mistake in this project, and here the
          evidence against it was written down, in the file that documents the rule, naming the
          exact row that got copied. Both are on the tooltip convention now. -->
+    <!-- [B-561] REMEMBERED CHOICES: every "Always ..." answer a dialog can save, in one place, so each
+         can be set back. Collapsed by default; the same disclosure as the style helper's Notes. -->
+    <div class="settings-item" id="setting-remembered-item"
+         title="Choices you told JMT Studio to remember, from an &quot;Always&quot; button. Turn one off to be asked again.">
+      <span class="settings-item-label">Remembered choices</span>
+      <button class="settings-disclosure" id="btn-settings-remembered" aria-expanded="false">&#9654; Show</button>
+    </div>
+    <div id="settings-remembered-body" class="settings-remembered-body" style="display:none">
     <div class="settings-item" id="setting-sd-config-item"
          title="Writes the open config to the card as my_config.h, next to the fonts, plus a styles
 file holding only the styles that config uses. A readme says what they are and how to build them.">
@@ -7773,6 +7804,23 @@ file holding only the styles that config uses. A readme says what they are and h
         <input type="checkbox" id="setting-sd-include-config">
         <span class="settings-toggle-track"></span>
       </label>
+    </div>
+    <div class="settings-item"
+         title="An image added to a font or a common folder is renamed after it, without asking. Off: asks each time.">
+      <span class="settings-item-label">Name added images after their font</span>
+      <label class="settings-toggle">
+        <input type="checkbox" id="setting-images-always-rename">
+        <span class="settings-toggle-track"></span>
+      </label>
+    </div>
+    <div class="settings-item"
+         title="When you rename a font the open config uses, its presets are updated to the new name, without asking. Off: asks each time.">
+      <span class="settings-item-label">Update the open config when a font it uses is renamed</span>
+      <label class="settings-toggle">
+        <input type="checkbox" id="setting-font-rename-update">
+        <span class="settings-toggle-track"></span>
+      </label>
+    </div>
     </div>
 
     <div class="about-section-heading">About</div>
@@ -10009,6 +10057,196 @@ window._sfFontPathParts = _sfFontPathParts;
 window._sfFontDir       = _sfFontDir;
 window._sfSharedDirs    = _sfSharedDirs;
 
+// ── A renamed font, and the config that still names it [B-561] ──
+// A rename never asks at the font. The config asks: the open one right after the rename, and any
+// other when it is opened, for a font folder no library font has now but one had before (its
+// formerNames). Only a preset's font folder (the first part) is renamed; shared folders after it
+// are left alone. Matched without case, as the saber's card does.
+const _sfFontRenameEdits = (text, renameOf) => {
+  let parsed;
+  try { parsed = presetParser.parsePresets(text); } catch { return []; }
+  const edits = [];
+  for (const arr of (parsed?.arrays || [])) {
+    for (const p of (arr.presets || [])) {
+      if (!p || !p.fontRange) continue;
+      const parts = _sfFontPathParts(p.font);
+      const to = parts[0] ? renameOf(parts[0]) : null;
+      if (!to) continue;
+      const r = p.fontRange;
+      edits.push({
+        range: { startLineNumber: r.startLine, startColumn: r.startCol + 1, endLineNumber: r.endLine, endColumn: r.endCol + 1 },
+        text: '"' + [to, ...parts.slice(1)].join(';') + '"',
+      });
+    }
+  }
+  return edits;
+};
+// One atomic edit, so updating every preset is one Ctrl+Z.
+const _sfApplyFontRenameEdits = (edits) => {
+  window._atomicEdit(editor, 'font-rename', edits);
+  try { if (typeof setDirty === 'function') setDirty(true); } catch {}
+};
+const _sfConfigLabel = () => (currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'this config');
+const _sfPresetCount = (n) => (n === 1 ? '1 preset' : `${n} presets`);
+
+// After fonts were renamed: the open config's presets that use them. Keep old name / Update /
+// Always update, the house order for a choice that can be remembered. Always on: updated without
+// asking, and a toast says so, since it happened in a tab the user is not looking at.
+async function _sfConfigFollowRenames(renames) {
+  if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
+  const map = new Map((renames || []).filter((r) => r && r.from && r.to && r.from !== r.to)
+    .map((r) => [r.from.toLowerCase(), r.to]));
+  if (!map.size) return;
+  const edits = _sfFontRenameEdits(editor.getValue(), (d) => map.get(d.toLowerCase()) || null);
+  if (!edits.length) return;
+  const used = (renames || []).filter((r) => r && map.get(String(r.from).toLowerCase()) === r.to
+    && _sfFontRenameEdits(editor.getValue(), (d) => (d.toLowerCase() === r.from.toLowerCase() ? r.to : null)).length);
+  const one = used.length === 1 ? used[0] : null;
+  const n = edits.length;
+  let always = false;
+  try { always = !!(await window.electronAPI.getSetting('fontRenameAlwaysUpdate', false)); } catch {}
+  if (!always) {
+    const choice = await promptConfirm({
+      title: 'Update the config too?',
+      message: one
+        ? `${_sfPresetCount(n)} in ${_sfConfigLabel()} ${n === 1 ? 'uses' : 'use'} ${one.from}. Update ${n === 1 ? 'it' : 'them'} to ${one.to}?`
+        : `${_sfPresetCount(n)} in ${_sfConfigLabel()} use fonts you renamed (${used.map((r) => `${r.from} to ${r.to}`).join(', ')}). Update them to the new names?`,
+      cancelText: 'Keep old name',
+      middleText: 'Update',
+      confirmText: 'Always update', confirmKind: 'primary',
+    });
+    if (choice !== 'middle' && choice !== 'confirm') return;
+    if (choice === 'confirm') { try { await window.electronAPI.setSetting('fontRenameAlwaysUpdate', true); } catch {} }
+  }
+  _sfApplyFontRenameEdits(edits);
+  if (always) {
+    showToast(one ? `Updated ${_sfPresetCount(n)} in ${_sfConfigLabel()} to ${one.to}.`
+                  : `Updated ${_sfPresetCount(n)} in ${_sfConfigLabel()} to the new font names.`,
+      { action: { label: 'Show', onClick: () => switchTab('config') } });
+  }
+}
+window._sfConfigFollowRenames = _sfConfigFollowRenames;
+
+// When a config opens: each font folder no library font has now is looked up in every font's
+// former names. One font had it: offer to update. Two or more: pick one, or ignore it. A name a
+// library font has now is always that font, so nothing is asked about it.
+async function _sfCheckConfigFormerNames() {
+  if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
+  let parsed;
+  try { parsed = presetParser.parsePresets(editor.getValue()); } catch { return; }
+  const dirs = new Map();   // lower -> as written
+  for (const arr of (parsed?.arrays || [])) {
+    for (const p of (arr.presets || [])) {
+      const d = p && _sfFontPathParts(p.font)[0];
+      if (d && !dirs.has(d.toLowerCase())) dirs.set(d.toLowerCase(), d);
+    }
+  }
+  if (!dirs.size) return;
+  let entries = [];
+  try { const r = await window.electronAPI.listEntries(); entries = (r && r.ok && r.entries) || []; } catch { return; }
+  const have = new Set(entries.map((e) => String(e.name).toLowerCase()));
+  const rows = [];
+  for (const [lc, d] of dirs) {
+    if (have.has(lc)) continue;
+    const owners = entries.filter((e) => ((e.meta && e.meta.formerNames) || []).some((n) => String(n).toLowerCase() === lc));
+    if (!owners.length) continue;
+    const count = _sfFontRenameEdits(editor.getValue(), (x) => (x.toLowerCase() === lc ? d : null)).length;
+    rows.push({ lc, d, owners, count });
+  }
+  if (!rows.length) return;
+  const picks = await _sfPromptFormerNames(rows);
+  if (!picks) return;
+  const to = new Map();
+  for (const p of picks) {
+    if (p.choice === 'update') to.set(p.row.lc, p.owner.name);
+    if (p.choice === 'forget') {
+      for (const e of p.row.owners) {
+        try { await window.electronAPI.forgetFormerName({ entryName: e.name, oldName: p.row.d }); } catch {}
+      }
+    }
+  }
+  if (to.size) _sfApplyFontRenameEdits(_sfFontRenameEdits(editor.getValue(), (x) => to.get(x.toLowerCase()) || null));
+}
+window._sfCheckConfigFormerNames = _sfCheckConfigFormerNames;
+
+// One row per renamed font folder: Update (default), Ignore, or Not this font. A row two or more
+// fonts once had picks the font from a dropdown, and its third choice is None of these. Resolves to
+// [{ row, choice, owner }] on Apply, null on Cancel. [B-561]
+function _sfPromptFormerNames(rows) {
+  const modal = document.getElementById('modal-sf-former-names');
+  const list = document.getElementById('sf-former-names-list');
+  const desc = document.getElementById('sf-former-names-desc');
+  const applyBtn = document.getElementById('sf-former-names-apply');
+  const cancelBtn = document.getElementById('sf-former-names-cancel');
+  const bulkRow = modal && modal.querySelector('.sf-save-conflict-bulk');
+  if (!modal || !list) return Promise.resolve(null);
+  const one = rows.length === 1;
+  document.getElementById('sf-former-names-title').textContent =
+    one ? 'A font in this config was renamed' : 'Fonts in this config were renamed';
+  desc.textContent = `${_sfConfigLabel()} uses ${one ? 'a font name' : 'font names'} that your library no longer has. `
+    + 'Update changes the presets to the new name. Not this font stops the old name pointing at that font.';
+  list.innerHTML = rows.map((r, i) => {
+    const presets = r.count === 1 ? '1 preset' : `${r.count} presets`;
+    const sub = r.owners.length === 1
+      ? `Now ${_preflightEsc(r.owners[0].name)} · ${presets}`
+      : `Now <select class="sf-former-pick" data-former-pick="${i}">`
+        + r.owners.map((e, j) => `<option value="${j}">${_preflightEsc(e.name)}</option>`).join('')
+        + `</select> · ${presets}`;
+    const radio = (v, label, checked, tip) =>
+      `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${checked ? ' checked' : ''}>${label}</label>`;
+    const many = r.owners.length > 1;
+    const now = many ? 'the font you pick' : r.owners[0].name;
+    const tips = {
+      update: `Change ${r.count === 1 ? 'the preset' : `the ${r.count} presets`} using ${r.d} to ${now}.`,
+      ignore: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}.\nYou are asked again the next time this config opens.`,
+      forget: many
+        ? `None of these fonts is ${r.d}.\nThey stop being matched to that name, and no config asks about it again.`
+        : `${r.owners[0].name} is not ${r.d}.\nIt stops being matched to that name, and no config asks about it again.`,
+    };
+    return `<div class="sf-save-conflict-row">`
+      + `<span class="sf-save-conflict-name" title="${_preflightEsc(r.d)}">${_preflightEsc(r.d)}`
+      + `<span class="sf-save-conflict-sub">${sub}</span></span>`
+      + `<span class="sf-save-conflict-choices">`
+      + radio('update', 'Update', true, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
+      + radio('forget', many ? 'None of these' : 'Not this font', false, tips.forget)
+      + `</span></div>`;
+  }).join('');
+  if (bulkRow) bulkRow.style.display = one ? 'none' : '';
+  modal.classList.add('active');
+  return new Promise((resolve) => {
+    const onBulk = (e) => {
+      const btn = e.target.closest('[data-former-all]');
+      if (!btn) return;
+      list.querySelectorAll(`input[type="radio"][value="${btn.getAttribute('data-former-all')}"]`).forEach((r) => { r.checked = true; });
+    };
+    const onApply = () => {
+      const picks = rows.map((row, i) => {
+        const choice = list.querySelector(`input[name="former-${i}"]:checked`)?.value || 'update';
+        const sel = list.querySelector(`[data-former-pick="${i}"]`);
+        return { row, choice, owner: row.owners[sel ? Number(sel.value) : 0] || row.owners[0] };
+      });
+      cleanup();
+      resolve(picks);
+    };
+    const onCancel = () => { cleanup(); resolve(null); };
+    const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    const cleanup = () => {
+      modal.classList.remove('active');
+      applyBtn?.removeEventListener('click', onApply);
+      cancelBtn?.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      bulkRow?.removeEventListener('click', onBulk);
+    };
+    applyBtn?.addEventListener('click', onApply);
+    cancelBtn?.addEventListener('click', onCancel);
+    modal.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+    bulkRow?.addEventListener('click', onBulk);
+  });
+}
+
 // The shared-folder name to WRITE when one is needed. The config's OWN name when it
 // uses exactly one, and the convention default only when there is nothing to read or a
 // genuine split. This is the rule the compile preflight's repair already follows
@@ -11678,6 +11916,8 @@ function loadContent(rawContent, filePath) {
   // previously-loaded file so the new file's bar accurately reflects "nothing
   // done yet" rather than inheriting the prior terminal state.
   window.resetBuildStatusForFileLoad?.();
+  // A font folder this config names that is a library font's former name. [B-561]
+  setTimeout(() => { window._sfCheckConfigFormerNames?.(); }, 0);
 }
 
 function clearMeta() {
@@ -14842,6 +15082,11 @@ async function openAboutModal() {
   document.getElementById('cache-confirm-panel').style.display = 'none';
   document.getElementById('workspace-confirm-panel').style.display = 'none';
   document.getElementById('btn-clear-cache').textContent = 'Clear';
+  // Remembered choices opens collapsed every time. [B-561]
+  document.getElementById('settings-remembered-body').style.display = 'none';
+  const _rememberedBtn = document.getElementById('btn-settings-remembered');
+  _rememberedBtn.innerHTML = '&#9654; Show';
+  _rememberedBtn.setAttribute('aria-expanded', 'false');
 
   // ── The modal opens HERE, before any disk work. ──────────────────────────
   // A click must always act instantly or it reads as a click that did not register. This
@@ -26019,9 +26264,17 @@ require(['vs/editor/editor.main'], function () {
         // Sound Fonts tab was hidden — a setting describing a button the user cannot reach,
         // because SD Export lives in that tab's toolbar. Found 2026-10-01 while removing the
         // dup-check row [B-450]. Anything added to the Sound Fonts group goes in this array.
-        for (const id of ['setting-sd-config-item']) {
+        // [B-561] The SD Export row now sits in Remembered choices, and every choice there is a
+        // Sound Fonts one, so the whole section goes (closed, so it comes back closed).
+        for (const id of ['setting-remembered-item']) {
           const el = document.getElementById(id);
           if (el) el.style.display = enabled ? '' : 'none';
+        }
+        if (!enabled) {
+          const body = document.getElementById('settings-remembered-body');
+          const btn = document.getElementById('btn-settings-remembered');
+          if (body) body.style.display = 'none';
+          if (btn) { btn.innerHTML = '&#9654; Show'; btn.setAttribute('aria-expanded', 'false'); }
         }
       };
       const _refreshSoundFontsToggleLock = async () => {
@@ -31026,6 +31279,8 @@ require(['vs/editor/editor.main'], function () {
         // and recomputes behind us, so the panel refresh never waits on the walk. Every path
         // that changes the library ends here, which is why the readout needs no other hook.
         window._sfRequestLibrarySize?.();
+        // The preset play buttons' file lookups are by font name, so any library change voids them. [B-561]
+        window._presetPlayCachesClear?.();
         const layerNoFonts = document.getElementById('sf-empty-nofonts');
         const layerBrowse  = document.getElementById('sf-browse');
         const toolbarBtn   = document.getElementById('btn-sf-import-toolbar');
@@ -31193,6 +31448,32 @@ require(['vs/editor/editor.main'], function () {
         _sfSdConfigEl.checked = _sfSdIncludeConfig;
         _sfSdConfigEl.addEventListener('change', () => window._sfSdSetIncludeConfig(_sfSdConfigEl.checked));
       }
+      // Remembered choices [B-561]: the other two "Always" answers. A dialog can turn either on at
+      // any time, so the toggles are read again each time the section opens.
+      const _rememberedToggles = [
+        ['setting-images-always-rename', 'imagesAlwaysRename'],
+        ['setting-font-rename-update', 'fontRenameAlwaysUpdate'],
+      ];
+      const _readRemembered = async () => {
+        for (const [id, key] of _rememberedToggles) {
+          const el = document.getElementById(id);
+          if (el) { try { el.checked = !!(await window.electronAPI.getSetting(key, false)); } catch {} }
+        }
+      };
+      for (const [id, key] of _rememberedToggles) {
+        document.getElementById(id)?.addEventListener('change', (e) => {
+          try { window.electronAPI.setSetting(key, !!e.target.checked); } catch {}
+        });
+      }
+      document.getElementById('btn-settings-remembered')?.addEventListener('click', (e) => {
+        const body = document.getElementById('settings-remembered-body');
+        if (!body) return;
+        const willOpen = body.style.display === 'none';
+        body.style.display = willOpen ? '' : 'none';
+        e.currentTarget.innerHTML = (willOpen ? '&#9660; Hide' : '&#9654; Show');
+        e.currentTarget.setAttribute('aria-expanded', String(willOpen));
+        if (willOpen) _readRemembered();
+      });
       // Library sentinel is auto-created on first import (see _sfRunImport).
       // No explicit setup step in the UI.
 
@@ -34860,6 +35141,9 @@ require(['vs/editor/editor.main'], function () {
       // Working edit state. Populated on open, mutated by pencil/confirm
       // actions, written back to disk on Save.
       let _sfDetailOriginalName = null;
+      // The font's name when its window opened. Renames during the visit are settled against it on
+      // close: one former name, one question to the open config. [B-561]
+      let _sfDetailVisitName = null;
       let _sfDetailEdit = null;
       let _sfDetailDirty = false;
       const _sfFormatDate = (s) => {
@@ -35879,7 +36163,9 @@ require(['vs/editor/editor.main'], function () {
         if (!entry || !_sfEntryDetailEls.modal) return;
         _sfMarkSeen(entryName);              // (1) looked at
         const m = entry.meta || {};
+        _sfSettleVisitRename();
         _sfDetailOriginalName = entry.name;
+        _sfDetailVisitName = entry.name;
         let _srcDocsPromise = null;   // the Source section's Included files, filled below
         const _picturePromise = _sfRenderPicture({ imgId: 'sf-entry-picture', boxId: 'sf-entry-meta-box',
           find: () => window.electronAPI.findEntryPicture({ name: entry.name }), isCurrent: () => _sfDetailOriginalName === entry.name });
@@ -36186,8 +36472,25 @@ require(['vs/editor/editor.main'], function () {
         }
         _sfEntryDetailEls.modal.classList.add('active');
       });
+      // A visit that ended under a different name than it opened with asks the open config once,
+      // from the opening name to the final one. A rename back to the opening name asks nothing.
+      function _sfSettleVisitRename() {
+        const from = _sfDetailVisitName;
+        const to = _sfDetailOriginalName;
+        _sfDetailVisitName = null;
+        if (!from || !to || from === to) return;
+        // Read from disk: the font list is refreshed after the close, and a deleted font asks nothing.
+        (async () => {
+          try {
+            const r = await window.electronAPI.listEntries();
+            if (!(r && r.ok && (r.entries || []).some((e) => e.name === to))) return;
+          } catch { return; }
+          window._sfConfigFollowRenames?.([{ from, to }]);
+        })();
+      }
       const _sfCloseEntryDetail = () => {
         if (_sfEntryDetailEls.modal) _sfEntryDetailEls.modal.classList.remove('active');
+        _sfSettleVisitRename();
         // Closing the font stops whatever it was playing.
         try { window._sfQuickAudioStop?.(); } catch {}
         // Fire-and-forget resolve of any dirty content hash. No-op when
@@ -36307,6 +36610,7 @@ require(['vs/editor/editor.main'], function () {
           currentName: _sfDetailOriginalName,
           newName: isRename ? sanitizedName : undefined,
           updates,
+          visitName: _sfDetailVisitName,
         });
         if (!res || !res.ok) {
           promptError('Save failed', (res && res.error) || 'unknown error');
@@ -38517,6 +38821,7 @@ require(['vs/editor/editor.main'], function () {
               const rr = await window.electronAPI.renameEntries({ renames });
               for (const r of (rr && rr.renamed) || []) nowNamed.set(r.from, r.to);
               for (const f of (rr && rr.failures) || []) entryEditFailures.push({ name: f.from, error: f.error || 'unknown error' });
+              if (rr && rr.renamed && rr.renamed.length) window._sfConfigFollowRenames?.(rr.renamed);   // [B-561]
             } catch (err) {
               for (const r of renames) entryEditFailures.push({ name: r.from, error: String(err && err.message || err) });
             }
@@ -57052,6 +57357,9 @@ require(['vs/editor/editor.main'], function () {
     // play button should hand to _sfQuickPlay, or null when nothing in
     // the entry matches the effect.
     const _presetEffectFileCache = new Map(); // "<entry>:<effect>" → subPath|null
+    // Keyed by font name, so a rename, delete or import leaves hits pointing at folders that are
+    // gone. Cleared on every library refresh. [B-561]
+    window._presetPlayCachesClear = () => { _presetPlayCheckCache.clear(); _presetEffectFileCache.clear(); };
     const _presetResolveEntryEffectFile = async (entryName, effectName) => {
       if (!entryName || !effectName) return null;
       const key = `${entryName}:${String(effectName).toLowerCase()}`;

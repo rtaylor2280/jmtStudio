@@ -70,7 +70,8 @@ const SOURCE_FIELDS = ['bundleName', 'vendor', 'vendorWebsite', 'linkUrl', 'down
 // Entry-level fields, keyed by candidatePath — the only stable identifier an
 // entry has across a delete and re-import. A name can be edited; the path the
 // font occupies inside the archive cannot.
-const ENTRY_FIELDS = ['name', 'tags', 'linkedStyleLibraryEntry', 'author', 'description', 'demoUrl', 'userNotes', 'purchased'];
+const ENTRY_FIELDS = ['name', 'tags', 'linkedStyleLibraryEntry', 'author', 'description', 'demoUrl', 'userNotes', 'purchased',
+  'formerNames'];   // [B-561] a re-import keeps them, unless it is imported as a new copy (importSource)
 // Record provenance, not curation: WHEN this entry existed in the library.
 //
 // THE LINE IS HISTORY versus ATTENTION, and it took two passes to find.
