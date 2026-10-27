@@ -2599,6 +2599,13 @@ function getEntryFileStates(userData, entryName) {
     if (missing.has(k) || renamedFrom.has(k)) continue;
     files.push({ path: k, state: 'removed', inSource: inSource(k) });
   }
+  // A picture at the top of the folder is left out of the comparison (it never makes a font Customized),
+  // so one the font no longer has is listed here as removed, to show greyed and be added back. [B-511]
+  const listed = new Set(files.map(f => f.path));
+  for (const [k] of srcHash) {
+    if (!/^[^/]+\.(png|jpe?g|gif|webp|bmp)$/i.test(k) || listed.has(k) || missing.has(k)) continue;
+    if (!fs.existsSync(path.join(root, k))) files.push({ path: k, state: 'removed', inSource: inSource(k) });
+  }
   for (const rel of after) files.push({ path: rel, state: 'missing', inSource: inSource(rel) });
   // The source's folders (every folder above a file, and empty ones by their marker), so the list can
   // tell a folder the source never had from one it did.
