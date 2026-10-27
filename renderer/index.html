@@ -36936,7 +36936,8 @@ require(['vs/editor/editor.main'], function () {
         // the download. One borrowed from a bundle font's own folder is not, so the row offers + Add.
         const named = shown && (shown.origin === 'own' || shown.origin === 'creator') ? shown : null;
         _sfSourceRowState = { single, shown, removable };
-        _sfRenderImageChip(chip, named, removable ? _sfRemoveSourcePicture : null);
+        // Removed here only when it is the source's own; a one-font source's font image is the font's.
+        _sfRenderImageChip(chip, named, removable === 'source' ? _sfRemoveSourcePicture : null);
         add.textContent = named ? 'Replace' : '+ Add';
         add.title = single ? `Choose an image for ${single.label}, which is what this source shows`
           : 'Choose an image for this source from your computer';
@@ -37010,6 +37011,44 @@ require(['vs/editor/editor.main'], function () {
         return true;
       };
       document.getElementById('btn-sf-source-picture-add')?.addEventListener('click', () => _sfSetSourcePicture());
+      // Right-click the picture on a font or source window: the image row's own actions, in place.
+      // Remove is greyed with the reason when the picture is not one that can be removed. [B-511]
+      const _sfPictureMenu = (e, { img, addBtn, pasteBtn, removable, onRemove, why }) => {
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        const item = (text, fn, off) => {
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item' + (off ? ' disabled' : '');
+          d.textContent = text;
+          if (off) d.title = off;
+          else d.addEventListener('mousedown', (ev) => { ev.stopPropagation(); menu.style.display = 'none'; fn(); });
+          menu.appendChild(d);
+        };
+        item('View image', () => img.click());
+        if (addBtn) item(addBtn.textContent.trim() === 'Replace' ? 'Replace image…' : 'Add its own image…', () => addBtn.click());
+        if (pasteBtn) item('Paste image', () => pasteBtn.click());
+        item('Remove image', onRemove, removable ? null : why);
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
+      };
+      document.getElementById('sf-entry-picture')?.addEventListener('contextmenu', (e) => _sfPictureMenu(e, {
+        img: e.currentTarget,
+        addBtn: document.getElementById('btn-sf-entry-picture-add'),
+        pasteBtn: document.getElementById('btn-sf-entry-picture-paste'),
+        removable: !!_sfEntryOwnPicture, onRemove: _sfRemoveEntryPicture,
+        why: 'This image is not one this font added, so it cannot be removed here',
+      }));
+      document.getElementById('sf-source-picture')?.addEventListener('contextmenu', (e) => _sfPictureMenu(e, {
+        img: e.currentTarget,
+        addBtn: document.getElementById('btn-sf-source-picture-add'),
+        pasteBtn: document.getElementById('btn-sf-source-picture-paste'),
+        // Only the source's own image. A one-font source shows that font's image, which is the font's.
+        removable: !!(_sfSourceRowState && _sfSourceRowState.removable === 'source'), onRemove: _sfRemoveSourcePicture,
+        why: _sfSourceRowState && _sfSourceRowState.removable === 'item'
+          ? "This image is the font's, so it is removed from the font. Replace shows a different one here"
+          : 'This image is part of the original source, which is kept as it is. Replace shows a different one here',
+      }));
       document.getElementById('btn-sf-source-picture-paste')?.addEventListener('click', (e) => _sfPasteImageVia(_sfSetSourcePicture, e.currentTarget));
 
       // The same chips, on the import review. The source already exists by the
