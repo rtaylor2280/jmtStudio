@@ -51641,16 +51641,21 @@ require(['vs/editor/editor.main'], function () {
           const imgItem = mkItem('Paste image', null, async () => {
             if (imgItem.dataset.off) return;
             await _sfPasteImageVia(async (fp) => {
-              if (await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: _ownPic && _ownPic.subPath, filePath: fp })) await _after();
+              if (await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: _ownPic && _ownPic.subPath, filePath: fp })) {
+                await _after();
+                showToast(`${_ownPic ? 'Replaced the image on' : 'Added an image to'} ${fontName}.`);
+              }
             }, null);
           });
           const linksItem = mkItem('Update links', { cls: 'has-submenu' }, null);
           const _linkRows = [
             { label: _m.demoUrl ? 'Replace Demo with paste' : 'Paste as Demo',
+              done: `${_m.demoUrl ? 'Replaced the Demo link on' : 'Added a Demo link to'} ${fontName}.`,
               run: async (url) => window.electronAPI.updateEntryMeta({ currentName: fontName, updates: { demoUrl: url } }) },
           ];
           if (_srcU) _linkRows.push({
             label: (_srcLink ? 'Replace Link with paste' : 'Paste as Link') + (_shares > 1 ? ` (${_allOf(_shares)} fonts from its source)` : ''),
+            done: `${_srcLink ? 'Replaced the Link on' : 'Added a Link to'} ${_shares > 1 ? `the ${_shares} fonts from ${fontName}'s source` : fontName}.`,
             run: async (url) => window.electronAPI.updateSourceMeta({ uuid: _srcU, updates: { linkUrl: url } }),
           });
           let _urlOk = true;
@@ -51670,8 +51675,11 @@ require(['vs/editor/editor.main'], function () {
                 _sfCloseCardCtxMenus();
                 const url = await _clipUrl();
                 if (!url) return;
-                try { await row.run(url); } catch (err) { promptError('Could not save the link', String(err && err.message || err)); return; }
+                let res;
+                try { res = await row.run(url); } catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
+                if (!res || !res.ok) { promptError('Could not save the link', (res && res.error) || 'unknown error'); return; }
                 await _after();
+                showToast(row.done);
               });
               sub.appendChild(item);
             }
