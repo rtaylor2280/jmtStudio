@@ -6818,8 +6818,8 @@ function _broadcastSerial(channel, payload) {
 // So: drop the listeners that would talk to a renderer about a port we are deliberately
 // discarding, and keep a sink on 'error' until the port is actually shut. The sink outlives
 // this function because the abort can arrive after it returns.
-function _closeSerialMonitor() {
-  if (!_serialMonitorPort) return;
+function _closeSerialMonitor(done) {
+  if (!_serialMonitorPort) return done && done();
   const sp = _serialMonitorPort;
   _serialMonitorPort = null;
   try { sp.removeAllListeners('data'); } catch {}
@@ -6828,7 +6828,8 @@ function _closeSerialMonitor() {
   // Deliberately anonymous and never removed: this port is being thrown away, and its only
   // remaining job is to not take the process with it.
   try { sp.on('error', () => {}); } catch {}
-  try { if (sp.isOpen) sp.close(() => {}); } catch {}
+  try { if (sp.isOpen) return sp.close(() => done && done()); } catch {}
+  done && done();
 }
 
 // THE JMT STUDIO WAY IS FIRST CLASS. When `sd 1` goes through this monitor and the board answers
@@ -6907,8 +6908,8 @@ ipcMain.handle('serial:write', async (_, { text }) => {
 });
 
 // Restarts the board with this serial number by sending `reset`, after its card was ejected, so
-// the board mounts its card again. Through the Serial Monitor's connection when it is open on
-// that board; otherwise the port is opened, written and closed, as the version probe does.
+// the board mounts its card again. The port is opened, written and closed, as the version probe
+// does; a Serial Monitor open on that board is closed first (see below).
 // Status: 'restarted' (with `back` / `ready`, see _boardPortCameBack), 'busy'
 // (another program holds the port), 'no-port' (no serial port with that serial number), 'failed'.
 // The board's port, by serial number. ~2 s (arduino-cli's list is the only one carrying the board's
@@ -6942,17 +6943,16 @@ ipcMain.handle('board:restartAfterEject', async (_, { boardSerial, portPath: kno
   if (!portPath) return { ok: true, status: 'no-port' };
   _sdSharedInApp.delete(String(portPath).toUpperCase());   // a restarted board boots with access off
 
+  // The Serial Monitor's own connection is closed and the reset goes out on a fresh one. After the
+  // card was written and ejected, the monitor's connection can stay open and take writes that
+  // never reach the board (2026-10-26: `reset` through it did nothing, and the same `reset` worked
+  // once the monitor was closed and reopened). The board drops the port as it restarts anyway, so
+  // the monitor loses nothing it would have kept.
   const sameAsMonitor = _serialMonitorPort && _serialMonitorPort.isOpen
     && String(_serialMonitorPort.path).toUpperCase() === portPath.toUpperCase();
   if (sameAsMonitor) {
-    const r = await new Promise(resolve => {
-      try {
-        _serialMonitorPort.write('reset\n', err => resolve(err
-          ? { ok: true, status: 'failed', error: err.message }
-          : { ok: true, status: 'restarted', via: 'monitor', port: portPath }));
-      } catch (e) { resolve({ ok: true, status: 'failed', error: String((e && e.message) || e) }); }
-    });
-    return r.status === 'restarted' ? { ...r, ...(await _boardPortCameBack(portPath)) } : r;
+    await new Promise(res => _closeSerialMonitor(res));
+    _broadcastSerial('serial:closed', { reason: 'close' });
   }
 
   await _abortVersionProbe?.();

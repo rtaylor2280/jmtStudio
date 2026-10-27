@@ -1,8 +1,8 @@
 // After a board card is ejected, the board is sent `reset` so it reads its card again.
 //
-//   1. main's board:restartAfterEject finds the port by the board's serial number and sends reset:
-//      through the Serial Monitor's connection when it is open on that port, otherwise by opening
-//      the port; 'busy' when another program holds it, 'no-port' when no port has that serial; `back` once the port has dropped and come back, `ready` once it opens again.
+//   1. main's board:restartAfterEject finds the port by the board's serial number and sends reset
+//      by opening the port, closing a Serial Monitor open on it first (its connection can be dead
+//      after the card was written and ejected);'busy' when another program holds it, 'no-port' when no port has that serial; `back` once the port has dropped and come back, `ready` once it opens again.
 //   2. Both eject surfaces (the summary row and the toast) look the board up before the eject
 //      and restart it after a fresh eject.
 // Checked on hardware 2026-10-25 (board 2078377E4130 on COM18): restarted via port and via the
@@ -28,7 +28,7 @@ for (let j = main.indexOf('{', main.indexOf('=>', fnStart)); j < main.length; j+
   else if (main[j] === '}') { depth--; if (!depth) { end = j + 1; break; } }
 }
 const src = at > -1 && end > -1 ? main.slice(fnStart, end) : '';
-check('CONTROL lifted the handler from main.js', src.includes('_boardPortForSerial(') && src.includes("'reset\\n'"));
+check('CONTROL lifted the handler from main.js', src.includes('_boardPortForSerial(') && src.includes("'\\nreset\\n'"));
 
 // A serial port stand-in that records what was written.
 // `presence` is what successive list() calls see of COM18: by default it drops and comes back.
@@ -76,13 +76,18 @@ check('CONTROL lifted the port lookup', portSrc.includes('portDetect.listPorts')
 check('CONTROL lifted the port-came-back wait', waitSrc.includes('SerialPort.list()'));
 let listCalls = 0;
 const shared = new Map();
+const broadcasts = [];
 function build({ ports, monitor = null, serial }) {
   const portDetect = { listPorts: async () => { listCalls++; return { ok: true, ports }; } };
+  const closeMonitor = done => { if (monitor) { monitor.isOpen = false; monitor.closed = true; } monitor = null; done && done(); };
+  const broadcast = (ch, p) => broadcasts.push([ch, p]);
   return new Function('portDetect', 'getMonitor', 'require', '_abortVersionProbe', '_sdSharedInApp',
+    '_closeSerialMonitor', '_broadcastSerial',
     `${waitSrc}
 ${portSrc}
 return ${src.replace(/_serialMonitorPort/g, 'getMonitor()')};`)(
-    portDetect, () => monitor, (m) => (m === 'serialport' ? serial.mod : require(m)), null, shared);
+    portDetect, () => monitor, (m) => (m === 'serialport' ? serial.mod : require(m)), null, shared,
+    closeMonitor, broadcast);
 }
 const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber: '2078377E4130' }];
 
@@ -106,10 +111,13 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
     s = makeSerial();
     const monWritten = [];
     const monitor = { isOpen: true, path: 'com18', write: (t, cb) => { monWritten.push(t); cb(null); } };
+    broadcasts.length = 0;
     r = await build({ ports: PORTS, monitor, serial: s })(null, { boardSerial: '2078377E4130' });
-    check('the Serial Monitor has it: sent through the monitor, the port not reopened',
-      r.status === 'restarted' && r.via === 'monitor' && monWritten.join('') === 'reset\n' && !s.written.length,
-      JSON.stringify({ r, monWritten, opened: s.written }));
+    check('the Serial Monitor has it: its connection is closed and reset goes out on a fresh one',
+      r.status === 'restarted' && r.via === 'port' && monitor.closed && !monWritten.length
+      && s.written.join('') === '\nreset\n', JSON.stringify({ r, monWritten, opened: s.written }));
+    check('and the monitor is told it is disconnected',
+      broadcasts.some(([ch, p]) => ch === 'serial:closed' && p.reason === 'close'), JSON.stringify(broadcasts));
 
     const other = { isOpen: true, path: 'COM7', write: () => { throw new Error('wrong port'); } };
     s = makeSerial();
