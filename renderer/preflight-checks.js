@@ -1680,6 +1680,247 @@
   // ENABLE_ALL_EDIT_OPTIONS 61 (39%). ENABLE_ALL means "turn on every edit-mode
   // option", not "I want SD mount", so keying off it would fire on two configs in five.
 
+  // ── A style the presets use is switched off by an #ifdef ─────────────── [B-180]
+  //
+  // A style defined only inside `#ifdef X ... #endif` (in the config, or in the my_styles.h the build
+  // puts beside it) does not exist unless X is defined. X is either an add-on's include guard
+  // (FUNCTIONS_CHARGE_FULL_PROP_H exists only when functions/charge_full_prop.h is included) or a
+  // define the user writes (CHARGE_DETECT_PIN). Without it the style is skipped and the compile stops
+  // with "not declared in this scope" at the preset, which names neither the gate nor the include.
+  //
+  // X counts as defined when the config defines it, or any file the config includes (followed through
+  // their own includes in the selected ProffieOS) defines it. The file that defines an include guard
+  // is found by searching that tree, so no add-on list is kept here. Only `#ifdef` gates are judged; a
+  // style under #if, #ifndef or #else is left alone.
+
+  // name -> [guards] for styles defined ONLY inside #ifdef blocks; a name also defined outside one is not gated.
+  function _gatedStyles(sources) {
+    const gated = new Map();
+    const free = new Set();
+    for (const src of sources) {
+      const stack = [];   // a guard name, or null for a block we do not judge
+      for (const line of String(src || '').split('\n')) {
+        let m;
+        if ((m = line.match(/^\s*#\s*ifdef\s+([A-Za-z_]\w*)/))) { stack.push(m[1]); continue; }
+        if (/^\s*#\s*(if|ifndef)\b/.test(line)) { stack.push(null); continue; }
+        if (/^\s*#\s*(else|elif)\b/.test(line)) { if (stack.length) stack[stack.length - 1] = null; continue; }
+        if (/^\s*#\s*endif\b/.test(line)) { stack.pop(); continue; }
+        for (const u of line.matchAll(/\busing\s+([A-Za-z_]\w*)\s*=/g)) {
+          const name = u[1];
+          const guards = stack.filter(g => g && !/^CONFIG_[A-Z_]+$/.test(g));
+          if (!stack.length || (stack.every(g => g !== null) && !guards.length)) { free.add(name); continue; }
+          if (stack.some(g => g === null)) { free.add(name); continue; }
+          if (!gated.has(name)) gated.set(name, guards);
+        }
+      }
+    }
+    for (const n of free) gated.delete(n);
+    return gated;
+  }
+  // Every #define the config's includes bring in, followed through their own includes in the selected
+  // ProffieOS, and the files reached (paths from the version root, "ProffieOS/props/x.h"). Paths resolve
+  // from the folder of the file that includes them; the config sits in config/.
+  // null when the version cannot be read at all.
+  async function _includedDefines(ctx) {
+    const r = await _followIncludes(ctx, ctx.cleanText, 'ProffieOS/config');
+    return r.readAny || !r.tried ? r : null;
+  }
+  // Reads `text`'s quoted includes and theirs, from `dir`. { defs, files: Map path -> comment-free text,
+  // readAny, tried }. A my_styles.h or absolute include is not followed.
+  async function _followIncludes(ctx, text, dir) {
+    const defs = new Set();
+    const files = new Map();
+    const seen = new Set();
+    const norm = (p) => {
+      const out = [];
+      for (const part of p.split('/')) {
+        if (part === '..') out.pop();
+        else if (part && part !== '.') out.push(part);
+      }
+      return out.join('/');
+    };
+    const queue = [];
+    const addIncludes = (text, dir) => {
+      for (const m of String(text).matchAll(/^[ \t]*#[ \t]*include[ \t]*"([^"]+)"/gm)) {
+        const inc = m[1].replace(/\\/g, '/');
+        if (/my_styles\.h$/i.test(inc) || /^[A-Za-z]:\//.test(inc) || inc.startsWith('/')) continue;
+        queue.push(norm(dir + '/' + inc));
+      }
+    };
+    addIncludes(text, dir);
+    let readAny = false;
+    while (queue.length && seen.size < 60) {
+      const rel = queue.shift();
+      if (seen.has(rel)) continue;
+      seen.add(rel);
+      let f = null;
+      try { f = await ctx.readVersionFile(ctx.versionName, rel); } catch { f = null; }
+      if (!f || !f.ok || typeof f.content !== 'string') continue;
+      readAny = true;
+      const clean = preflight.stripComments(f.content);
+      files.set(rel, clean);
+      for (const d of preflight.configDefines(clean)) defs.add(d);
+      addIncludes(clean, rel.slice(0, rel.lastIndexOf('/')));
+    }
+    return { defs, files, readAny, tried: seen.size };
+  }
+  // A gate file can lean on a variable it only declares (`extern bool g_charge_full;`) and that one
+  // prop defines. With another prop the include compiles and the link fails ("undefined reference").
+  // Returns { name, prop } for the first such variable no file the config reaches defines, where the
+  // file that does define it is a prop; null otherwise.
+  async function _propOnlyNeed(ctx, gateFile, reached) {
+    const gateRel = 'ProffieOS/' + gateFile.replace(/^\.\.\//, '');
+    let gate = null;
+    try { gate = await ctx.readVersionFile(ctx.versionName, gateRel); } catch { gate = null; }
+    if (!gate || !gate.ok || typeof gate.content !== 'string') return null;
+    const gateClean = preflight.stripComments(gate.content);
+    const own = await _followIncludes(ctx, gateClean, gateRel.slice(0, gateRel.lastIndexOf('/')));
+    const externs = new Set();
+    for (const t of [gateClean, ...own.files.values()]) {
+      for (const m of t.matchAll(/^[ \t]*extern[ \t]+(?!"C")[^;(]*?\b([A-Za-z_]\w*)[ \t]*(?:\[[^\]]*\])?[ \t]*;/gm)) externs.add(m[1]);
+    }
+    // A definition: a type, then the name, then `=`, `;`, `[` or `{`. Not an extern, not an assignment.
+    const defines = (t, name) => new RegExp('^[ \\t]*(?!extern\\b|return\\b)[A-Za-z_][\\w:<>,*& \\t]*[ \\t*&]' + name + '[ \\t]*(=[^=]|;|\\[|\\{)', 'm').test(t);
+    for (const name of externs) {
+      if ([...reached.values()].some(t => defines(t, name))) continue;
+      let hits = null;
+      try { hits = await ctx.searchVersionFiles(ctx.versionName, name); } catch { hits = null; }
+      if (!hits || !hits.ok || !Array.isArray(hits.results)) continue;
+      for (const r of hits.results.slice(0, 20)) {
+        if (r.type !== 'file' || !/^ProffieOS\/props\/[^/]+\.h$/i.test(r.path || '')) continue;
+        let f = null;
+        try { f = await ctx.readVersionFile(ctx.versionName, r.path); } catch { f = null; }
+        if (f && f.ok && defines(preflight.stripComments(f.content || ''), name)) {
+          return { name, prop: String(r.path).replace(/^ProffieOS\//, '') };
+        }
+      }
+    }
+    return null;
+  }
+  // The file in the selected ProffieOS that #defines `guard`, as a path from the config folder
+  // ("../functions/charge_full_prop.h"), or null when nothing there defines it.
+  async function _guardFile(ctx, guard) {
+    let hits = null;
+    try { hits = await ctx.searchVersionFiles(ctx.versionName, guard); } catch { hits = null; }
+    if (!hits || !hits.ok || !Array.isArray(hits.results)) return null;
+    for (const r of hits.results.slice(0, 20)) {
+      if (r.type !== 'file' || !/\.h$/i.test(r.path || '')) continue;
+      let f = null;
+      try { f = await ctx.readVersionFile(ctx.versionName, r.path); } catch { f = null; }
+      if (f && f.ok && new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + guard + '\\b', 'm').test(f.content || '')) {
+        return '../' + String(r.path).replace(/^ProffieOS\//, '');
+      }
+    }
+    return null;
+  }
+  // Where an include for a gate goes: right before the config's my_styles.h include, or else first
+  // inside CONFIG_PRESETS. 1-based line, or 0 when neither is there.
+  function _gateIncludeLine(text) {
+    const lines = String(text).split('\n');
+    const styles = lines.findIndex(l => /^[ \t]*#[ \t]*include[ \t]*["<][^">]*my_styles\.h[">]/.test(l));
+    if (styles >= 0) return styles + 1;
+    const presets = lines.findIndex(l => /^[ \t]*#[ \t]*ifdef[ \t]+CONFIG_PRESETS\b/.test(l));
+    return presets >= 0 ? presets + 2 : 0;
+  }
+
+  preflight.register({
+    id: 'gated-style-off',
+    severity: 'block',
+    title: 'A style is switched off by a missing include or define',
+    async run(ctx) {
+      if (!ctx.parsed) return null;
+      const sources = [ctx.cleanText];
+      if (/^[ \t]*#[ \t]*include[ \t]*["<][^">]*my_styles\.h[">]/m.test(ctx.cleanText)) {
+        let lib = null;
+        try { lib = await ctx.readStylesLibrary(); } catch { lib = null; }
+        if (lib) sources.push(preflight.stripComments(lib));
+      }
+      const gated = _gatedStyles(sources);
+      if (!gated.size) return null;
+
+      // The gated names the presets actually use, and where.
+      const used = new Map();   // name -> [preset labels]
+      for (const arr of (ctx.parsed.arrays || [])) {
+        for (const p of (arr.presets || [])) {
+          if (p.parseError || !p.raw) continue;
+          let slots = [];
+          try { slots = _parser().extractStyleSlots(p.raw); } catch { slots = []; }
+          for (const s of slots) {
+            const txt = p.raw.slice(s.startOffset, s.endOffset);
+            for (const m of txt.matchAll(/[A-Za-z_]\w*/g)) {
+              if (!gated.has(m[0])) continue;
+              const label = (p.displayName || '').trim() || `Preset ${p.index}`;
+              if (!used.has(m[0])) used.set(m[0], []);
+              if (!used.get(m[0]).includes(label)) used.get(m[0]).push(label);
+            }
+          }
+        }
+      }
+      if (!used.size) return null;
+
+      const defined = new Set(ctx.defines);
+      const fromIncludes = await _includedDefines(ctx);
+      if (fromIncludes === null) return { unsure: 'the selected ProffieOS version could not be read' };
+      for (const d of fromIncludes.defs) defined.add(d);
+
+      // One finding per gate, naming every style it switches off and every preset using them. A gate
+      // that is on is kept too: its file can still need a prop this config does not use.
+      const byGuard = new Map();   // guard -> { names: [], presets: [], on }
+      for (const [name, labels] of used) {
+        for (const g of gated.get(name)) {
+          if (!byGuard.has(g)) byGuard.set(g, { names: [], presets: [], on: defined.has(g) });
+          const b = byGuard.get(g);
+          if (!b.names.includes(name)) b.names.push(name);
+          for (const l of labels) if (!b.presets.includes(l)) b.presets.push(l);
+        }
+      }
+      if (!byGuard.size) return null;
+
+      const findings = [];
+      for (const [guard, b] of byGuard) {
+        const names = b.names.join(', ');
+        const many = b.names.length > 1;
+        const file = await _guardFile(ctx, guard);
+        const need = file ? await _propOnlyNeed(ctx, file, fromIncludes.files) : null;
+        if (b.on && !need) continue;
+        if (need) {
+          // The include alone cannot make it build, so no button: the prop is the user's choice.
+          const short = file.replace(/^\.\.\//, '');
+          findings.push({
+            title: `${names} ${many ? 'need' : 'needs'} the ${need.prop.replace(/^props\//, '')} prop, and this config's prop does not support ${many ? 'them' : 'it'}.`,
+            detail: `${many ? 'These styles are' : 'This style is'} built on ${short}, which uses ${need.name}. Only `
+              + `${need.prop} defines it, so with this prop the compile stops at the link step with "undefined `
+              + `reference to ${need.name}". Choose that prop to use ${many ? 'them' : 'it'}, or use a different style.`,
+            items: b.presets,
+          });
+        } else if (file) {
+          const at = _gateIncludeLine(ctx.text);
+          findings.push({
+            title: `${names} ${many ? 'need' : 'needs'} ${file.replace(/^\.\.\//, '')}, but this config does not include it.`,
+            detail: `${many ? 'These styles are' : 'This style is'} only defined when ${file.replace(/^\.\.\//, '')} is included `
+              + `(#ifdef ${guard}). Without it the compile stops with "not declared in this scope" at the preset.`,
+            items: b.presets,
+            fix: at ? {
+              label: `Add #include "${file}"`,
+              plan() {
+                return [{ startLine: at, startCol: 0, endLine: at, endCol: 0, text: `#include "${file}"\n` }];
+              },
+            } : null,
+          });
+        } else {
+          findings.push({
+            title: `${names} ${many ? 'are' : 'is'} only defined when ${guard} is defined, but this config does not define it.`,
+            detail: `${many ? 'These styles sit' : 'This style sits'} inside #ifdef ${guard}. Add the #define ${guard} `
+              + `line your setup needs, or use a different style. Without it the compile stops with "not declared in `
+              + `this scope" at the preset.`,
+            items: b.presets,
+          });
+        }
+      }
+      return findings.length ? { findings } : null;
+    },
+  });
+
   // Exposed for index.html, whose Sound Fonts view asks the same question when
   // deciding what a NEWLY added preset should carry. One walk, one answer — the
   // alternative is a second implementation that drifts.

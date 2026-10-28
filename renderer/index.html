@@ -10434,6 +10434,10 @@ window.runPreflight = async function () {
       try { return await window.electronAPI?.listVersionDir?.(versionName, subPath); }
       catch { return null; }
     },
+    readStylesLibrary: async () => {
+      try { return (await window.electronAPI?.readStylesFile?.()) || null; }
+      catch { return null; }
+    },
   });
 
   let ctx = makeCtx();

@@ -145,6 +145,11 @@
       listVersionDir: typeof o.listVersionDir === 'function'
         ? o.listVersionDir
         : async () => null,
+      // readStylesLibrary() -> Promise<string|null>: the Style Library the build puts beside the config
+      // as my_styles.h. Absent or empty is normal (no library). [B-180]
+      readStylesLibrary: typeof o.readStylesLibrary === 'function'
+        ? o.readStylesLibrary
+        : async () => null,
 
       defines: _configDefines(text),
     };
