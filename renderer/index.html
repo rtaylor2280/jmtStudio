@@ -1850,10 +1850,10 @@
   .settings-toggle input:checked + .settings-toggle-track::after { transform: translateX(16px); }
   .settings-slider-val { font-size: 0.8rem; color: var(--c-text); min-width: 18px; text-align: right; }
   .theme-selector { display: flex; background: var(--c-bg-raised); border: 1px solid var(--c-border-heavy); border-radius: 4px; overflow: hidden; }
-  .theme-btn { background: transparent; border: none; border-right: 1px solid var(--c-border-heavy); color: var(--c-text-muted); padding: 4px 14px; font-size: 0.75rem; font-weight: 400; cursor: pointer; border-radius: 0; white-space: nowrap; }
-  .theme-btn:last-child { border-right: none; }
-  .theme-btn:hover { background: var(--c-bg-hover); color: var(--c-text-sub); opacity: 1; }
-  .theme-btn.active { background: var(--c-bg-card); color: var(--c-text-bright); font-weight: 600; }
+  .theme-btn, .choice-btn { background: transparent; border: none; border-right: 1px solid var(--c-border-heavy); color: var(--c-text-muted); padding: 4px 14px; font-size: 0.75rem; font-weight: 400; cursor: pointer; border-radius: 0; white-space: nowrap; }
+  .theme-btn:last-child, .choice-btn:last-child { border-right: none; }
+  .theme-btn:hover, .choice-btn:hover { background: var(--c-bg-hover); color: var(--c-text-sub); opacity: 1; }
+  .theme-btn.active, .choice-btn.active { background: var(--c-bg-card); color: var(--c-text-bright); font-weight: 600; }
   #modal-about .about-footer { font-size: 0.75rem; color: var(--c-text-hint); line-height: 1.6; border-top: 1px solid var(--c-border); padding-top: 14px; margin-top: 20px; }
   /* scroll-margin-top clears the sticky about-header, so scrolling the toggle to the top of the
      modal does not park it underneath the logo bar. */
@@ -5931,6 +5931,7 @@
       <select id="modal-confirm-dropdown"></select>
     </div>
     <div class="modal-btns">
+      <button class="modal-btn-cancel" id="modal-confirm-lead" style="display:none"></button>
       <button class="modal-btn-cancel" id="modal-confirm-cancel">Cancel</button>
       <button class="modal-btn-cancel" id="modal-confirm-middle" style="display:none"></button>
       <button class="modal-btn-cancel" id="modal-confirm-alt" style="display:none"></button>
@@ -7792,10 +7793,12 @@
          whether it IS the pattern is the most repeated mistake in this project, and here the
          evidence against it was written down, in the file that documents the rule, naming the
          exact row that got copied. Both are on the tooltip convention now. -->
-    <!-- [B-561] REMEMBERED CHOICES: every "Always ..." answer a dialog can save, in one place, so each
-         can be set back. Collapsed by default; the same disclosure as the style helper's Notes. -->
+    <!-- [B-561] REMEMBERED CHOICES: every answer a dialog can save (its "Always ..." or "Never ..."
+         button), in one place, so each can be set back to Ask.
+         Collapsed by default; the same disclosure as the style helper's Notes. Ask / Always / Never
+         is the theme selector's segmented look, on its own class so the theme code never sees it. -->
     <div class="settings-item" id="setting-remembered-item"
-         title="Choices you told JMT Studio to remember, from an &quot;Always&quot; button. Turn one off to be asked again.">
+         title="Choices you told JMT Studio to remember. Set one to Ask to be asked again.">
       <span class="settings-item-label">Remembered choices</span>
       <button class="settings-disclosure" id="btn-settings-remembered" aria-expanded="false">&#9654; Show</button>
     </div>
@@ -7804,26 +7807,23 @@
          title="Writes the open config to the card as my_config.h, next to the fonts, plus a styles
 file holding only the styles that config uses. A readme says what they are and how to build them.">
       <span class="settings-item-label">Include the config with SD Export</span>
-      <label class="settings-toggle">
-        <input type="checkbox" id="setting-sd-include-config">
-        <span class="settings-toggle-track"></span>
-      </label>
+      <div class="theme-selector" id="setting-sd-include-config">
+        <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
+      </div>
     </div>
     <div class="settings-item"
-         title="An image added to a font or a common folder is renamed after it, without asking. Off: asks each time.">
+         title="Whether an image added to a font or a common folder is renamed after it.">
       <span class="settings-item-label">Name added images after their font</span>
-      <label class="settings-toggle">
-        <input type="checkbox" id="setting-images-always-rename">
-        <span class="settings-toggle-track"></span>
-      </label>
+      <div class="theme-selector" id="setting-images-always-rename">
+        <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
+      </div>
     </div>
     <div class="settings-item"
-         title="When you rename a font the open config uses, its presets are updated to the new name, without asking. Off: asks each time.">
+         title="Whether the open config's presets are updated when you rename a font they use.">
       <span class="settings-item-label">Update the open config when a font it uses is renamed</span>
-      <label class="settings-toggle">
-        <input type="checkbox" id="setting-font-rename-update">
-        <span class="settings-toggle-track"></span>
-      </label>
+      <div class="theme-selector" id="setting-font-rename-update">
+        <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
+      </div>
     </div>
     </div>
 
@@ -8114,7 +8114,7 @@ window.promptUnsaved = promptUnsaved;
 //   FORM CONTROLS AND THE RETURN SHAPE. A dropdown or a checkbox is a
 //   PARAMETER; the buttons are how you submit. Whenever either is present the
 //   result is an object carrying the answer plus every control's value:
-//     no controls          -> true/false, or 'cancel'|'middle'|'alt'|'confirm'
+//     no controls          -> true/false, or 'lead'|'cancel'|'middle'|'alt'|'confirm'
 //     controls, 2 buttons  -> { confirmed, value?, checked? }
 //     controls, 3+ buttons -> { choice,    value?, checked? }
 function promptConfirm(opts) {
@@ -8128,6 +8128,7 @@ function promptConfirm(opts) {
       cancelText  = 'Cancel',
       cancelKind  = 'cancel',
       middleText  = null,
+      leadText    = null,
       altText     = null,
       altKind     = 'cancel',
       hideCancel  = false,
@@ -8337,6 +8338,18 @@ function promptConfirm(opts) {
         middleBtn.onclick = null;
       }
     }
+    // `leadText`: a button before Cancel, resolving 'lead'. Used for Never on a remembered choice,
+    // so the row reads Never, the one-time answers, then Always.
+    const leadBtn = document.getElementById('modal-confirm-lead');
+    if (leadBtn) {
+      if (leadText) {
+        leadBtn.textContent = leadText;
+        leadBtn.style.display = '';
+      } else {
+        leadBtn.style.display = 'none';
+        leadBtn.onclick = null;
+      }
+    }
     const altBtn = document.getElementById('modal-confirm-alt');
     if (altBtn) {
       if (altText) {
@@ -8353,12 +8366,12 @@ function promptConfirm(opts) {
     }
     // Four-button modals get a wider shell so their row fits horizontally.
     const modalEl = document.querySelector('#modal-confirm .modal');
-    if (modalEl) modalEl.classList.toggle('modal-confirm-wide', !!(middleText && altText));
+    if (modalEl) modalEl.classList.toggle('modal-confirm-wide', !!(middleText && (altText || leadText)));
     const overlay = document.getElementById('modal-confirm');
     overlay.classList.add('active');
     // Multi-button mode (any of middle/alt present) resolves with strings so the
     // caller can branch; plain two-button mode keeps the historical boolean shape.
-    const multi = !!(middleText || altText);
+    const multi = !!(middleText || altText || leadText);
     // A DROPDOWN OR A CHECKBOX IS A FORM PARAMETER; THE BUTTONS ARE HOW YOU
     // SUBMIT (2026-09-03: "it's not a checkbox with the buttons it's a
     // checkbox as parameters like a form"). So the values come back with
@@ -8388,6 +8401,7 @@ function promptConfirm(opts) {
     cancelBtn.onclick = () => cleanup(multi ? 'cancel'  : false);
     if (middleBtn) middleBtn.onclick = () => cleanup('middle');
     if (altBtn)    altBtn.onclick    = () => cleanup('alt');
+    if (leadBtn)   leadBtn.onclick   = () => cleanup('lead');
     const xBtn = document.getElementById('modal-confirm-x');
     if (xBtn) {
       xBtn.style.display = closeX ? '' : 'none';
@@ -8396,6 +8410,19 @@ function promptConfirm(opts) {
   });
 }
 window.promptConfirm = promptConfirm;
+// A REMEMBERED CHOICE is 'ask', 'always' or 'never', set from a dialog's Always or Never button or
+// in Settings (Remembered choices). They were true/false before Never existed: true was Always,
+// and false was "ask" for the two that only had an Always button, but "never" for SD Export's
+// config, whose first-time question saved either answer. `legacyFalse` says which.
+async function _jmtRememberedChoice(key, legacyFalse = 'ask') {
+  let v = null;
+  try { v = await window.electronAPI.getSetting(key, null); } catch { return 'ask'; }
+  if (v === 'ask' || v === 'always' || v === 'never') return v;
+  if (v === true) return 'always';
+  if (v === false) return legacyFalse;
+  return 'ask';
+}
+window._jmtRememberedChoice = _jmtRememberedChoice;
 // The file viewers show an image at its own shape: the window hugs it, a large one is scaled down to fit
 // the screen, a small one is scaled up until its longer side is about 480px. Text and PDFs keep the
 // fixed-size window, so `modalEl` loses the class whenever something else is shown. [B-511]
@@ -10093,9 +10120,10 @@ const _sfApplyFontRenameEdits = (edits) => {
 const _sfConfigLabel = () => (currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'this config');
 const _sfPresetCount = (n) => (n === 1 ? '1 preset' : `${n} presets`);
 
-// After fonts were renamed: the open config's presets that use them. Keep old name / Update /
-// Always update, the house order for a choice that can be remembered. Always on: updated without
-// asking, and a toast says so, since it happened in a tab the user is not looking at.
+// After fonts were renamed: the open config's presets that use them. Never update / Keep old name /
+// Update / Always update, the house order for a choice that can be remembered. Always: updated
+// without asking, and a toast says so, since it happened in a tab the user is not looking at.
+// Never: left alone, as chosen. The X is the one-time no: there is nothing to cancel, so the config is left.
 async function _sfConfigFollowRenames(renames) {
   if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
   const map = new Map((renames || []).filter((r) => r && r.from && r.to && r.from !== r.to)
@@ -10107,20 +10135,24 @@ async function _sfConfigFollowRenames(renames) {
     && _sfFontRenameEdits(editor.getValue(), (d) => (d.toLowerCase() === r.from.toLowerCase() ? r.to : null)).length);
   const one = used.length === 1 ? used[0] : null;
   const n = edits.length;
-  let always = false;
-  try { always = !!(await window.electronAPI.getSetting('fontRenameAlwaysUpdate', false)); } catch {}
+  const remembered = await _jmtRememberedChoice('fontRenameAlwaysUpdate');
+  if (remembered === 'never') return;
+  const always = remembered === 'always';
   if (!always) {
     const choice = await promptConfirm({
       title: 'Update the config too?',
       message: one
         ? `${_sfPresetCount(n)} in ${_sfConfigLabel()} ${n === 1 ? 'uses' : 'use'} ${one.from}. Update ${n === 1 ? 'it' : 'them'} to ${one.to}?`
         : `${_sfPresetCount(n)} in ${_sfConfigLabel()} use fonts you renamed (${used.map((r) => `${r.from} to ${r.to}`).join(', ')}). Update them to the new names?`,
+      leadText: 'Never update',
       cancelText: 'Keep old name',
       middleText: 'Update',
       confirmText: 'Always update', confirmKind: 'primary',
+      closeX: true,
     });
+    if (choice === 'lead') { try { await window.electronAPI.setSetting('fontRenameAlwaysUpdate', 'never'); } catch {} }
     if (choice !== 'middle' && choice !== 'confirm') return;
-    if (choice === 'confirm') { try { await window.electronAPI.setSetting('fontRenameAlwaysUpdate', true); } catch {} }
+    if (choice === 'confirm') { try { await window.electronAPI.setSetting('fontRenameAlwaysUpdate', 'always'); } catch {} }
   }
   _sfApplyFontRenameEdits(edits);
   if (always) {
@@ -31514,46 +31546,45 @@ require(['vs/editor/editor.main'], function () {
       let _sfDupCheckEnabled = _sfDupCheckRaw === false ? false : true;
 
       // [B-229] Write the config next to the fonts on an SD Export. NOT ON BY DEFAULT AND NOT OFF
-      // BY DEFAULT: unset, the first SD Export with a config open asks, and the answer becomes this
-      // setting (Settings, "Include the config with SD Export"). Writing someone's config onto a
-      // card they are about to hand to a customer is not a thing to start doing on their behalf,
-      // and leaving it off unasked hides a feature most people want.
-      // Only an explicit `true` or `false` is an answer; anything else is "not asked yet", and
-      // reads as off until it is.
+      // BY DEFAULT: while this is Ask, every SD Export with a config open asks, and Always or Never
+      // from that dialog becomes this setting (Settings, "Include the config with SD Export").
+      // Writing someone's config onto a card they are about to hand to a customer is not a thing
+      // to start doing on their behalf, and leaving it off unasked hides a feature most people want.
       // EXPORTED ON `window` because the door that reads it lives in a different lexical
       // scope. Same reason as the eject helpers — see [B-424]. The export is placed AFTER the
       // declaration on purpose; a TDZ ReferenceError here would abandon the rest of this IIFE.
-      const _sfSdConfigRaw = await window.electronAPI.getSetting('sdExportIncludeConfig', null);
-      let _sfSdIncludeConfig = _sfSdConfigRaw === true;
-      let _sfSdConfigAnswered = _sfSdConfigRaw === true || _sfSdConfigRaw === false;
-      window._sfSdIncludeConfig = () => _sfSdIncludeConfig;
-      window._sfSdConfigAnswered = () => _sfSdConfigAnswered;
-      const _sfSdConfigEl = document.getElementById('setting-sd-include-config');
-      window._sfSdSetIncludeConfig = async (v) => {
-        _sfSdIncludeConfig = !!v;
-        _sfSdConfigAnswered = true;
-        if (_sfSdConfigEl) _sfSdConfigEl.checked = _sfSdIncludeConfig;
-        try { await window.electronAPI.setSetting('sdExportIncludeConfig', _sfSdIncludeConfig); } catch {}
+      // Kept as Ask / Always / Never, like the other remembered choices; a false
+      // saved before 'never' existed was this question's "Don't include", so it reads as Never.
+      let _sfSdConfigChoice = await _jmtRememberedChoice('sdExportIncludeConfig', 'never');
+      window._sfSdConfigChoice = () => _sfSdConfigChoice;
+      window._sfSdSetConfigChoice = async (v) => {
+        _sfSdConfigChoice = v;
+        try { await window.electronAPI.setSetting('sdExportIncludeConfig', v); } catch {}
       };
-      if (_sfSdConfigEl) {
-        _sfSdConfigEl.checked = _sfSdIncludeConfig;
-        _sfSdConfigEl.addEventListener('change', () => window._sfSdSetIncludeConfig(_sfSdConfigEl.checked));
-      }
-      // Remembered choices [B-561]: the other two "Always" answers. A dialog can turn either on at
-      // any time, so the toggles are read again each time the section opens.
-      const _rememberedToggles = [
-        ['setting-images-always-rename', 'imagesAlwaysRename'],
-        ['setting-font-rename-update', 'fontRenameAlwaysUpdate'],
+      // Remembered choices [B-561]: Ask / Always / Never for each. A dialog's Always or Never can
+      // change one at any time, so they are read again each time the section opens.
+      const _rememberedChoices = [
+        ['setting-sd-include-config', 'sdExportIncludeConfig', 'never'],
+        ['setting-images-always-rename', 'imagesAlwaysRename', 'ask'],
+        ['setting-font-rename-update', 'fontRenameAlwaysUpdate', 'ask'],
       ];
+      const _showRemembered = (el, v) => {
+        el.querySelectorAll('.choice-btn').forEach((b) => b.classList.toggle('active', b.dataset.choice === v));
+      };
       const _readRemembered = async () => {
-        for (const [id, key] of _rememberedToggles) {
+        for (const [id, key, legacyFalse] of _rememberedChoices) {
           const el = document.getElementById(id);
-          if (el) { try { el.checked = !!(await window.electronAPI.getSetting(key, false)); } catch {} }
+          if (el) _showRemembered(el, await _jmtRememberedChoice(key, legacyFalse));
         }
       };
-      for (const [id, key] of _rememberedToggles) {
-        document.getElementById(id)?.addEventListener('change', (e) => {
-          try { window.electronAPI.setSetting(key, !!e.target.checked); } catch {}
+      for (const [id, key] of _rememberedChoices) {
+        const el = document.getElementById(id);
+        el?.addEventListener('click', (e) => {
+          const b = e.target.closest('.choice-btn');
+          if (!b) return;
+          _showRemembered(el, b.dataset.choice);
+          if (key === 'sdExportIncludeConfig') window._sfSdSetConfigChoice(b.dataset.choice);
+          else { try { window.electronAPI.setSetting(key, b.dataset.choice); } catch {} }
         });
       }
       document.getElementById('btn-settings-remembered')?.addEventListener('click', (e) => {
@@ -34720,7 +34751,7 @@ require(['vs/editor/editor.main'], function () {
             try {
               let own = null;
               try { const r = await window.electronAPI.findEntryPicture({ name: fontName }); own = r && r.ok && r.picture && r.picture.origin === 'own' ? r.picture : null; } catch {}
-              await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: own && own.subPath, filePath: pick.image });
+              await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: own && own.subPath, filePath: pick.image, keepName: true });
             } catch {}
             _sfDropReviewImage(pick.image);
           }
@@ -35591,8 +35622,9 @@ require(['vs/editor/editor.main'], function () {
         .replace(/[^a-z0-9.]+/g, '-')
         .replace(/^[-.]+|[-.]+$/g, '') || 'image';
       // [B-511] One add path for a pasted image and a chosen one: named after the item, keeping the
-      // chosen file's own extension. Returns the added paths ([] on failure, reported).
-      const _sfAddImageToItem = async ({ kind, id, subPath, filePath }) => {
+      // chosen file's own extension. `keepName`: a chosen or saved file keeps its own name, and the
+      // "Name added images" setting decides when it lands. Returns the added paths ([] on failure, reported).
+      const _sfAddImageToItem = async ({ kind, id, subPath, filePath, keepName = false }) => {
         const ext = ((String(filePath).match(/[.][^.\\/]+$/) || ['.png'])[0]).toLowerCase();
         const itemName = kind === 'common'
           ? ((_sfCommons.find((c) => c.uuid === id) || {}).meta || {}).name
@@ -35610,8 +35642,9 @@ require(['vs/editor/editor.main'], function () {
           here = (n && n.children) || [];
         }
         const sameExt = here.filter((x) => !x.isDir && x.name.toLowerCase().endsWith(ext)).map((x) => x.name.slice(0, -ext.length));
-        const stem = _sfPastedImageStem(itemName);
-        const finalStem = sameExt.some((t) => t.toLowerCase() === stem) ? _jmtNumberedName(stem, sameExt) : stem;
+        const ownStem = String(filePath).split(/[\\/]/).pop().replace(/[.][^.]+$/, '');
+        const stem = keepName && ownStem ? ownStem : _sfPastedImageStem(itemName);
+        const finalStem = sameExt.some((t) => t.toLowerCase() === stem.toLowerCase()) ? _jmtNumberedName(stem, sameExt) : stem;
         let res;
         try {
           res = await window.electronAPI.fileOpsAddFiles({ kind, id, subPath: subPath || '', sourceFilePaths: [filePath], destNames: [`${finalStem}${ext}`] });
@@ -35639,29 +35672,33 @@ require(['vs/editor/editor.main'], function () {
         return (r && r.ok && r.filePath) ? r : { ok: false, error: (r && r.error) || 'The image could not be read.' };
       };
       // An image that landed at the top of a font or common folder through any door is offered the
-      // item's name: Keep original name, Rename, or Always rename (a preference; never asked again).
-      // A name that already is the item's, or its _N, is left alone. [B-530]
+      // item's name: Never rename, Keep original name, Rename, or Always rename. Never and Always are
+      // remembered and can be changed in Settings. A name that already is the item's, or its _N, is
+      // left alone. [B-530]
       window.electronAPI?.onPicturesLanded?.(async ({ kind, id, paths, undo } = {}) => {
+        const replacing = _sfImageReplacePending;
         const itemName = kind === 'common' ? (((_sfCommons.find((c) => c.uuid === id) || {}).meta || {}).name) : id;
         const stem = _sfPastedImageStem(itemName);
         // The stem is only a-z, 0-9, '.' and '-' (_sfPastedImageStem), so '.' is all that needs escaping.
         const named = new RegExp('^' + stem.replace(/\./g, '\\.') + '(_\\d+)?\\.png$', 'i');
         const todo = (paths || []).filter((p) => !named.test(p));
         if (!todo.length) return;
-        let always = false;
-        try { always = !!(await window.electronAPI.getSetting('imagesAlwaysRename', false)); } catch {}
-        if (!always) {
+        const remembered = await _jmtRememberedChoice('imagesAlwaysRename');
+        if (remembered === 'never') return;
+        if (remembered !== 'always') {
           const many = todo.length > 1;
           const choice = await promptConfirm({
             title: many ? 'Rename these images?' : 'Rename this image?',
             messageHtml: `${many ? `${todo.length} images were` : `<strong>${_sfEscape(todo[0])}</strong> was`} added to `
               + `<strong>${_sfEscape(itemName || '')}</strong>. Name ${many ? 'them' : 'it'} after it, as <strong>${_sfEscape(stem)}.png</strong>?`,
+            leadText: 'Never rename',
             cancelText: 'Keep original name',
             middleText: 'Rename',
             confirmText: 'Always rename', confirmKind: 'primary',
-            closeX: Array.isArray(undo),
+            closeX: true,
           });
-          // ✕ cancels the whole paste or add: everything it put in the folder comes back out.
+          // ✕ cancels the whole paste or add: everything it put in the folder comes back out. After a
+          // move there is nothing to take back, so it is the one-time no and the name is left.
           if (choice === 'close') {
             for (const p of undo || []) {
               try {
@@ -35673,9 +35710,11 @@ require(['vs/editor/editor.main'], function () {
             else if (kind === 'common' && typeof _sfRefreshCommons === 'function') { try { _sfRefreshCommons(); } catch {} }
             return;
           }
-          if (choice === 'cancel') return;
-          if (choice === 'confirm') { try { await window.electronAPI.setSetting('imagesAlwaysRename', true); } catch {} }
+          if (choice === 'lead') { try { await window.electronAPI.setSetting('imagesAlwaysRename', 'never'); } catch {} }
+          if (choice === 'cancel' || choice === 'lead') return;
+          if (choice === 'confirm') { try { await window.electronAPI.setSetting('imagesAlwaysRename', 'always'); } catch {} }
         }
+        if (replacing) await replacing;
         let tree = [];
         try {
           const lr = kind === 'common' ? await window.electronAPI.listCommonFiles({ uuid: id })
@@ -35745,8 +35784,12 @@ require(['vs/editor/editor.main'], function () {
         // or a download) pastes too. An in-app Copy empties the system clipboard on purpose.
         const copied = _sfFileClipboard && _sfFileClipboard.paths.length === 1
           && /\.(png|jpe?g|gif|webp|bmp)$/i.test(_sfFileClipboard.paths[0]) ? _sfFileClipboard : null;
+        // An in-app copy is a file with its own name, so it keeps it and the "Name added images" setting
+        // decides, the same as Add. A system clipboard image has no name and is named after the item.
+        let fromCopied = false;
         if ((!tmp || !tmp.ok) && copied) {
           try { tmp = await window.electronAPI.pictureFromCopied({ kind: copied.kind, id: copied.id, subPath: copied.paths[0] }); } catch {}
+          fromCopied = !!(tmp && tmp.ok);
         }
         if (!tmp || !tmp.ok) {
           if (btn) {
@@ -35757,7 +35800,7 @@ require(['vs/editor/editor.main'], function () {
           }
           return;
         }
-        try { await setFromFile(tmp.filePath); }
+        try { await setFromFile(tmp.filePath, fromCopied); }
         finally { try { await window.electronAPI.clipboardCleanupTemp({ filePath: tmp.filePath }); } catch {} }
       };
       const _sfRenderEntryPictureRow = async () => {
@@ -35796,6 +35839,7 @@ require(['vs/editor/editor.main'], function () {
         await _sfAfterEntryPictureChange();
         return true;
       };
+      // After the font's image changed: the files, which redraw the image views with them.
       const _sfAfterEntryPictureChange = async () => {
         const name = _sfDetailOriginalName;
         if (!name) return;
@@ -35803,7 +35847,13 @@ require(['vs/editor/editor.main'], function () {
           const fr = await window.electronAPI.listEntryFiles({ name });
           _sfEntryFilesTree = (fr && fr.ok && fr.files) || [];
         } catch {}
+        _sfPictureRowTree = null;
         _sfRenderEntryFiles();
+      };
+      // Everything that shows the font's image: the Image row, the picture, and Included Files.
+      const _sfRenderEntryPictureViews = async () => {
+        const name = _sfDetailOriginalName;
+        if (!name) return;
         _sfRenderEntryPictureRow();
         _sfRenderPicture({ imgId: 'sf-entry-picture', boxId: 'sf-entry-meta-box',
           find: () => window.electronAPI.findEntryPicture({ name }), isCurrent: () => _sfDetailOriginalName === name });
@@ -35819,11 +35869,21 @@ require(['vs/editor/editor.main'], function () {
       // Put an image in a font's or common folder's own folder, replacing the one there. Adds the new
       // one first, so a failure leaves the old; then removes the old and gives the new one the plain
       // name if the old one was holding it. Returns whether anything changed.
-      const _sfReplaceItemImage = async ({ kind, id, oldSubPath, filePath }) => {
-        const added = await _sfAddImageToItem({ kind, id, subPath: '', filePath });
+      // While a replace is running, the image-name offer waits for the old image to be deleted, so the
+      // new one can take its name.
+      let _sfImageReplacePending = null;
+      const _sfReplaceItemImage = async ({ kind, id, oldSubPath, filePath, keepName = false }) => {
+        let done = () => {};
+        _sfImageReplacePending = new Promise((r) => { done = r; });
+        try { return await _sfReplaceItemImageSteps({ kind, id, oldSubPath, filePath, keepName }); }
+        finally { done(); _sfImageReplacePending = null; }
+      };
+      const _sfReplaceItemImageSteps = async ({ kind, id, oldSubPath, filePath, keepName }) => {
+        const added = await _sfAddImageToItem({ kind, id, subPath: '', filePath, keepName });
         if (!added || !added.length) return false;
         if (oldSubPath && oldSubPath !== added[0]) {
           try { await window.electronAPI.fileOpsDelete({ kind, id, subPaths: [oldSubPath] }); } catch {}
+          if (keepName) return true;
           const itemName = kind === 'common' ? (((_sfCommons.find((c) => c.uuid === id) || {}).meta || {}).name) : id;
           const ext = (added[0].match(/[.][^.]+$/) || [''])[0];
           const plain = `${_sfPastedImageStem(itemName)}${ext.toLowerCase()}`;
@@ -35833,18 +35893,18 @@ require(['vs/editor/editor.main'], function () {
         }
         return true;
       };
-      const _sfSetEntryPicture = async (filePath) => {
+      const _sfSetEntryPicture = async (filePath, keepName = false) => {
         const name = _sfDetailOriginalName;
         if (!name || !filePath) return;
         const old = _sfEntryOwnPicture;
-        if (await _sfReplaceItemImage({ kind: 'entry', id: name, oldSubPath: old && old.subPath, filePath })) {
+        if (await _sfReplaceItemImage({ kind: 'entry', id: name, oldSubPath: old && old.subPath, filePath, keepName })) {
           await _sfAfterEntryPictureChange();
         }
       };
       document.getElementById('btn-sf-entry-picture-add')?.addEventListener('click', async () => {
         const s = await window._sfSelectPictureAsPng();
         if (!s.ok) { if (s.error) promptError('Could not add the image', s.error); return; }
-        try { await _sfSetEntryPicture(s.filePath); }
+        try { await _sfSetEntryPicture(s.filePath, true); }
         finally { if (s.converted) { try { await window.electronAPI.clipboardCleanupTemp({ filePath: s.filePath }); } catch {} } }
       });
       document.getElementById('btn-sf-entry-picture-paste')?.addEventListener('click', (e) => _sfPasteImageVia(_sfSetEntryPicture, e.currentTarget));
@@ -35884,11 +35944,12 @@ require(['vs/editor/editor.main'], function () {
         // edit would answer from the manifest the edit just invalidated — a live
         // wrong answer, which is worse than a correct late one.
         if (_sfDetailOriginalName) _sfRenderCustomized(_sfDetailOriginalName);
-        // The Image row follows the files the same way: an image added, removed or renamed through
-        // Files shows there at once. Only when the file list itself changed, not on navigation.
+        // The image follows the files the same way: an image added, removed or renamed through Files
+        // shows in the Image row, the picture and Included Files at once. Only when the file list
+        // itself changed, not on navigation.
         if (_sfEntryFilesTree !== _sfPictureRowTree) {
           _sfPictureRowTree = _sfEntryFilesTree;
-          try { _sfRenderEntryPictureRow(); } catch {}
+          try { _sfRenderEntryPictureViews(); } catch {}
         }
         const list = document.getElementById('sf-entry-files-list');
         const crumbEl = document.getElementById('sf-entry-files-breadcrumb');
@@ -37377,7 +37438,7 @@ require(['vs/editor/editor.main'], function () {
         // Fonts and common folders fall back to this image, so the sidebar's hover answers are stale.
         if (typeof _sfRefreshCommons === 'function') { try { _sfRefreshCommons(); } catch {} }
       };
-      const _sfSetSourcePicture = async (filePath) => {
+      const _sfSetSourcePicture = async (filePath, keepName = false) => {
         const uuid = _sfSourceOriginalUuid;
         if (!uuid) return;
         const { single, shown, removable } = _sfSourceRowState;
@@ -37392,7 +37453,7 @@ require(['vs/editor/editor.main'], function () {
           if (single) {
             const fp = filePath;
             const oldSubPath = removable === 'item' ? shown.subPath : null;
-            if (!(await _sfReplaceItemImage({ kind: single.kind, id: single.id, oldSubPath, filePath: fp }))) return;
+            if (!(await _sfReplaceItemImage({ kind: single.kind, id: single.id, oldSubPath, filePath: fp, keepName: !!picked || keepName }))) return;
             // The item's image is now the source's; one set on the source earlier would hide it.
             if (removable === 'source') { try { await window.electronAPI.clearSourcePicture({ uuid }); } catch {} }
             _sfAfterSourcePictureChange();
@@ -44791,7 +44852,7 @@ require(['vs/editor/editor.main'], function () {
                 if (own) { try { const c = await window.electronAPI.pictureFromCopied({ kind: 'entry', id: name, subPath: own.subPath }); copy = c && c.ok ? c.filePath : null; } catch {} }
                 before.set(key, { name, copy });
               }
-              const changed = await _sfReplaceItemImage({ kind: 'entry', id: name, oldSubPath: own && own.subPath, filePath: value.filePath });
+              const changed = await _sfReplaceItemImage({ kind: 'entry', id: name, oldSubPath: own && own.subPath, filePath: value.filePath, keepName: true });
               if (changed && _sfDetailEdit && _sfDetailOriginalName === name) await _sfAfterEntryPictureChange();
             } finally { try { await window.electronAPI.linkImportCleanup({ filePath: value.filePath }); } catch {} }
           }
@@ -48157,26 +48218,35 @@ require(['vs/editor/editor.main'], function () {
         // Whether the fonts it uses are on the card is decided at the write, when the card can be
         // looked at.
         let _provSkipConfig = false, _provSkipReason = '', _cfgNote = '';
+        // Whether this export writes the config: the answer given here, or the remembered setting.
+        let _sdWantCfg = false;
         try {
-          // NOT ASKED YET: the first SD Export with a config open asks, and the answer is the
-          // setting from then on. Changeable in Settings.
-          if (window._sfSdConfigAnswered && !window._sfSdConfigAnswered()
+          // ASK: every SD Export with a config open asks. Skip and Include are this export
+          // only; Never and Always are remembered, and can be set back to Ask in Settings.
+          // The dialog's ✕ cancels the export.
+          let _thisTime = null;
+          if (window._sfSdConfigChoice && window._sfSdConfigChoice() === 'ask'
               && typeof fileIsOpen !== 'undefined' && fileIsOpen) {
-            const _first = await promptConfirm({
+            const _ans = await promptConfirm({
               title: 'Put your config on the card?',
               message: 'SD Export can put the open config on the card with the fonts, as my_config.h, '
                 + 'with the styles it uses and a readme saying how to build it. The card and the '
-                + 'config then stay together.\n\nThis is remembered for every SD Export. You can '
-                + 'change it in Settings.',
+                + 'config then stay together.',
+              leadText: 'Never include',
+              cancelText: 'Skip',
+              middleText: 'Include',
               confirmText: 'Always include',
               confirmKind: 'primary',
-              middleText: "Don't include",
-              cancelText: 'Cancel',
+              closeX: true,
             });
-            if (_first === 'cancel' || _first === 'close') return false;
-            await window._sfSdSetIncludeConfig(_first === 'confirm');
+            if (_ans === 'close') return false;
+            if (_ans === 'lead') await window._sfSdSetConfigChoice('never');
+            if (_ans === 'confirm') await window._sfSdSetConfigChoice('always');
+            _thisTime = _ans === 'middle' || _ans === 'confirm';
           }
-          const _wantCfg = window._sfSdIncludeConfig ? window._sfSdIncludeConfig() : false;
+          const _wantCfg = _thisTime !== null ? _thisTime
+            : (window._sfSdConfigChoice ? window._sfSdConfigChoice() === 'always' : false);
+          _sdWantCfg = _wantCfg;
           const _built   = window.getCompileSuccess ? window.getCompileSuccess() : true;
           const _open    = typeof fileIsOpen !== 'undefined' && fileIsOpen;
           const _label   = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'This config';
@@ -48186,9 +48256,9 @@ require(['vs/editor/editor.main'], function () {
                 title: 'Include an uncompiled config?',
                 message: `${_label} has changes that have not been compiled. `
                   + 'Compile it first to be sure it builds, or put it on the card as it is.',
-                confirmText: 'Include it',
+                confirmText: 'Include',
                 confirmKind: 'primary',
-                middleText: 'Leave config out',
+                middleText: 'Skip',
                 cancelText: 'Cancel',
               });
               if (_choice === 'cancel' || _choice === 'close') return false;
@@ -49399,13 +49469,9 @@ require(['vs/editor/editor.main'], function () {
           // for the same reason: four ways to write no config all look identical from outside,
           // and that is how a feature reports as shipped while doing nothing.
           try {
-            // FALLBACK IS `false`, MATCHING THE GATE AT THE TOP OF THE EXPORT. The setting
-            // reader sits behind an `await getSetting`, so an IPC failure can leave this
-            // function undefined — and the permissive fallback would then write a config the
-            // user's setting says to leave off, having never asked the not-compiled question
-            // either. A missing reader means "we do not know what they chose", and the default
-            // they chose is off.
-            const _incl = window._sfSdIncludeConfig ? window._sfSdIncludeConfig() : false;
+            // The answer from the top of the export: this time's Include or Skip, or the
+            // remembered setting. False when the setting could not be read.
+            const _incl = _sdWantCfg;
             const _cfgName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
             let _cfgBody = null, _stylesName = '', _stylesBody = null, _stylesUsed = 0;
             // What the export summary says about the config, whenever the setting is on.
@@ -51960,8 +52026,8 @@ require(['vs/editor/editor.main'], function () {
           let _ownPic = null;
           const imgItem = mkItem('Paste image', null, async () => {
             if (imgItem.dataset.off) return;
-            await _sfPasteImageVia(async (fp) => {
-              if (await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: _ownPic && _ownPic.subPath, filePath: fp })) {
+            await _sfPasteImageVia(async (fp, keepName) => {
+              if (await _sfReplaceItemImage({ kind: 'entry', id: fontName, oldSubPath: _ownPic && _ownPic.subPath, filePath: fp, keepName })) {
                 await _after();
                 showToast(`${_ownPic ? 'Replaced the image on' : 'Added an image to'} ${fontName}.`);
               }

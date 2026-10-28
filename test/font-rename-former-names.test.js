@@ -169,8 +169,61 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
     && /_rememberedBtn\.innerHTML = '&#9654; Show'/.test(aboutOpen));
   check('Remembered choices holds all three',
     ['setting-sd-include-config', 'setting-images-always-rename', 'setting-font-rename-update'].every((id) => body.includes(`id="${id}"`)));
-  check('and is wired to their settings', /\['setting-images-always-rename', 'imagesAlwaysRename'\],\s*\['setting-font-rename-update', 'fontRenameAlwaysUpdate'\],/.test(html));
+  check('and is wired to their settings', /\['setting-sd-include-config', 'sdExportIncludeConfig', 'never'\],\s*\['setting-images-always-rename', 'imagesAlwaysRename', 'ask'\],\s*\['setting-font-rename-update', 'fontRenameAlwaysUpdate', 'ask'\],/.test(html));
+  check('each is Ask / Always / Never', ['setting-sd-include-config', 'setting-images-always-rename', 'setting-font-rename-update'].every((id) => {
+    const at = body.indexOf(`id="${id}"`);
+    const seg = body.slice(at, body.indexOf('</div>', at));
+    return /data-choice="ask">Ask<[\s\S]*data-choice="always">Always<[\s\S]*data-choice="never">Never</.test(seg);
+  }));
   check('the section hides with the Sound Fonts tab', /for \(const id of \['setting-remembered-item'\]\)/.test(html));
+
+  // Never. [B-571]
+  const fnAt = html.indexOf('async function _jmtRememberedChoice(');
+  const fnSrc = html.slice(fnAt, html.indexOf('\n}\n', fnAt) + 2);
+  const remembered = async (stored, legacyFalse) => {
+    const ctx = { window: { electronAPI: { getSetting: async () => stored } } };
+    vm.runInNewContext(fnSrc + '\nthis.f = _jmtRememberedChoice;', ctx);
+    return ctx.f('k', legacyFalse);
+  };
+  check('a remembered choice reads its three values',
+    (await remembered('ask')) === 'ask' && (await remembered('always')) === 'always' && (await remembered('never')) === 'never');
+  check('true from before reads as Always, unset as Ask', (await remembered(true)) === 'always' && (await remembered(null)) === 'ask');
+  check('false from before is Ask for the renames, Never for SD Export',
+    (await remembered(false)) === 'ask' && (await remembered(false, 'never')) === 'never');
+  check('an unreadable setting is Ask', await (async () => {
+    const ctx = { window: { electronAPI: { getSetting: async () => { throw new Error('x'); } } } };
+    vm.runInNewContext(fnSrc + '\nthis.f = _jmtRememberedChoice;', ctx);
+    return (await ctx.f('k')) === 'ask';
+  })());
+  check('each dialog has a Never button, and it saves Never',
+    ['Never update', 'Never rename', 'Never include'].every((t) => html.includes(`leadText: '${t}'`))
+    && /if \(choice === 'lead'\) \{ try \{ await window\.electronAPI\.setSetting\('fontRenameAlwaysUpdate', 'never'\)/.test(html)
+    && /if \(choice === 'lead'\) \{ try \{ await window\.electronAPI\.setSetting\('imagesAlwaysRename', 'never'\)/.test(html)
+    && /if \(_ans === 'lead'\) await window\._sfSdSetConfigChoice\('never'\);/.test(html));
+  check('no dialog carries a "Don\'t ask again" box', !html.includes(`label: "Don't ask again"`));
+  check('Never skips the question', (html.match(/if \(remembered === 'never'\) return;/g) || []).length === 2);
+  check('the Never button sits before Cancel and resolves lead',
+    /id="modal-confirm-lead"[^>]*><\/button>\s*<button class="modal-btn-cancel" id="modal-confirm-cancel"/.test(html)
+    && /leadBtn\.onclick\s*=\s*\(\) => cleanup\('lead'\)/.test(html));
+  check('SD Export asks every time on Ask; Include and Don\'t include are this export only',
+    /window\._sfSdConfigChoice\(\) === 'ask'/.test(html)
+    && /_thisTime = _ans === 'middle' \|\| _ans === 'confirm';/.test(html)
+    && !/_ans === 'cancel'[^\n]*_sfSdSetConfigChoice/.test(html));
+  check('an image copied in the app keeps its name on Paste; a clipboard image is named after the item',
+    /fromCopied = !!\(tmp && tmp\.ok\);/.test(html)
+    && /await setFromFile\(tmp\.filePath, fromCopied\);/.test(html)
+    && /const _sfSetEntryPicture = async \(filePath, keepName = false\)/.test(html)
+    && /const _sfSetSourcePicture = async \(filePath, keepName = false\)/.test(html)
+    && /_sfPasteImageVia\(async \(fp, keepName\) => \{/.test(html));
+  check('a change in Files redraws the Image row, the picture and Included Files',
+    /if \(_sfEntryFilesTree !== _sfPictureRowTree\) \{\s*_sfPictureRowTree = _sfEntryFilesTree;\s*try \{ _sfRenderEntryPictureViews\(\); \} catch \{\}/.test(html)
+    && /const _sfRenderEntryPictureViews = async \(\) => \{[\s\S]{0,200}_sfRenderEntryPictureRow\(\);\s*_sfRenderPicture\(\{ imgId: 'sf-entry-picture'[\s\S]{0,600}_sfRenderDocChips\(/.test(html));
+  check('every remembered-choice dialog has the X',
+    /confirmText: 'Always update', confirmKind: 'primary',\s*closeX: true,/.test(html)
+    && /confirmText: 'Always rename', confirmKind: 'primary',\s*closeX: true,/.test(html)
+    && /confirmText: 'Always include',\s*confirmKind: 'primary',\s*closeX: true,/.test(html));
+  check('the write uses this export\'s answer, not the setting again',
+    /const _incl = _sdWantCfg;/.test(html) && /_sdWantCfg = _wantCfg;/.test(html));
 
   console.log(failures ? `\n${failures} failed` : '\nall passed');
   process.exit(failures ? 1 : 0);

@@ -56,12 +56,12 @@ check('a row holds its image (a new one drops one saved earlier this session, ke
   && /<img class="cand-image-thumb" alt="">/.test(html) && /<button class="cand-image-clear" title="Remove this font image">/.test(html));
 check('the × drops it and deletes the file', /closest\('\.cand-image-clear'\)[\s\S]{0,200}_sfDropReviewImage\(row\.dataset\.image\);\s*delete row\.dataset\.image;/.test(html));
 check('Import carries it with the row', /demoUrl,\s*image: row\.dataset\.image \|\| '',\s*\}\);/.test(html));
-check('once the font is created, its image goes in through the Paste path, then the file goes',
-  /else if \(pick\.image\) \{[\s\S]{0,600}_sfReplaceItemImage\(\{ kind: 'entry', id: fontName, oldSubPath: own && own\.subPath, filePath: pick\.image \}\)[\s\S]{0,60}_sfDropReviewImage\(pick\.image\);/.test(html));
+check('once the font is created, its image goes in keeping its own name, then the file goes',
+  /else if \(pick\.image\) \{[\s\S]{0,600}_sfReplaceItemImage\(\{ kind: 'entry', id: fontName, oldSubPath: own && own\.subPath, filePath: pick\.image, keepName: true \}\)[\s\S]{0,60}_sfDropReviewImage\(pick\.image\);/.test(html));
 check('closing the review, imported or not, deletes every image still held',
   /linkCaptureClose\(\); \} catch \{\}\s*for \(const f of Array\.from\(_sfReviewImages\)\) _sfDropReviewImage\(f\);/.test(html));
-check("the picture replaces the font's own, the way Paste does, then the temp folder goes",
-  /key\.startsWith\('image:'\)[\s\S]{0,700}_sfReplaceItemImage\(\{ kind: 'entry', id: name, oldSubPath: own && own\.subPath, filePath: value\.filePath \}\)[\s\S]{0,300}linkImportCleanup/.test(html));
+check("the picture replaces the font's own, keeping its own name, then the temp folder goes",
+  /key\.startsWith\('image:'\)[\s\S]{0,700}_sfReplaceItemImage\(\{ kind: 'entry', id: name, oldSubPath: own && own\.subPath, filePath: value\.filePath, keepName: true \}\)[\s\S]{0,300}linkImportCleanup/.test(html));
 
 console.log('4. Find');
 check('Find sits between Add/Replace and Paste on both Image rows',
