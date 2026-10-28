@@ -3888,6 +3888,7 @@
   .sf-doc-viewer-frame { width: 100%; height: 100%; border: none; background: #fff; }
   .sf-doc-viewer-nopreview { color: var(--c-text-dim); font-family: inherit; text-align: center; padding: 24px; }
   .sf-doc-viewer-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  #sf-doc-viewer-style-pick { margin-right: auto; padding: 2px 6px; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 3px; font-size: 0.8rem; }
   /* Proof of Purchase row: chips like Included Files, plus inline add/link. */
   .sf-pop-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
   /* An empty name slot takes no room, or the flex gap before it indents "+ Add". */
@@ -6739,6 +6740,12 @@
     <div class="sf-doc-viewer-actions" id="sf-doc-viewer-actions" style="display:none">
       <button class="modal-btn-cancel" id="sf-doc-viewer-open-ext" type="button" title="Open in your computer's default app">Open externally</button>
       <button class="modal-btn-cancel sf-source-delete-btn" id="sf-doc-viewer-remove" type="button" title="Remove this file from this source">Remove from source</button>
+    </div>
+    <!-- A creator's style file [B-569]: shown when the text holds style code. -->
+    <div class="sf-doc-viewer-actions" id="sf-doc-viewer-style-actions" style="display:none">
+      <select id="sf-doc-viewer-style-pick" title="This file holds more than one style" style="display:none"></select>
+      <button class="modal-btn-cancel" id="sf-doc-viewer-copy-style" type="button" title="Copy the style code">Copy style</button>
+      <button class="modal-btn-primary" id="sf-doc-viewer-add-style" type="button">Add to Style Library</button>
     </div>
   </div>
 </div>
@@ -24891,6 +24898,125 @@ function _parseClipboardStyle(text) {
   }
 
   return result;
+}
+
+// ── A FONT'S OWN STYLE FILE [B-569] ─────────────────────────────────────────────
+// Greyscale, BVM Sabers and JayDaloRian ship a text file with the style beside the font. The doc
+// viewer offers to copy it or add it to the Style Library, with the form filled from the font.
+//
+// The styles in a file, each as _parseClipboardStyle reads it. 91 of 95 measured files hold one
+// StylePtr and the rest two or three; each style's segment runs from the end of the one before to
+// the end of this one, so a header above a style stays with it. `code` is the style as written,
+// for Copy style. A file with only a `using` statement is one style.
+function _findFileStyles(text) {
+  const src = String(text || '');
+  const OPEN = /\b\w*Style\w*Ptr\w*\s*</y;
+  const found = [];
+  let i = 0, inBlock = false, inLine = false, depth = 0, start = -1;
+  while (i < src.length) {
+    const c = src[i], c2 = src[i + 1];
+    if (inLine)  { if (c === '\n') inLine = false; i++; continue; }
+    if (inBlock) { if (c === '*' && c2 === '/') { inBlock = false; i += 2; continue; } i++; continue; }
+    if (c === '/' && c2 === '*') { inBlock = true; i += 2; continue; }
+    if (c === '/' && c2 === '/') { inLine  = true; i += 2; continue; }
+    if (start === -1) {
+      OPEN.lastIndex = i;
+      const m = OPEN.exec(src);
+      if (m) { start = i; depth = 1; i += m[0].length; continue; }
+      i++; continue;
+    }
+    if (c === '<') depth++;
+    else if (c === '>' && --depth === 0) {
+      const tail = src.slice(i + 1).match(/^\s*\(\s*\)/);
+      const end = i + 1 + (tail ? tail[0].length : 0);
+      found.push({ start, end });
+      start = -1;
+    }
+    i++;
+  }
+  const out = [];
+  let prev = 0;
+  for (const f of found) {
+    const parsed = _parseClipboardStyle(src.slice(prev, f.end));
+    prev = f.end;
+    if (parsed.expr) out.push({ parsed, code: src.slice(f.start, f.end).trim() });
+  }
+  if (!found.length && _styleCodeStart(src) !== -1) {
+    const parsed = _parseClipboardStyle(src);
+    if (parsed.expr) out.push({ parsed, code: src.trim() });
+  }
+  return out;
+}
+
+// The lines of a creator's file that carry a copyright, kept in the style's notes; the ProffieOS
+// licence line is the firmware's, not the creator's. Comment markers are dropped.
+function _fileCopyrightLines(text) {
+  const seen = new Set();
+  return String(text || '').split(/\r?\n/)
+    .map(l => l.replace(/^\s*(\/\/+|\/\*+|\*+|[-•–]+)\s*/, '').replace(/\s*\*+\/\s*$/, '').trim())
+    .filter(l => /copyright/i.test(l) && !/proffieos|hubinette|general public license/i.test(l))
+    .filter(l => !seen.has(l.toLowerCase()) && seen.add(l.toLowerCase()));
+}
+
+// The Add Style form for style n of count from a font's file. ctx: { fontName, fileName, creator,
+// website, tags, copyright, fileLabel }. His rulings 2026-10-28: the name is the font's alone (plus
+// the variant a file name carries, and a number for a second or third style in one file); Creator
+// is the font's creator; Source is what the file credits (a Fett263 header) or else the creator;
+// the link is the creator's site; the font's tags come in; notes are the creator's words about the
+// style, its copyright lines, and where it came from.
+function _fontStyleForm(parsed, ctx, n = 0, count = 1) {
+  const stem = String(ctx.fileName || '').replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
+  // A variant is what a STYLE file's name adds ("Energy style-2", "Red bs"); a readme's name is not one.
+  const fontWords = new Set(String(ctx.fontName || '').toLowerCase().split(/[\s_\-.]+/).filter(Boolean));
+  const stemWords = stem.split(/[\s_\-.]+/).filter(Boolean);
+  const variant = !stemWords.some(t => /^(bladestyle|style|styles|bs)$/i.test(t)) ? '' : stemWords
+    .filter(t => !/^(proffie|proffieboard|blade|bladestyle|style|styles|bs|os\d*)$/i.test(t) && !fontWords.has(t.toLowerCase()))
+    .join(' ');
+  const name = _styleNameFromDisplay([ctx.fontName, variant, count > 1 && n > 0 ? String(n + 1) : '']
+    .filter(Boolean).join(' '));
+  const creator = String(ctx.creator || '').trim();
+  const url = String(ctx.website || '').trim() || parsed.url || '';
+  const tags = [];
+  const addTag = (t) => { t = String(t || '').trim(); if (t && !tags.some(x => x.toLowerCase() === t.toLowerCase())) tags.push(t); };
+  (ctx.tags || []).forEach(addTag);
+  String(parsed.tags || '').split(',').forEach(addTag);
+  addTag(parsed.osVersion);
+  const notes = [];
+  if (parsed.url && parsed.url !== url) notes.push(parsed.url);
+  if (parsed.notes) notes.push(parsed.notes);
+  const credited = `copyright ${parsed.source || ''}`.toLowerCase();
+  for (const l of (ctx.copyright || [])) {
+    if (l.toLowerCase() !== credited && !notes.some(x => x.includes(l))) notes.push(l);
+  }
+  if (ctx.fileLabel) notes.push(`From ${ctx.fileLabel}`);
+  return { name, creator, source: parsed.source || creator, url, tags, notes: notes.join('\n'), expr: parsed.expr };
+}
+
+// The library style whose code matches, ignoring layout and comments, or ''. A font's style
+// already in the library is linked, not added a second time. [B-569]
+function _styleCodeKey(expr) {
+  return String(expr || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
+}
+function _libraryStyleWithCode(expr) {
+  const key = _styleCodeKey(expr);
+  if (!key) return '';
+  const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+  if (!text) return '';
+  for (const e of _parseStyleEntries(text)) {
+    const body = String(e.usingCode || '').replace(/^using\s+[^=]+=\s*/, '').replace(/;\s*$/, '');
+    if (_styleCodeKey(body) === key) return e.name;
+  }
+  return '';
+}
+
+// Opens Add Style filled from a font's style file; onAdded(name) runs once it is in the library.
+function _openAddFontStyle(form, onAdded) {
+  if (!_addStyleEditor) window.initStylesPanel?.();
+  _openAddStyleModal();
+  _addStyleConfirmCallback = onAdded || null;
+  _applyParsedStyleResult({ name: form.name, expr: form.expr, source: form.source, url: form.url,
+    tags: form.tags.join(', '), osVersion: '', notes: form.notes });
+  document.getElementById('add-style-creator').value = form.creator || '';
 }
 
 // Notes toggle for add modal
@@ -43616,7 +43742,8 @@ require(['vs/editor/editor.main'], function () {
         }
         const raw = _sfDecodeBytes(bytes);
         const text = /\.rtf$/i.test(fileName) ? _sfStripRtf(raw) : raw;
-        _sfShowDocViewer(fileName, size || bytes.length, text);
+        _sfShowDocViewer(fileName, size || bytes.length, text,
+          (kind === 'entry' || kind === 'source') ? { origin: { kind, id, path: subPath } } : {});
       };
 
       // Manual double-click detector. The native dblclick event doesn't
@@ -50608,6 +50735,10 @@ require(['vs/editor/editor.main'], function () {
         actions:  document.getElementById('sf-doc-viewer-actions'),
         openExt:  document.getElementById('sf-doc-viewer-open-ext'),
         remove:   document.getElementById('sf-doc-viewer-remove'),
+        styleActions: document.getElementById('sf-doc-viewer-style-actions'),
+        stylePick:    document.getElementById('sf-doc-viewer-style-pick'),
+        copyStyle:    document.getElementById('sf-doc-viewer-copy-style'),
+        addStyle:     document.getElementById('sf-doc-viewer-add-style'),
       };
       // Blob URL of the currently-previewed media (image/PDF), revoked on close.
       let _sfDocViewerBlobUrl = null;
@@ -50661,6 +50792,8 @@ require(['vs/editor/editor.main'], function () {
             body.textContent = content;
           }
         }
+        _sfDocViewerOrigin = opts.origin || null;
+        _sfRenderDocStyleActions(kind === 'text' ? content : '', fileName);
         // Proof-of-purchase actions (Open externally / Remove) only for attachments.
         _sfDocViewerPop = opts.pop || null;
         _sfDocViewerRemove = opts.remove || null;
@@ -50699,8 +50832,11 @@ require(['vs/editor/editor.main'], function () {
         if (_sfDocViewerBlobUrl) { URL.revokeObjectURL(_sfDocViewerBlobUrl); _sfDocViewerBlobUrl = null; }
         if (_sfDocViewerEls.body) { _sfDocViewerEls.body.innerHTML = ''; _sfDocViewerEls.body.classList.remove('sf-doc-viewer-media'); }
         if (_sfDocViewerEls.actions) _sfDocViewerEls.actions.style.display = 'none';
+        if (_sfDocViewerEls.styleActions) _sfDocViewerEls.styleActions.style.display = 'none';
         _sfDocViewerPop = null;
         _sfDocViewerRemove = null;
+        _sfDocViewerOrigin = null;
+        _sfDocViewerStyles = [];
         // Restore whatever modals we hid when the viewer opened, preserving
         // their existing state (dirty flags, in-progress edits, etc.).
         for (const id of _sfDocViewerStashedModalIds) {
@@ -50753,6 +50889,130 @@ require(['vs/editor/editor.main'], function () {
         if (e.key === 'Escape' && _sfDocViewerEls.modal?.classList.contains('active')) {
           _sfHideDocViewer();
         }
+      });
+      // ── A CREATOR'S STYLE FILE IN THE VIEWER [B-569] ──
+      // Text holding style code gets Copy style and Add to Style Library. Add fills the form from
+      // the font the file came from and, once added, makes the style that font's Last used style
+      // (every font made from it, for a file in a source); a style already in the library is
+      // linked instead of added twice.
+      let _sfDocViewerOrigin = null;   // { kind: 'entry' | 'source', id: font name | source uuid, path }
+      let _sfDocViewerStyles = [];     // [{ parsed, code }] in the text shown
+      let _sfDocViewerText = '', _sfDocViewerFile = '';
+      const _sfDocStyleContext = () => {
+        const o = _sfDocViewerOrigin;
+        if (!o) return null;
+        if (o.kind === 'entry') {
+          const e = _sfAllEntries.find(x => x.name === o.id);
+          if (!e) return null;
+          const m = e.meta || {};
+          const sm = (m.sourceUuid && _sfAllSourcesByUuid[m.sourceUuid] && _sfAllSourcesByUuid[m.sourceUuid].meta) || {};
+          // An open font window's tags are the ones on screen, saved or not.
+          const tags = (_sfDetailEdit && _sfDetailEdit.name === e.name) ? _sfDetailEdit.tags : (m.tags || []);
+          return { fonts: [e.name], fontName: e.name, creator: m.author || sm.vendor || '',
+            website: m.vendorWebsite || sm.vendorWebsite || '', tags, fileLabel: `the ${e.name} font's ${o.path}` };
+        }
+        if (o.kind === 'source') {
+          const sm = (_sfAllSourcesByUuid[o.id] && _sfAllSourcesByUuid[o.id].meta) || {};
+          const fonts = _sfAllEntries.filter(e => e.meta && e.meta.sourceUuid === o.id);
+          const tags = [];
+          fonts.forEach(f => (f.meta.tags || []).forEach(t => { if (!tags.includes(t)) tags.push(t); }));
+          const label = sm.bundleName || String(sm.originalName || '').replace(/\.zip$/i, '') || 'this';
+          return { fonts: fonts.map(f => f.name), fontName: fonts.length === 1 ? fonts[0].name : label,
+            creator: sm.vendor || (fonts[0] && fonts[0].meta.author) || '', website: sm.vendorWebsite || '',
+            tags, fileLabel: `the ${label} source's ${o.path}` };
+        }
+        return null;
+      };
+      const _sfDocPickedStyle = () => _sfDocViewerStyles[parseInt(_sfDocViewerEls.stylePick?.value || '0', 10) || 0] || null;
+      const _sfSyncDocAddLabel = () => {
+        const btn = _sfDocViewerEls.addStyle;
+        const s = _sfDocPickedStyle();
+        if (!btn || !s) return;
+        const have = _libraryStyleWithCode(s.parsed.expr);
+        btn.textContent = have ? `In Style Library as ${have}` : 'Add to Style Library';
+        btn.title = have ? `Already in your Style Library as ${have}. Click to make it the Last used style.`
+                         : 'Add this style to the Style Library, filled in from the font';
+      };
+      const _sfRenderDocStyleActions = (text, fileName) => {
+        const els = _sfDocViewerEls;
+        _sfDocViewerText = text || '';
+        _sfDocViewerFile = fileName || '';
+        _sfDocViewerStyles = text ? _findFileStyles(text) : [];
+        if (!els.styleActions) return;
+        const n = _sfDocViewerStyles.length;
+        els.styleActions.style.display = n ? '' : 'none';
+        if (!n) return;
+        if (els.stylePick) {
+          els.stylePick.style.display = n > 1 ? '' : 'none';
+          els.stylePick.replaceChildren(..._sfDocViewerStyles.map((_, i) => {
+            const o = document.createElement('option');
+            o.value = String(i);
+            o.textContent = `Style ${i + 1} of ${n}`;
+            return o;
+          }));
+        }
+        // Add needs a Style Library to add to and a font to fill it from; Copy needs neither.
+        if (els.addStyle) els.addStyle.style.display = (_stylesFileImported && _sfDocStyleContext()) ? '' : 'none';
+        _sfSyncDocAddLabel();
+      };
+      // Last used style, written on each font and on an open font window, so its own Save does not put
+      // the old one back.
+      const _sfPairFontsWithStyle = async (fontNames, styleName) => {
+        for (const name of fontNames) {
+          try {
+            await window.electronAPI.updateEntryMeta({ currentName: name, updates: { linkedStyleLibraryEntry: styleName } });
+          } catch { continue; }
+          const e = _sfAllEntries.find(x => x.name === name);
+          if (e) e.meta = { ...(e.meta || {}), linkedStyleLibraryEntry: styleName };
+          if (_sfDetailEdit && _sfDetailEdit.name === name) {
+            _sfDetailEdit.lastUsedStyleName = styleName;
+            _sfRefreshDisplayValues();
+          }
+        }
+        window._sfEntriesCache = _sfAllEntries;
+      };
+      _sfDocViewerEls.stylePick?.addEventListener('change', _sfSyncDocAddLabel);
+      _sfDocViewerEls.copyStyle?.addEventListener('click', () => {
+        const s = _sfDocPickedStyle();
+        if (!s) return;
+        navigator.clipboard.writeText(s.code).then(() => {
+          const btn = _sfDocViewerEls.copyStyle;
+          btn.textContent = '✓ Copied';
+          setTimeout(() => { btn.textContent = 'Copy style'; }, 1500);
+        });
+      });
+      _sfDocViewerEls.addStyle?.addEventListener('click', async () => {
+        const s = _sfDocPickedStyle();
+        const ctx = _sfDocStyleContext();
+        if (!s || !ctx) return;
+        const who = ctx.fonts.length === 1 ? ctx.fonts[0] : `the ${ctx.fonts.length} fonts made from this source`;
+        const have = _libraryStyleWithCode(s.parsed.expr);
+        if (have) {
+          if (!ctx.fonts.length) {
+            await promptConfirm({ title: 'Already in the Style Library', message: `This style is already in your Style Library as ${have}.`, confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+            return;
+          }
+          const ok = await promptConfirm({ title: 'Already in the Style Library',
+            message: `This style is already in your Style Library as ${have}.\n\nMake it the Last used style for ${who}?`,
+            confirmText: 'Make it Last used', confirmKind: 'primary' });
+          if (ok) await _sfPairFontsWithStyle(ctx.fonts, have);
+          return;
+        }
+        const form = _fontStyleForm(s.parsed, { ...ctx, fileName: _sfDocViewerFile, copyright: _fileCopyrightLines(_sfDocViewerText) },
+          _sfDocViewerStyles.indexOf(s), _sfDocViewerStyles.length);
+        // Add Style sits under the Sound Fonts windows, so they are put away while it is open and
+        // come back when it closes, however it closes.
+        const stashed = _sfDocViewerStashedModalIds.slice();
+        _sfDocViewerStashedModalIds = [];
+        _sfHideDocViewer();
+        const addModal = document.getElementById('modal-add-style');
+        _openAddFontStyle(form, (name) => { _sfPairFontsWithStyle(ctx.fonts, name); });
+        const mo = new MutationObserver(() => {
+          if (addModal.classList.contains('active')) return;
+          mo.disconnect();
+          for (const id of stashed) document.getElementById(id)?.classList.add('active');
+        });
+        mo.observe(addModal, { attributes: true, attributeFilter: ['class'] });
       });
       // Image/PDF extensions we can preview inline (blob URL). Everything else
       // falls through to text (if readable) or "open externally".
@@ -50821,7 +51081,8 @@ require(['vs/editor/editor.main'], function () {
             // groups down to readable text before showing. Other text types
             // (.txt, .md, .ini, etc.) render as-is.
             const displayText = /\.rtf$/i.test(fileName) ? _sfStripRtf(rawText) : rawText;
-            _sfShowDocViewer(fileName, size || bytes.length, displayText);
+            _sfShowDocViewer(fileName, size || bytes.length, displayText,
+              { origin: { kind: scope === 'entry' ? 'entry' : 'source', id: key, path: fileName } });
           } catch (err) {
             promptError('Could not read file', err && err.message || err);
           }

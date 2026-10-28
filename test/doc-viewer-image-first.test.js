@@ -32,6 +32,7 @@ const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
   const document = { getElementById: (id) => (id === 'modal-sf-entry-detail' ? { classList: classList('font') } : null) };
   const run = new Function('_sfDocViewerEls', 'document', '_jmtFitViewerImage', 'URL',
     `let _sfDocViewerBlobUrl = null, _sfDocViewerPop = null, _sfDocViewerRemove = null, _sfDocViewerStashedModalIds = [];
+     let _sfDocViewerOrigin = null; const _sfRenderDocStyleActions = () => {};   // [B-569] style file actions
      ${src}
      return { show: _sfShowDocViewer, hide: () => { _sfDocViewerShowToken++; } };`)(
     els, document, (m, i) => log.push(i ? 'fit' : 'fit-none'), { revokeObjectURL() {} });
