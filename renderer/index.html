@@ -9606,7 +9606,23 @@ window._sfFailedDestinationLabel = _sfFailedDestinationLabel;
 window._sfExportFailed = _sfExportFailed;
 
 // ── Dirty ──────────────────────────────────────────────
-function setDirty(v) {
+// The editor text when the config was last marked clean (opened, saved, closed), so typing it back
+// clears the dirty mark [B-572]. Only a text edit can be undone this way, the app's own edits
+// included: anything outside the text (the meta fields, the voicepack slots) stays dirty until the next save.
+let _cleanText = null;
+let _dirtyOutsideText = false;
+function _editorMatchesClean() {
+  if (_cleanText === null || typeof editor === 'undefined' || !editor) return false;
+  const model = editor.getModel && editor.getModel();
+  if (!model || model.getValueLength() !== _cleanText.length) return false;
+  return model.getValue() === _cleanText;
+}
+function setDirty(v, fromText = false) {
+  if (v && !fromText) _dirtyOutsideText = true;
+  if (!v) {
+    _dirtyOutsideText = false;
+    try { _cleanText = (typeof editor !== 'undefined' && editor) ? editor.getValue() : null; } catch { _cleanText = null; }
+  }
   isDirty = v;
   document.getElementById('stat-dirty').classList.toggle('visible', v);
   // Save button enable: dirty → yes; clean WITH a path → no (nothing to save);
@@ -9711,7 +9727,6 @@ function _commentOutMountSdSetting() {
     range: new monaco.Range(ln, 1, ln, orig.length + 1),
     text:  commented,
   }]);
-  if (fileIsOpen) setDirty(true);
   flashEditorLine(ln);
   return true;
 }
@@ -9770,7 +9785,6 @@ function _fixMountSdSetting() {
       range: new monaco.Range(ln, 1, ln, lines[commentedIdx].length + 1),
       text:  uncommented,
     }]);
-    if (fileIsOpen) setDirty(true);
     _msgStorageDeclinedMode = null;
     flashEditorLine(ln);
     return true;
@@ -9797,7 +9811,6 @@ function _fixMountSdSetting() {
     range: new monaco.Range(insertLineNum, 1, insertLineNum, 1),
     text:  defineLine,
   }]);
-  if (fileIsOpen) setDirty(true);
   _msgStorageDeclinedMode = null; // fixed, no longer a pending risk
   flashEditorLine(insertLineNum);
   return true;
@@ -10115,7 +10128,6 @@ const _sfFontRenameEdits = (text, renameOf) => {
 // One atomic edit, so updating every preset is one Ctrl+Z.
 const _sfApplyFontRenameEdits = (edits) => {
   window._atomicEdit(editor, 'font-rename', edits);
-  try { if (typeof setDirty === 'function') setDirty(true); } catch {}
 };
 const _sfConfigLabel = () => (currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'this config');
 const _sfPresetCount = (n) => (n === 1 ? '1 preset' : `${n} presets`);
@@ -26275,7 +26287,7 @@ require(['vs/editor/editor.main'], function () {
 
   editor.onDidChangeModelContent(() => {
     if (fileIsOpen) {
-      setDirty(true);
+      setDirty(_dirtyOutsideText || !_editorMatchesClean(), true);
       if (window.onEditorContentChanged) window.onEditorContentChanged();
       _updateStylesLinkBtn();
       _updateJmtLinkBtn();
@@ -28149,7 +28161,6 @@ require(['vs/editor/editor.main'], function () {
         if (!edits.length) return;
         // One atomic edit, so renaming thirty-four presets is ONE Ctrl+Z.
         window._atomicEdit(editor, 'shared-folder-rename', edits);
-        try { if (typeof setDirty === 'function') setDirty(true); } catch {}
         // The old slot stops being declared, so injectMetadata stops writing its
         // assignment - nothing has to clean the map up by hand.
         _sfRenderConfigCommonField();
