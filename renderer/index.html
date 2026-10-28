@@ -21323,18 +21323,23 @@ function _dedupeAndCheckTemplates(content, allEntries) {
   };
 }
 
-window.saveStylesFile = async function() {
-  if (!_stylesEditorInstance) return;
-  if (_conflictStyleNames.size > 0) {
-    promptError('Cannot save', 'Resolve duplicate name conflicts before saving the Style Library.');
-    return;
-  }
-  if (_conflictTemplateNames.size > 0) {
-    promptError('Cannot save', 'Resolve template conflicts before saving the Style Library.');
-    return;
-  }
+// Resolves true when the library is on disk. opts.visual: a change made in Visual view, which has no
+// Save button [B-574], so a refusal says the change is kept and saves once the conflict is gone.
+window.saveStylesFile = async function(opts) {
+  if (!_stylesEditorInstance) return false;
+  // Template conflicts are read from the text as it is now, not from the last load, so one
+  // resolved since then no longer blocks the save.
   const { content: sorted, conflicts: sortConflicts } = _sortHelpersFirst(_stylesEditorInstance.getValue());
   _conflictTemplateNames = sortConflicts;
+  const blocked = _conflictStyleNames.size > 0 ? 'two styles share a name'
+                : _conflictTemplateNames.size > 0 ? 'two templates share a name with different code' : '';
+  if (blocked) {
+    if (opts?.visual) promptError('Not saved yet', `This change is kept, but the Style Library cannot be saved while ${blocked}. Rename or delete one of each marked pair and it saves.`);
+    else promptError('Cannot save', _conflictStyleNames.size > 0
+      ? 'Resolve duplicate name conflicts before saving the Style Library.'
+      : 'Resolve template conflicts before saving the Style Library.');
+    return false;
+  }
   // Rebuild section structure and refresh @jmt:updated on every save
   const createdDate = _extractStyleLibraryCreatedDate(sorted) || _jmtLocalDateString();
   const structured = _applyStyleLibraryStructure(sorted, createdDate);
@@ -21344,7 +21349,17 @@ window.saveStylesFile = async function() {
   await window.electronAPI.writeStylesFile(_stylesEditorInstance.getValue());
   _setStylesDirty(false);
   if (_stylesViewMode === 'visual') _buildStylesVisual();
+  return true;
 };
+
+// A change to the library. Visual view has no Save, Discard or Delete [B-574]: what you see there is
+// what is on disk, so a change made there is written at once. Code view keeps Save, so a change there
+// waits for it. The write is deferred a tick so the caller's own rebuild (and the conflict check the
+// editor runs on every change) has settled first.
+function _stylesChanged() {
+  _setStylesDirty(true);
+  if (_stylesViewMode === 'visual') setTimeout(() => window.saveStylesFile({ visual: true }), 0);
+}
 
 function _setStylesDirty(v) {
   _isStylesDirtyFlag = v;
@@ -21406,7 +21421,14 @@ function _switchStylesView(mode) {
   document.getElementById('btn-styles-undo').style.display           = show;
   document.getElementById('btn-styles-redo').style.display           = show;
   document.getElementById('divider-undoredo').style.display  = show;
+  // Save, Discard and Delete are Code view's: Visual writes each change as it is made. [B-574]
+  document.getElementById('btn-styles-save').style.display    = show;
+  document.getElementById('btn-styles-discard').style.display = show;
+  document.getElementById('btn-styles-delete').style.display  = show;
   if (mode === 'visual') _buildStylesVisual();
+  // Arriving in Visual still unsaved (the load's own auto-fix, the only way left once the
+  // button has asked) has no Save to wait for, so it is written now.
+  if (mode === 'visual' && _isStylesDirtyFlag) _stylesChanged();
   if (showCode && _stylesEditorInstance) {
     _stylesEditorInstance.layout();
     _updateStyleErrorDecorations();
@@ -22701,7 +22723,7 @@ async function _deleteStyleEntry(entry, isHelper) {
   const { preamble, segments } = _buildSegments(content, allEntries);
   const kept = segments.filter(s => s.entry.name !== entry.name);
   _stylesEditorInstance.setValue(preamble + kept.map(s => s.text).join(''));
-  _setStylesDirty(true);
+  _stylesChanged();
   // Arm the one-shot: if this delete removed the last card matching an active
   // filter, the rebuild below should restore the full list rather than leave a
   // blank panel that reads as "my library is gone" (B-156).
@@ -22733,7 +22755,7 @@ function _reorderStylesInFile(srcIdx, tgtIdx) {
     .filter(t => t.length > 0)
     .join('\n\n');
   _stylesEditorInstance.setValue(preamble.replace(/\s+$/, '') + (joined ? '\n' + joined + '\n' : ''));
-  _setStylesDirty(true);
+  _stylesChanged();
   _buildStylesVisual();
 }
 
@@ -23020,7 +23042,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
       segments.unshift({ entry: null, text: newBlock });
     }
     _stylesEditorInstance.setValue(preamble + segments.map(s => s.text).join(''));
-    _setStylesDirty(true);
+    _stylesChanged();
     _closeHelperEditor();
     _buildStylesVisual();
     return;
@@ -23062,7 +23084,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
         _helperEditorOrigNotes   = notes;
         _helperEditorOrigName    = targetName;
         _stylesEditorInstance.setValue(newContent);
-        _setStylesDirty(true);
+        _stylesChanged();
         _exitHelperPencilMode();
         document.getElementById('btn-helper-save').disabled = true;
         _updateHelperEditorButtons();
@@ -23084,7 +23106,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
   _helperEditorOrigName    = targetName;
 
   _stylesEditorInstance.setValue(newContent);
-  _setStylesDirty(true);
+  _stylesChanged();
   _exitHelperPencilMode();
   document.getElementById('btn-helper-save').disabled = true;
   _updateHelperEditorButtons();
@@ -23932,9 +23954,9 @@ async function _saveDetail() {
     }
   }
 
-  // Update in-memory editor only — user saves to disk via the styles Save button
+  // Written at once: Visual view has no Save [B-574]
   _stylesEditorInstance.setValue(current);
-  _setStylesDirty(true);
+  _stylesChanged();
 
   _detailName         = newName;
   _detailOriginalCode = newUsingCode;
@@ -24044,7 +24066,7 @@ document.getElementById('btn-styles-append').addEventListener('click', async () 
 
   const separator = existing.trimEnd().length > 0 ? '\n' : '';
   _stylesEditorInstance.setValue(existing.trimEnd() + separator + '\n' + collapsedIncoming.trimStart());
-  _setStylesDirty(true);
+  _stylesChanged();
   if (_stylesViewMode === 'visual') _buildStylesVisual();
   else _updateConflictBanner();
   // [B-424] Eject offer, after the buffer and banner have settled. Same reason as the Import
@@ -24132,7 +24154,16 @@ async function _runDetailPasteCode() {
 }
 document.getElementById('btn-style-detail-paste-code').addEventListener('click', _runDetailPasteCode);
 document.getElementById('btn-styles-view-code').addEventListener('click',   () => _switchStylesView('code'));
-document.getElementById('btn-styles-view-visual').addEventListener('click', () => _switchStylesView('visual'));
+// Visual has no Save, so Code view's unsaved edits are settled before leaving it. [B-574]
+document.getElementById('btn-styles-view-visual').addEventListener('click', async () => {
+  if (_stylesViewMode === 'code' && _isStylesDirtyFlag) {
+    const choice = await promptUnsaved('The Style Library has unsaved changes. Visual view saves as you go, so save or discard these first.');
+    if (choice === 'cancel') return;
+    if (choice === 'save' && !await window.saveStylesFile()) return;
+    if (choice === 'discard') { _closeHelperEditor(); await _loadStylesFile(); }
+  }
+  _switchStylesView('visual');
+});
 
 function _transformAllUsing(transformFn, validateCompact = false) {
   if (!_stylesEditorInstance) return;
@@ -25121,14 +25152,14 @@ document.addEventListener('keydown', e => {
     _closeHelperEditor();
     _styleReorderRedoStack.push(_stylesEditorInstance.getValue());
     _stylesEditorInstance.setValue(_styleReorderUndoStack.pop());
-    _setStylesDirty(true);
+    _stylesChanged();
     _buildStylesVisual();
   } else if (isRedo && _styleReorderRedoStack.length) {
     e.preventDefault();
     _closeHelperEditor();
     _styleReorderUndoStack.push(_stylesEditorInstance.getValue());
     _stylesEditorInstance.setValue(_styleReorderRedoStack.pop());
-    _setStylesDirty(true);
+    _stylesChanged();
     _buildStylesVisual();
   }
 });
@@ -25223,7 +25254,7 @@ document.getElementById('btn-add-style-confirm').addEventListener('click', async
   const creator = document.getElementById('add-style-creator').value.trim();
   const block = _buildStyleBlock(name, expr, source, tags, url, notes, creator);
   _stylesEditorInstance.setValue(_stylesEditorInstance.getValue() + block);
-  _setStylesDirty(true);
+  _stylesChanged();
   _buildStylesVisual();
   document.getElementById('modal-add-style').classList.remove('active');
   // Surface the newly-added card. Without this, the new style is appended to
@@ -25251,7 +25282,8 @@ document.getElementById('btn-add-style-confirm').addEventListener('click', async
 
   // When invoked from "Add to Library" and the file was clean, auto-save so the
   // user isn't prompted about a change they already intentionally committed.
-  if (hadCallback && !wasAlreadyDirty) {
+  // (Visual view already wrote it above. [B-574])
+  if (hadCallback && !wasAlreadyDirty && _stylesViewMode !== 'visual') {
     await window.saveStylesFile();
   }
 });
