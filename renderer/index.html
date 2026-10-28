@@ -1561,9 +1561,18 @@
   .sf-libpick-filter-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .sf-libpick-filter-row > button { white-space: nowrap; }
   .sf-libpick-target-label { font-size: 0.74rem; color: var(--c-text-sub); }
-  .sf-libpick-target-select { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); color: var(--c-text); border-radius: 3px; padding: 4px 8px; font-size: 0.8rem; font-family: inherit; outline: none; }
+  .sf-libpick-target-select { flex: 1; min-width: 0; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); color: var(--c-text); border-radius: 3px; padding: 4px 8px; font-size: 0.8rem; font-family: inherit; outline: none; }
   .sf-libpick-target-select:focus { border-color: var(--jmt-blue); }
   .sf-libpick-target-select optgroup { font-style: normal; color: var(--c-text-muted); font-size: 0.7rem; }
+  /* The Browse list [B-573]: the style picker's dropdown look, above the picker (10010) and below the file viewer
+     (10012). Group headings collapse with the ▾ the import review's groups use. */
+  .sf-libpick-browse-drop { position: fixed; z-index: 10011; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); overflow-y: auto; font-size: 0.8rem; }
+  .sf-libpick-browse-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; cursor: pointer; user-select: none; color: var(--c-text-muted); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; position: sticky; top: 0; z-index: 1; background: var(--c-bg-raised); }
+  .sf-libpick-browse-head:hover { color: var(--c-text); }
+  .sf-libpick-browse-head::before { content: '\25BE'; display: inline-block; transition: transform 0.1s; }
+  .sf-libpick-browse-head.collapsed::before { transform: rotate(-90deg); }
+  .sf-libpick-browse-item { padding: 4px 8px 4px 22px; cursor: pointer; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-libpick-browse-item:hover, .sf-libpick-browse-item.current { background: rgba(58,143,255,0.15); color: var(--jmt-blue); }
   .sf-libpick-crumb { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 0.7rem; min-height: 1.4em; }
   .sf-libpick-crumb-item { display: inline-flex; align-items: center; background: var(--c-bg-raised); border: 1px solid var(--c-border-faint); color: var(--c-text-sub); cursor: pointer; padding: 1px 8px; border-radius: 10px; transition: background 0.1s, color 0.1s, border-color 0.1s; }
   .sf-libpick-crumb-item:hover { background: var(--c-bg-hover); border-color: var(--jmt-blue); color: var(--jmt-blue); }
@@ -41836,6 +41845,79 @@ require(['vs/editor/editor.main'], function () {
       };
       // Target switch — load the picked source / font tree.
       _sfLibPickEls.target?.addEventListener('change', _sfLibPickLoadTarget);
+      // The Browse list [B-573]. The select keeps the value; a click opens this list in place of the
+      // browser's, so it stays inside the window and each group (Sources, Fonts, Common folders)
+      // collapses. The group holding the current choice opens expanded, the rest collapsed.
+      let _sfLibPickBrowseDrop = null;
+      const _sfBrowseOutside = (e) => {
+        if (_sfLibPickBrowseDrop && !_sfLibPickBrowseDrop.contains(e.target) && e.target !== _sfLibPickEls.target) _sfCloseBrowseDrop();
+      };
+      const _sfBrowseKey = (e) => {
+        if (e.key === 'Escape' && _sfLibPickBrowseDrop) { e.preventDefault(); e.stopPropagation(); _sfCloseBrowseDrop(); }
+      };
+      const _sfCloseBrowseDrop = () => {
+        if (!_sfLibPickBrowseDrop) return;
+        _sfLibPickBrowseDrop.remove();
+        _sfLibPickBrowseDrop = null;
+        document.removeEventListener('mousedown', _sfBrowseOutside, true);
+        document.removeEventListener('keydown', _sfBrowseKey, true);
+      };
+      const _sfOpenBrowseDrop = () => {
+        const sel = _sfLibPickEls.target;
+        if (!sel) return;
+        _sfCloseBrowseDrop();
+        const drop = document.createElement('div');
+        drop.className = 'sf-libpick-browse-drop';
+        const pick = (value) => {
+          _sfCloseBrowseDrop();
+          if (sel.value !== value) { sel.value = value; sel.dispatchEvent(new Event('change')); }
+          sel.focus();
+        };
+        const addItem = (parent, opt) => {
+          const it = document.createElement('div');
+          it.className = 'sf-libpick-browse-item';
+          it.textContent = opt.textContent;
+          it.title = opt.textContent;
+          if (opt.value === sel.value) it.classList.add('current');
+          it.addEventListener('mousedown', (e) => { e.preventDefault(); pick(opt.value); });
+          parent.appendChild(it);
+        };
+        // Each group is a section, so its sticky heading stays in view only while its own items scroll
+        // past. An option outside any group (Shared Tracks) is a group of its own, named after it.
+        for (const child of Array.from(sel.children)) {
+          const opts = child.tagName === 'OPTION' ? [child] : Array.from(child.children);
+          const label = child.tagName === 'OPTION' ? child.textContent : child.label;
+          const section = document.createElement('div');
+          const head = document.createElement('div');
+          head.className = 'sf-libpick-browse-head';
+          head.textContent = `${label} (${opts.length})`;
+          const body = document.createElement('div');
+          if (!opts.some((o) => o.value === sel.value)) { head.classList.add('collapsed'); body.style.display = 'none'; }
+          head.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            body.style.display = head.classList.toggle('collapsed') ? 'none' : '';
+          });
+          for (const o of opts) addItem(body, o);
+          section.append(head, body);
+          drop.appendChild(section);
+        }
+        document.body.appendChild(drop);
+        _sfLibPickBrowseDrop = drop;
+        const r = sel.getBoundingClientRect();
+        drop.style.left = `${r.left}px`;
+        drop.style.top = `${r.bottom + 2}px`;
+        drop.style.width = `${r.width}px`;
+        drop.style.maxHeight = `${Math.max(120, window.innerHeight - r.bottom - 12)}px`;
+        drop.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
+        setTimeout(() => {
+          document.addEventListener('mousedown', _sfBrowseOutside, true);
+          document.addEventListener('keydown', _sfBrowseKey, true);
+        }, 0);
+      };
+      _sfLibPickEls.target?.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (_sfLibPickBrowseDrop) _sfCloseBrowseDrop(); else _sfOpenBrowseDrop();
+      });
       // Type filter change — just re-render; the filter is applied at
       // render time so no IPC or tree mutation needed. _sfLibPickPath
       // stays put so the user keeps their navigation context across
