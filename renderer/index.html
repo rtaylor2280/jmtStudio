@@ -5559,6 +5559,14 @@
           </div>
         </div>
         <div class="styles-tag-filter-wrap">
+          <button id="btn-styles-creator-filter" class="styles-tag-filter-btn" title="Filter by creator">
+            <span class="styles-tag-filter-icon">&#9662;</span> Creators<span id="styles-creator-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+          </button>
+          <div id="styles-creator-dropdown" class="styles-tag-dropdown" style="display:none">
+            <div id="styles-creator-dropdown-list"></div>
+          </div>
+        </div>
+        <div class="styles-tag-filter-wrap">
           <button id="btn-styles-effect-filter" class="styles-tag-filter-btn styles-effect-filter-btn" title="Filter by effect">
             <span class="styles-tag-filter-icon">&#9662;</span> Effects<span id="styles-effect-filter-badge" class="styles-tag-filter-badge styles-effect-filter-badge" style="display:none">0</span>
           </button>
@@ -5601,6 +5609,13 @@
       <div id="style-detail-name-error"></div>
     </div>
     <div id="style-detail-meta">
+      <div class="style-meta-row" id="detail-creator-row">
+        <span class="style-meta-label">Creator</span>
+        <span id="detail-creator-display" class="style-meta-val"></span>
+        <input id="detail-creator-input" class="detail-meta-input" type="text" list="style-creator-list" placeholder="Add creator…">
+        <button class="detail-pencil" id="btn-detail-creator-edit" title="Edit creator">&#9998;</button>
+        <button class="detail-pencil" id="btn-detail-creator-confirm" title="Confirm creator" style="display:none;color:#4a4;opacity:0.7">&#10003;</button>
+      </div>
       <div class="style-meta-row" id="detail-source-row">
         <span class="style-meta-label">Source</span>
         <span id="detail-source-display" class="style-meta-val"></span>
@@ -5994,6 +6009,11 @@
         <input id="add-style-name" type="text" class="detail-meta-input visible" placeholder="Required" style="flex:1;font-size:0.82rem">
       </div>
       <div id="add-style-name-error"></div>
+      <div class="style-meta-row">
+        <span class="style-meta-label">Creator</span>
+        <input id="add-style-creator" type="text" class="detail-meta-input visible" list="style-creator-list" placeholder="Blank if it is yours" style="flex:1;font-size:0.82rem">
+      </div>
+      <datalist id="style-creator-list"></datalist>
       <div class="style-meta-row">
         <span class="style-meta-label">Source</span>
         <input id="add-style-source" type="text" class="detail-meta-input visible" placeholder="Optional" style="flex:1;font-size:0.82rem">
@@ -20862,11 +20882,15 @@ function _canonicalTagSpelling(spellings, raw) {
   return (spellings && spellings.get(s.toLowerCase())) || s;
 }
 let _detailSource          = '';
+let _detailCreator         = '';
 let _detailUrl             = '';
 let _detailNotes           = '';
 let _activeFilterTags      = new Set();
 // Tags left out (right-click a tag row), as _activeFilterEffectsMissing is for effects. [B-564]
 let _activeFilterTagsMissing = new Set();
+// Creators picked and left out, as tags. A style with no creator is _STYLE_NO_CREATOR. [B-569]
+let _activeFilterCreators        = new Set();
+let _activeFilterCreatorsMissing = new Set();
 let _activeFilterEffects   = new Set();
 // [B-286] Effects a style must NOT have, set by right-click, as on Sound Fonts. Setting one polarity
 // of an effect clears the other.
@@ -21004,11 +21028,12 @@ function _normalizeStyleInput(raw) {
 }
 
 // Build the full file block for a new style entry
-function _buildStyleBlock(name, expr, source, tags, url = '', notes = '') {
+function _buildStyleBlock(name, expr, source, tags, url = '', notes = '', creator = '') {
   const dashes = n => '-'.repeat(n);
   const pad    = Math.max(0, Math.floor((74 - name.length - 2) / 2));
   const divider = `/*${dashes(pad)} ${name} ${dashes(74 - pad - name.length - 2)}*/`;
   const lines = [divider];
+  if (creator) lines.push(`// creator: ${creator}`);
   if (source) lines.push(`// source: ${source}`);
   if (url)    lines.push(`// url: ${url}`);
   if (tags.length) lines.push(`// tags: ${tags.join(', ')}`);
@@ -21034,6 +21059,7 @@ function _styleNameFromDisplay(s) {
 
 function _clearAddStyleForm() {
   document.getElementById('add-style-name').value   = '';
+  document.getElementById('add-style-creator').value = '';
   document.getElementById('add-style-source').value = '';
   document.getElementById('add-style-url').value    = '';
   document.getElementById('add-style-tags').value   = '';
@@ -21724,7 +21750,7 @@ function _parseStyleEntries(content) {
 
 // Extract structured metadata from the /*--- ... ---*/ header comment and gap lines
 function _parseStyleMeta(comment, gapText) {
-  const meta = { source: '', osVersion: '', url: '', userSource: '', userUrl: '', userTags: null, userNotes: '', templatePrefix: '' };
+  const meta = { source: '', osVersion: '', url: '', userSource: '', userUrl: '', userTags: null, userNotes: '', templatePrefix: '', userCreator: '' };
   if (!comment && !gapText) return meta;
 
   // Parse fett263 block comment
@@ -21773,7 +21799,8 @@ function _parseStyleMeta(comment, gapText) {
     let inNotes = false;
     for (const line of gapText.split('\n')) {
       const t = line.replace(/^\/\/\s*/, '').trim();
-      if (t.startsWith('source:'))      { meta.userSource = t.slice('source:'.length).trim(); inNotes = false; }
+      if (t.startsWith('creator:'))     { meta.userCreator = t.slice('creator:'.length).trim(); inNotes = false; }
+      else if (t.startsWith('source:')) { meta.userSource = t.slice('source:'.length).trim(); inNotes = false; }
       else if (t.startsWith('url:'))    { meta.userUrl = t.slice('url:'.length).trim(); inNotes = false; }
       else if (t.startsWith('tags:'))   { const raw = t.slice('tags:'.length).trim(); meta.userTags = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []; inNotes = false; }
       else if (t.startsWith('notes:'))  { noteLines.push(t.slice('notes:'.length).trim()); inNotes = true; }
@@ -21802,6 +21829,8 @@ function _stylesClearAllFilters() {
   if (sc) sc.style.display = 'none';
   _activeFilterTags    = new Set();
   _activeFilterTagsMissing = new Set();
+  _activeFilterCreators = new Set();
+  _activeFilterCreatorsMissing = new Set();
   _activeFilterEffects = new Set();
   _activeFilterEffectsMissing = new Set();
   _stylesInUseFilter   = '';
@@ -21815,7 +21844,7 @@ function _applyStylesSearch() {
   let inUseCount = 0, notInUseCount = 0;
   cards.forEach(card => {
     const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
-    const matchesTags = _styleInTagScope(card);
+    const matchesTags = _styleInTagScope(card) && _styleInCreatorScope(card);
     const matchesEffects = matchesTags && _styleInEffectScope(card);
     const inUse = card.classList.contains('in-use');
     const others = matchesQ && matchesTags && matchesEffects;
@@ -21910,6 +21939,14 @@ function _styleInTagScope(card) {
   for (const tag of _activeFilterTagsMissing) if (_styleHas(card, '.style-tag', 'data-tag', tag)) return false;
   return true;
 }
+// Picked creators OR; left-out creators AND-NOT. Read from the card, so the list and the filter agree.
+function _styleCreatorKey(card) { return card.dataset.creator || _STYLE_NO_CREATOR; }
+function _styleInCreatorScope(card) {
+  const c = _styleCreatorKey(card);
+  if (_activeFilterCreators.size && !_activeFilterCreators.has(c)) return false;
+  if (_activeFilterCreatorsMissing.has(c)) return false;
+  return true;
+}
 function _styleInEffectScope(card) {
   if (_activeFilterEffects.size) {
     let any = false;
@@ -21927,6 +21964,7 @@ function _matchingCardsForFacet(own) {
   return all.filter(card => {
     if (q && !(card.dataset.searchBlob || '').includes(q)) return false;
     if (own !== 'tag' && !_styleInTagScope(card)) return false;
+    if (own !== 'creator' && !_styleInCreatorScope(card)) return false;
     if (own !== 'effect' && !_styleInEffectScope(card)) return false;
     if (_stylesInUseFilter && card.classList.contains('in-use') !== (_stylesInUseFilter === 'in')) return false;
     return true;
@@ -21946,6 +21984,20 @@ function _computeAvailableTagsWithCounts() {
   return Array.from(counts.entries()).sort((a, b) =>
     _facetSortCompare(a[0], a[1], _activeFilterTags.has(a[0]) || _activeFilterTagsMissing.has(a[0]),
                       b[0], b[1], _activeFilterTags.has(b[0]) || _activeFilterTagsMissing.has(b[0])));   // [B-285]
+}
+
+// Same shape as _computeAvailableTagsWithCounts, but for the creator facet. Styles with no creator count
+// under _STYLE_NO_CREATOR, so they can be picked or left out like any creator.
+function _computeAvailableCreatorsWithCounts() {
+  const counts = new Map();
+  _matchingCardsForFacet('creator').forEach(card => {
+    const c = _styleCreatorKey(card);
+    counts.set(c, (counts.get(c) || 0) + 1);
+  });
+  for (const c of [..._activeFilterCreators, ..._activeFilterCreatorsMissing]) if (!counts.has(c)) counts.set(c, 0);
+  const on = (c) => _activeFilterCreators.has(c) || _activeFilterCreatorsMissing.has(c);
+  return Array.from(counts.entries()).sort((a, b) =>
+    _facetSortCompare(a[0], a[1], on(a[0]), b[0], b[1], on(b[0])));   // [B-285]
 }
 
 // Same shape as _computeAvailableTagsWithCounts, but for the effect facet.
@@ -22034,46 +22086,85 @@ function _wireFacetSortBar(container, rerender) {
   });
 }
 
-function _renderTagFilterDropdown() {
-  const list = document.getElementById('styles-tag-dropdown-list');
-  if (!list) return;
-  const tags = _computeAvailableTagsWithCounts();
-  if (!tags.length) {
-    list.innerHTML = '<div class="styles-tag-dropdown-empty">No tags available</div>';
-    return;
-  }
-  const tip = 'Left click: filter for styles with this tag.\nRight click: filter for styles without this tag.';
-  list.innerHTML = _facetSortBarHtml() + tags.map(([tag, count]) => {
-    const present = _activeFilterTags.has(tag);
-    const absent  = _activeFilterTagsMissing.has(tag);
-    const state   = present ? ' selected sf-effect-state-present' : absent ? ' selected sf-effect-state-absent' : '';
-    return `<button class="styles-tag-dropdown-item${state}" data-tag="${tag}" title="${tip}">`
-      + `<span class="styles-tag-dropdown-check">${present ? '&#10003;' : absent ? '&#10005;' : ''}</span>`
-      + `<span class="styles-tag-dropdown-name">${tag}</span>`
-      + `<span class="styles-tag-dropdown-count">${count}</span>`
-      + `</button>`;
-  }).join('');
-  _wireFacetSortBar(list, _renderTagFilterDropdown);   // [B-285]
-  // Left click toggles "has it", right click toggles "does not have it"; either clears the other, as the
-  // effect rows. Stays open: a multi-select, as on Sound Fonts.
-  const flip = (tag, on, off) => {
-    if (on.has(tag)) on.delete(tag);
-    else { off.delete(tag); on.add(tag); }
-    _applyStylesSearch();
-    _renderTagFilterDropdown();
+// One facet dropdown in the Style Library toolbar (Tags, Creators, Effects): a row per value with its count,
+// the shared sort bar, left click to want a value and right click to leave it out (either clears the other),
+// open until a click outside. Multi-select, as on Sound Fonts.
+function _styleFacetDropdown({ ddId, listId, btnId, items, on, off, rowClass = '', label = (v) => v, tip, empty }) {
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let outside = null;
+  const render = () => {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    const rows = items();
+    if (!rows.length) {
+      list.innerHTML = `<div class="styles-tag-dropdown-empty">${empty}</div>`;
+      return;
+    }
+    list.innerHTML = _facetSortBarHtml() + rows.map(([value, count]) => {
+      const present = on().has(value);
+      const absent  = off().has(value);
+      const state   = present ? ' selected sf-effect-state-present' : absent ? ' selected sf-effect-state-absent' : '';
+      return `<button class="styles-tag-dropdown-item${rowClass}${state}" data-value="${esc(value)}" title="${esc(tip)}">`
+        + `<span class="styles-tag-dropdown-check">${present ? '&#10003;' : absent ? '&#10005;' : ''}</span>`
+        + `<span class="styles-tag-dropdown-name">${esc(label(value))}</span>`
+        + `<span class="styles-tag-dropdown-count">${count}</span>`
+        + `</button>`;
+    }).join('');
+    _wireFacetSortBar(list, render);   // [B-285]
+    const flip = (value, yes, no) => {
+      if (yes.has(value)) yes.delete(value);
+      else { no.delete(value); yes.add(value); }
+      _applyStylesSearch();
+      render();
+    };
+    list.querySelectorAll('.styles-tag-dropdown-item').forEach(btn => {
+      const value = btn.dataset.value;
+      btn.addEventListener('click', e => { e.stopPropagation(); flip(value, on(), off()); });
+      btn.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); flip(value, off(), on()); });
+    });
   };
-  list.querySelectorAll('.styles-tag-dropdown-item').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      flip(btn.dataset.tag, _activeFilterTags, _activeFilterTagsMissing);
-    });
-    btn.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      flip(btn.dataset.tag, _activeFilterTagsMissing, _activeFilterTags);
-    });
-  });
+  const isOpen = () => {
+    const dd = document.getElementById(ddId);
+    return !!dd && dd.style.display !== 'none' && !!dd.style.display;
+  };
+  const close = () => {
+    const dd = document.getElementById(ddId);
+    if (dd) dd.style.display = 'none';
+    if (outside) { document.removeEventListener('mousedown', outside, true); outside = null; }
+  };
+  const open = () => {
+    const dd = document.getElementById(ddId);
+    if (!dd) return;
+    render();
+    dd.style.display = 'block';
+    if (outside) document.removeEventListener('mousedown', outside, true);
+    outside = (ev) => {
+      const btn = document.getElementById(btnId);
+      if (dd.contains(ev.target) || (btn && btn.contains(ev.target))) return;
+      close();
+    };
+    document.addEventListener('mousedown', outside, true);
+  };
+  const toggle = () => { if (isOpen()) close(); else open(); };
+  return { render, open, close, toggle, isOpen };
 }
+
+// The value a style with no creator is counted under: the user's own. Same words as Sound Fonts.
+const _STYLE_NO_CREATOR = '(no creator)';
+const _tagFacet = _styleFacetDropdown({
+  ddId: 'styles-tag-dropdown', listId: 'styles-tag-dropdown-list', btnId: 'btn-styles-tag-filter',
+  items: () => _computeAvailableTagsWithCounts(), on: () => _activeFilterTags, off: () => _activeFilterTagsMissing,
+  tip: 'Left click: filter for styles with this tag.\nRight click: filter for styles without this tag.',
+  empty: 'No tags available',
+});
+const _creatorFacet = _styleFacetDropdown({
+  ddId: 'styles-creator-dropdown', listId: 'styles-creator-dropdown-list', btnId: 'btn-styles-creator-filter',
+  items: () => _computeAvailableCreatorsWithCounts(), on: () => _activeFilterCreators, off: () => _activeFilterCreatorsMissing,
+  tip: 'Left click: filter for styles by this creator.\nRight click: filter for styles not by this creator.',
+  empty: 'No creators available',
+});
+function _renderTagFilterDropdown() { _tagFacet.render(); }
+function _renderCreatorFilterDropdown() { _creatorFacet.render(); }
 
 function _renderActiveFilterChips() {
   const strip      = document.getElementById('styles-active-filters');
@@ -22087,6 +22178,14 @@ function _renderActiveFilterChips() {
     else tagBadge.style.display = 'none';
   }
   if (tagBtn) tagBtn.classList.toggle('has-active', tagCount > 0);
+  const creBadge = document.getElementById('styles-creator-filter-badge');
+  const creBtn   = document.getElementById('btn-styles-creator-filter');
+  const creCount = _activeFilterCreators.size + _activeFilterCreatorsMissing.size;
+  if (creBadge) {
+    if (creCount) { creBadge.textContent = creCount; creBadge.style.display = ''; }
+    else creBadge.style.display = 'none';
+  }
+  if (creBtn) creBtn.classList.toggle('has-active', creCount > 0);
   const fxCount = _activeFilterEffects.size + _activeFilterEffectsMissing.size;
   if (fxBadge) {
     if (fxCount) { fxBadge.textContent = fxCount; fxBadge.style.display = ''; }
@@ -22096,7 +22195,7 @@ function _renderActiveFilterChips() {
   if (!strip) return;
   // Search counts as a filter here, same as on the Sound Fonts side (B-156).
   const searchQ = (document.getElementById('styles-search')?.value || '').trim();
-  const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + _activeFilterEffects.size + _activeFilterEffectsMissing.size
+  const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + creCount + _activeFilterEffects.size + _activeFilterEffectsMissing.size
     + (searchQ ? 1 : 0) + (_stylesInUseFilter ? 1 : 0);
   if (!totalActive) {
     strip.style.display = 'none';
@@ -22120,6 +22219,9 @@ function _renderActiveFilterChips() {
     group('tag',     Array.from(_activeFilterTags).map(t => chip(t, 'tag', t)),                               'or'),
     group('without', Array.from(_activeFilterTagsMissing).map(t =>
       chip(t, 'tag-without', t, ' sf-active-filter-effect-missing')),                                         'and'),
+    group('creator', Array.from(_activeFilterCreators).map(c => chip(c, 'creator', c)),                      'or'),
+    group('without', Array.from(_activeFilterCreatorsMissing).map(c =>
+      chip(c, 'creator-without', c, ' sf-active-filter-effect-missing')),                                     'and'),
     group('effect',  Array.from(_activeFilterEffects).map(fx => chip(fx, 'effect', fx)),                      'or'),
     group('without', Array.from(_activeFilterEffectsMissing).map(fx =>
       chip(fx, 'without', fx, ' sf-active-filter-effect-missing')),                                           'and'),
@@ -22147,6 +22249,8 @@ function _renderActiveFilterChips() {
         }
         case 'tag':     _activeFilterTags.delete(v); break;
         case 'tag-without': _activeFilterTagsMissing.delete(v); break;
+        case 'creator': _activeFilterCreators.delete(v); break;
+        case 'creator-without': _activeFilterCreatorsMissing.delete(v); break;
         case 'effect':  _activeFilterEffects.delete(v); break;
         case 'without': _activeFilterEffectsMissing.delete(v); break;
         case 'in-use':  _stylesInUseFilter = ''; break;
@@ -22237,104 +22341,22 @@ function _toggleStylesSortDropdown() {
   document.addEventListener('mousedown', _sortDropdownOutsideHandler, true);
 }
 
-let _tagDropdownOutsideHandler = null;
-function _closeTagFilterDropdown() {
-  const dd = document.getElementById('styles-tag-dropdown');
-  if (dd) dd.style.display = 'none';
-  if (_tagDropdownOutsideHandler) {
-    document.removeEventListener('mousedown', _tagDropdownOutsideHandler, true);
-    _tagDropdownOutsideHandler = null;
-  }
-}
-function _openTagFilterDropdown() {
-  const dd = document.getElementById('styles-tag-dropdown');
-  if (!dd) return;
-  _renderTagFilterDropdown();
-  dd.style.display = 'block';
-  if (_tagDropdownOutsideHandler) document.removeEventListener('mousedown', _tagDropdownOutsideHandler, true);
-  _tagDropdownOutsideHandler = (ev) => {
-    const btn = document.getElementById('btn-styles-tag-filter');
-    if (dd.contains(ev.target) || (btn && btn.contains(ev.target))) return;
-    _closeTagFilterDropdown();
-  };
-  document.addEventListener('mousedown', _tagDropdownOutsideHandler, true);
-}
-function _toggleTagFilterDropdown() {
-  const dd = document.getElementById('styles-tag-dropdown');
-  if (!dd) return;
-  if (dd.style.display === 'none' || !dd.style.display) _openTagFilterDropdown();
-  else _closeTagFilterDropdown();
-}
+function _closeTagFilterDropdown() { _tagFacet.close(); }
+function _openTagFilterDropdown() { _tagFacet.open(); }
+function _toggleTagFilterDropdown() { _tagFacet.toggle(); }
+function _toggleCreatorFilterDropdown() { _creatorFacet.toggle(); }
 
-function _renderEffectFilterDropdown() {
-  const list = document.getElementById('styles-effect-dropdown-list');
-  if (!list) return;
-  const fx = _computeAvailableEffectsWithCounts();
-  if (!fx.length) {
-    list.innerHTML = '<div class="styles-tag-dropdown-empty">No effects available</div>';
-    return;
-  }
-  const tip = 'Left click: filter for styles that have this effect.\nRight click: filter for styles that don\'t have this effect.';
-  list.innerHTML = _facetSortBarHtml() + fx.map(([effect, count]) => {
-    const present = _activeFilterEffects.has(effect);
-    const absent  = _activeFilterEffectsMissing.has(effect);
-    const state   = present ? ' selected sf-effect-state-present' : absent ? ' selected sf-effect-state-absent' : '';
-    return `<button class="styles-tag-dropdown-item styles-effect-dropdown-item${state}" data-effect="${effect}" title="${tip}">`
-      + `<span class="styles-tag-dropdown-check">${present ? '&#10003;' : absent ? '&#10005;' : ''}</span>`
-      + `<span class="styles-tag-dropdown-name">${effect}</span>`
-      + `<span class="styles-tag-dropdown-count">${count}</span>`
-      + `</button>`;
-  }).join('');
-  _wireFacetSortBar(list, _renderEffectFilterDropdown);   // [B-285]
-  // Left click toggles "has it", right click toggles "does not have it"; either clears the other.
-  // Both stay open, as on Sound Fonts.
-  const flip = (effect, on, off) => {
-    if (on.has(effect)) on.delete(effect);
-    else { off.delete(effect); on.add(effect); }
-    _applyStylesSearch();
-    _renderEffectFilterDropdown();
-  };
-  list.querySelectorAll('.styles-effect-dropdown-item').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      flip(btn.dataset.effect, _activeFilterEffects, _activeFilterEffectsMissing);
-    });
-    btn.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      flip(btn.dataset.effect, _activeFilterEffectsMissing, _activeFilterEffects);
-    });
-  });
-}
-
-let _effectDropdownOutsideHandler = null;
-function _closeEffectFilterDropdown() {
-  const dd = document.getElementById('styles-effect-dropdown');
-  if (dd) dd.style.display = 'none';
-  if (_effectDropdownOutsideHandler) {
-    document.removeEventListener('mousedown', _effectDropdownOutsideHandler, true);
-    _effectDropdownOutsideHandler = null;
-  }
-}
-function _openEffectFilterDropdown() {
-  const dd = document.getElementById('styles-effect-dropdown');
-  if (!dd) return;
-  _renderEffectFilterDropdown();
-  dd.style.display = 'block';
-  if (_effectDropdownOutsideHandler) document.removeEventListener('mousedown', _effectDropdownOutsideHandler, true);
-  _effectDropdownOutsideHandler = (ev) => {
-    const btn = document.getElementById('btn-styles-effect-filter');
-    if (dd.contains(ev.target) || (btn && btn.contains(ev.target))) return;
-    _closeEffectFilterDropdown();
-  };
-  document.addEventListener('mousedown', _effectDropdownOutsideHandler, true);
-}
-function _toggleEffectFilterDropdown() {
-  const dd = document.getElementById('styles-effect-dropdown');
-  if (!dd) return;
-  if (dd.style.display === 'none' || !dd.style.display) _openEffectFilterDropdown();
-  else _closeEffectFilterDropdown();
-}
+const _effectFacet = _styleFacetDropdown({
+  ddId: 'styles-effect-dropdown', listId: 'styles-effect-dropdown-list', btnId: 'btn-styles-effect-filter',
+  items: () => _computeAvailableEffectsWithCounts(), on: () => _activeFilterEffects, off: () => _activeFilterEffectsMissing,
+  rowClass: ' styles-effect-dropdown-item',
+  tip: 'Left click: filter for styles that have this effect.\nRight click: filter for styles that don\'t have this effect.',
+  empty: 'No effects available',
+});
+function _renderEffectFilterDropdown() { _effectFacet.render(); }
+function _closeEffectFilterDropdown() { _effectFacet.close(); }
+function _openEffectFilterDropdown() { _effectFacet.open(); }
+function _toggleEffectFilterDropdown() { _effectFacet.toggle(); }
 
 // Classifies entries as helpers vs full styles, and marks JMT-dependent entries:
 //   - isCharging   → using-code references ChargeFullPropF  (needs FUNCTIONS_CHARGE_FULL_PROP_H)
@@ -23242,6 +23264,21 @@ function _buildStylesVisual() {
   const helpers    = allEntries.filter(e =>  e.isHelper);
   const fullStyles = allEntries.filter(e => !e.isHelper);
 
+  // Creators suggested in both Creator boxes: the Sound Fonts list (known vendors and every
+  // font's creator) and the creators already in the Style Library, one per name in any case.
+  {
+    const dl = document.getElementById('style-creator-list');
+    if (dl) {
+      const byKey = new Map();
+      const add = (n) => { n = String(n || '').trim(); if (n && !byKey.has(n.toLowerCase())) byKey.set(n.toLowerCase(), n); };
+      try { (window._sfGetKnownVendors?.() || []).forEach(v => add(v.name)); } catch {}
+      (window._sfEntriesCache || []).forEach(e => add(e?.meta?.author));
+      fullStyles.forEach(e => add(e?.meta?.userCreator));
+      const names = [...byKey.values()].sort((a, b) => a.localeCompare(b));
+      dl.replaceChildren(...names.map((n) => { const o = document.createElement('option'); o.value = n; return o; }));
+    }
+  }
+
   // Populate the Style Library tags datalist with the union of userTags
   // across all entries. Used by the detail-edit tag input for autocomplete.
   // Existing tags are suggested but new tags are still accepted.
@@ -23376,10 +23413,13 @@ function _buildStylesVisual() {
     card.dataset.name   = name;
 
     const displaySource  = meta.userSource || meta.source || '';
+    const creator        = (meta.userCreator || '').trim();
+    card.dataset.creator = creator;
     const userTags       = meta.userTags || [];
     const effects        = _scanEffects(entry.usingCode);
     card.dataset.searchBlob = [
       name,
+      creator,
       displaySource,
       meta.userUrl || meta.url || '',
       (userTags || []).join(' '),
@@ -23408,6 +23448,7 @@ function _buildStylesVisual() {
       <div class="style-card-top">
         <div class="style-card-name">${name}</div>
       </div>
+      ${creator       ? `<div class="style-card-source style-card-creator">${creator.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))}</div>` : ''}
       ${displaySource ? `<div class="style-card-source">${displaySource}</div>` : ''}
       ${cardUrl       ? `<div class="style-card-source"><button class="style-card-source-link" title="${cardUrl}">${urlLabel}</button></div>` : ''}
       ${userTagsHtml  ? `<div class="style-card-tags">${userTagsHtml}</div>` : ''}
@@ -23701,25 +23742,10 @@ function _openStyleDetail(entry) {
   document.getElementById('style-detail-name').style.display      = '';
   document.getElementById('style-detail-name-input').style.display = 'none';
 
-  // Source field
-  const srcDisplay  = document.getElementById('detail-source-display');
-  const srcInput    = document.getElementById('detail-source-input');
-  const srcPencil   = document.getElementById('btn-detail-source-edit');
-  const srcConfirm  = document.getElementById('btn-detail-source-confirm');
-  if (_detailSource) {
-    srcDisplay.textContent = _detailSource;
-    srcDisplay.style.display = '';
-    srcInput.value = _detailSource;
-    srcInput.classList.remove('visible');
-    srcPencil.style.display = '';
-    srcConfirm.style.display = 'none';
-  } else {
-    srcDisplay.style.display = 'none';
-    srcInput.value = '';
-    srcInput.classList.add('visible');
-    srcPencil.style.display = 'none';
-    srcConfirm.style.display = '';
-  }
+  // Creator and Source fields
+  _detailCreator = meta.userCreator || '';
+  _detailTextFields.creator.show();
+  _detailTextFields.source.show();
 
   // URL: user-edited value takes precedence, fall back to fett263-extracted URL
   _detailUrl = meta.userUrl || meta.url || '';
@@ -23798,6 +23824,7 @@ async function _saveDetail() {
   const srcInp  = document.getElementById('detail-source-input');
 
   if (srcInp.classList.contains('visible'))   _commitDetailSource();
+  if (document.getElementById('detail-creator-input').classList.contains('visible')) _detailTextFields.creator.commit();
   const oldName = _detailName;
   if (nameInp.style.display !== 'none')       _commitDetailName();
 
@@ -23853,9 +23880,10 @@ async function _saveDetail() {
   // Build updated gap: keep non-metadata lines, prepend new metadata
   // Also strip any template<> line from gap — it's now owned by the editor
   const cleanGap  = oldGap.split('\n')
-    .filter(l => !/^\/\/\s*(source|tags|url|notes):/.test(l.trim()) && !/^\s*template\s*</.test(l))
+    .filter(l => !/^\/\/\s*(creator|source|tags|url|notes):/.test(l.trim()) && !/^\s*template\s*</.test(l))
     .join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/, '');
   const metaLines = [];
+  if (_detailCreator)     metaLines.push(`// creator: ${_detailCreator}`);
   if (_detailSource)      metaLines.push(`// source: ${_detailSource}`);
   if (_detailUrl)         metaLines.push(`// url: ${_detailUrl}`);
   if (_detailTags.length) metaLines.push(`// tags: ${_detailTags.join(', ')}`);
@@ -25192,7 +25220,8 @@ document.getElementById('btn-add-style-confirm').addEventListener('click', async
   const wasAlreadyDirty = _isStylesDirtyFlag;
   const hadCallback     = !!_addStyleConfirmCallback;
 
-  const block = _buildStyleBlock(name, expr, source, tags, url, notes);
+  const creator = document.getElementById('add-style-creator').value.trim();
+  const block = _buildStyleBlock(name, expr, source, tags, url, notes, creator);
   _stylesEditorInstance.setValue(_stylesEditorInstance.getValue() + block);
   _setStylesDirty(true);
   _buildStylesVisual();
@@ -25357,54 +25386,60 @@ document.getElementById('style-detail-name-input').addEventListener('keydown', e
   if (e.key === 'Escape') { e.preventDefault(); document.getElementById('style-detail-name-input').value = _detailName; _commitDetailName(); }
 });
 
-function _commitDetailSource() {
-  const disp    = document.getElementById('detail-source-display');
-  const inp     = document.getElementById('detail-source-input');
-  const pencil  = document.getElementById('btn-detail-source-edit');
-  const confirm = document.getElementById('btn-detail-source-confirm');
-  _detailSource = inp.value.trim();
-  disp.textContent = _detailSource;
-  disp.style.display = _detailSource ? '' : 'none';
-  inp.classList.remove('visible');
-  pencil.style.display = _detailSource ? '' : 'none';
-  confirm.style.display = 'none';
-  _setDetailDirty(true);
-}
-
-// Source edit — pencil toggles display ↔ input
-document.getElementById('btn-detail-source-edit').addEventListener('click', () => {
-  const inp     = document.getElementById('detail-source-input');
-  const pencil  = document.getElementById('btn-detail-source-edit');
-  const confirm = document.getElementById('btn-detail-source-confirm');
-  if (inp.classList.contains('visible')) {
-    _commitDetailSource();
-  } else {
-    inp.value = _detailSource;
-    document.getElementById('detail-source-display').style.display = 'none';
+// A pencil text field in the style detail panel (Creator, Source). It shows the value, or an open input
+// when there is none; the pencil opens it, ✓ or Enter commits, Escape puts the value back.
+function _wireDetailTextField(key, get, set) {
+  const el = (id) => document.getElementById(id);
+  const disp = el(`detail-${key}-display`), inp = el(`detail-${key}-input`);
+  const pencil = el(`btn-detail-${key}-edit`), confirm = el(`btn-detail-${key}-confirm`);
+  const show = () => {
+    const v = get();
+    disp.textContent = v;
+    disp.style.display = v ? '' : 'none';
+    inp.value = v;
+    inp.classList.toggle('visible', !v);
+    pencil.style.display = v ? '' : 'none';
+    confirm.style.display = v ? 'none' : '';
+  };
+  const commit = () => {
+    const before = get();
+    set(inp.value.trim());
+    const v = get();
+    disp.textContent = v;
+    disp.style.display = v ? '' : 'none';
+    inp.classList.remove('visible');
+    pencil.style.display = v ? '' : 'none';
+    confirm.style.display = 'none';
+    if (v !== before) _setDetailDirty(true);
+  };
+  pencil.addEventListener('click', () => {
+    if (inp.classList.contains('visible')) { commit(); return; }
+    inp.value = get();
+    disp.style.display = 'none';
     inp.classList.add('visible');
     pencil.style.display = 'none';
     confirm.style.display = '';
     inp.focus(); inp.select();
-  }
-});
-document.getElementById('btn-detail-source-confirm').addEventListener('click', _commitDetailSource);
-document.getElementById('detail-source-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); _commitDetailSource(); }
-  else if (e.key === 'Escape') {
-    const inp     = document.getElementById('detail-source-input');
-    const pencil  = document.getElementById('btn-detail-source-edit');
-    const confirm = document.getElementById('btn-detail-source-confirm');
-    const disp    = document.getElementById('detail-source-display');
-    inp.classList.remove('visible');
-    disp.style.display = _detailSource ? '' : 'none';
-    disp.textContent = _detailSource;
-    pencil.style.display = '';
-    confirm.style.display = 'none';
-  }
-});
-document.getElementById('detail-source-input').addEventListener('input', () => {
-  _setDetailDirty(true);
-});
+  });
+  confirm.addEventListener('click', commit);
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') {
+      inp.classList.remove('visible');
+      disp.style.display = get() ? '' : 'none';
+      disp.textContent = get();
+      pencil.style.display = '';
+      confirm.style.display = 'none';
+    }
+  });
+  inp.addEventListener('input', () => { _setDetailDirty(true); });
+  return { show, commit };
+}
+const _detailTextFields = {
+  creator: _wireDetailTextField('creator', () => _detailCreator, (v) => { _detailCreator = v; }),
+  source:  _wireDetailTextField('source',  () => _detailSource,  (v) => { _detailSource = v; }),
+};
+const _commitDetailSource = () => _detailTextFields.source.commit();
 
 // Tag input — Enter adds a tag
 document.getElementById('detail-tag-input').addEventListener('keydown', e => {
@@ -25502,9 +25537,11 @@ document.getElementById('btn-detail-url-confirm').addEventListener('click', _com
 document.getElementById('style-detail-name-input').addEventListener('blur', () => {
   if (document.getElementById('style-detail-name-input').style.display !== 'none') _commitDetailName();
 });
-document.getElementById('detail-source-input').addEventListener('blur', () => {
-  if (document.getElementById('detail-source-input').classList.contains('visible')) _commitDetailSource();
-});
+for (const key of ['creator', 'source']) {
+  document.getElementById(`detail-${key}-input`).addEventListener('blur', () => {
+    if (document.getElementById(`detail-${key}-input`).classList.contains('visible')) _detailTextFields[key].commit();
+  });
+}
 document.getElementById('detail-url-input').addEventListener('blur', (e) => {
   if (document.getElementById('detail-url-edit-row').style.display === 'none') return;
   if (_validateUrl(e.target.value).ok) _commitDetailUrl();
@@ -25546,6 +25583,8 @@ document.getElementById('detail-notes-input').addEventListener('input', () => {
 function _refreshOpenFacetDropdowns() {
   const tagDd = document.getElementById('styles-tag-dropdown');
   if (tagDd && tagDd.style.display !== 'none') _renderTagFilterDropdown();
+  const creDd = document.getElementById('styles-creator-dropdown');
+  if (creDd && creDd.style.display !== 'none') _renderCreatorFilterDropdown();
   const fxDd = document.getElementById('styles-effect-dropdown');
   if (fxDd && fxDd.style.display !== 'none') _renderEffectFilterDropdown();
 }
@@ -25585,6 +25624,10 @@ document.getElementById('btn-styles-not-in-use-filter')?.addEventListener('click
 document.getElementById('btn-styles-tag-filter')?.addEventListener('click', e => {
   e.stopPropagation();
   _toggleTagFilterDropdown();
+});
+document.getElementById('btn-styles-creator-filter')?.addEventListener('click', e => {
+  e.stopPropagation();
+  _toggleCreatorFilterDropdown();
 });
 document.getElementById('btn-styles-effect-filter')?.addEventListener('click', e => {
   e.stopPropagation();

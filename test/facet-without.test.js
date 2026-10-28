@@ -88,8 +88,11 @@ console.log('3. Style Library tags');
   env2.set(['Sith', 'Jedi'], ['Red']);
   check('picked tags OR, then the left-out one removes', pick() === 'Calm', pick());
   check('right-click on a tag row leaves it out; the row shows the red x; a without group; the chip x and Clear all clear it',
-    /flip\(btn\.dataset\.tag, _activeFilterTagsMissing, _activeFilterTags\);/.test(html)
-    && /const absent  = _activeFilterTagsMissing\.has\(tag\);/.test(html)
+    // The Style Library's facets share one dropdown [B-569]: a right-click flips the left-out set, and a row
+    // shows the red x from it. Tags hands it _activeFilterTags / _activeFilterTagsMissing.
+    /btn\.addEventListener\('contextmenu', e => \{ e\.preventDefault\(\); e\.stopPropagation\(\); flip\(value, off\(\), on\(\)\); \}\);/.test(html)
+    && /const absent  = off\(\)\.has\(value\);/.test(html)
+    && /const _tagFacet = _styleFacetDropdown\(\{[\s\S]{0,300}on: \(\) => _activeFilterTags, off: \(\) => _activeFilterTagsMissing,/.test(html)
     && /group\('without', Array\.from\(_activeFilterTagsMissing\)/.test(html)
     && /case 'tag-without': _activeFilterTagsMissing\.delete\(v\); break;/.test(html)
     && /_activeFilterTags    = new Set\(\);\s*_activeFilterTagsMissing = new Set\(\);/.test(html));
