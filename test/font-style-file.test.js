@@ -108,12 +108,54 @@ check('both doors tell the viewer where the file came from',
   /\(kind === 'entry' \|\| kind === 'source'\) \? \{ origin: \{ kind, id, path: subPath \} \} : \{\}/.test(html)
   && /\{ origin: \{ kind: scope === 'entry' \? 'entry' : 'source', id: key, path: fileName \} \}/.test(html));
 check('a text file is checked for style code', /_sfRenderDocStyleActions\(kind === 'text' \? content : '', fileName\);/.test(html));
-check('Add needs a Style Library and a font', /els\.addStyle\.style\.display = \(_stylesFileImported && _sfDocStyleContext\(\)\) \? '' : 'none';/.test(html));
-check('adding makes it the Last used style', /_openAddFontStyle\(form, \(name\) => \{ _sfPairFontsWithStyle\(ctx\.fonts, name\); \}\);/.test(html)
+check('Add needs a Style Library, a font, and no copy already there',
+  /const ctx = \(_stylesFileImported && _sfDocStyleContext\(\)\) \|\| null;/.test(html) && /btn\.style\.display = ctx \? '' : 'none';\s*btn\.disabled = !!have;/.test(html));
+check('adding offers the Last used style', /_openAddFontStyle\(form, \(name\) => \{ _sfOfferPairFonts\(ctx\.fonts, name\); \}\);/.test(html)
   && /updates: \{ linkedStyleLibraryEntry: styleName \}/.test(html) && /_sfDetailEdit\.lastUsedStyleName = styleName;/.test(html));
-check('already in the library: offers the link, adds nothing', /if \(have\) \{[\s\S]{0,700}_sfPairFontsWithStyle\(ctx\.fonts, have\);\s*return;/.test(html));
+check('the choice is in Settings with the other remembered choices',
+  /\['setting-font-style-use', 'fontStyleAlwaysUse', 'ask'\],/.test(html) && /id="setting-font-style-use"/.test(html));
+check('already in the library: Add greyed with the reason on hover, and Use as Last used style only while a font lacks it',
+  /`Already in your Style Library as \$\{have\}\.`/.test(html) && !/sf-doc-viewer-style-status/.test(html) && /use\.style\.display = have && unpaired\.length \? '' : 'none';/.test(html)
+  && /if \(_libraryStyleWithCode\(s\.parsed\.expr\)\) \{ _sfSyncDocAddLabel\(\); return; \}/.test(html)
+  && /await _sfPairFontsWithStyle\(todo, have\);\s*_sfSyncDocAddLabel\(\);/.test(html)
+  && !/Click to make it the Last used style/.test(html));
 check('the font windows come back however Add Style closes', /new MutationObserver\(\(\) => \{\s*if \(addModal\.classList\.contains\('active'\)\) return;/.test(html));
 check('the form is filled with the creator', /document\.getElementById\('add-style-creator'\)\.value = form\.creator \|\| '';/.test(html));
 
-console.log(failures ? `\n${failures} failed` : '\nall passed');
-process.exit(failures ? 1 : 0);
+console.log('5. the question after Add');
+(async () => {
+  const at = html.indexOf('const _sfOfferPairFonts = async (fontNames, styleName) => {');
+  const end = html.indexOf('\n      };', at);
+  const src = at > -1 && end > at ? html.slice(at, end + 9) : '';
+  check('located', src.length > 500);
+  const run = async (remembered, answer, linked = {}) => {
+    const out = { asked: null, set: [], paired: null };
+    const entries = Object.keys({ Skotos: 1, Null: 1, ...linked }).map((n) => ({ name: n, meta: { linkedStyleLibraryEntry: linked[n] || '' } }));
+    const f = new Function('_sfAllEntries', '_jmtRememberedChoice', 'promptConfirm', 'window', '_sfEscape', '_sfPairFontsWithStyle',
+      `${src}\nreturn _sfOfferPairFonts;`)(entries, async () => remembered, async (o) => { out.asked = o; return answer; },
+      { electronAPI: { setSetting: async (k, v) => out.set.push(`${k}=${v}`) } }, (x) => x, async (n, s) => { out.paired = n.join(',') + '>' + s; });
+    await f(['Skotos'], 'Skotos');
+    return out;
+  };
+  let o = await run('ask', 'middle', { Skotos: 'GreyscaleFontsSkotos' });
+  check('Ask: the four buttons and the X, naming what it replaces; Use pairs, saves nothing',
+    o.asked && o.asked.leadText === 'Never use' && o.asked.cancelText === 'Skip' && o.asked.middleText === 'Use'
+    && o.asked.confirmText === 'Always use' && o.asked.closeX === true && /replaces <strong>GreyscaleFontsSkotos/.test(o.asked.messageHtml)
+    && o.paired === 'Skotos>Skotos' && !o.set.length, JSON.stringify(o));
+  o = await run('ask', 'cancel');
+  check('Skip: adds only', o.paired === null && !o.set.length, JSON.stringify(o));
+  o = await run('ask', 'close');
+  check('the X is Skip', o.paired === null && !o.set.length, JSON.stringify(o));
+  o = await run('ask', 'lead');
+  check('Never use: adds only, and remembers', o.paired === null && o.set.join() === 'fontStyleAlwaysUse=never', JSON.stringify(o));
+  o = await run('ask', 'confirm');
+  check('Always use: pairs, and remembers', o.paired === 'Skotos>Skotos' && o.set.join() === 'fontStyleAlwaysUse=always', JSON.stringify(o));
+  o = await run('always', null);
+  check('remembered Always: pairs without asking', o.asked === null && o.paired === 'Skotos>Skotos', JSON.stringify(o));
+  o = await run('never', null);
+  check('remembered Never: adds without asking', o.asked === null && o.paired === null, JSON.stringify(o));
+  o = await run('ask', 'middle', { Skotos: 'Skotos' });
+  check('already its Last used style: nothing to ask', o.asked === null, JSON.stringify(o));
+  console.log(failures ? `\n${failures} failed` : '\nall passed');
+  process.exit(failures ? 1 : 0);
+})();

@@ -5657,6 +5657,7 @@
       <button class="modal-btn-cancel" id="btn-style-detail-copy" title="Copy full function block to clipboard">Copy Function</button>
       <button class="modal-btn-cancel" id="btn-style-detail-copy-style" title="Copy as StylePtr for use in a preset">Copy Style</button>
       <button class="modal-btn-cancel" id="btn-style-detail-paste-code" title="Replace this style's code from the clipboard. Keeps the name, source, tags, and notes. Undo with Ctrl+Z.">Paste Code</button>
+      <button class="modal-btn-cancel" id="btn-style-detail-test" title="Open this style, as it is on screen, in the online ProffieOS style editor. Your Style Library helpers are written in.">Test Style</button>
       <button class="modal-btn-cancel" id="btn-detail-undo" title="Undo (Ctrl+Z)">&#8634;</button>
       <button class="modal-btn-cancel" id="btn-detail-redo" title="Redo (Ctrl+Y)">&#8635;</button>
       <div style="flex:1"></div>
@@ -6745,6 +6746,8 @@
     <div class="sf-doc-viewer-actions" id="sf-doc-viewer-style-actions" style="display:none">
       <select id="sf-doc-viewer-style-pick" title="This file holds more than one style" style="display:none"></select>
       <button class="modal-btn-cancel" id="sf-doc-viewer-copy-style" type="button" title="Copy the style code">Copy style</button>
+      <button class="modal-btn-cancel" id="sf-doc-viewer-test-style" type="button" title="See this style in the online ProffieOS style editor before adding it">Test style</button>
+      <button class="modal-btn-cancel" id="sf-doc-viewer-use-style" type="button" style="display:none">Use as Last used style</button>
       <button class="modal-btn-primary" id="sf-doc-viewer-add-style" type="button">Add to Style Library</button>
     </div>
   </div>
@@ -7858,6 +7861,13 @@ file holding only the styles that config uses. A readme says what they are and h
          title="Whether the open config's presets are updated when you rename a font they use.">
       <span class="settings-item-label">Update the open config when a font it uses is renamed</span>
       <div class="theme-selector" id="setting-font-rename-update">
+        <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
+      </div>
+    </div>
+    <div class="settings-item"
+         title="Whether a style added to the Style Library from a font's own style file becomes that font's Last used style.">
+      <span class="settings-item-label">Use a style added from a font as its Last used style</span>
+      <div class="theme-selector" id="setting-font-style-use">
         <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
       </div>
     </div>
@@ -21598,6 +21608,227 @@ function _composeCopyStyleExpr(name, usingCode) {
   return placeholders.length ? { expr, placeholders } : { expr };
 }
 
+// ── TEST STYLE [B-575] ───────────────────────────────────────────────────────────
+// Opens a style in the online ProffieOS style editor, which draws it: the style goes in the URL as
+// ?S=<expression>, the format the editor's own share links use (tested by hand 2026-10-28 with a
+// 3,409-character style). Callable from anywhere: window._testStyleInEditor(style).
+//
+// Takes a style in any form the app holds one: StylePtr<...>() with or without its arguments, a
+// `using X = ...;` line, a bare expression, or a Style Library name. The editor knows ProffieOS's
+// templates, not the library's, so the style is made independent first (_independentStyle below):
+// every library style or helper used inside it written in, template arguments filled from the use
+// or else the default, as Copy Style does for one entry.
+// Comments stay: the editor accepts them (verified 2026-08-16).
+// A 4,805-character URL opened through shell.openExternal on Windows, 2026-10-28.
+const _STYLE_EDITOR_URL = 'https://fredrik.hubbe.net/lightsaber/style_editor_beta.html?S=';
+
+// The top-level comma-separated pieces of a template argument list.
+function _splitTemplateArgs(s) {
+  const out = [];
+  let d = 0, cur = '';
+  for (const ch of String(s)) {
+    if (ch === '<') d++;
+    else if (ch === '>') d--;
+    if (ch === ',' && d === 0) { out.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+// AN INDEPENDENT STYLE: the same style with nothing left that needs the Style Library, so it
+// compiles, shares or draws on its own. StylePtr<PlasmaChamberWrapper<ControlMainUnstableRageBaseColor>>
+// ("65535,0,0") comes back with the wrapper's code and the style it wraps both written in, and its
+// arguments kept. Callable from anywhere: window._independentStyle(style).
+// { expr, args, style: 'StylePtr<expr>(args)' }, or { error } saying why not.
+function _independentStyle(style) {
+  let src = String(style || '').trim();
+  // A StylePtr's arguments ride along: StylePtr<...>("65535,0,0") -> args '"65535,0,0"'.
+  const argsM = src.match(/>\s*\(\s*([^()]*?)\s*\)\s*[,;]?\s*$/);
+  const args = argsM && /\b\w*Style\w*Ptr\w*\s*</.test(src) ? argsM[1] : '';
+  const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+  const lib = new Map();
+  if (text) for (const e of _parseStyleEntries(text)) {
+    lib.set(e.name, String(e.usingCode || '').replace(/^using\s+[^=]+=\s*/, '').replace(/;\s*$/, '').trim());
+  }
+  // A bare name stays as it is: a library name is expanded below like any use of it.
+  const at = _styleCodeStart(src);
+  const using = at !== -1 ? src.slice(at).match(/^using\s+(\w+)[^=;]*=\s*/) : null;
+  if (using && lib.has(using[1])) {
+    src = using[1];   // its own template parameters, if any, take their defaults
+  } else if (using) {
+    const end = _findUsingExprEnd(src, at + using[0].length);
+    src = src.slice(at + using[0].length, end >= 0 ? end : undefined).trim();
+  } else if (at !== -1) {
+    src = _extractStylePtrInner(src) || '';
+  } else {
+    src = src.replace(/[;,]\s*$/, '').trim();
+  }
+  if (!src) return { error: 'There is no style code to test.' };
+
+  const missing = new Set();
+  const expand = (expr, depth) => {
+    if (depth > 20) return expr;   // a helper that uses itself; leave the rest as written
+    let out = '', i = 0;
+    const re = /\b[A-Za-z_]\w*\b/g;
+    let m;
+    while ((m = re.exec(expr))) {
+      const name = m[0];
+      if (!lib.has(name)) continue;
+      // Its template arguments, when the use gives any: Name<a, b>.
+      let j = m.index + name.length, args = [], end = j;
+      const k = expr.slice(j).match(/^\s*</);
+      if (k) {
+        let d = 0, p = j + k[0].length - 1;
+        for (; p < expr.length; p++) {
+          if (expr[p] === '<') d++;
+          else if (expr[p] === '>' && --d === 0) break;
+        }
+        args = _splitTemplateArgs(expr.slice(j + k[0].length, p));
+        end = p + 1;
+      }
+      const params = _getHelperTemplateParams(name) || [];
+      if (!params.length && k) continue;   // not a template, so <...> is not its argument list
+      const values = {};
+      params.forEach((p, n) => {
+        const v = args[n] !== undefined ? args[n] : p.defaultExpr;
+        if (v === null || v === undefined) {
+          if (p.type === 'class') values[p.name] = _COPY_STYLE_INNER_PLACEHOLDER;
+          else missing.add(`${name}'s ${p.name}`);
+        } else values[p.name] = v;
+      });
+      let body = lib.get(name);
+      if (params.length) {
+        const names = params.map(p => p.name).filter(n => n in values);
+        if (names.length) body = body.replace(new RegExp(`\\b(${names.join('|')})\\b`, 'g'), (x) => values[x]);
+      }
+      out += expr.slice(i, m.index) + expand(body, depth + 1);
+      i = end;
+      re.lastIndex = end;
+    }
+    return out + expr.slice(i);
+  };
+  const expr = expand(src, 0);
+  if (missing.size) {
+    const list = [...missing];
+    return { error: `It needs a value for ${list.join(', ')}, which ${list.length > 1 ? 'have' : 'has'} no default.` };
+  }
+  return { expr, args, style: `StylePtr<${expr}>(${args})` };
+}
+window._independentStyle = _independentStyle;
+
+// THE EDITOR READS NUMBERS, NOT ARITHMETIC. A helper can pass a constant expression the compiler
+// works out, `(32768 * 100) / DURATION_MS`, and once written in it reads `(32768 * 100) / 10000`.
+// The editor cannot parse that and shows Black (CrystalChamberAccelWrapper via BootNormTime,
+// 2026-10-28). So for the editor only, every template argument that is plain integer arithmetic
+// is worked out the way C++ does it: integers, division truncating toward zero. Anything else is
+// left exactly as written; the independent style itself is not touched.
+function _foldConstArgs(expr) {
+  const calc = (s) => {
+    let i = 0;
+    const peek = () => { while (s[i] === ' ') i++; return s[i]; };
+    const num = () => {
+      if (peek() === '(') { i++; const v = add(); if (peek() !== ')') throw 0; i++; return v; }
+      if (peek() === '-') { i++; return -num(); }
+      if (peek() === '+') { i++; return num(); }
+      const m = s.slice(i).match(/^\d+/);
+      if (!m) throw 0;
+      i += m[0].length;
+      return Number(m[0]);
+    };
+    const mul = () => {
+      let v = num();
+      for (let c = peek(); c === '*' || c === '/' || c === '%'; c = peek()) {
+        i++;
+        const r = num();
+        if (c !== '*' && r === 0) throw 0;
+        v = c === '*' ? v * r : c === '/' ? Math.trunc(v / r) : v % r;
+      }
+      return v;
+    };
+    const add = () => {
+      let v = mul();
+      for (let c = peek(); c === '+' || c === '-'; c = peek()) { i++; const r = mul(); v = c === '+' ? v + r : v - r; }
+      return v;
+    };
+    const v = add();
+    if (peek() !== undefined || !Number.isSafeInteger(v)) throw 0;
+    return v;
+  };
+  // An argument made only of digits, spaces, parentheses and operators, with a real operator in it
+  // (not just the sign of -1500), between its `<` or `,` and its `,` or `>`.
+  return String(expr).replace(/([<,])(\s*[-+\d\s()*/%]+?\s*)(?=[,>])/g, (all, open, arg) => {
+    if (!/[\d)]\s*[-+*/%]/.test(arg)) return all;
+    try { return open + String(calc(arg.trim())); } catch { return all; }
+  });
+}
+
+// THE PRESET'S COLOURS, WRITTEN IN. The editor link carries the expression alone, so a preset's
+// StylePtr<...>("65535,0,0") would draw in the style's defaults (DeepSkyBlue, not the red it was
+// set to; seen 2026-10-28). Each argument the string sets replaces its use in the style:
+// RgbArg<BASE_COLOR_ARG,DeepSkyBlue> -> Rgb<255,0,0>, IntArg<X,n> -> Int<v>. Read with the same
+// reader as the preset sidecar's swatches (window.proffieArgs), both string formats. Unset ones
+// keep their defaults, which is what the board does too.
+function _applyStyleArgs(expr, args) {
+  const pa = window.proffieArgs;
+  const str = String(args || '').trim().replace(/^"|"$/g, '');
+  if (!pa || !str) return expr;
+  let out = String(expr);
+  for (const reg of pa.registry) {
+    const r = pa.readRegistryArg(reg.name, str);
+    if (!r || r.isDefault || r.unsupported) continue;
+    const v = r.values.map(x => x || 0);
+    const value = reg.kind === 'RgbArg'
+      ? (v.every(x => x % 257 === 0) ? `Rgb<${v.map(x => x / 257).join(',')}>` : `Rgb16<${v.join(',')}>`)
+      : `Int<${v[0]}>`;
+    // Every RgbArg<NAME, default> or IntArg<NAME, default>, the default however deep it nests.
+    const head = new RegExp(`\\b${reg.kind}\\s*<\\s*${reg.name}\\s*,`, 'g');
+    let m, res = '', from = 0;
+    while ((m = head.exec(out))) {
+      let d = 0, p = m.index + m[0].indexOf('<');
+      for (; p < out.length; p++) {
+        if (out[p] === '<') d++;
+        else if (out[p] === '>' && --d === 0) break;
+      }
+      if (p >= out.length) break;
+      res += out.slice(from, m.index) + value;
+      from = p + 1;
+      head.lastIndex = from;
+    }
+    out = res + out.slice(from);
+  }
+  return out;
+}
+
+// The editor takes the expression alone, so the StylePtr's arguments are written into it first.
+async function _testStyleInEditor(style) {
+  const r = _independentStyle(style);
+  if (r.error) { promptError('Cannot test this style', r.error); return false; }
+  // Comments come out first: a labelled argument puts one inside the arithmetic, `(32768 * 100) /
+  // /* START_MS*/ 10000`, which would keep it from being worked out, and the editor lays the style
+  // out afresh anyway.
+  const forEditor = _foldConstArgs(_applyStyleArgs(r.expr, r.args).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ').replace(/\s+/g, ' ').trim());
+  try { await window.electronAPI.openExternal(_STYLE_EDITOR_URL + encodeURIComponent(forEditor)); }
+  catch (e) { promptError('Cannot open the style editor', (e && e.message) || String(e)); return false; }
+  return true;
+}
+window._testStyleInEditor = _testStyleInEditor;
+
+// The Test Style row, shared by every right-click menu that offers it. `style` is the style or a
+// function returning it at click time; `close` takes the menu down first.
+function _testStyleMenuItem(style, close) {
+  const d = document.createElement('div');
+  d.className = 'preset-ctx-item';
+  d.textContent = 'Test in style editor';
+  d.title = 'Open it in the online ProffieOS style editor, with your Style Library helpers written in';
+  d.addEventListener('mousedown', (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    if (close) close();
+    _testStyleInEditor(typeof style === 'function' ? style() : style);
+  });
+  return d;
+}
+
 // Parse a library helper's template<...> parameters out of my_styles.h.
 // Top level (moved out of presetSidecarModule 2026-08-16) because Copy Style
 // needs it too - the module-private copy was why Copy Style emitted a style
@@ -23128,14 +23359,25 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
 function _styleCardContextMenu(e, styleName) {
   const menu = document.getElementById('preset-ctx-menu');
   if (!menu || !styleName) return;
-  if (!(typeof editor !== 'undefined' && editor && typeof fileIsOpen !== 'undefined' && fileIsOpen)) return;
-  if (typeof window._addPresetWithStyle !== 'function' || typeof window._replaceBladeWithStyle !== 'function'
-      || typeof window._presetBladeNames !== 'function') {
+  // Test Style needs no config [B-575]; the two config verbs do.
+  const hasConfig = typeof editor !== 'undefined' && editor && typeof fileIsOpen !== 'undefined' && fileIsOpen;
+  if (hasConfig && (typeof window._addPresetWithStyle !== 'function' || typeof window._replaceBladeWithStyle !== 'function'
+      || typeof window._presetBladeNames !== 'function')) {
     console.error('[B-541] preset sidecar bridges are missing; the style card menu cannot write.');
     return;
   }
   e.preventDefault();
   e.stopPropagation();
+  if (!hasConfig) {
+    menu.innerHTML = '';
+    menu.style.minWidth = '220px';
+    menu.appendChild(_testStyleMenuItem(styleName, () => { menu.style.display = 'none'; menu.style.minWidth = ''; }));
+    menu.style.display = 'block';
+    const w = menu.offsetWidth || 220, h = menu.offsetHeight || 30;
+    menu.style.left = `${Math.min(e.clientX, window.innerWidth - w - 8)}px`;
+    menu.style.top = `${Math.min(e.clientY, window.innerHeight - h - 8)}px`;
+    return;
+  }
   let banks = [];
   try { banks = presetParser.parsePresets(editor.getValue()).arrays || []; } catch {}
   const presetCount = banks.reduce((n, a) => n + ((a.presets || []).length), 0);
@@ -23263,6 +23505,13 @@ function _styleCardContextMenu(e, styleName) {
     });
     hoverOpens(repItem, open);
   }
+
+  const sep = document.createElement('div');
+  sep.className = 'preset-ctx-separator';
+  menu.appendChild(sep);
+  const testItem = _testStyleMenuItem(styleName, closeAll);
+  testItem.addEventListener('mouseenter', () => { sub.style.display = 'none'; sub2.style.display = 'none'; });
+  menu.appendChild(testItem);
 
   menu.style.display = 'block';
   const w = menu.offsetWidth || 220, h = menu.offsetHeight || 60;
@@ -24160,6 +24409,15 @@ async function _runDetailPasteCode() {
   _setDetailDirty(true);
 }
 document.getElementById('btn-style-detail-paste-code').addEventListener('click', _runDetailPasteCode);
+// Test Style [B-575]: the code on screen, unsaved edits and all. A templated style (a wrapper) is
+// tested by name, so its parameters take their defaults or the stand-in as the library holds them.
+document.getElementById('btn-style-detail-test').addEventListener('click', () => {
+  if (!_stylesDetailEditor) return;
+  const { prefix, code } = _splitTemplatePrefix(_stylesDetailEditor.getValue().trim());
+  // The body alone: a `using` line naming a library style would be read from the library, not the screen.
+  const body = code.replace(/^\s*using\s+[^=]+=\s*/, '').replace(/;\s*$/, '');
+  _testStyleInEditor(prefix && _detailName ? _detailName : body);
+});
 document.getElementById('btn-styles-view-code').addEventListener('click',   () => _switchStylesView('code'));
 // Visual has no Save, so Code view's unsaved edits are settled before leaving it. [B-574]
 document.getElementById('btn-styles-view-visual').addEventListener('click', async () => {
@@ -31792,6 +32050,7 @@ require(['vs/editor/editor.main'], function () {
         ['setting-sd-include-config', 'sdExportIncludeConfig', 'never'],
         ['setting-images-always-rename', 'imagesAlwaysRename', 'ask'],
         ['setting-font-rename-update', 'fontRenameAlwaysUpdate', 'ask'],
+        ['setting-font-style-use', 'fontStyleAlwaysUse', 'ask'],
       ];
       const _showRemembered = (el, v) => {
         el.querySelectorAll('.choice-btn').forEach((b) => b.classList.toggle('active', b.dataset.choice === v));
@@ -50924,14 +51183,27 @@ require(['vs/editor/editor.main'], function () {
         return null;
       };
       const _sfDocPickedStyle = () => _sfDocViewerStyles[parseInt(_sfDocViewerEls.stylePick?.value || '0', 10) || 0] || null;
+      // A style already in the library: Add stays, greyed, and its tooltip says why (chosen 2026-10-28
+      // over a status line). The one thing left to do, making it the Last used style, is its
+      // own button, shown only while some font here does not use it yet.
       const _sfSyncDocAddLabel = () => {
         const btn = _sfDocViewerEls.addStyle;
+        const use = document.getElementById('sf-doc-viewer-use-style');
         const s = _sfDocPickedStyle();
         if (!btn || !s) return;
-        const have = _libraryStyleWithCode(s.parsed.expr);
-        btn.textContent = have ? `In Style Library as ${have}` : 'Add to Style Library';
-        btn.title = have ? `Already in your Style Library as ${have}. Click to make it the Last used style.`
-                         : 'Add this style to the Style Library, filled in from the font';
+        const ctx = (_stylesFileImported && _sfDocStyleContext()) || null;
+        const have = ctx ? _libraryStyleWithCode(s.parsed.expr) : '';
+        const unpaired = have ? ctx.fonts.filter(n => ((_sfAllEntries.find(x => x.name === n) || {}).meta || {}).linkedStyleLibraryEntry !== have) : [];
+        btn.style.display = ctx ? '' : 'none';
+        btn.disabled = !!have;
+        const who = ctx && ctx.fonts.length === 1 ? `${ctx.fonts[0]}'s` : 'these fonts\'';
+        btn.title = !have ? 'Add this style to the Style Library, filled in from the font'
+          : (ctx.fonts.length && !unpaired.length) ? `Already in your Style Library as ${have}, and ${who} Last used style.`
+          : `Already in your Style Library as ${have}.`;
+        if (use) {
+          use.style.display = have && unpaired.length ? '' : 'none';
+          use.title = have ? `Make ${have} the Last used style for ${unpaired.length === 1 ? unpaired[0] : `the ${unpaired.length} fonts made from this source that do not use it`}` : '';
+        }
       };
       const _sfRenderDocStyleActions = (text, fileName) => {
         const els = _sfDocViewerEls;
@@ -50951,8 +51223,8 @@ require(['vs/editor/editor.main'], function () {
             return o;
           }));
         }
-        // Add needs a Style Library to add to and a font to fill it from; Copy needs neither.
-        if (els.addStyle) els.addStyle.style.display = (_stylesFileImported && _sfDocStyleContext()) ? '' : 'none';
+        // Add needs a Style Library to add to and a font to fill it from, and no copy already there
+        // (_sfSyncDocAddLabel decides); Copy and Test need neither.
         _sfSyncDocAddLabel();
       };
       // Last used style, written on each font and on an open font window, so its own Save does not put
@@ -50971,7 +51243,56 @@ require(['vs/editor/editor.main'], function () {
         }
         window._sfEntriesCache = _sfAllEntries;
       };
+      // After an Add: make it the Last used style? A remembered choice, so a style can be added now and
+      // used later (his, 2026-10-28: "I might want to add some but not use them... yet"). Never / Skip /
+      // Use / Always use, and the X is Skip. The question names what it would replace.
+      const _sfOfferPairFonts = async (fontNames, styleName) => {
+        const todo = fontNames.filter(n => {
+          const e = _sfAllEntries.find(x => x.name === n);
+          return ((e && e.meta && e.meta.linkedStyleLibraryEntry) || '') !== styleName;
+        });
+        if (!todo.length) return;
+        const remembered = await _jmtRememberedChoice('fontStyleAlwaysUse');
+        if (remembered === 'never') return;
+        if (remembered !== 'always') {
+          const current = todo.map(n => ((_sfAllEntries.find(x => x.name === n) || {}).meta || {}).linkedStyleLibraryEntry || '')
+            .filter(Boolean);
+          const who = todo.length === 1 ? `<strong>${_sfEscape(todo[0])}</strong>` : `the ${todo.length} fonts made from this source`;
+          const replaces = !current.length ? ''
+            : todo.length === 1 ? ` It replaces <strong>${_sfEscape(current[0])}</strong>.`
+            : ` It replaces the Last used style on ${current.length} of them.`;
+          const choice = await promptConfirm({
+            title: 'Use it as the Last used style?',
+            messageHtml: `<strong>${_sfEscape(styleName)}</strong> is in the Style Library. Make it the Last used style for ${who}, `
+              + `so adding ${todo.length === 1 ? 'the font' : 'them'} to a preset brings it along?${replaces}`,
+            leadText: 'Never use',
+            cancelText: 'Skip',
+            middleText: 'Use',
+            confirmText: 'Always use', confirmKind: 'primary',
+            closeX: true,
+          });
+          if (choice === 'lead') { try { await window.electronAPI.setSetting('fontStyleAlwaysUse', 'never'); } catch {} }
+          if (choice !== 'middle' && choice !== 'confirm') return;
+          if (choice === 'confirm') { try { await window.electronAPI.setSetting('fontStyleAlwaysUse', 'always'); } catch {} }
+        }
+        await _sfPairFontsWithStyle(todo, styleName);
+      };
       _sfDocViewerEls.stylePick?.addEventListener('change', _sfSyncDocAddLabel);
+      // Use as Last used style: the click is the answer, so no question; the fonts not using it yet.
+      document.getElementById('sf-doc-viewer-use-style')?.addEventListener('click', async () => {
+        const s = _sfDocPickedStyle();
+        const ctx = _sfDocStyleContext();
+        const have = s && ctx ? _libraryStyleWithCode(s.parsed.expr) : '';
+        if (!have) return;
+        const todo = ctx.fonts.filter(n => ((_sfAllEntries.find(x => x.name === n) || {}).meta || {}).linkedStyleLibraryEntry !== have);
+        await _sfPairFontsWithStyle(todo, have);
+        _sfSyncDocAddLabel();
+      });
+      // Test Style [B-575]: the picked style as the creator wrote it.
+      document.getElementById('sf-doc-viewer-test-style')?.addEventListener('click', () => {
+        const s = _sfDocPickedStyle();
+        if (s) _testStyleInEditor(s.code);
+      });
       _sfDocViewerEls.copyStyle?.addEventListener('click', () => {
         const s = _sfDocPickedStyle();
         if (!s) return;
@@ -50985,19 +51306,9 @@ require(['vs/editor/editor.main'], function () {
         const s = _sfDocPickedStyle();
         const ctx = _sfDocStyleContext();
         if (!s || !ctx) return;
-        const who = ctx.fonts.length === 1 ? ctx.fonts[0] : `the ${ctx.fonts.length} fonts made from this source`;
-        const have = _libraryStyleWithCode(s.parsed.expr);
-        if (have) {
-          if (!ctx.fonts.length) {
-            await promptConfirm({ title: 'Already in the Style Library', message: `This style is already in your Style Library as ${have}.`, confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
-            return;
-          }
-          const ok = await promptConfirm({ title: 'Already in the Style Library',
-            message: `This style is already in your Style Library as ${have}.\n\nMake it the Last used style for ${who}?`,
-            confirmText: 'Make it Last used', confirmKind: 'primary' });
-          if (ok) await _sfPairFontsWithStyle(ctx.fonts, have);
-          return;
-        }
+        // Never a second copy: the button is hidden once the code is in the library, and this catches a
+        // library that gained it since the viewer opened.
+        if (_libraryStyleWithCode(s.parsed.expr)) { _sfSyncDocAddLabel(); return; }
         const form = _fontStyleForm(s.parsed, { ...ctx, fileName: _sfDocViewerFile, copyright: _fileCopyrightLines(_sfDocViewerText) },
           _sfDocViewerStyles.indexOf(s), _sfDocViewerStyles.length);
         // Add Style sits under the Sound Fonts windows, so they are put away while it is open and
@@ -51006,7 +51317,7 @@ require(['vs/editor/editor.main'], function () {
         _sfDocViewerStashedModalIds = [];
         _sfHideDocViewer();
         const addModal = document.getElementById('modal-add-style');
-        _openAddFontStyle(form, (name) => { _sfPairFontsWithStyle(ctx.fonts, name); });
+        _openAddFontStyle(form, (name) => { _sfOfferPairFonts(ctx.fonts, name); });
         const mo = new MutationObserver(() => {
           if (addModal.classList.contains('active')) return;
           mo.disconnect();
@@ -60803,6 +61114,7 @@ function _getFreshFieldRange(fieldName) {
       labelRemoveBtn.title = 'Remove label';
       labelRow.appendChild(labelRemoveBtn);
 
+
       function _syncLabelDisplay() {
         labelPosId.style.display    = labelCurrent ? 'none' : '';
         labelTextEl.textContent     = labelCurrent || '';
@@ -61630,6 +61942,26 @@ function _getFreshFieldRange(fieldName) {
         customBtnRow.appendChild(addToLibBtn);
       }
 
+      // Test Style [B-575], a text button on each mode's own row: here the expression being written
+      // (the live text, else the document's), and beside Write Custom Expression the blade as the
+      // document has it. Not for a ref, which has no style of its own, nor a blade following another
+      // (its right-click still offers it; toggling Follow rebuilds this editor).
+      const _canTestBlade = slot.type !== 'ref' && !_slotIsFollowingHere(preset, slotIdx);
+      let libTestBtn = null, libLinkRow = null;   // set beside Write Custom Expression below
+      const _mkBladeTestBtn = (getText) => {
+        const b = document.createElement('button');
+        b.className = 'preset-mode-switch';
+        b.textContent = 'Test Style';
+        b.title = 'Open this blade\'s style in the online ProffieOS style editor, with your Style Library helpers written in';
+        b.addEventListener('click', e => { e.stopPropagation(); _testStyleInEditor(getText()); });
+        return b;
+      };
+      if (_canTestBlade) {
+        const customTestBtn = _mkBladeTestBtn(() => ta.value.trim() || _getFullSlotTextFromEditor(slot) || fullSlotText);
+        if (!addToLibBtn) customTestBtn.style.marginLeft = 'auto';
+        customBtnRow.insertBefore(customTestBtn, addToLibBtn || null);
+      }
+
       body.appendChild(customBtnRow);
 
       // ── LIBRARY MODE elements ──────────────────────────────────────────────
@@ -61697,7 +62029,17 @@ function _getFreshFieldRange(fieldName) {
         customLink.className = 'preset-mode-switch';
         customLink.textContent = 'Write Custom Expression';
         customLink.addEventListener('click', e => { e.stopPropagation(); showCustomMode(true); });
-        body.appendChild(customLink);
+        if (_canTestBlade) {
+          // One row: Write Custom Expression on the left, Test Style right-justified.
+          libLinkRow = document.createElement('div');
+          libLinkRow.style.cssText = 'display:flex;align-items:center;gap:4px;';
+          libTestBtn = _mkBladeTestBtn(() => _getFullSlotTextFromEditor(slot) || fullSlotText);
+          libTestBtn.style.marginLeft = 'auto';
+          libLinkRow.append(customLink, libTestBtn);
+          body.appendChild(libLinkRow);
+        } else {
+          body.appendChild(customLink);
+        }
       }
 
       // Template Parameters section (library mode only)
@@ -62134,6 +62476,7 @@ function _getFreshFieldRange(fieldName) {
         if (comboWrap)   comboWrap.style.display    = '';       // CSS rule provides display:flex
         if (tpSection)   tpSection.style.display    = 'flex';
         if (customLink)  customLink.style.display   = 'block';
+        if (libTestBtn)  libTestBtn.style.display   = 'inline-block';
         if (primaryRow)  primaryRow.style.display   = 'flex';
         if (advBtn)      advBtn.style.display        = 'block';
                          okBtn.style.display         = 'none';
@@ -62151,6 +62494,7 @@ function _getFreshFieldRange(fieldName) {
         if (comboWrap)   comboWrap.style.display    = 'none';
         if (tpSection)   tpSection.style.display    = 'none';
         if (customLink)  customLink.style.display   = 'none';
+        if (libTestBtn)  libTestBtn.style.display   = 'none';
         if (primaryRow)  primaryRow.style.display   = 'flex';
         if (advBtn)      advBtn.style.display       = 'block';
                          okBtn.style.display        = '';
@@ -62160,7 +62504,7 @@ function _getFreshFieldRange(fieldName) {
       // ── _restoreSlotBody ───────────────────────────────────────────────────
       _restoreSlotBody = () => {
         if (numBadge) numBadge.style.display = '';
-        [labelRow, labelErrorEl, customLabel, ta, customBtnRow, libLabel, comboWrap, tpSection, customLink, primaryRow, advBtn]
+        [labelRow, labelErrorEl, customLabel, ta, customBtnRow, libLabel, comboWrap, tpSection, customLink, libTestBtn, libLinkRow, primaryRow, advBtn]
           .forEach(el => { if (el && el.parentNode) el.parentNode.removeChild(el); });
         if (exprSpan) exprSpan.style.display = '';
 
@@ -64271,6 +64615,19 @@ function _getFreshFieldRange(fieldName) {
         };
         item.addEventListener('mouseenter', open);
         item.addEventListener('mousedown', ev => { ev.stopPropagation(); open(); });
+      }
+
+      // Test Style [B-575], after the copies; a ref has no style of its own to show.
+      const slot = preset.styles[slotIdx];
+      if (slot.type !== 'ref') {
+        if (menu.children.length) {
+          const sep = document.createElement('div');
+          sep.className = 'preset-ctx-separator';
+          menu.appendChild(sep);
+        }
+        const testItem = _testStyleMenuItem(() => _getFullSlotTextFromEditor(slot), _hidePresetContextMenu);
+        testItem.addEventListener('mouseenter', hideSubs);
+        menu.appendChild(testItem);
       }
 
       if (!menu.children.length) return;
