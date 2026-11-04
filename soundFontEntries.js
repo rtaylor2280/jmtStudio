@@ -678,6 +678,90 @@ async function createEntry({ userData, sourceUuid, candidate, name, metadata, on
   }
 }
 
+// replaceEntryFiles({ userData, name, folderPath, stripDamagedWavs?, onProgress? })  [B-585]
+//
+// Swaps a font's FILES for the contents of a folder and keeps everything else: its name, entryUuid,
+// tags, notes, links, source and candidatePath. The ask was bringing curated versions in over stock
+// fonts, where add-then-delete lost every one of those. Keeping candidatePath is what makes the
+// result report Customized against the same source subtree, exactly as "Add from folder" does.
+//
+// Built beside the font, then swapped in: the new files are written to a staging folder through the
+// same writer "Add from folder" uses (dedup included, so files the library already holds cost 0
+// bytes), then two renames put it in place. A failure before the swap leaves the font untouched.
+// The font's own image is kept when the folder brings none.
+// The old files are not kept: a stock font can be rebuilt from its source, and the renderer
+// confirms first when the font was already customized, because those edits exist nowhere else.
+//
+// Returns { ok: true, name, meta, refused, stripped, added, savings } or { ok: false, error }.
+async function replaceEntryFiles({ userData, name, folderPath, stripDamagedWavs = false, onProgress }) {
+  if (!userData) return { ok: false, error: 'Missing userData' };
+  if (!folderPath) return { ok: false, error: 'Missing folder' };
+  const root = entriesRoot(userData);
+  const entryDir = path.join(root, String(name || ''));
+  const meta = name ? _readEntryMeta(entryDir) : null;
+  if (!meta) return { ok: false, error: `Font not found: ${name}` };
+
+  // Beside the library, not in it, so nothing that lists fonts can see a half-built or retired copy.
+  // Same volume (both under soundFonts/), so the swap is two renames.
+  const tag = crypto.randomUUID().slice(0, 8);
+  const work = path.join(path.dirname(root), '.replace-work');
+  fs.mkdirSync(work, { recursive: true });
+  const staging = path.join(work, `new-${tag}`);
+  const retired = path.join(work, `old-${tag}`);
+  const emit = (stage, payload) => { if (onProgress) onProgress({ stage, ...payload }); };
+  try {
+    fs.mkdirSync(staging, { recursive: true });
+    emit('extracting', { percent: 0 });
+    const contentIndex = require('./soundFontContentIndex').buildIndex(userData);
+    const result = await _copyFolderIntoDir(folderPath, staging, (p) => emit('extracting', p),
+      contentIndex, stripDamagedWavs === true);
+
+    const pic = require('./soundFontPicture');
+    const filesOf = (d) => fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name);
+    const oldPic = pic.pickPicture(filesOf(entryDir));
+    const newHas = filesOf(staging);
+    if (oldPic && !pic.pickPicture(newHas)) {
+      fs.copyFileSync(path.join(entryDir, oldPic), path.join(staging, oldPic));
+    }
+
+    const { effects, unknownEffects } = computeEntryEffects(staging);
+    const next = {
+      ...meta,
+      contentFileCount: result.fileCount,
+      contentTotalBytes: result.totalBytes,
+      effects, unknownEffects, effectsDirty: false,
+      // Dirty, so the rebuild below takes the new files as the record instead of reporting every
+      // old file as missing (recomputeEntryContentHash only looks for losses on a clean record).
+      contentHashDirty: true,
+      updatedAt: new Date().toISOString(),
+    };
+    delete next.missingFiles;
+    fs.writeFileSync(path.join(staging, 'meta.json'), JSON.stringify(next, null, 2));
+
+    await fs.promises.rename(entryDir, retired);
+    try {
+      await fs.promises.rename(staging, entryDir);
+    } catch (err) {
+      try { await fs.promises.rename(retired, entryDir); } catch {}
+      throw err;
+    }
+    try { fs.rmSync(retired, { recursive: true, force: true }); } catch {}
+    try { recomputeEntryContentHash(userData, name); } catch {}
+
+    emit('done', { fileCount: result.fileCount, totalBytes: result.totalBytes });
+    return {
+      ok: true, name, meta: _readEntryMeta(entryDir) || next,
+      refused: result.refused || [], stripped: result.stripped || [],
+      added: { fileCount: result.fileCount || 0, totalBytes: result.totalBytes || 0 },
+      savings: { archiveBytes: 0, contentBytes: result.totalBytes || 0, crossLinked: null,
+                 dedupSaved: result.linkedBytes || 0, reusedSource: false },
+    };
+  } catch (err) {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
 // Duplicate an existing entry into a new entry of the given name.
 //   mode === 'current': copy the source entry's directory verbatim
 //     (current files + accumulated edits). Meta is copied too, then
@@ -3093,6 +3177,7 @@ module.exports = {
   listEntries,
   findEntryByName,
   createEntry,
+  replaceEntryFiles,
   duplicateEntry,
   updateEntryMeta,
   renameEntries,

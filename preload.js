@@ -169,6 +169,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyProp:            (from, file, to)        => ipcRenderer.invoke('versions:copyProp', { from, file, to }),
   readVersionFile:     (name, subPath)         => ipcRenderer.invoke('versions:readFile', { name, subPath }),
   searchVersionFiles:  (name, query)           => ipcRenderer.invoke('versions:search', { name, query }),
+  versionNameIndex:    (name, stamp)           => ipcRenderer.invoke('versions:nameIndex', { name, stamp }),
 
   // ── Proffieboard core, chosen per ProffieOS version ──────
   // Which core a version builds against. Exposed per version rather than
@@ -381,6 +382,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   entryCustomization:    (params)     => ipcRenderer.invoke('entries:customization', params),
   inspectFontFolder:     (params)     => ipcRenderer.invoke('sources:inspectFolder', params),
   createEntry:           (params)     => ipcRenderer.invoke('entries:create', params),
+  replaceEntryFiles:     (params)     => ipcRenderer.invoke('entries:replaceFiles', params),
   duplicateEntry:        (params)     => ipcRenderer.invoke('entries:duplicate', params),
   updateEntryMeta:       (params)     => ipcRenderer.invoke('entries:updateMeta', params),
   forgetFormerName:      (params)     => ipcRenderer.invoke('entries:forgetFormerName', params),

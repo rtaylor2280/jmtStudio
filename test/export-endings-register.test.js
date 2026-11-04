@@ -93,7 +93,8 @@ const rowSites = [...code.matchAll(/_sfWireEjectRow\(\{/g)].filter((m) => {
 });
 const toastSites = [...code.matchAll(/_sfOfferEjectInToast\(/g)];
 
-ok('eject rows: 5 surfaces plus 2 window exports', rowSites.length === 5,
+// 5 -> 6 on 2026-11-01 [B-585]: Replace from folder's "Files replaced" summary carries its eject inline.
+ok('eject rows: 6 surfaces plus 2 window exports', rowSites.length === 6,
    `found ${rowSites.length} at lines ${rowSites.map((m) => lineOf(m.index)).join(', ')}`);
 // 14 -> 13 on 2026-10-07 [B-424]: Common Folders + Import dropped its completion toast, because a
 // unit door's one ending is a completion summary and the eject rides that inline. The count is

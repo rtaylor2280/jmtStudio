@@ -24,7 +24,7 @@ const STYLES_FILENAME  = 'my_styles.h';
 
 // ── Version state ──────────────────────────────────────
 let _selectedVersion = null;
-const _hashCache = new Map(); // versionName → hash string
+const _hashCache = new Map(); // versionName → { sig, hash }
 const _osVersionCache = new Map(); // versionName → "v8.10" | null
 
 // ── Path helpers ───────────────────────────────────────
@@ -132,12 +132,16 @@ function getSelectedVersion() {
 /**
  * Recursively hashes all files in a directory, sorted by relative path
  * for stability. Returns a 16-char hex string.
- * Result is cached in memory by versionName — computed at most once per session.
+ * Kept in memory with the tree's signature (paths, sizes, modified times) and recomputed when that
+ * changes, so an edit no code path announced (Explorer, a forgotten invalidate) cannot leave the
+ * compile cache restoring a binary built from the old files. [B-591]
  */
 function hashVersion(versionName) {
-  if (_hashCache.has(versionName)) return _hashCache.get(versionName);
-
   const dirPath = getVersionSourcePath(versionName);
+  const sig = _treeSignature(dirPath);
+  const have = _hashCache.get(versionName);
+  if (have && have.sig === sig) return have.hash;
+
   const hash    = crypto.createHash('sha256');
 
   function walk(dir) {
@@ -170,7 +174,7 @@ function hashVersion(versionName) {
 
   walk(dirPath);
   const result = hash.digest('hex').slice(0, 16);
-  _hashCache.set(versionName, result);
+  _hashCache.set(versionName, { sig, hash: result });
   return result;
 }
 
@@ -181,6 +185,9 @@ function hashVersion(versionName) {
 function invalidateVersionHash(versionName) {
   if (versionName) _hashCache.delete(versionName);
   else _hashCache.clear();
+  // The name index [B-584] is derived from the same files, so it goes stale at the same moment.
+  if (versionName) _nameIndexCache.delete(versionName);
+  else _nameIndexCache.clear();
 }
 
 // ── ArgumentName enum ──────────────────────────────────
@@ -357,25 +364,55 @@ async function copyDirCancellable(src, dest, opts = {}) {
   return { completed: finished, copied };
 }
 
+// What a version's files are right now: every path, size and modified time, hashed. Read fresh
+// on every call, never cached, so no door that changes a tree (prop import, add-on update, an
+// edit in Explorer) can leave the workspace behind by forgetting to say so. Stats only, no
+// reads: ~400 files, a few milliseconds.
+function _treeSignature(dir) {
+  const h = crypto.createHash('sha1');
+  (function walk(d, rel) {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) { walk(full, r); continue; }
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      h.update(`${r}\0${st.size}\0${Math.floor(st.mtimeMs)}\n`);
+    }
+  })(dir, '');
+  return h.digest('hex').slice(0, 16);
+}
+
 /**
- * Ensures the selected version is in the writable workspace.
- * No-op in dev (source is already writable).
- * Re-copies if the workspace holds a different version.
+ * Ensures the workspace holds the selected version exactly as it is on disk now.
+ * Re-copies when the workspace holds a different version OR the version's files changed
+ * since the copy. [B-591]
+ *
+ * ONE PATH FOR BOTH BUILDS, so dev runs what release runs. Re-copying on a version NAME change
+ * alone left a prop imported or an add-on updated in the selected version out of the compile,
+ * and an in-place dev compile could not show that. The workspace exists so a
+ * compile never writes into the user's tree (my_config.h, my_styles.h, the CONFIG_FILE line
+ * in ProffieOS.ino), and dev now tests exactly what release runs. Called on every compile.
  */
 function initWorkspace(onLog) {
-  if (!app.isPackaged) return { ok: true };
-
   const version = getSelectedVersion();
   if (!version) return { ok: false, error: 'No ProffieOS version available.' };
 
-  const workspace        = getWorkspacePath();
-  const workspaceVersion = getWorkspaceVersion();
+  const workspace = getWorkspacePath();
+  const source    = getVersionSourcePath(version);
+  const sig       = _treeSignature(source);
+  const sigPath   = path.join(workspace, '_signature.txt');
+  let haveSig = null;
+  try { haveSig = fs.readFileSync(sigPath, 'utf8').trim(); } catch { haveSig = null; }
 
-  if (workspaceVersion === version && fs.existsSync(path.join(workspace, 'ProffieOS.ino'))) {
+  if (getWorkspaceVersion() === version && haveSig === sig
+      && fs.existsSync(path.join(workspace, 'ProffieOS.ino'))) {
     return { ok: true };
   }
 
-  const source = getVersionSourcePath(version);
   if (onLog) onLog(`Setting up ProffieOS workspace for ${version}...`, false);
 
   try {
@@ -383,7 +420,13 @@ function initWorkspace(onLog) {
       fs.rmSync(workspace, { recursive: true, force: true });
     }
     copyDirSync(source, workspace);
+    // A tree compiled in place by an older dev build carries that compile's staged copies;
+    // the workspace starts without them, as a release user's tree always has.
+    for (const f of [CONFIG_FILENAME, STYLES_FILENAME]) {
+      fs.rmSync(path.join(workspace, 'config', f), { force: true });
+    }
     fs.writeFileSync(getWorkspaceVersionFilePath(), version, 'utf8');
+    fs.writeFileSync(sigPath, sig, 'utf8');
     if (onLog) onLog('Workspace ready.', false);
     return { ok: true };
   } catch (e) {
@@ -393,11 +436,9 @@ function initWorkspace(onLog) {
 
 // ── Compile paths ──────────────────────────────────────
 
-// The root used for compilation and config staging.
+// The root used for compilation and config staging: always the workspace copy. [B-591]
 function getProffieOSRoot() {
-  if (app.isPackaged) return getWorkspacePath();
-  const version = getSelectedVersion();
-  return version ? getVersionSourcePath(version) : null;
+  return getWorkspacePath();
 }
 
 function getConfigStagingPath() {
@@ -1176,6 +1217,107 @@ function searchVersionFiles(versionName, query) {
   return { ok: true, results };
 }
 
+// ── Name index [B-584] ─────────────────────────────────
+// Every identifier in a version's ProffieOS tree and the files it appears in, built
+// in one walk and kept. Two readers: the editor's #define autocomplete, and the
+// "Defines nothing reads" preflight check. They share it so autocomplete can never
+// offer a name the check then flags.
+//
+// Same files the content search reads (same extensions, same size cap), so a name
+// the File Browser finds is a name the index has. Whole words, case-sensitive: the
+// compiler is, and a substring hit (FETT263_SWING inside FETT263_SWING_ON_SPEED) is
+// not a read.
+//
+// `c` marks a name the tree tests in a preprocessor condition (#if/#ifdef/#ifndef/
+// #elif), which is what a config option usually looks like; autocomplete ranks
+// those first. Value options like VOLUME are read as plain names and still count.
+//
+// `stamp` lets the renderer keep its copy and ask "still this one?" without the whole
+// index crossing IPC every time. Dropped by invalidateVersionHash, which every path
+// that changes a version's files already calls.
+const _nameIndexCache = new Map(); // versionName → { stamp, files, names }
+let _nameIndexStamp = 0;
+
+// A word in a comment or a string is not a name the code reads, and offering one puts names in
+// the autocomplete list that nothing could read. Comments, string and char literals are blanked to
+// spaces, newlines kept, so line-based reading (and #if detection) sees the code alone.
+function _blankCommentsAndStrings(text) {
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i], d = text[i + 1];
+    if (c === '/' && d === '/') {
+      while (i < n && text[i] !== '\n') { out += ' '; i++; }
+    } else if (c === '/' && d === '*') {
+      out += '  '; i += 2;
+      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) { out += text[i] === '\n' ? '\n' : ' '; i++; }
+      if (i < n) { out += '  '; i += 2; }
+    } else if (c === '"' || c === "'") {
+      out += ' '; i++;
+      while (i < n && text[i] !== c && text[i] !== '\n') {
+        if (text[i] === '\\' && i + 1 < n && text[i + 1] !== '\n') { out += ' '; i++; }
+        out += ' '; i++;
+      }
+      if (i < n && text[i] === c) { out += ' '; i++; }
+    } else {
+      out += c; i++;
+    }
+  }
+  return out;
+}
+
+function getVersionNameIndex(versionName, knownStamp) {
+  if (!versionName) return { ok: false, error: 'No version.' };
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  const searchRoot = path.join(resolved.folderPath, 'ProffieOS');
+  if (!fs.existsSync(searchRoot)) return { ok: false, error: 'ProffieOS directory not found.' };
+  // Kept while the tree's signature holds, so an edit nothing announced still rebuilds it. [B-591]
+  const sig = _treeSignature(searchRoot);
+  const cached = _nameIndexCache.get(versionName);
+  if (cached && cached.sig === sig) {
+    if (knownStamp != null && knownStamp === cached.stamp) return { ok: true, unchanged: true, stamp: cached.stamp };
+    return { ok: true, stamp: cached.stamp, files: cached.files, names: cached.names };
+  }
+
+  const files = [];
+  const names = Object.create(null);
+  const condRe = /^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b/;
+  (function walk(dir, relPath) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const rel = relPath ? `${relPath}/${e.name}` : e.name;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(full, rel); continue; }
+      const ext = (e.name.toLowerCase().split('.').pop() || '');
+      if (!_SEARCH_TEXT_EXTS.has(ext)) continue;
+      let text;
+      try {
+        if (fs.statSync(full).size > _SEARCH_MAX_FILE_BYTES) continue;
+        text = fs.readFileSync(full, 'utf8');
+      } catch { continue; }
+      const fi = files.push(`ProffieOS/${rel}`) - 1;
+      for (const line of _blankCommentsAndStrings(text).split('\n')) {
+        const ids = line.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+        if (!ids) continue;
+        const cond = condRe.test(line);
+        for (const id of ids) {
+          let n = names[id];
+          if (!n) n = names[id] = { f: [], c: 0 };
+          if (n.f[n.f.length - 1] !== fi) n.f.push(fi);
+          if (cond) n.c = 1;
+        }
+      }
+    }
+  })(searchRoot, '');
+
+  const entry = { stamp: ++_nameIndexStamp, files, names };
+  _nameIndexCache.set(versionName, { ...entry, sig });
+  return { ok: true, ...entry };
+}
+
 // Returns the top-level resources directory (arduino-cli, tools, etc.)
 function getResourcesPath() {
   return app.isPackaged
@@ -1234,5 +1376,6 @@ module.exports = {
   listVersionDir,
   readVersionFile,
   searchVersionFiles,
+  getVersionNameIndex,
   getUserVersionsPath,
 };

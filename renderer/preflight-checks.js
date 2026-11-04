@@ -736,6 +736,14 @@
 
   async function _treeHasName(ctx, name) {
     const allowed = await _allowedProps(ctx);
+    // THE NAME INDEX FIRST [B-584]. Autocomplete offers from the same index, so the two answer
+    // "does this OS read it" identically: autocomplete can never offer a name this check then
+    // flags. Whole-word and case-sensitive, where the search below is a substring match.
+    const index = await _treeIndex(ctx);
+    if (index) {
+      const e = index.names[name];
+      return !!(e && e.f.some(i => _hitCounts(index.files[i], allowed)));
+    }
     // The allowed set is part of the answer, so it is part of the key. Switching props must not
     // read back a verdict computed under the previous one.
     const key = ctx.versionName + '::' + [...allowed].sort().join(',') + '::' + name;
@@ -749,6 +757,31 @@
     } catch { found = false; }
     _nameCache.set(key, found);
     return found;
+  }
+
+  // The selected version's name index, or null when the context has none (tests, callers that
+  // do not wire it) or it could not be built - then the search above answers instead.
+  async function _treeIndex(ctx) {
+    if (!ctx.versionName || typeof ctx.versionNameIndex !== 'function') return null;
+    let index = null;
+    try { index = await ctx.versionNameIndex(ctx.versionName); } catch { index = null; }
+    return index && index.names && Array.isArray(index.files) ? index : null;
+  }
+
+  // What the selected OS and prop read, for the editor's #define autocomplete [B-584]. Same index
+  // and same _hitCounts scoping as the check, so the list and the check cannot disagree.
+  // [{ name, cond, files }] where cond = tested in a preprocessor condition; null = cannot tell.
+  async function treeNames(ctx) {
+    const index = await _treeIndex(ctx);
+    if (!index) return null;
+    const allowed = await _allowedProps(ctx);
+    const out = [];
+    for (const name of Object.keys(index.names)) {
+      const e = index.names[name];
+      const files = e.f.map(i => index.files[i]).filter(p => _hitCounts(p, allowed));
+      if (files.length) out.push({ name, cond: !!e.c, files });
+    }
+    return out;
   }
 
   // THE SEARCH HAS TO PROVE ITSELF BEFORE ITS SILENCE MEANS ANYTHING. A search that is broken,
@@ -1924,7 +1957,7 @@
   // Exposed for index.html, whose Sound Fonts view asks the same question when
   // deciding what a NEWLY added preset should carry. One walk, one answer — the
   // alternative is a second implementation that drifts.
-  const api = { vpkLiveText, vpkPropIncludes, vpkPropRequirement, vpkScanPresets, VPK_INIT_RE };
+  const api = { vpkLiveText, vpkPropIncludes, vpkPropRequirement, vpkScanPresets, VPK_INIT_RE, treeNames };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.preflightChecks = api;
 

@@ -497,7 +497,47 @@ async function initBuildPanel() {
   // roundtrip when the user never touches Advanced.
 
   // Wire buttons
-  el('bp-btn-compile').addEventListener('click', doCompile);
+  el('bp-btn-compile').addEventListener('click', () => doCompile());
+  // Right-click Compile: Compile only first, since it is the reason to right-click, then Compile
+  // and flash (what a click does) so the menu explains itself. For a board plugged in that should
+  // not be flashed yet. [B-466]
+  el('bp-btn-compile').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const btn = el('bp-btn-compile');
+    if (!btn || btn.disabled || isBusy) return;
+    // Refused during the cache check, the same as a click [B-470]: the answer may be "already
+    // compiled", which disables Compile.
+    if (cacheCheckPending) { doCompile(); return; }
+    const menu = document.getElementById('preset-ctx-menu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    const close = () => {
+      menu.style.display = 'none';
+      document.removeEventListener('mousedown', outside, true);
+      _closeCompileMenu = null;
+    };
+    _closeCompileMenu = close;
+    const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
+    const mk = (label, run) => {
+      const it = document.createElement('div');
+      it.className = 'preset-ctx-item';
+      it.textContent = label;
+      it.addEventListener('mousedown', (ev) => {
+        ev.stopPropagation(); ev.preventDefault(); close();
+        // Asked again at the pick: the state can change while the menu is open, and a cache check
+        // that lands then disables Compile. A menu opened before that must not build past it.
+        if (btn.disabled || isBusy || cacheCheckPending) return;
+        run();
+      });
+      menu.appendChild(it);
+    };
+    mk('Compile only', () => doCompile({ compileOnly: true }));
+    mk('Compile and flash', () => doCompile());
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+    menu.style.top  = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+    menu.style.display = 'block';
+    setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+  });
   // The tooltip names the board and port, which change without the button being redrawn; reading
   // them again on hover keeps it true.
   el('bp-btn-compile').addEventListener('pointerenter', applyCompileButtonState);
@@ -732,8 +772,14 @@ function setGatePhase(on) {
 }
 
 // ── Compile ────────────────────────────────────────────
-async function doCompile() {
+// Set by "Compile only" for the build it starts; the compile's ending reads it and stops at
+// the finished build instead of flashing. Every other start, including the SD guard's
+// recompile, leaves it false and flashes. [B-466]
+let _compileOnly = false;
+
+async function doCompile(opts) {
   if (isBusy) return;
+  _compileOnly = !!(opts && opts.compileOnly);
   // [B-470] A CLICK DURING THE CACHE CHECK IS REFUSED. The button stays enabled while the check
   // runs, because disabling it blinked it on every config switch (tried and reverted 2026-10-21),
   // and holding the click to act on it later was a delayed action nobody asked for. But letting it
@@ -1880,7 +1926,16 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       stopCompileHints();
       appendLog('\n✓ Firmware ready.', false);
 
-      if (isDfuMode) {
+      if (_compileOnly) {
+        // Compile only [B-466]: the build is done and kept; Flash is there when wanted.
+        _compileOnly = false;
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
+        document.getElementById('bm-abort').style.display = 'none';
+        document.getElementById('bm-close').style.display = 'inline-block';
+        document.getElementById('bm-status').textContent = 'Compiled, not flashed. Flash it from the toolbar whenever you are ready.';
+        setBarMode('success');
+        setFlashEnabled(isDfuMode ? !!dfuDeviceReady : !!selectedPort);
+      } else if (isDfuMode) {
         // DFU mode — don't watch serial ports
         setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
         document.getElementById('bm-abort').style.display = 'none';
@@ -3258,11 +3313,17 @@ function compileBlockedReason() {
   return null;
 }
 
+// The Compile right-click menu's close, while it is open. [B-466]
+var _closeCompileMenu = null;
+
 function applyCompileButtonState() {
   const btn = el('bp-btn-compile');
   if (!btn) return;
   const reason = compileBlockedReason();
   btn.disabled = !!reason;
+  // A cache answer that lands while the menu is open greys Compile; the menu goes with it rather
+  // than offering a build the button no longer allows. [B-466]
+  if (btn.disabled && _closeCompileMenu) _closeCompileMenu();
   // A check in flight does not disable the button (that blinks it on every config switch); the
   // tooltip says so, and a click meanwhile is refused (doCompile). [B-470]
   _compileTip().set(reason || (cacheCheckPending ? 'Checking for a build of this config…' : compileReadyTip()));
@@ -3323,12 +3384,15 @@ function _makeCompileTip() {
 // straight on into a flash when a Proffieboard is on the port or the board is in bootloader mode,
 // and otherwise waits for one to be connected (onBuildDone). "Compile and flash" leads, so the flash is
 // part of the promise before the click; a user who expected only a compile was surprised by it.
+// Right-click is the only door to Compile only, so the tooltip names it. [B-466]
+const _COMPILE_ONLY_HINT = ' Right-click to compile without flashing.';
 function compileReadyTip() {
-  if (isDfuMode) return 'Compile and flash this config to the board in bootloader (DFU) mode.';
+  if (isDfuMode) return 'Compile and flash this config to the board in bootloader (DFU) mode.' + _COMPILE_ONLY_HINT;
   if (selectedPortIsProffieboard && selectedPort) {
-    return `Compile and flash this config to the Proffieboard on ${selectedPort}.`;
+    return `Compile and flash this config to the Proffieboard on ${selectedPort}.` + _COMPILE_ONLY_HINT;
   }
-  return 'Compile this config into firmware for your board. Connect your Proffieboard to flash it when it finishes.';
+  return 'Compile this config into firmware for your board. Connect your Proffieboard to flash it when it finishes.'
+    + _COMPILE_ONLY_HINT;
 }
 
 function setBusy(busy) {
@@ -3395,7 +3459,13 @@ function flashBlockedReason() {
 function applyFlashTitle() {
   const btn = el('bp-btn-flash');
   if (!btn) return;
-  btn.title = btn.disabled ? (flashBlockedReason() || '') : '';
+  btn.title = btn.disabled ? (flashBlockedReason() || '') : flashReadyTip();
+}
+
+// What Flash will do when it is live, the same way Compile's tooltip says what Compile will do.
+function flashReadyTip() {
+  if (isDfuMode) return "Flash this config's build to the board in bootloader (DFU) mode.";
+  return `Flash this config's build to the Proffieboard on ${selectedPort}.`;
 }
 
 function setFlashEnabled(enabled) {

@@ -1189,6 +1189,11 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
         `(${_useIsolatedCore ? 'JMT Studio' : 'system'})`, false);
   onLog(`USB:                 ${usb}`, false);
 
+  // The workspace is re-checked against the installed tree on every compile, not only at
+  // startup: a prop imported or an add-on updated since must be in this build. [B-591]
+  const ws = proffie.initWorkspace(onLog);
+  if (!ws.ok) { onLog(ws.error, true); return { ok: false, error: ws.error }; }
+
   const refCheck = proffie.ensureConfigFileRef(onLog);
   if (!refCheck.ok) { onLog(refCheck.error, true); return { ok: false, error: refCheck.error }; }
 

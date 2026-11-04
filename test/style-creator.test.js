@@ -66,7 +66,7 @@ check('a left-out creator removes, even when also picked', pick() === 'Skotos', 
 console.log('3. wiring');
 check('the card carries its creator and shows it', /card\.dataset\.creator = creator;/.test(html) && /style-card-creator/.test(html));
 check('the list, the facet counts and the chips all use the creator scope',
-  /const matchesTags = _styleInTagScope\(card\) && _styleInCreatorScope\(card\);/.test(html)
+  /const matchesTags = _styleInTagScope\(card\) && _styleInCreatorScope\(card\)[ &]/.test(html)
   && /if \(own !== 'creator' && !_styleInCreatorScope\(card\)\) return false;/.test(html)
   && /group\('creator', Array\.from\(_activeFilterCreators\)/.test(html)
   && /case 'creator-without': _activeFilterCreatorsMissing\.delete\(v\); break;/.test(html));

@@ -42,7 +42,7 @@ el = box('sf-creators-datalist', 'Kyberphonic', ['Kyberphonic']);
 fire(el, undefined);
 check('a box with other suggestions (a creator) is left alone', el.sent.length === 0);
 check('every tag box uses one of the two lists',
-  (html.match(/list="sf-all-tags-datalist"/g) || []).length === 4 && (html.match(/list="style-all-tags-datalist"/g) || []).length === 1);
+  (html.match(/list="sf-all-tags-datalist"/g) || []).length === 4 && (html.match(/list="style-all-tags-datalist"/g) || []).length === 2);   // the style window and bulk Tags [B-582]
 
 console.log(failures ? `\n${failures} failing` : '\nall passed');
 process.exit(failures ? 1 : 0);

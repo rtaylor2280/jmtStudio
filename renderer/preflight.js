@@ -140,6 +140,12 @@
       searchVersionFiles: typeof o.searchVersionFiles === 'function'
         ? o.searchVersionFiles
         : async () => null,
+      // versionNameIndex(versionName) -> Promise<{files, names}|null> [B-584]
+      // Every name in the selected OS tree and the files it appears in, built once per
+      // version. Checks prefer it to a search; absent means "ask the search instead".
+      versionNameIndex: typeof o.versionNameIndex === 'function'
+        ? o.versionNameIndex
+        : null,
       // listVersionDir(versionName, subPath) -> Promise<{ok, entries:[{name,type}]}|null>
       // Cheaper than a search when a check knows exactly which folder to look in.
       listVersionDir: typeof o.listVersionDir === 'function'

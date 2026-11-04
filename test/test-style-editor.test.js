@@ -76,11 +76,14 @@ check('the independent style keeps its StylePtr arguments',
 check('no arguments: an empty ()', env.forEditor('StylePtr<Glow>()').style === 'StylePtr<AudioFlicker<Blue,Cyan>>()');
 
 console.log('2b. where it is offered');
-check('the style window: Test Style between Paste Code and undo, testing the code on screen',
-  /id="btn-style-detail-paste-code"[^\n]*\n\s*<button class="modal-btn-cancel" id="btn-style-detail-test"[^\n]*\n\s*<button class="modal-btn-cancel" id="btn-detail-undo"/.test(html)
+check('the style window: Test Style between Paste Code (and Add Segment [B-177]) and undo, testing the code on screen',
+  /id="btn-style-detail-paste-code"[^\n]*\n\s*<button class="modal-btn-cancel" id="btn-style-detail-add-segment"[^\n]*\n\s*<button class="modal-btn-cancel" id="btn-style-detail-test"[^\n]*\n\s*<button class="modal-btn-cancel" id="btn-detail-undo"/.test(html)
   && /_testStyleInEditor\(prefix && _detailName \? _detailName : body\);/.test(html));
-check('a style card\'s right-click, with or without a config open',
-  /menu\.appendChild\(_testStyleMenuItem\(styleName, \(\) => \{ menu\.style\.display = 'none'; menu\.style\.minWidth = ''; \}\)\);/.test(html)
+check('the style window is one row: Copy ▾ (Copy Style, Copy Function) then Paste Code, Add Segment, Test Style, undo/redo',
+  /id="btn-style-detail-copy-menu"[^>]*>Copy &#9662;<\/button>\s*<div id="style-detail-copy-dropdown" class="styles-tag-dropdown"[^>]*>\s*<button class="styles-tag-dropdown-item" id="btn-style-detail-copy-style"[\s\S]{0,300}id="btn-style-detail-copy"[\s\S]{0,200}<\/div>\s*<\/div>\s*<button class="modal-btn-cancel" id="btn-style-detail-paste-code"/.test(html)
+  && (html.match(/_flashDetailCopied/g) || []).length >= 3);
+check('a style card\'s right-click, with or without a config open: the config items only with one, Test always',
+  /if \(hasConfig\) \{\s*const addItem = document\.createElement\('div'\);/.test(html) && /\} \/\/ hasConfig/.test(html)
   && /const testItem = _testStyleMenuItem\(styleName, closeAll\);/.test(html));
 check("a font's style file in the viewer: the picked style", /id="sf-doc-viewer-copy-style"[^\n]*\n\s*<button class="modal-btn-cancel" id="sf-doc-viewer-test-style"/.test(html)
   && /if \(s\) _testStyleInEditor\(s\.code\);/.test(html));

@@ -1118,6 +1118,13 @@ async function _vpLoadTree(versionName, subPath, container, depth) {
 // not build with. Read by the Link Prop button in index.html.
 let _vpViewerProp = null;
 
+// Already the open config's prop: the Prop dropdown names this file, for the version it builds
+// with. One answer for the viewer's button and the tree's menu.
+function _vpIsLinkedProp(fileName, versionName) {
+  return document.getElementById('input-prop')?.value === fileName
+    && document.getElementById('input-version')?.value === versionName;
+}
+
 // Link Prop is only offered for a prop header, and only when there is a config
 // open for it to be written into.
 function _vpUpdateLinkPropBtn() {
@@ -1125,6 +1132,12 @@ function _vpUpdateLinkPropBtn() {
   if (!btn) return;
   const eligible = !!_vpViewerProp && !!(window.isConfigOpen && window.isConfigOpen());
   btn.style.display = eligible ? '' : 'none';
+  // Already this config's prop (the Prop dropdown says so, for the version it builds with):
+  // shown but greyed, so it still says which prop is in use rather than vanishing.
+  const name = eligible ? _vpViewerProp.filePath.split('/').pop() : '';
+  const linked = eligible && _vpIsLinkedProp(name, _vpViewerProp.versionName);
+  btn.disabled = !!linked;
+  btn.title = linked ? `${name} is already this config's prop` : 'Make this the prop for the config you have open';
 }
 
 async function _vpOpenFile(versionName, filePath, fileName, searchQuery) {
@@ -1187,8 +1200,81 @@ async function _vpOpenFile(versionName, filePath, fileName, searchQuery) {
   }
 }
 
+// Find in OS tree [B-589]: the config editor's right-click opens this viewer over Config
+// Manager with every file in the version that holds the name down the left, the same search
+// and the same rows as the File Browser. Click a file to read it with the name highlighted;
+// the first one opens straight away. Nothing is filtered: this is for reading the code, not
+// checking a config, so props and config examples count too.
+async function _vpFindInVersion(versionName, query) {
+  const modal = document.getElementById('vp-file-modal');
+  const inner = modal.querySelector('.vp-file-modal-inner');
+  const rail  = document.getElementById('vp-file-modal-rail');
+  const head  = `<div class="vp-rail-head"><b>${_vpEsc(query)}</b> in ${_vpEsc(versionName)}</div>`;
+  inner.classList.add('with-rail');
+  rail.style.display = '';
+  rail.innerHTML = head + '<div class="vp-tree-loading">Searching…</div>';
+  document.getElementById('vp-file-modal-title').textContent = '';
+  document.getElementById('vp-file-modal-editor').innerHTML = '';
+  if (_vpFileViewer) { _vpFileViewer.dispose(); _vpFileViewer = null; }
+  modal.classList.add('active');
+
+  let result = null;
+  try { result = await window.electronAPI.searchVersionFiles(versionName, query); } catch { result = null; }
+  if (!modal.classList.contains('active') || rail.style.display === 'none') return; // closed meanwhile
+  if (!result || !result.ok) {
+    rail.innerHTML = head + `<div class="vp-tree-error">${_vpEsc(result?.error || 'Search failed.')}</div>`;
+    return;
+  }
+  // A dev build compiles in the installed tree, so its config/ holds the last compile's copy of
+  // the open config and library. Left out so dev reads like a release build, which stages in a
+  // private workspace and leaves the tree as it came.
+  const STAGED = new Set(['ProffieOS/config/my_config.h', 'ProffieOS/config/my_styles.h']);
+  const files = result.results.filter(r => r.type === 'file' && !STAGED.has(r.path));
+  if (!files.length) {
+    rail.innerHTML = head + '<div class="vp-tree-empty">No file in this version contains it.</div>';
+    return;
+  }
+  rail.innerHTML = head + `<div class="vp-search-summary">${files.length} file${files.length !== 1 ? 's' : ''}</div>`;
+  const rows = files.map(entry => {
+    const row = document.createElement('div');
+    row.className = 'vp-tree-row vp-tree-file vp-search-result';
+    row.style.paddingLeft = '10px';
+    const badge = entry.matchType === 'content'
+      ? `<span class="vp-search-badge">${entry.matchCount} match${entry.matchCount !== 1 ? 'es' : ''}</span>`
+      : '';
+    const preview = entry.matchLine ? `<div class="vp-search-preview">${_vpEsc(entry.matchLine)}</div>` : '';
+    row.innerHTML = `
+      <span class="vp-tree-file-icon">${_vpFileIcon(entry.name)}</span>
+      <div class="vp-search-result-body">
+        <div class="vp-search-result-top">
+          <span class="vp-tree-name">${_vpEsc(entry.path.replace(/^ProffieOS\//, ''))}</span>
+          ${badge}
+        </div>
+        ${preview}
+      </div>
+    `;
+    row.title = entry.path;
+    row.addEventListener('click', () => {
+      rows.forEach(r => r.classList.toggle('active', r === row));
+      _vpOpenFile(versionName, entry.path, entry.name, query);
+    });
+    rail.appendChild(row);
+    return row;
+  });
+  if (result.results.length >= 300) {
+    const cap = document.createElement('div');
+    cap.className = 'vp-tree-empty';
+    cap.textContent = 'Results capped at 300.';
+    rail.appendChild(cap);
+  }
+  rows[0].click();
+}
+
 function _vpCloseFileModal() {
   document.getElementById('vp-file-modal').classList.remove('active');
+  const rail = document.getElementById('vp-file-modal-rail');
+  if (rail) { rail.style.display = 'none'; rail.innerHTML = ''; }
+  document.querySelector('#vp-file-modal .vp-file-modal-inner')?.classList.remove('with-rail');
   if (_vpFileViewer) { _vpFileViewer.dispose(); _vpFileViewer = null; }
   _vpViewerProp = null;
   _vpUpdateLinkPropBtn();
@@ -1270,9 +1356,14 @@ function _vpAttachPropCtxMenu(row, filePath, fileName, versionName) {
     if (configOpen) {
       // Same rule as Delete below: the menu is on this file, so it does not name it.
       // This item predates [B-446] and read "Link scorpio.h as this config's prop".
-      mkItem(`\u{1F517} Link as this config's prop`, null, () => {
-        if (window._linkPropFromVersion) window._linkPropFromVersion(filePath, versionName);
-      });
+      if (_vpIsLinkedProp(fileName, versionName)) {
+        // Shown greyed, like the viewer's button, so it still says which prop is in use.
+        mkItem(`\u{1F517} Already this config's prop`, { cls: 'disabled' }, null);
+      } else {
+        mkItem(`\u{1F517} Link as this config's prop`, null, () => {
+          if (window._linkPropFromVersion) window._linkPropFromVersion(filePath, versionName);
+        });
+      }
     }
 
     // Provenance decides what is on offer, and it gates COPY as well as REMOVE.
@@ -1921,6 +2012,8 @@ async function _vpJmtFlow(v) {
 window.initVersionsPanel = initVersionsPanel;
 window.vpRefresh         = vpRefresh;
 window.vpCloseFileModal  = _vpCloseFileModal;
+window.vpFindInVersion   = _vpFindInVersion;
+window.vpUpdateLinkPropBtn = _vpUpdateLinkPropBtn;
 window.vpOpenFind        = () => { if (_vpFileViewer) _vpFileViewer.trigger('keyboard', 'actions.find', null); };
 window.vpViewerProp      = () => _vpViewerProp;
 window.vpSelectVersion   = (name) => {

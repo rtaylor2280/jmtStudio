@@ -85,7 +85,7 @@ function ok(label, cond, detail) {
   // the save. Asserting the coercion is still there keeps that link explicit: change it to a
   // null-check and the fix silently stops working.
   ok('the save gate still coerces the answer, so a truthy unreadable blocks Save',
-     /return !!\(_findBracketError\(compact\)/.test(gate), gate);
+     /return !!\(_statementError\(compact\)/.test(gate), gate);
 
   const save = html.slice(html.indexOf('async function _saveDetail()'),
                           html.indexOf('async function _saveDetail()') + 300);

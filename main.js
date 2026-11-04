@@ -2395,6 +2395,21 @@ ipcMain.handle('entries:create', async (event, { sourceUuid, candidate, name, me
   }
 });
 
+// [B-585] Replace a font's files with a folder's, keeping the font. Progress rides the create
+// channel, so the renderer's existing listener drives the same bar.
+ipcMain.handle('entries:replaceFiles', async (event, { name, folderPath, stripDamagedWavs } = {}) => {
+  const send = (payload) => {
+    try { event.sender.send('entries:createProgress', payload); } catch {}
+  };
+  try {
+    return await soundFontEntries.replaceEntryFiles({
+      userData: app.getPath('userData'), name, folderPath, stripDamagedWavs, onProgress: send,
+    });
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('sources:listDocs', async (_, { uuid } = {}) => {
   try {
     const docs = await soundFontSources.listSourceDocs(app.getPath('userData'), uuid);
@@ -7931,6 +7946,7 @@ ipcMain.handle('versions:openFolder',  (_, name) => {
 ipcMain.handle('versions:listDir',    (_, { name, subPath }) => proffie.listVersionDir(name, subPath || ''));
 ipcMain.handle('versions:readFile',   (_, { name, subPath }) => proffie.readVersionFile(name, subPath));
 ipcMain.handle('versions:search',     (_, { name, query })   => proffie.searchVersionFiles(name, query));
+ipcMain.handle('versions:nameIndex',  (_, { name, stamp })   => proffie.getVersionNameIndex(name, stamp));
 // Import a prop header into ONE version's props/ folder. [B-446]
 //
 // Two calls, on purpose. The first has no sourcePath, opens the picker and reports

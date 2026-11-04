@@ -75,13 +75,22 @@ check('a readme with no style code finds none', e.find('Thanks for buying!\nInst
 check('a bare using statement is one style', e.find('using Foo = Layers<Red,InOutTrL<TrWipe<300>,TrWipeIn<500>>>;').length === 1);
 
 console.log('2. the form');
-const font = (fontName, creator, fileName, extra = {}) => ({ fontName, creator, fileName, website: 'https://bvmsabers.com', tags: ['free', 'Sith'],
+const font = (fontName, creator, fileName, extra = {}) => ({ fontName, creator, fileName, link: 'https://bvmsabers.com/astral', tags: ['free', 'Sith'],
   fileLabel: `the ${fontName} font's ${fileName}`, ...extra });
 const fb = e.form(b[0].parsed, font('Astral-Projection', 'BVM Sabers', 'bladestyle.txt'));
 check('name is the font alone', fb.name === 'AstralProjection', fb.name);
 check('Creator is the font\'s creator, Source the Fett263 line', fb.creator === 'BVM Sabers' && fb.source === 'Fett263 LavaLamp (Primary Blade) OS7 Style', JSON.stringify(fb));
-check('the link is the creator\'s site, and the Fett263 page moves to the notes',
-  fb.url === 'https://bvmsabers.com' && fb.notes.split('\n')[0] === 'https://fett263library.com/early-access/#LavaLamp', JSON.stringify(fb));
+// Ruled 2026-10-29: the Link is what the file gives, else the font's own Link; the creator's
+// site comes with the creator, never as the Link.
+check('the link is the file\'s own page when it gives one',
+  fb.url === 'https://fett263library.com/early-access/#LavaLamp' && !fb.notes.includes('fett263library'), JSON.stringify(fb));
+{
+  const noUrl = { ...b[0].parsed, url: '' };
+  const f2 = e.form(noUrl, font('Astral-Projection', 'BVM Sabers', 'bladestyle.txt'));
+  check('else the font\'s Link', f2.url === 'https://bvmsabers.com/astral', f2.url);
+  const f3 = e.form(noUrl, font('Astral-Projection', 'BVM Sabers', 'bladestyle.txt', { link: '', website: 'https://bvmsabers.com' }));
+  check('and never the creator\'s website', f3.url === '', f3.url);
+}
 check('the font\'s tags come in, with the OS version', fb.tags.join(',') === 'free,Sith,OS7.14 v3.01p', fb.tags.join(','));
 check('notes end with where it came from', /From the Astral-Projection font's bladestyle\.txt$/.test(fb.notes), fb.notes);
 const fg = e.form(g[0].parsed, font('Skotos', 'Greyscale Fonts', 'proffie_blade_style.txt', { website: '' }));

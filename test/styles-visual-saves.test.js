@@ -91,14 +91,13 @@ const fn = (name) => {
 
   console.log('3. wiring');
   const n = (re) => (html.match(re) || []).length;
-  check('ten Visual changes go through _stylesChanged', n(/^\s*_stylesChanged\(\);/mg) === 10, n(/^\s*_stylesChanged\(\);/mg));
+  check('thirteen Visual changes go through _stylesChanged (adding a style segment, using a new one across the library, saving an edit as a copy; undo and redo share one step [B-177]; the bulk actions share one [B-582])', n(/^\s*_stylesChanged\(\);/mg) === 13, n(/^\s*_stylesChanged\(\);/mg));
   check('the entry Save writes at once', /setValue\(current\);\s*_stylesChanged\(\);/.test(html));
   check('Add Style, Append, delete, reorder, undo and redo write at once',
     /setValue\(_stylesEditorInstance\.getValue\(\) \+ block\);\s*_stylesChanged\(\);/.test(html)
     && /collapsedIncoming\.trimStart\(\)\);\s*_stylesChanged\(\);/.test(html)
-    && /kept\.map\(s => s\.text\)\.join\(''\)\);\s*_stylesChanged\(\);/.test(html)
-    && /_styleReorderUndoStack\.pop\(\)\);\s*_stylesChanged\(\);/.test(html)
-    && /_styleReorderRedoStack\.pop\(\)\);\s*_stylesChanged\(\);/.test(html));
+    && /s\.entry\.name === entry\.name \? s\.tail : s\.text\)\.join\(''\)\);\s*_stylesChanged\(\);/.test(html)
+    && /_stylesEditorInstance\.setValue\(step\.text\);\s*_stylesChanged\(\);/.test(html));
   check("Code view's Condense and Expand still wait for Save", /_stylesEditorInstance\.setValue\(result\);\s*_setStylesDirty\(true\);/.test(html));
   check('Save, Discard and Delete show only in Code view',
     /getElementById\('btn-styles-save'\)\.style\.display    = show;/.test(html)
