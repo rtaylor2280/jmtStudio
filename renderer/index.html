@@ -2621,9 +2621,9 @@
      visually flagged so the user knows they won't play. */
   .sf-entry-files-row-name.warn { color: #d97706; }
   /* [B-313] A file's standing against its source, on the name only (the icon stays as it is). */
-  .sf-entry-files-row-name.sf-file-state-custom  { color: var(--jmt-blue); }
-  .sf-entry-files-row-name.sf-file-state-removed { color: var(--c-text-faint); }
-  .sf-entry-files-row-name.sf-file-state-missing { color: var(--c-danger-text); }
+  .sf-entry-files-row-name.sf-file-state-custom, .sf-tree-row .sf-tree-name.sf-file-state-custom  { color: var(--jmt-blue); }
+  .sf-entry-files-row-name.sf-file-state-removed, .sf-tree-row .sf-tree-name.sf-file-state-removed { color: var(--c-text-faint); }
+  .sf-entry-files-row-name.sf-file-state-missing, .sf-tree-row .sf-tree-name.sf-file-state-missing { color: var(--c-danger-text); }
   /* Footer explaining the amber rows — only rendered when at least one
      undersized track exists. Color matches the row tint so the link
      between footer and rows reads at a glance. */
@@ -31408,19 +31408,51 @@ require(['vs/editor/editor.main'], function () {
           const r = await window.electronAPI.listCommonFiles({ uuid: _sfSelectedCommonUuid });
           files = (r && r.ok && r.files) || [];
         } catch {}
+        // [B-587] Each file's standing against the source, as a font's Files list shows it. A file the source
+        // has and this folder doesn't is a row of its own, added back from its right-click.
+        let states = { byPath: new Map(), known: false, sourceDirs: new Set() };
+        try {
+          const r = await window.electronAPI.commonFileStates({ uuid: _sfSelectedCommonUuid });
+          states = { byPath: new Map(((r && r.files) || []).map(f => [f.path, f])), known: !!(r && r.known),
+                     sourceDirs: new Set((r && r.sourceDirs) || []) };
+        } catch {}
+        for (const st of states.byPath.values()) {
+          if (st.state !== 'removed') continue;
+          const parts = st.path.split('/');
+          let level = files;
+          parts.slice(0, -1).forEach((name, i) => {
+            const dirPath = parts.slice(0, i + 1).join('/');
+            let dir = level.find(n => n.isDir && n.path === dirPath);
+            if (!dir) { dir = { name, path: dirPath, isDir: true, absent: true, children: [] }; level.push(dir); }
+            level = dir.children;
+          });
+          level.push({ name: parts[parts.length - 1], path: st.path, absent: true });
+        }
         if (files.length === 0) {
           wrap.innerHTML = '<div class="sf-tree-empty">No files yet. Use "+ Add files" to include wavs.</div>';
           return;
         }
+        const stateOf = (n) => (n.isDir ? _sfFolderState(n, states) : states.byPath.get(n.path));
+        const isGrey = (n) => { const st = stateOf(n); return !!(st && st.state === 'removed'); };
+        const nameClass = (st) => (st ? ` sf-file-state-${_sfFileStateClass(st.state)}` : '');
+        const tipAttr = (st) => (st ? ` title="${_sfEscape(_sfFileStateTip(st, 'common folder'))}"` : '');
         const renderNodes = (nodes, depth) => {
-          return nodes.map(n => {
+          // Removed rows go last, keeping folders first on each side.
+          return [...nodes.filter(n => !isGrey(n)), ...nodes.filter(isGrey)].map(n => {
             const indent = depth * 14;
+            const st = stateOf(n);
+            if (!n.isDir && n.absent) {
+              return `<div class="sf-tree-row sf-tree-file" data-absent-path="${_sfEscape(n.path)}" data-absent-source="${st && st.inSource ? '1' : ''}"${tipAttr(st)} style="padding-left:${8 + indent + 18}px">
+                <span class="sf-tree-icon">&#128196;</span>
+                <span class="sf-tree-name${nameClass(st)}">${_sfEscape(n.name)}</span>
+              </div>`;
+            }
             if (n.isDir) {
               const isOpen = _sfCommonTreeOpen.has(n.path);
-              return `<div class="sf-tree-row sf-tree-dir" data-tree-dir="${_sfEscape(n.path)}" style="padding-left:${8 + indent}px">
+              return `<div class="sf-tree-row sf-tree-dir"${n.absent ? '' : ` data-tree-dir="${_sfEscape(n.path)}"`}${tipAttr(st)} style="padding-left:${8 + indent}px">
                 <span class="sf-tree-toggle" data-tree-toggle="${_sfEscape(n.path)}">${isOpen ? '&#9662;' : '&#9656;'}</span>
                 <span class="sf-tree-icon">&#128193;</span>
-                <span class="sf-tree-name">${_sfEscape(n.name)}</span>
+                <span class="sf-tree-name${nameClass(st)}">${_sfEscape(n.name)}</span>
               </div><div class="sf-tree-children${isOpen ? ' open' : ''}" data-tree-children="${_sfEscape(n.path)}">${renderNodes(n.children || [], depth + 1)}</div>`;
             }
             const sel = _sfCommonFilesSelected.has(n.path) ? ' selected' : '';
@@ -31430,9 +31462,9 @@ require(['vs/editor/editor.main'], function () {
             // and similar config files exist alongside.
             const fileExt = (n.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
             const fileIcon = fileExt === '.wav' ? '&#127925;' : '&#128196;';
-            return `<div class="sf-tree-row sf-tree-file${sel}" draggable="true" data-tree-file="${_sfEscape(n.path)}" style="padding-left:${8 + indent + 14}px">
+            return `<div class="sf-tree-row sf-tree-file${sel}" draggable="true" data-tree-file="${_sfEscape(n.path)}"${tipAttr(st)} style="padding-left:${8 + indent + 14}px">
               <span class="sf-tree-icon">${fileIcon}</span>
-              <span class="sf-tree-name">${_sfEscape(n.name)}</span>
+              <span class="sf-tree-name${nameClass(st)}">${_sfEscape(n.name)}</span>
               <span class="sf-tree-size">${_sfFmtBytes(n.size)}</span>
             </div>`;
           }).join('');
@@ -38804,17 +38836,17 @@ require(['vs/editor/editor.main'], function () {
       // when everything in it is a rename out of one source folder); anything missing inside makes it
       // red; any other difference inside makes it customized; a folder that is only removed files is
       // removed. Nothing inside differs and the source has it: no state.
-      const _sfFolderState = (n) => {
-        if (!_sfEntryFileStates.known && !n.absent) return null;
+      const _sfFolderState = (n, states = _sfEntryFileStates) => {
+        if (!states.known && !n.absent) return null;
         const pre = n.path + '/';
-        const inside = [..._sfEntryFileStates.byPath.values()].filter(f => f.path.startsWith(pre));
+        const inside = [...states.byPath.values()].filter(f => f.path.startsWith(pre));
         const count = (s) => inside.filter(f => f.state === s).length;
         const c = { added: count('added') + count('renamed'), changed: count('changed'),
                     removed: count('removed'), missing: count('missing') };
         const base = { path: n.path, isFolder: true, counts: c };
         if (n.absent) return { ...base, state: c.missing ? 'missing' : 'removed' };
         if (c.missing) return { ...base, state: 'missing' };
-        if (!_sfEntryFileStates.sourceDirs.has(n.path)) {
+        if (!states.sourceDirs.has(n.path)) {
           const renames = inside.filter(f => f.state === 'renamed');
           let from = null;
           if (renames.length && renames.length === inside.length) {
@@ -38831,7 +38863,7 @@ require(['vs/editor/editor.main'], function () {
       };
       const _sfFolderCounts = (c) => [c.added && `${c.added} added`, c.changed && `${c.changed} changed`,
         c.removed && `${c.removed} removed`, c.missing && `${c.missing} missing`].filter(Boolean).join(', ');
-      const _sfFileStateTip = (st) => {
+      const _sfFileStateTip = (st, noun = 'font') => {
         const name = st.path.split('/').pop();
         if (st.isFolder) {
           const inner = _sfFolderCounts(st.counts);
@@ -38839,7 +38871,7 @@ require(['vs/editor/editor.main'], function () {
             case 'added':    return `${name}\nCustomized: a folder the source does not have.${inner ? ` Inside: ${inner}.` : ''}`;
             case 'renamed':  return `${name}\nCustomized: renamed from ${st.from.split('/').pop()}.`;
             case 'contains': return `${name}\nCustomized inside: ${inner}.`;
-            case 'removed':  return `${name}\nRemoved: in the source but not in this font. Open it to add files back.`;
+            case 'removed':  return `${name}\nRemoved: in the source but not in this ${noun}. Open it to add files back.`;
             case 'missing':  return `${name}\nSomething inside is missing: ${inner}.`;
           }
         }
@@ -38847,7 +38879,7 @@ require(['vs/editor/editor.main'], function () {
           case 'added':   return `${name}\nCustomized: added, not in the source.`;
           case 'renamed': return `${name}\nCustomized: renamed from ${st.from.split('/').pop()}.`;
           case 'changed': return `${name}\nCustomized: differs from the source.`;
-          case 'removed': return `${name}\nRemoved: in the source but not in this font. Right-click to add it back.`;
+          case 'removed': return `${name}\nRemoved: in the source but not in this ${noun}. Right-click to add it back.`;
           case 'missing': return st.inSource
             ? `${name}\nMissing: this font had it, and it is no longer on disk. Right-click to add it back from the source.`
             : `${name}\nMissing: this font had it, and it is no longer on disk. The source does not have it, so it cannot be added back here.`;
@@ -56201,6 +56233,28 @@ require(['vs/editor/editor.main'], function () {
       // Otherwise a right-click on a file would also match the outer common
       // row and we'd race two menus.
       document.getElementById('sf-common-list')?.addEventListener('contextmenu', async (e) => {
+        // [B-587] A file the source has and this folder doesn't has one action: add it back.
+        const absentRow = e.target.closest('[data-absent-path]');
+        if (absentRow) {
+          e.preventDefault();
+          const absentMenu = document.getElementById('preset-ctx-menu');
+          if (!absentMenu) return;
+          if (!absentRow.dataset.absentSource) { absentMenu.style.display = 'none'; return; }
+          absentMenu.innerHTML = '';
+          const d = document.createElement('div');
+          d.className = 'preset-ctx-item';
+          d.textContent = 'Add back from source';
+          d.addEventListener('mousedown', async (e2) => {
+            e2.stopPropagation();
+            absentMenu.style.display = 'none';
+            const r = await window.electronAPI.restoreCommonFile({ uuid: _sfSelectedCommonUuid, path: absentRow.dataset.absentPath });
+            if (!r || !r.ok) { window.showToast?.(`Could not add it back: ${(r && r.error) || 'unknown error'}`, { kind: 'error' }); return; }
+            await _sfRefreshCommons({ preserveSelection: true });
+          });
+          absentMenu.appendChild(d);
+          _jmtPlaceMenu(absentMenu, e.clientX, e.clientY);
+          return;
+        }
         const fileRow = e.target.closest('[data-tree-file]');
         const dirRow = e.target.closest('[data-tree-dir]');
         const commonRow = e.target.closest('[data-common-uuid]');

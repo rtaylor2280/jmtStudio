@@ -55,6 +55,7 @@ const INWARD = [
   // both unreachable, both listed here as though covered. door-reachability.test.js guards it.
   'sources:restoreCustomized',
   'entries:restoreFile',
+  'common:restoreFile',
   'common:importFromZip',
   'common:importFromFolder',
   'common:addFiles',

@@ -2401,6 +2401,52 @@ function getCommonCustomization(userData, uuid) {
                  added: d.added, removed: d.removed, changed: d.changed });
 }
 
+// [B-587] Each file's standing against the common's source, for its Files list. The font side's
+// comparison, on the common's own manifests. Returns { ok, known, files, sourceDirs }; known:false means no
+// source to compare with, and the caller shows no states.
+function getCommonFileStates(userData, uuid) {
+  const unknown = { ok: true, known: false, files: [] };
+  if (!uuid) return unknown;
+  const cust = getCommonCustomization(userData, uuid);
+  if (!cust || !cust.known) return unknown;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(path.join(commonRoot(userData), uuid, 'meta.json'), 'utf8')); }
+  catch { return unknown; }
+  const fh = require('./soundFontFileHash');
+  const cm = fh.readFileHashManifest(path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`));
+  const sDir = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid);
+  const sm = fh.readFileHashManifest(path.join(sDir, '.jmt-source-manifest.json'))
+    || fh.readFileHashManifest(fh.fileHashManifestPath(userData, 'sources', meta.sourceUuid));
+  if (!cm || !sm || !Array.isArray(cm.records) || !Array.isArray(sm.records)) return unknown;
+  const inSource = (k) => fs.existsSync(path.join(sDir, 'source', ...(meta.sourceSubPath ? [meta.sourceSubPath] : []), ...k.split('/')));
+  const st = fh.fileStatesAgainstSource(cm.records, sm.records, meta.sourceSubPath, { inSource });
+  if (!st) return unknown;
+  return { ok: true, known: true, files: st.files, sourceDirs: st.sourceDirs };
+}
+
+// [B-587] Put a file back from the common's source, linked as its other files are, at the same place.
+function restoreCommonFileFromSource(userData, uuid, relPath) {
+  const root = path.join(commonRoot(userData), String(uuid || ''));
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(path.join(root, 'meta.json'), 'utf8')); } catch { return { ok: false, error: 'Common folder not found' }; }
+  const rel = String(relPath || '').replace(/\\/g, '/');
+  if (!rel || rel.split('/').some(p => p === '..' || p === '')) return { ok: false, error: 'Bad path' };
+  if (!meta.sourceUuid) return { ok: false, error: 'This common folder has no source to restore from' };
+  const src = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid, 'source',
+    ...(meta.sourceSubPath ? [meta.sourceSubPath] : []), ...rel.split('/'));
+  if (!fs.existsSync(src)) return { ok: false, error: 'The source does not have this file' };
+  const dest = _resolveFilesPath(userData, uuid, rel);
+  if (fs.existsSync(dest)) return { ok: false, error: 'A file is already there' };
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    try { fs.linkSync(src, dest); } catch { fs.copyFileSync(src, dest); }
+    markCommonContentDirty(userData, uuid);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
 // Mark a common folder as content-modified — cheap meta.json write of
 // one boolean. Set by every content-modifying op so the eventual
 // rehash knows to recompute. Many ops collapse into one rehash.
@@ -2475,6 +2521,8 @@ module.exports = {
   duplicateCommon,
   deleteCommon,
   getCommonCustomization,
+  getCommonFileStates,
+  restoreCommonFileFromSource,
   createCommonFromFolder,
   setCommonGroup,
   setCommonGroupMany,

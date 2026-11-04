@@ -409,6 +409,46 @@ function readFileHashManifest(filePath) {
 // labels a font or common folder, and the sounds are what "customized" is about. So an image at
 // the item's top level is left out on both sides; one deeper in is still content.
 const _PICTURE_AT_TOP_RX = /^[^/]+\.(png|jpe?g|gif|webp|bmp)$/i;
+// [B-313] Each file's standing against its source, for a Files list: added, renamed, changed and removed,
+// plus the folders the source has. A rename is an added file whose bytes are a removed one's, shown once,
+// under the new name. skip leaves a file out of removed; inSource says whether the source can give it back.
+// Null when the two can't be compared.
+function fileStatesAgainstSource(liveRecords, sourceRecords, subPath, { skip = () => false, inSource = () => false } = {}) {
+  const d = diffAgainstSource(liveRecords, sourceRecords, subPath);
+  if (!d.known) return null;
+  const pfx = subPath ? subPath + '/' : '';
+  const srcHash = new Map(sourceRecords.filter(r => r && String(r.relPath || '').startsWith(pfx))
+    .map(r => [String(r.relPath).slice(pfx.length), r.fileHash]));
+  const liveHash = new Map(liveRecords.map(r => [String((r && r.relPath) || ''), r && r.fileHash]));
+  const removedByHash = new Map();
+  for (const k of d.removedKeys) if (!skip(k)) {
+    const h = srcHash.get(k);
+    if (h && !removedByHash.has(h)) removedByHash.set(h, k);
+  }
+  const files = [];
+  const renamedFrom = new Set();
+  for (const k of d.addedKeys) {
+    const from = removedByHash.get(liveHash.get(k));
+    if (from && !renamedFrom.has(from)) { renamedFrom.add(from); files.push({ path: k, state: 'renamed', from }); }
+    else files.push({ path: k, state: 'added' });
+  }
+  for (const k of d.changedKeys) files.push({ path: k, state: 'changed' });
+  for (const k of d.removedKeys) {
+    if (skip(k) || renamedFrom.has(k)) continue;
+    files.push({ path: k, state: 'removed', inSource: inSource(k) });
+  }
+  // Every folder above a file, and empty ones by their marker.
+  const sourceDirs = new Set();
+  for (const r of sourceRecords) {
+    const rp = String((r && r.relPath) || '');
+    if (!rp.startsWith(pfx)) continue;
+    const parts = rp.slice(pfx.length).split('/');
+    const upto = r.fileHash === '<empty>' ? parts.length : parts.length - 1;
+    for (let i = 1; i <= upto; i++) sourceDirs.add(parts.slice(0, i).join('/'));
+  }
+  return { files, sourceDirs: [...sourceDirs], srcHash };
+}
+
 function diffAgainstSource(liveRecords, sourceRecords, subPath) {
   const none = { known: false, added: 0, removed: 0, changed: 0,
                  addedKeys: [], removedKeys: [], changedKeys: [] };
@@ -541,6 +581,6 @@ function dirSignals(root, excludeFn) {
 module.exports = {
   uniqueFileHashes, hashItemDir, hashBucketChildren, collectFileRecords, collectFileRecordsAsync,
   hashRecords, hashFile: _hashFile, hashFileAsync, copyFileHashing, writeFileHashManifest, readFileHashManifest, breathe,
-  fileHashManifestPath, dropManifestIfOwnerGone, diffAgainstSource,
+  fileHashManifestPath, dropManifestIfOwnerGone, diffAgainstSource, fileStatesAgainstSource,
   isContentFile: _isContentFile,
   dirSignals };

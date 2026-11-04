@@ -2702,30 +2702,11 @@ function getEntryFileStates(userData, entryName) {
   const sm = readFileHashManifest(path.join(sDir, '.jmt-source-manifest.json'))
     || readFileHashManifest(fileHashManifestPath(userData, 'sources', meta.sourceUuid));
   if (!em || !sm || !Array.isArray(em.records) || !Array.isArray(sm.records)) return { ok: true, known: false, files };
-  const { diffAgainstSource } = require('./soundFontFileHash');
-  const d = diffAgainstSource(em.records, sm.records, meta.candidatePath);
-  if (!d.known) return { ok: true, known: false, files };
-  const pfx = meta.candidatePath ? meta.candidatePath + '/' : '';
-  const srcHash = new Map(sm.records.filter(r => r && String(r.relPath || '').startsWith(pfx))
-    .map(r => [String(r.relPath).slice(pfx.length), r.fileHash]));
-  const liveHash = new Map(em.records.map(r => [String((r && r.relPath) || ''), r && r.fileHash]));
-  // A rename is an added file whose bytes are a removed one's: shown once, under the new name.
-  const removedByHash = new Map();
-  for (const k of d.removedKeys) if (!missing.has(k)) {
-    const h = srcHash.get(k);
-    if (h && !removedByHash.has(h)) removedByHash.set(h, k);
-  }
-  const renamedFrom = new Set();
-  for (const k of d.addedKeys) {
-    const from = removedByHash.get(liveHash.get(k));
-    if (from && !renamedFrom.has(from)) { renamedFrom.add(from); files.push({ path: k, state: 'renamed', from }); }
-    else files.push({ path: k, state: 'added' });
-  }
-  for (const k of d.changedKeys) files.push({ path: k, state: 'changed' });
-  for (const k of d.removedKeys) {
-    if (missing.has(k) || renamedFrom.has(k)) continue;
-    files.push({ path: k, state: 'removed', inSource: inSource(k) });
-  }
+  const { fileStatesAgainstSource } = require('./soundFontFileHash');
+  const st = fileStatesAgainstSource(em.records, sm.records, meta.candidatePath, { skip: (k) => missing.has(k), inSource });
+  if (!st) return { ok: true, known: false, files };
+  files.push(...st.files);
+  const srcHash = st.srcHash;
   // A picture at the top of the folder is left out of the comparison (it never makes a font Customized),
   // so one the font no longer has is listed here as removed, to show greyed and be added back. [B-511]
   const listed = new Set(files.map(f => f.path));
@@ -2734,18 +2715,7 @@ function getEntryFileStates(userData, entryName) {
     if (!fs.existsSync(path.join(root, k))) files.push({ path: k, state: 'removed', inSource: inSource(k) });
   }
   for (const rel of after) files.push({ path: rel, state: 'missing', inSource: inSource(rel) });
-  // The source's folders (every folder above a file, and empty ones by their marker), so the list can
-  // tell a folder the source never had from one it did.
-  const sourceDirs = new Set();
-  for (const r of sm.records) {
-    const rp = String((r && r.relPath) || '');
-    if (!rp.startsWith(pfx)) continue;
-    const rel = rp.slice(pfx.length);
-    const parts = rel.split('/');
-    const upto = r.fileHash === '<empty>' ? parts.length : parts.length - 1;
-    for (let i = 1; i <= upto; i++) sourceDirs.add(parts.slice(0, i).join('/'));
-  }
-  return { ok: true, known: true, files, sourceDirs: [...sourceDirs] };
+  return { ok: true, known: true, files, sourceDirs: st.sourceDirs };
 }
 
 // [B-313] Put a file back from the font's source: the same file, linked as the font's other files

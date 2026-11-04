@@ -3090,6 +3090,16 @@ ipcMain.handle('common:customization', (_, { uuid } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
+ipcMain.handle('common:fileStates', (_, { uuid } = {}) => {
+  try { return soundFontCommon.getCommonFileStates(app.getPath('userData'), uuid); }
+  catch (err) { return { ok: false, known: false, files: [], error: String(err && err.message || err) }; }
+});
+
+ipcMain.handle('common:restoreFile', (_, { uuid, path: rel } = {}) => {
+  try { return soundFontCommon.restoreCommonFileFromSource(app.getPath('userData'), uuid, rel); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+
 ipcMain.handle('common:listFiles', (_, { uuid } = {}) => {
   try { return { ok: true, files: soundFontCommon.listCommonFiles(app.getPath('userData'), uuid) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
