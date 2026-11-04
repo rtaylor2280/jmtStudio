@@ -28506,6 +28506,11 @@ async function switchTab(name) {
       window.initStylesPanel();
     } else if (window._stylesEditor) {
       window._stylesEditor.layout();
+      // Built before a config was open: the cards read which styles are in use when they are built.
+      if (stylesView.dataset.preloaded) {
+        delete stylesView.dataset.preloaded;
+        if (_stylesViewMode === 'visual') _buildStylesVisual();
+      }
     }
   }
 
@@ -28826,9 +28831,27 @@ async function refreshEmptyStateFavs() {
   if (!dim) return;
   let done = false;
   const hide = () => { if (done) return; done = true; dim.classList.add('hidden'); setTimeout(() => dim.remove(), 550); };
-  window.electronAPI?.onSplashDismissed?.(hide);
-  setTimeout(hide, 6000);
+  window.electronAPI?.onSplashDismissed?.(() => { hide(); _scheduleStylesPreload(); });
+  setTimeout(() => { hide(); _scheduleStylesPreload(); }, 6000);
 })();
+
+// Builds the Style Library when the app goes idle after startup, so its tab is ready on the first visit.
+// Not when there is no library: its tab is hidden, and creating or importing one builds it. [B-595]
+let _stylesPreloadScheduled = false;
+function _scheduleStylesPreload() {
+  if (_stylesPreloadScheduled) return;
+  _stylesPreloadScheduled = true;
+  const run = () => {
+    if (!window.monaco) { setTimeout(run, 500); return; }
+    const view = document.getElementById('styles-view');
+    const tab = document.querySelector('.tab[data-tab="styles"]');
+    if (view.dataset.loaded || !tab || tab.style.display === 'none') return;
+    view.dataset.loaded = '1';
+    view.dataset.preloaded = '1';
+    window.initStylesPanel();
+  };
+  requestIdleCallback(run, { timeout: 4000 });
+}
 
 // Reflow the favorites grid when the window resizes so the height-aware row cap
 // (see refreshEmptyStateFavs) re-applies live. Debounced; only re-lays-out when
