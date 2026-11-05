@@ -5702,6 +5702,14 @@
             <div id="styles-effect-dropdown-list"></div>
           </div>
         </div>
+        <div class="styles-tag-filter-wrap">
+          <button id="btn-styles-color-filter" class="styles-tag-filter-btn" title="Filter by Base or detected color">
+            <span class="styles-tag-filter-icon">&#9662;</span> Color<span id="styles-color-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
+          </button>
+          <div id="styles-color-dropdown" class="styles-tag-dropdown" style="display:none">
+            <div id="styles-color-dropdown-list"></div>
+          </div>
+        </div>
         <!-- Helpers and segments a style names, each shown once the library has one. [B-177] -->
         <div class="styles-tag-filter-wrap" id="styles-helper-filter-wrap" style="display:none">
           <button id="btn-styles-helper-filter" class="styles-tag-filter-btn" title="Filter by helper">
@@ -21244,6 +21252,9 @@ let _activeFilterHelpers         = new Set();
 let _activeFilterHelpersMissing  = new Set();
 let _activeFilterSegments        = new Set();
 let _activeFilterSegmentsMissing = new Set();
+// Colour families picked and left out, read from a style's Base or detected colour. [B-608]
+let _activeFilterColors        = new Set();
+let _activeFilterColorsMissing = new Set();
 let _activeFilterEffects   = new Set();
 // [B-286] Effects a style must NOT have, set by right-click, as on Sound Fonts. Setting one polarity
 // of an effect clears the other.
@@ -22453,6 +22464,8 @@ function _stylesClearAllFilters() {
   _activeFilterHelpersMissing = new Set();
   _activeFilterSegments = new Set();
   _activeFilterSegmentsMissing = new Set();
+  _activeFilterColors = new Set();
+  _activeFilterColorsMissing = new Set();
   _activeFilterEffects = new Set();
   _activeFilterEffectsMissing = new Set();
   _stylesInUseFilter   = '';
@@ -22466,7 +22479,7 @@ function _applyStylesSearch() {
   let inUseCount = 0, notInUseCount = 0;
   cards.forEach(card => {
     const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
-    const matchesTags = _styleInTagScope(card) && _styleInCreatorScope(card) && _styleInHelperScope(card) && _styleInSegmentScope(card);
+    const matchesTags = _styleInTagScope(card) && _styleInCreatorScope(card) && _styleInHelperScope(card) && _styleInSegmentScope(card) && _styleInColorScope(card);
     const matchesEffects = matchesTags && _styleInEffectScope(card);
     const inUse = card.classList.contains('in-use');
     const others = matchesQ && matchesTags && matchesEffects;
@@ -22514,7 +22527,8 @@ function _applyStylesSearch() {
   const listEl     = document.getElementById('styles-visual-list');
   const isFiltering = !!q || _activeFilterTags.size > 0 || _activeFilterTagsMissing.size > 0 || _activeFilterEffects.size > 0
     || _activeFilterEffectsMissing.size > 0 || !!_stylesInUseFilter || _activeFilterCreators.size > 0 || _activeFilterCreatorsMissing.size > 0
-    || _activeFilterHelpers.size > 0 || _activeFilterHelpersMissing.size > 0 || _activeFilterSegments.size > 0 || _activeFilterSegmentsMissing.size > 0;
+    || _activeFilterHelpers.size > 0 || _activeFilterHelpersMissing.size > 0 || _activeFilterSegments.size > 0 || _activeFilterSegmentsMissing.size > 0
+    || _activeFilterColors.size > 0 || _activeFilterColorsMissing.size > 0;
   const autoClear  = _stylesAutoClearOnEmpty;
   _stylesAutoClearOnEmpty = false;
   if (listEl) {
@@ -22585,6 +22599,12 @@ function _styleInNamesScope(card, kind, on, off) {
 }
 function _styleInHelperScope(card)  { return _styleInNamesScope(card, 'helpers',  _activeFilterHelpers,  _activeFilterHelpersMissing); }
 function _styleInSegmentScope(card) { return _styleInNamesScope(card, 'segments', _activeFilterSegments, _activeFilterSegmentsMissing); }
+// Picked families OR; left-out families AND-NOT. A style with neither Base nor a detected colour has no family.
+function _styleInColorScope(card) {
+  const c = card.dataset.colorFamily;
+  if (_activeFilterColors.size && !_activeFilterColors.has(c)) return false;
+  return !_activeFilterColorsMissing.has(c);
+}
 function _styleInEffectScope(card) {
   if (_activeFilterEffects.size) {
     let any = false;
@@ -22605,6 +22625,7 @@ function _matchingCardsForFacet(own) {
     if (own !== 'creator' && !_styleInCreatorScope(card)) return false;
     if (own !== 'helper' && !_styleInHelperScope(card)) return false;
     if (own !== 'segment' && !_styleInSegmentScope(card)) return false;
+    if (own !== 'color' && !_styleInColorScope(card)) return false;
     if (own !== 'effect' && !_styleInEffectScope(card)) return false;
     if (_stylesInUseFilter && card.classList.contains('in-use') !== (_stylesInUseFilter === 'in')) return false;
     return true;
@@ -22650,6 +22671,18 @@ function _computeAvailableNamesWithCounts(kind, own, on, off) {
   const sel = (n) => on.has(n) || off.has(n);
   return Array.from(counts.entries()).sort((a, b) =>
     _facetSortCompare(a[0], a[1], sel(a[0]), b[0], b[1], sel(b[0])));
+}
+
+// The colour families, in wheel order, with the styles in each. A picked one keeps its row at 0.
+function _computeAvailableColorsWithCounts() {
+  const counts = new Map();
+  _matchingCardsForFacet('color').forEach(card => {
+    const c = card.dataset.colorFamily;
+    if (c) counts.set(c, (counts.get(c) || 0) + 1);
+  });
+  return window.proffieArgs.colorFamilies
+    .filter(f => counts.has(f.name) || _activeFilterColors.has(f.name) || _activeFilterColorsMissing.has(f.name))
+    .map(f => [f.name, counts.get(f.name) || 0]);
 }
 
 // Same shape as _computeAvailableTagsWithCounts, but for the effect facet.
@@ -22741,7 +22774,7 @@ function _wireFacetSortBar(container, rerender) {
 // One facet dropdown in the Style Library toolbar (Tags, Creators, Effects): a row per value with its count,
 // the shared sort bar, left click to want a value and right click to leave it out (either clears the other),
 // open until a click outside. Multi-select, as on Sound Fonts.
-function _styleFacetDropdown({ ddId, listId, btnId, items, on, off, rowClass = '', label = (v) => v, tip, empty }) {
+function _styleFacetDropdown({ ddId, listId, btnId, items, on, off, rowClass = '', label = (v) => v, tip, empty, dot, fixedOrder = false }) {
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   let outside = null;
   const render = () => {
@@ -22752,17 +22785,19 @@ function _styleFacetDropdown({ ddId, listId, btnId, items, on, off, rowClass = '
       list.innerHTML = `<div class="styles-tag-dropdown-empty">${empty}</div>`;
       return;
     }
-    list.innerHTML = _facetSortBarHtml() + rows.map(([value, count]) => {
+    list.innerHTML = (fixedOrder ? '' : _facetSortBarHtml()) + rows.map(([value, count]) => {
       const present = on().has(value);
       const absent  = off().has(value);
       const state   = present ? ' selected sf-effect-state-present' : absent ? ' selected sf-effect-state-absent' : '';
       return `<button class="styles-tag-dropdown-item${rowClass}${state}" data-value="${esc(value)}" title="${esc(tip)}">`
         + `<span class="styles-tag-dropdown-check">${present ? '&#10003;' : absent ? '&#10005;' : ''}</span>`
+        + (dot ? dot(value) : '')
         + `<span class="styles-tag-dropdown-name">${esc(label(value))}</span>`
         + `<span class="styles-tag-dropdown-count">${count}</span>`
         + `</button>`;
     }).join('');
-    _wireFacetSortBar(list, render);   // [B-285]
+    if (fixedOrder) _wireColorDots(list);
+    else _wireFacetSortBar(list, render);   // [B-285]
     const flip = (value, yes, no) => {
       if (yes.has(value)) yes.delete(value);
       else { no.delete(value); yes.add(value); }
@@ -22860,6 +22895,7 @@ function _renderActiveFilterChips() {
   };
   const helCount = nameCount('helper', _activeFilterHelpers.size + _activeFilterHelpersMissing.size);
   const segCount = nameCount('segment', _activeFilterSegments.size + _activeFilterSegmentsMissing.size);
+  const colCount = nameCount('color', _activeFilterColors.size + _activeFilterColorsMissing.size);
   const fxCount = _activeFilterEffects.size + _activeFilterEffectsMissing.size;
   if (fxBadge) {
     if (fxCount) { fxBadge.textContent = fxCount; fxBadge.style.display = ''; }
@@ -22869,7 +22905,7 @@ function _renderActiveFilterChips() {
   if (!strip) return;
   // Search counts as a filter here, same as on the Sound Fonts side (B-156).
   const searchQ = (document.getElementById('styles-search')?.value || '').trim();
-  const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + creCount + helCount + segCount + _activeFilterEffects.size + _activeFilterEffectsMissing.size
+  const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + creCount + helCount + segCount + colCount + _activeFilterEffects.size + _activeFilterEffectsMissing.size
     + (searchQ ? 1 : 0) + (_stylesInUseFilter ? 1 : 0);
   if (!totalActive) {
     strip.style.display = 'none';
@@ -22902,6 +22938,9 @@ function _renderActiveFilterChips() {
     group('segment', Array.from(_activeFilterSegments).map(s => chip(s, 'segment', s)),                      'or'),
     group('without', Array.from(_activeFilterSegmentsMissing).map(s =>
       chip(s, 'segment-without', s, ' sf-active-filter-effect-missing')),                                     'and'),
+    group('color',   Array.from(_activeFilterColors).map(c => chip(c, 'color', c)),                          'or'),
+    group('without', Array.from(_activeFilterColorsMissing).map(c =>
+      chip(c, 'color-without', c, ' sf-active-filter-effect-missing')),                                       'and'),
     group('effect',  Array.from(_activeFilterEffects).map(fx => chip(fx, 'effect', fx)),                      'or'),
     group('without', Array.from(_activeFilterEffectsMissing).map(fx =>
       chip(fx, 'without', fx, ' sf-active-filter-effect-missing')),                                           'and'),
@@ -22935,6 +22974,8 @@ function _renderActiveFilterChips() {
         case 'helper-without': _activeFilterHelpersMissing.delete(v); break;
         case 'segment': _activeFilterSegments.delete(v); break;
         case 'segment-without': _activeFilterSegmentsMissing.delete(v); break;
+        case 'color':   _activeFilterColors.delete(v); break;
+        case 'color-without': _activeFilterColorsMissing.delete(v); break;
         case 'effect':  _activeFilterEffects.delete(v); break;
         case 'without': _activeFilterEffectsMissing.delete(v); break;
         case 'in-use':  _stylesInUseFilter = ''; break;
@@ -23034,6 +23075,18 @@ function _openTagFilterDropdown() { _tagFacet.open(); }
 function _toggleTagFilterDropdown() { _tagFacet.toggle(); }
 function _toggleCreatorFilterDropdown() { _creatorFacet.toggle(); }
 
+// Families in wheel order, always: nine rows have no need of a sort. [B-608]
+const _colorFacet = _styleFacetDropdown({
+  ddId: 'styles-color-dropdown', listId: 'styles-color-dropdown-list', btnId: 'btn-styles-color-filter',
+  items: () => _computeAvailableColorsWithCounts(), on: () => _activeFilterColors, off: () => _activeFilterColorsMissing,
+  dot: (name) => {
+    const family = window.proffieArgs.colorFamilies.find(f => f.name === name);
+    return _colorDotHtml(window.proffieArgs.namedColors[family.swatch], name);
+  },
+  fixedOrder: true,
+  tip: 'Left click: filter for styles with this Base or detected color.\nRight click: filter for styles without it.',
+  empty: 'No style has a Base or detected color',
+});
 const _effectFacet = _styleFacetDropdown({
   ddId: 'styles-effect-dropdown', listId: 'styles-effect-dropdown-list', btnId: 'btn-styles-effect-filter',
   items: () => _computeAvailableEffectsWithCounts(), on: () => _activeFilterEffects, off: () => _activeFilterEffectsMissing,
@@ -23502,7 +23555,7 @@ function _librarySegments() {
 
 // A colour argument's short name, on a card and in the window; hovering the name shows the real one.
 // A card shows these seven, in this order, whatever a style lacks left out. The window shows every
-// colour argument. A style with none shows its detected colour, as a preset slot does. [B-603]
+// colour argument. A style with no Base shows its detected colour first, as a preset slot does. [B-603]
 const _COLOR_NAMES = { BASE_COLOR_ARG: 'Base', ALT_COLOR_ARG: 'Alt', IGNITION_COLOR_ARG: 'Ignition', BLAST_COLOR_ARG: 'Blast',
   CLASH_COLOR_ARG: 'Clash', LOCKUP_COLOR_ARG: 'Lockup', DRAG_COLOR_ARG: 'Drag', LB_COLOR_ARG: 'Lightning', STAB_COLOR_ARG: 'Stab',
   SWING_COLOR_ARG: 'Swing', EMITTER_COLOR_ARG: 'Emitter', PREON_COLOR_ARG: 'PreOn', RETRACTION_COLOR_ARG: 'Retraction',
@@ -23510,19 +23563,19 @@ const _COLOR_NAMES = { BASE_COLOR_ARG: 'Base', ALT_COLOR_ARG: 'Alt', IGNITION_CO
 const _CARD_COLORS = ['BASE_COLOR_ARG', 'ALT_COLOR_ARG', 'BLAST_COLOR_ARG', 'CLASH_COLOR_ARG',
   'LOCKUP_COLOR_ARG', 'STAB_COLOR_ARG', 'OFF_COLOR_ARG'];
 
-function _colorDotHtml(rgb16) {
+function _colorDotHtml(rgb16, title) {
   const [r, g, b] = rgb16;
   return `<span class="style-color-dot" data-rgb="${[r, g, b].map(v => Math.round(v / 257)).join(',')}"`
-    + ` style="background-color:${styleArgResolver.proffieToCSS(r, g, b)}" title="${window.proffieArgs.colorLabel(r, g, b)}"></span>`;
+    + ` style="background-color:${styleArgResolver.proffieToCSS(r, g, b)}" title="${title || window.proffieArgs.colorLabel(r, g, b)}"></span>`;
 }
 
 // What a card or the window draws: [{ label, real, rgb16 }], from code with its helpers and segments
 // written in.
 function _styleColorList(code, cardOnly) {
   const { args, main } = styleArgResolver.styleColors(code);
-  if (main) return [{ label: 'Detected', real: 'No color arguments: the first color in the code', rgb16: main }];
-  return args.filter(a => !cardOnly || _CARD_COLORS.includes(a.name))
-    .map(a => ({ label: _COLOR_NAMES[a.name] || a.name, real: a.name, rgb16: a.rgb16 }));
+  const detected = main ? [{ label: 'Detected', real: 'No Base color argument: the first color in the code', rgb16: main }] : [];
+  return [...detected, ...args.filter(a => !cardOnly || _CARD_COLORS.includes(a.name))
+    .map(a => ({ label: _COLOR_NAMES[a.name] || a.name, real: a.name, rgb16: a.rgb16 }))];
 }
 
 // The window's colours on one row if they fit, otherwise in even rows: 10 go 5 and 5, not 8 and 2.
@@ -25343,7 +25396,10 @@ function _buildStylesVisual() {
       const active = _activeFilterTags.has(t) ? ' active' : '';
       return `<span class="style-tag${active}${_isStyleAppTag(t) ? ' app' : ''}" data-tag="${t}">${t}</span>`;
     }).join('');
-    const colorsHtml = _styleColorList(_withSegmentBodies(entry.usingCode, [...helpers, ...segmentEntries]), true)
+    const cardColors = _styleColorList(_withSegmentBodies(entry.usingCode, [...helpers, ...segmentEntries]), true);
+    const mainColor  = cardColors.find(c => c.real === 'BASE_COLOR_ARG' || c.label === 'Detected');
+    card.dataset.colorFamily = (mainColor && window.proffieArgs.colorFamily(mainColor.rgb16)) || '';
+    const colorsHtml = cardColors
       .map(c => `<span class="style-card-color"><span class="style-card-color-name" title="${c.real}">${c.label}</span>${_colorDotHtml(c.rgb16)}</span>`).join('');
     const effectsHtml = effects.map(e => {
       const active = _activeFilterEffects.has(e) ? ' active' : '';
@@ -28283,6 +28339,7 @@ function _refreshOpenFacetDropdowns() {
   if (fxDd && fxDd.style.display !== 'none') _renderEffectFilterDropdown();
   if (_helperFacet.isOpen()) _helperFacet.render();
   if (_segmentFacet.isOpen()) _segmentFacet.render();
+  if (_colorFacet.isOpen()) _colorFacet.render();
 }
 document.getElementById('styles-search')?.addEventListener('input', function() {
   document.getElementById('styles-search-clear').style.display = this.value ? '' : 'none';
@@ -28328,6 +28385,10 @@ document.getElementById('btn-styles-creator-filter')?.addEventListener('click', 
 document.getElementById('btn-styles-effect-filter')?.addEventListener('click', e => {
   e.stopPropagation();
   _toggleEffectFilterDropdown();
+});
+document.getElementById('btn-styles-color-filter')?.addEventListener('click', e => {
+  e.stopPropagation();
+  _colorFacet.toggle();
 });
 document.getElementById('btn-styles-helper-filter')?.addEventListener('click', e => {
   e.stopPropagation();
@@ -65313,30 +65374,7 @@ function _getFreshFieldRange(fieldName) {
       // ── Named-color dropdown (custom — color swatch per row) ─────────
       if (window.proffieArgs?.namedColors) {
         const _pa = window.proffieArgs;
-        // Sort so the dropdown reads like a color wheel:
-        // reds → oranges → yellows → greens → cyans → blues → purples → pinks →
-        // achromatic (black/grays/white) at the bottom by lightness. Within a hue,
-        // lighter shades fall after darker.
-        //
-        // Achromatic detection uses CHROMA (max channel − min channel) rather than
-        // HSL saturation. HSL's saturation formula reports ~1.0 for near-white
-        // colors like Snow (255, 250, 250) because both max and min are near 1.0,
-        // which would place Snow next to Red at hue=0. Chroma is honest about it
-        // (Snow's chroma ≈ 0.02). Threshold 0.08 cleanly separates whites/grays
-        // from light pastels like MistyRose (chroma ≈ 0.12) that still belong in
-        // the chromatic spectrum.
-        const _colorOrder = (r16, g16, b16) => {
-          const r = r16 / 65535, g = g16 / 65535, b = b16 / 65535;
-          const max = Math.max(r, g, b), min = Math.min(r, g, b);
-          const chroma = max - min;
-          const l = (max + min) / 2;
-          if (chroma < 0.08) return { ach: true, h: 0, l };
-          let h;
-          if      (max === r) h = (g - b) / chroma + (g < b ? 6 : 0);
-          else if (max === g) h = (b - r) / chroma + 2;
-          else                h = (r - g) / chroma + 4;
-          return { ach: false, h: h / 6, l };
-        };
+        const _colorOrder = _pa.colorOrder;
         // In colour order by default, or A-Z; the choice is remembered (namedColorSort).
         const _byColor = (a, b) => {
           if (a.order.ach !== b.order.ach) return a.order.ach ? 1 : -1;

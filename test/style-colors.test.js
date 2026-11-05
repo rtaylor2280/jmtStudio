@@ -37,6 +37,11 @@ check('a default that is not a colour yet is left out',
 check('a commented-out argument does not count',
   styleColors('using A = Layers<Blue /* RgbArg<BASE_COLOR_ARG,Red> */>;\n// RgbArg<ALT_COLOR_ARG,Red>').args.length === 0);
 
+const noBase = styleColors('Layers<AudioFlicker<Rgb<135,0,255>,Blue>,RgbArg<CLASH_COLOR_ARG,Rgb<255,255,255>>,RgbArg<OFF_COLOR_ARG,Red>>');
+check('no Base: the colour outside its arguments, beside them', same(noBase.main, [135 * 257, 0, 65535]) && noBase.args.length === 2, noBase.main);
+check('an argument\'s default is not the detected colour',
+  same(styleColors('Layers<RgbArg<CLASH_COLOR_ARG,Red>,AudioFlicker<Blue,White>>').main, [0, 0, 65535]));
+check('only arguments, and no Base: nothing detected', styleColors('Layers<RgbArg<OFF_COLOR_ARG,Red>>').main === null);
 check('no arguments: the main colour', same(styleColors('using A = StylePtr<Layers<Red,AudioFlicker<Blue,White>>>();').main, [65535, 0, 0]));
 check('the style\'s own name is not its colour', same(styleColors('using Red = StylePtr<Blue>();').main, [0, 0, 65535]));
 check('nothing to show', styleColors('using A = StylePtr<Layers<Black>>();').main === null && styleColors('using A = StylePtr<Layers<Black>>();').args.length === 0);
@@ -60,6 +65,26 @@ check('colours that fit stay on one row', balanced(7, 675) === 7, balanced(7, 67
 check('10 in a width that fits 8 go 5 and 5', balanced(10, 675) === 5, balanced(10, 675));
 check('9 go 5 and 4, 16 go 8 and 8, 17 go 6, 6 and 5', balanced(9, 675) === 5 && balanced(16, 675) === 8 && balanced(17, 675) === 6, [balanced(9, 675), balanced(16, 675), balanced(17, 675)].join());
 check('a narrow window still balances', balanced(10, 300) === 4, balanced(10, 300));
+
+const { colorFamily, colorFamilies, namedColors } = sandbox.window.proffieArgs;
+const family = (n) => colorFamily(namedColors[n]);
+const expected = { Red: 'Red', HaltRed: 'Red', MistyRose: 'Red', Maroon: 'Red', SafetyOrange: 'Orange', Orange: 'Orange', Amber: 'Orange',
+  SchoolBus: 'Yellow', Yellow: 'Yellow', LightYellow: 'Yellow', LimeZest: 'Green', Green: 'Green', Aquamarine: 'Green', Cyan: 'Cyan',
+  MasterSwordBlue: 'Cyan', DeepSkyBlue: 'Blue', Blue: 'Blue', Purple: 'Purple', Magenta: 'Purple', HotPink: 'Pink', Pink: 'Pink',
+  White: 'White', Snow: 'White', Ivory: 'White', AliceBlue: 'White' };
+const wrong = Object.entries(expected).filter(([n, f]) => namedColors[n] && family(n) !== f).map(([n, f]) => `${n}=${family(n)} not ${f}`);
+check('named colours land in the family you would expect', wrong.length === 0, wrong.join());
+check('black has no family', family('Black') === null);
+check('a custom colour has a family', colorFamily([65535, 2570, 0]) === 'Red' && colorFamily([0, 5140, 65535]) === 'Blue');
+check('the families read as the wheel, nine of them', Array.from(colorFamilies).map(f => f.name).join() === 'Red,Orange,Yellow,Green,Cyan,Blue,Purple,Pink,White');
+check('each family has a colour for its dot', Array.from(colorFamilies).every(f => namedColors[f.swatch]));
+check('the picker and the filter share one wheel', /const _colorOrder = _pa\.colorOrder;/.test(html) && !/const _colorOrder = \(r16/.test(html));
+check('a card is filed by Base or Detected only', /c\.real === 'BASE_COLOR_ARG' \|\| c\.label === 'Detected'/.test(html));
+check('Color filters as the other dropdowns do', /&& _styleInColorScope\(card\);/.test(html) && /own !== 'color' && !_styleInColorScope/.test(html));
+check('Color counts as filtering, and shows and clears as a chip', /_activeFilterColors\.size > 0 \|\| _activeFilterColorsMissing\.size > 0/.test(html)
+  && /case 'color':\s+_activeFilterColors\.delete\(v\)/.test(html) && /case 'color-without':\s+_activeFilterColorsMissing\.delete\(v\)/.test(html)
+  && /_activeFilterColors = new Set\(\);\s+_activeFilterColorsMissing = new Set\(\);\s+_activeFilterEffects = new Set\(\);/.test(html));
+check('Color keeps its wheel order, with no sort bar', /fixedOrder: true/.test(html) && /fixedOrder \? '' : _facetSortBarHtml\(\)/.test(html));
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

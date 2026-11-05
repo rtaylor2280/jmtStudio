@@ -11,9 +11,10 @@
 
   /**
    * Find all RgbArg/IntArg instances in a style expression, in order of
-   * appearance. Each entry has: { kind, name, defaultExpr, width } where
-   * width is 3 for RgbArg and 1 for IntArg, and defaultExpr is the second
-   * template parameter (e.g. "Red" from RgbArg<BASE_COLOR_ARG, Red>).
+   * appearance. Each entry has: { kind, name, defaultExpr, width, start, end }
+   * where width is 3 for RgbArg and 1 for IntArg, defaultExpr is the second
+   * template parameter (e.g. "Red" from RgbArg<BASE_COLOR_ARG, Red>), and
+   * start and end are where the whole argument sits in expr.
    */
   function findArgs(expr) {
     if (!expr) return [];
@@ -38,6 +39,8 @@
         name,
         defaultExpr,
         width: m[1] === 'RgbArg' ? 3 : 1,
+        start: m.index,
+        end:   i,
       });
     }
     return args;
@@ -111,22 +114,24 @@
    * A style's colours as written: { args, main }. args holds each RgbArg it uses, once, in the
    * registry's order, as { name, label, rgb16 }, the default it is written with. A default that
    * isn't a colour yet (a template parameter) has no value to show, so it is left out. main is
-   * the style's one colour when it has no arguments, or null.
+   * the first colour written outside its arguments when it has no Base, or null. [B-608]
    */
   function styleColors(code) {
     const pa = root.proffieArgs;
     const text = String(code || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
       .replace(/^\s*using\s+[^=]+=/, '');
     const found = new Map();
-    for (const a of findArgs(text)) {
-      if (a.kind !== 'RgbArg' || found.has(a.name)) continue;
+    const rgbArgs = findArgs(text).filter(a => a.kind === 'RgbArg');
+    for (const a of rgbArgs) {
+      if (found.has(a.name)) continue;
       const rgb16 = pa.resolveColorDefault(a.defaultExpr);
       if (!rgb16.some(Boolean) && !/^(Black|BLACK|Rgb(16)?\s*<\s*0\s*,\s*0\s*,\s*0\s*>)$/.test(a.defaultExpr)) continue;
       const reg = pa.registry.find(r => r.name === a.name);
       found.set(a.name, { name: a.name, label: reg ? reg.label : a.name, pos: reg ? reg.pos : Infinity, rgb16 });
     }
     const args = [...found.values()].sort((a, b) => a.pos - b.pos);
-    const hit = args.length ? null : pa.earliestColor(text);
+    const outside = rgbArgs.reduceRight((t, a) => t.slice(0, a.start) + t.slice(a.end), text);
+    const hit = found.has('BASE_COLOR_ARG') ? null : pa.earliestColor(outside);
     return { args, main: hit ? hit.rgb16 : null };
   }
 
