@@ -23275,13 +23275,16 @@ function _matchSegmentLayer(seg, layer) {
   return ps.map(p => { const k = order.indexOf(p.name); return k < 0 ? p.def : mm[k + 1]; });
 }
 // A style's own colour for each of the segment's parameters: the fallback it already gives that
-// argument (its first RgbArg<ARG, X>), or the segment's default.
+// argument (its first RgbArg<ARG, X>); for Base on a style with none, its detected colour; or the
+// segment's default.
 function _styleColoursFor(seg, styleCode) {
   const s = _stripComments(styleCode).replace(/\s+/g, '');
   return (seg.params || []).map(p => {
     if (!p.arg) return p.def;
     const m = s.match(new RegExp(`RgbArg<${p.arg},(${_COLOUR_TOKEN})>`));
-    return m ? m[1] : p.def;
+    if (m) return m[1];
+    const detected = p.arg === 'BASE_COLOR_ARG' && window.styleArgResolver.styleColors(styleCode).mainText;
+    return detected ? detected.replace(/\s+/g, '') : p.def;
   });
 }
 // Every use of `name` in `code`, bare or with <values>, replaced by fn(values).
@@ -23609,9 +23612,11 @@ function _colorDotHtml(rgb16, title) {
 }
 
 // What a card or the window draws: [{ slot, label, real, find, rgb16 }], from code with its helpers and
-// segments written in. find is what the code editor searches for when the colour is clicked. [B-609]
-function _styleColorList(code, cardOnly) {
-  const { args, main, mainText } = styleArgResolver.styleColors(code);
+// segments written in. A Base only a segment brings doesn't count. find is what the code editor searches
+// for when the colour is clicked. [B-609] [B-611]
+function _styleColorList(code, blocks, cardOnly) {
+  const { args, main, mainText } = styleArgResolver.styleColors(_withSegmentBodies(code, blocks),
+    _withSegmentBodies(code, blocks.filter(b => !b.isSegment)));
   const detected = main ? [{ slot: 'BASE_COLOR_ARG', label: 'Detected', real: 'No Base color argument: the first color in the code', find: mainText, rgb16: main }] : [];
   return [...detected, ...args.filter(a => !cardOnly || _CARD_COLORS.includes(a.name))
     .map(a => ({ slot: a.name, label: _COLOR_NAMES[a.name] || a.name, real: a.name, find: a.name, rgb16: a.rgb16 }))];
@@ -25435,7 +25440,7 @@ function _buildStylesVisual() {
       const active = _activeFilterTags.has(t) ? ' active' : '';
       return `<span class="style-tag${active}${_isStyleAppTag(t) ? ' app' : ''}" data-tag="${t}">${t}</span>`;
     }).join('');
-    const cardColors = _styleColorList(_withSegmentBodies(entry.usingCode, [...helpers, ...segmentEntries]), true);
+    const cardColors = _styleColorList(entry.usingCode, [...helpers, ...segmentEntries], true);
     const mainColor  = cardColors.find(c => c.real === 'BASE_COLOR_ARG' || c.label === 'Detected');
     card.dataset.colorFamily = (mainColor && window.proffieArgs.colorFamily(mainColor.rgb16)) || '';
     const colorsHtml = cardColors
@@ -25818,7 +25823,7 @@ function _openStyleDetail(entry) {
   // Colors (read-only, read from the code) [B-603]
   const libText = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
   const blocks = libText ? _classifyStyleEntries(_parseStyleEntries(libText)).filter(e => e.isHelper || e.isSegment) : [];
-  const colors = _styleColorList(_withSegmentBodies(usingCode, blocks), false);
+  const colors = _styleColorList(usingCode, blocks, false);
   const colorsWrap = document.getElementById('detail-colors');
   colorsWrap.innerHTML = colors.map(c => `<span class="detail-color">${_colorDotHtml(c.rgb16)}<span title="${c.real}">${c.label}</span></span>`).join('');
   _wireColorDots(colorsWrap);
@@ -63062,13 +63067,13 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     }
 
     // Find the EARLIEST hardcoded color expression in `text` — an `Rgb16<…>`, `Rgb<…>`,
-    // or a named color token (Red, Cyan, etc.). Returns { rgb16, matchStr, matchIndex }
-    // or null. "Earliest by source position" matters because library styles often use a
-    // base color near the top and later mention `White` inside an `AlphaL<…>` modifier —
-    // we want the base, not the modifier. Shared by the collapsed slot tile's swatch and
-    // the expanded slot editor's "Detected Base Color" so both views agree.
+    // or a named color token (Red, Cyan, etc.), outside any RgbArg. Returns { rgb16, matchStr,
+    // matchIndex } or null. "Earliest by source position" matters because library styles often
+    // use a base color near the top and later mention `White` inside an `AlphaL<…>` modifier —
+    // we want the base, not the modifier. Shared by the collapsed slot tile's swatch, the
+    // expanded slot editor's "Detected Base Color" and the style card's Detected, so all agree.
     function _earliestColorInText(text) {
-      return window.proffieArgs ? window.proffieArgs.earliestColor(text) : null;
+      return window.styleArgResolver ? window.styleArgResolver.mainColor(text) : null;
     }
 
     // Wrapper-vs-inner color mismatch. When a slot is a wrapper template with a

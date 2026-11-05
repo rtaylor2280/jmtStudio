@@ -115,27 +115,42 @@
    * registry's order, as { name, label, rgb16 }, the default it is written with. A default that
    * isn't a colour yet (a template parameter) has no value to show, so it is left out. main is
    * the first colour written outside its arguments when it has no Base, or null, and mainText
-   * that colour as the code spells it. [B-608]
+   * that colour as the code spells it. [B-608] own is the style without its segments: a Base only
+   * a segment brings colours that segment, not the blade, so it is no Base here. [B-611]
    */
-  function styleColors(code) {
+  function styleColors(code, own = code) {
     const pa = root.proffieArgs;
-    const text = String(code || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const clean = (c) => String(c || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
       .replace(/^\s*using\s+[^=]+=/, '');
+    const text = clean(code), ownText = clean(own);
     const found = new Map();
-    const rgbArgs = findArgs(text).filter(a => a.kind === 'RgbArg');
-    for (const a of rgbArgs) {
-      if (found.has(a.name)) continue;
+    for (const a of findArgs(text)) {
+      if (a.kind !== 'RgbArg' || found.has(a.name)) continue;
       const rgb16 = pa.resolveColorDefault(a.defaultExpr);
       if (!rgb16.some(Boolean) && !/^(Black|BLACK|Rgb(16)?\s*<\s*0\s*,\s*0\s*,\s*0\s*>)$/.test(a.defaultExpr)) continue;
       const reg = pa.registry.find(r => r.name === a.name);
       found.set(a.name, { name: a.name, label: reg ? reg.label : a.name, pos: reg ? reg.pos : Infinity, rgb16 });
     }
+    if (!findArgs(ownText).some(a => a.name === 'BASE_COLOR_ARG')) found.delete('BASE_COLOR_ARG');
     const args = [...found.values()].sort((a, b) => a.pos - b.pos);
-    const outside = rgbArgs.reduceRight((t, a) => t.slice(0, a.start) + t.slice(a.end), text);
-    const hit = found.has('BASE_COLOR_ARG') ? null : pa.earliestColor(outside);
+    const hit = found.has('BASE_COLOR_ARG') ? null : mainColor(ownText);
     return { args, main: hit ? hit.rgb16 : null, mainText: hit ? hit.matchStr : null };
   }
 
-  root.styleArgResolver = { findArgs, resolveStyleArgs, readArgValue, writeArgValue, styleColors, proffieToCSS, cssToProffie };
+  /**
+   * The first colour written into a style, read past its arguments: an argument's default is what
+   * that argument starts as, not what the blade paints. This is a detected colour wherever one is
+   * shown or used. { rgb16, matchStr, matchIndex, scale } or null, matchIndex being a place in text
+   * as given, so the arguments are blanked rather than cut. [B-611]
+   */
+  function mainColor(text) {
+    const pa = root.proffieArgs;
+    if (!pa) return null;
+    const src = String(text || '');
+    return pa.earliestColor(findArgs(src).filter(a => a.kind === 'RgbArg')
+      .reduce((t, a) => t.slice(0, a.start) + ' '.repeat(a.end - a.start) + t.slice(a.end), src));
+  }
+
+  root.styleArgResolver = { findArgs, resolveStyleArgs, readArgValue, writeArgValue, styleColors, mainColor, proffieToCSS, cssToProffie };
 
 })(window);

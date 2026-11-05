@@ -13,7 +13,7 @@ const sandbox = { window: {}, console };
 vm.createContext(sandbox);
 vm.runInContext(read('effect-args.js'), sandbox);
 vm.runInContext(read('styleArgResolver.js'), sandbox);
-const { styleColors } = sandbox.window.styleArgResolver;
+const { styleColors, mainColor } = sandbox.window.styleArgResolver;
 const same = (a, b) => JSON.stringify(Array.from(a || [])) === JSON.stringify(b);
 
 const full = `using Full = StylePtr<Layers<
@@ -53,9 +53,21 @@ check('every colour argument has a short name', unnamed.length === 0, unnamed.jo
 check('hovering a short name shows the real one, on the card and in the window', /style-card-color-name" title="\$\{c\.real\}"/.test(html) && /<span title="\$\{c\.real\}">\$\{c\.label\}<\/span>/.test(html));
 check('a style with no arguments says Detected, as a preset slot does', /label: 'Detected'/.test(html));
 check('the window lines its colours up in a grid', /\.detail-colors-wrap \{ display: grid/.test(html));
-check('a card reads through helpers and segments', /_styleColorList\(_withSegmentBodies\(entry\.usingCode, \[\.\.\.helpers, \.\.\.segmentEntries\]\), true\)/.test(html));
-check('the window shows every argument', /_styleColorList\(_withSegmentBodies\(usingCode, blocks\), false\)/.test(html));
-check('the slot and the card share one main-colour reader', /return window\.proffieArgs \? window\.proffieArgs\.earliestColor\(text\) : null/.test(html));
+check('a card reads through helpers and segments', /_styleColorList\(entry\.usingCode, \[\.\.\.helpers, \.\.\.segmentEntries\], true\)/.test(html) && /styleColors\(_withSegmentBodies\(code, blocks\),/.test(html));
+check('the window shows every argument', /_styleColorList\(usingCode, blocks, false\)/.test(html));
+const clashFirst = 'Layers<RgbArg<CLASH_COLOR_ARG,Red>,AudioFlicker<Blue,Cyan>>';
+check('the main colour is read past the arguments', mainColor(clashFirst).matchStr === 'Blue');
+check('and its place is where it sits in the code, so a slot can still edit it', clashFirst.slice(mainColor(clashFirst).matchIndex).startsWith('Blue,Cyan'));
+check('only arguments: no main colour, so a slot falls to its last resort', mainColor('Layers<RgbArg<OFF_COLOR_ARG,Red>>') === null);
+const blade = 'Layers<AudioFlicker<Blue,Cyan>,RgbArg<CLASH_COLOR_ARG,Red>,VolSeg<Blue>>';
+const written = blade.replace('VolSeg<Blue>', 'AlphaL<RgbArg<BASE_COLOR_ARG,Blue>,Int<0>>');
+const viaSegment = styleColors(written, blade);
+check('a Base only a segment brings is not the style\'s Base', same(viaSegment.main, [0, 0, 65535]) && viaSegment.args.map(a => a.name).join() === 'CLASH_COLOR_ARG', viaSegment);
+const ownBase = styleColors('Layers<RgbArg<BASE_COLOR_ARG,Green>,AlphaL<RgbArg<BASE_COLOR_ARG,Blue>,Int<0>>>', 'Layers<RgbArg<BASE_COLOR_ARG,Green>,VolSeg<Blue>>');
+check('a style\'s own Base stands, with a segment beside it', ownBase.main === null && same(ownBase.args[0].rgb16, [0, 65535, 0]));
+check('a segment\'s other colours still read', styleColors('Layers<Blue,RgbArg<CLASH_COLOR_ARG,Red>>', 'Layers<Blue,ClashSeg>').args.map(a => a.name).join() === 'CLASH_COLOR_ARG');
+check('the card and the window read Base with the segments left out', /_withSegmentBodies\(code, blocks\.filter\(b => !b\.isSegment\)\)/.test(html));
+check('the slot and the card share one main-colour reader', /return window\.styleArgResolver \? window\.styleArgResolver\.mainColor\(text\) : null/.test(html));
 check('each colour renders once, at idle, and its dots share it', /_colorDotImages\.set\(key, image\)/.test(html) && /requestIdleCallback\(\(\) => \{\s+_colorDotIdle = false/.test(html));
 check('only the hovered dot animates', (html.match(/animated: true, width: 14/g) || []).length === 1 && /dot\.addEventListener\('mouseenter'/.test(html));
 check('the colours sit at the foot of the card, and cards in a grid match', /\.style-card-colors \{[^}]*margin-top: auto/.test(html) && /\.style-cards \{[^}]*grid-auto-rows: 1fr/.test(html));

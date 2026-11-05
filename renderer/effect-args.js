@@ -187,8 +187,8 @@
     return [0, 0, 0];
   }
 
-  // The first colour written in a piece of style code, skipping black: that is what a slot, or a
-  // style with no arguments, paints as its main colour.
+  // The first colour written in a piece of style code, skipping black. What a style paints as its main
+  // colour is styleArgResolver.mainColor, which reads this past the arguments.
   function earliestColor(text) {
     if (!text) return null;
     const m16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);

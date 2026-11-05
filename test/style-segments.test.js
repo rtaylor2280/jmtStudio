@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
 
 let failures = 0;
@@ -34,6 +35,10 @@ const names = ['_styleExprHead', '_segmentRank', '_splitArgsRaw', '_addSegmentTo
   '_wrapSegmentLayers', '_buildHelperBlock', '_classifyStyleEntries', '_parseStyleEntries', '_parseStyleMeta', '_findUsingExprEnd'];
 const missing = names.filter((n) => !fn(n));
 check('located', !missing.length, missing.join(', '));
+const sandbox = { window: {}, console };
+vm.createContext(sandbox);
+for (const f of ['effect-args.js', 'styleArgResolver.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8'), sandbox);
+globalThis.window = sandbox.window;
 const env = new Function(`
   const _SL_CHARGING_SYMBOL_RE = /\\bChargeFullPropF\\b/; const _SL_PIXEL_RELAY_SYMBOL_RE = /\\bPixelRelayL?\\b/;
   ${constLine('_stripComments')}
@@ -225,7 +230,10 @@ console.log('3e. a segment that takes its colours from the style');
     && sw.expr === `Layers<HumpFlicker<RgbArg<BASE_COLOR_ARG,Rgb<0,0,255>>,Black,50>,${IG},VolSeg<Rgb<255,0,0>>>`, JSON.stringify(sw));
   const ad = env.add(`Layers<HumpFlicker<RgbArg<BASE_COLOR_ARG,Rgb<0,0,255>>,Black,50>,${IG}>`, VS, [VS]);
   check('added new, it takes the style\'s own base colour', ad.expr === `Layers<HumpFlicker<RgbArg<BASE_COLOR_ARG,Rgb<0,0,255>>,Black,50>,${IG},VolSeg<Rgb<0,0,255>>>`, ad.expr);
-  check('a style with no base colour of its own gets the default', env.add(`Layers<Red,${IG}>`, VS, [VS]).expr === `Layers<Red,${IG},VolSeg<>>`);
+  check('a style with no Base gives it the colour it detects', env.add(`Layers<Red,${IG}>`, VS, [VS]).expr === `Layers<Red,${IG},VolSeg<Red>>`);
+  check('the detected colour goes in with no spaces, and an argument\'s default is not it',
+    env.add(`Layers<AudioFlicker<Rgb< 0, 0, 200 >,Blue>,RgbArg<CLASH_COLOR_ARG,Red>,${IG}>`, VS, [VS]).expr.endsWith(',VolSeg<Rgb<0,0,200>>>'));
+  check('nothing detected, the segment\'s default', env.add(`Layers<RgbArg<CLASH_COLOR_ARG,Red>,${IG}>`, VS, [VS]).expr.endsWith(',VolSeg<>>'));
   check('one already there with <colours> counts as already there', env.add(`Layers<Red,${IG},VolSeg<Red>>`, VS, [VS]).already === true);
   const PSG = { name: 'PowerSaveSeg', usingCode: PS.usingCode, params: [] };
   check('the order still holds past a name with <colours>: power save goes under it',
