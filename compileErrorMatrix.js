@@ -159,7 +159,24 @@ function _selectedBoard(ctx, g) {
   return true;
 }
 
+// A name sitting bare where a preset's font or track goes.
+function _unquotedName(ctx, g) {
+  const src = String(ctx.configText || '');
+  return new RegExp(`\\{\\s*${g.symbol}\\s*,|\\{\\s*"[^"]*"\\s*,\\s*${g.symbol}\\s*,`).test(src);
+}
+
 const SIGNATURES = [
+  {
+    id: "unquoted-preset-name",
+    severity: "error",
+    match: /['`](?<symbol>[A-Za-z_]\w*)['`] was not declared in this scope/,
+    specificity: 23,
+    primary: true,
+    precondition: _unquotedName,
+    title: "{symbol} needs quotes",
+    meaning: "Font and track names go in quotes, so the compiler read {symbol} as a name it should already know.",
+    fix: "Change it to \"{symbol}\".",
+  },
   {
     id: "style-switched-off",
     severity: "error",
