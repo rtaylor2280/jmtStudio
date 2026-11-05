@@ -4340,6 +4340,7 @@
   /* In Use filter mirrors the .sf-card.in-use blue tint so the visual
      vocabulary is consistent — same color signal in toolbar and card. */
   #btn-sf-in-use-filter:hover { color: var(--jmt-blue); }
+  #btn-sf-selected-filter.active, #btn-styles-selected-filter.active { color: var(--jmt-blue); border-color: rgba(0,130,255,0.5); background: rgba(0,100,220,0.08); }
   #btn-sf-in-use-filter.active { color: var(--jmt-blue); border-color: rgba(0,130,255,0.5); background: rgba(0,100,220,0.08); }
   /* The inverse chip needs its own active rule — the class was landing on
      nothing, so the filter could be ON with no way to see it. Same blue as its
@@ -5535,6 +5536,9 @@
           <button id="btn-sf-not-in-use-filter" class="styles-tag-filter-btn" title="Only fonts NOT used by the open config" style="display:none">
             Not in use<span id="sf-not-in-use-count" class="styles-tag-filter-badge sf-badge-muted" style="display:none">0</span>
           </button>
+          <button id="btn-sf-selected-filter" class="styles-tag-filter-btn" title="Only the selected fonts" style="display:none">
+            Selected<span id="sf-selected-count" class="styles-tag-filter-badge">0</span>
+          </button>
           <button id="btn-sf-new-filter" class="styles-tag-filter-btn" title="Only fonts not opened or used" style="display:none">
             New<span id="sf-new-count" class="styles-tag-filter-badge" style="display:none">0</span>
           </button>
@@ -5737,6 +5741,9 @@
         </button>
         <button id="btn-styles-not-in-use-filter" class="styles-tag-filter-btn" title="Only styles NOT used by the open config" style="display:none">
           Not in use<span id="styles-not-in-use-count" class="styles-tag-filter-badge sf-badge-muted" style="display:none">0</span>
+        </button>
+        <button id="btn-styles-selected-filter" class="styles-tag-filter-btn" title="Only the selected styles" style="display:none">
+          Selected<span id="styles-selected-count" class="styles-tag-filter-badge">0</span>
         </button>
       </div>
       <div id="styles-active-filters" class="styles-active-filters" style="display:none"></div>
@@ -22478,6 +22485,7 @@ function _stylesClearAllFilters() {
   _activeFilterEffects = new Set();
   _activeFilterEffectsMissing = new Set();
   _stylesInUseFilter   = '';
+  _stylesSelectedView  = '';
   _applyStylesSearch();
 }
 
@@ -22486,6 +22494,8 @@ function _applyStylesSearch() {
   const cards = document.querySelectorAll('#styles-visual-list .style-card');
   let shown   = 0;
   let inUseCount = 0, notInUseCount = 0;
+  if (!_stylesSelected.size) _stylesSelectedView = '';
+  _stylesSelectedHeld = 0;
   cards.forEach(card => {
     const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
     const matchesTags = _styleInTagScope(card) && _styleInCreatorScope(card) && _styleInHelperScope(card) && _styleInSegmentScope(card) && _styleInColorScope(card) && _styleInSlotScope(card);
@@ -22494,7 +22504,10 @@ function _applyStylesSearch() {
     const others = matchesQ && matchesTags && matchesEffects;
     if (others) { if (inUse) inUseCount++; else notInUseCount++; }
     const matchesInUse = !_stylesInUseFilter || (_stylesInUseFilter === 'in' ? inUse : !inUse);
-    const vis = others && matchesInUse;
+    const matches = others && matchesInUse;
+    const selected = _stylesSelected.has(card.dataset.name);
+    const vis = _stylesSelectedView === 'only' ? selected : matches || (selected && !_stylesSelectedView);
+    if (vis && !matches) _stylesSelectedHeld++;
     card.style.display = vis ? '' : 'none';
     if (vis) shown++;
     card.querySelectorAll('.style-card-color').forEach(el => el.classList.toggle('active', _activeFilterSlots.has(el.dataset.slotColor)));
@@ -22516,6 +22529,13 @@ function _applyStylesSearch() {
       notBtn.classList.toggle('active', _stylesInUseFilter === 'not');
     }
     if (notBadge) { notBadge.textContent = String(notInUseCount); notBadge.style.display = ''; }
+    const selBtn = document.getElementById('btn-styles-selected-filter');
+    if (selBtn) {
+      selBtn.style.display = _stylesSelected.size ? '' : 'none';
+      selBtn.classList.toggle('active', _stylesSelectedView === 'only');
+    }
+    const selBadge = document.getElementById('styles-selected-count');
+    if (selBadge) selBadge.textContent = String(_stylesSelected.size);
   }
   // Update active state on all tag chips across all cards
   document.querySelectorAll('.style-tag').forEach(el => {
@@ -22927,8 +22947,9 @@ function _renderActiveFilterChips() {
   if (!strip) return;
   // Search counts as a filter here, same as on the Sound Fonts side (B-156).
   const searchQ = (document.getElementById('styles-search')?.value || '').trim();
+  const selectedOnly = _stylesSelectedView === 'only';
   const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + creCount + helCount + segCount + colCount + _activeFilterSlots.size + _activeFilterSlotsMissing.size + _activeFilterEffects.size + _activeFilterEffectsMissing.size
-    + (searchQ ? 1 : 0) + (_stylesInUseFilter ? 1 : 0);
+    + (searchQ ? 1 : 0) + (_stylesInUseFilter ? 1 : 0) + (selectedOnly || _stylesSelectedHeld ? 1 : 0);
   if (!totalActive) {
     strip.style.display = 'none';
     strip.innerHTML = '';
@@ -22973,10 +22994,14 @@ function _renderActiveFilterChips() {
   const flags = _stylesInUseFilter
     ? chip(_stylesInUseFilter === 'in' ? 'In use' : 'Not in use', 'in-use', '', ' sf-active-filter-in-use')
     : '';
+  // [B-600] Selected is the one OR: it adds to what the filters show, and says why those are there.
+  const selectedChip = selectedOnly || _stylesSelectedHeld
+    ? chip(`Selected (${selectedOnly ? _stylesSelected.size : _stylesSelectedHeld})`, 'selected', '', ' sf-active-filter-in-use') : '';
   strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>`
-    + groups.join('<span class="sf-filter-join">and</span>')
-    + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
-    + flags
+    + (selectedOnly ? selectedChip : groups.join('<span class="sf-filter-join">and</span>')
+      + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
+      + flags
+      + (selectedChip ? '<span class="sf-filter-join">or</span>' + selectedChip : ''))
     + `<button class="styles-active-filter-clear" id="styles-clear-all-filters">Clear all</button>`;
   strip.querySelectorAll('[data-remove] .styles-active-filter-remove').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -23006,6 +23031,7 @@ function _renderActiveFilterChips() {
         case 'effect':  _activeFilterEffects.delete(v); break;
         case 'without': _activeFilterEffectsMissing.delete(v); break;
         case 'in-use':  _stylesInUseFilter = ''; break;
+        case 'selected': _stylesSelectedView = _stylesSelectedView === 'only' ? '' : 'hidden'; break;
       }
       _applyStylesSearch();
       _refreshOpenFacetDropdowns();
@@ -23025,6 +23051,11 @@ function _renderActiveFilterChips() {
 let _stylesInUseFilter = '';   // '' | 'in' | 'not'
 // Multi-select: style names, kept across rebuilds and filters, and the card a Shift range runs from. [B-582]
 let _stylesSelected = new Set();
+// Selected styles stay in the results, what matches OR is selected, whatever would hide them, as on
+// Sound Fonts. '' for that, 'only' for just them, 'hidden' once the chip's x takes them out.
+// The selection itself stays either way. [B-600]
+let _stylesSelectedView = '';
+let _stylesSelectedHeld = 0;   // how many are showing only because they are selected
 let _stylesAnchor   = null;
 // Name A-Z until the user picks another; reordering by drag is File order's alone.
 let _stylesSort = { key: 'name', dir: 'asc' };
@@ -26845,7 +26876,7 @@ function _syncStylesSelection() {
     const b = c.querySelector('.style-card-select-btn');
     if (b) b.innerHTML = on ? '&#10003;' : '';
   });
-  _syncStylesBulkBar();
+  _applyStylesSearch();   // who is showing can turn on who is selected [B-600]
 }
 function _stylesClearSelection() {
   _stylesSelected.clear();
@@ -28424,6 +28455,12 @@ document.getElementById('btn-styles-sort')?.addEventListener('click', e => {
   e.stopPropagation();
   _toggleStylesSortDropdown();
 });
+document.getElementById('btn-styles-selected-filter')?.addEventListener('click', e => {
+  e.stopPropagation();
+  _stylesSelectedView = _stylesSelectedView ? '' : 'only';
+  _applyStylesSearch();
+  _refreshOpenFacetDropdowns();
+});
 document.getElementById('btn-styles-in-use-filter')?.addEventListener('click', e => {
   e.stopPropagation();
   _stylesInUseFilter = _stylesInUseFilter === 'in' ? '' : 'in';
@@ -29748,6 +29785,10 @@ require(['vs/editor/editor.main'], function () {
       // Filter/search changes, opening entry details, tab switches, scroll,
       // and window focus loss all preserve selection.
       let _sfSelectedNames = new Set();
+      // '' keeps selected fonts in the results, 'only' shows just them, 'hidden' is the Selected chip's
+      // x taking them out. The selection itself stays either way. [B-600]
+      let _sfSelectedView = '';
+      let _sfSelectedHeld = 0;   // how many are showing only because they are selected
       // Shift-range anchor for the card grid. Set by the two actions that
       // actually select — ctrl/cmd-click and the corner checkbox — and never by
       // a plain click, which in this grid opens the entry rather than selecting.
@@ -30076,6 +30117,7 @@ require(['vs/editor/editor.main'], function () {
         _sfNewHeld = new Set();
         _sfNeedsReviewHeld = new Set();
         _sfInUseFilter = '';
+        _sfSelectedView = '';
         // [B-390] `silent` is for the one caller that clears in order to set something
         // else in the same breath. Rendering the empty state first would flash the
         // whole library for a frame on the way to six cards.
@@ -30181,25 +30223,18 @@ require(['vs/editor/editor.main'], function () {
           if (!_sfInUseFilter) return true;
           return _sfInUseFilter === 'in' ? inUseFonts.has(f.name) : !inUseFonts.has(f.name);
         };
-        // Text search is authoritative: a typed query gates EVERY card,
-        // selected or not. A search that matches nothing must show nothing
-        // (and fall through to the "No fonts match" empty state) rather than
-        // silently displaying a stale selection as if it were the result.
-        //
-        // Selection still overrides the TOGGLE filters (tags / creator /
-        // effects / needs-review / in-use): those are deliberate switches,
-        // and keeping selected cards visible while toggling them is the
-        // useful "keep this" behavior. Clearing the selection lets the
-        // toggle filters take over again. But selection does NOT override
-        // the search box — you type to narrow, so narrow it does.
-        // [B-390] Sits beside search, OUTSIDE the selection override, for the reason
+        // Selection overrides the filters and the search box: what matches OR is selected, so a
+        // bulk action never runs on what can't be seen, and the Selected chip says why those are
+        // there. [B-600]
+        // [B-390] Sits OUTSIDE the selection override, for the reason
         // given where it is declared: it is the answer to a question just asked.
         const matchesNameFilter = _sfInNameScope;   // [B-390] one definition, five callers
-        const matching = sorted.filter(f =>
-          matchesSearch(f) && matchesNameFilter(f) &&
-          (_sfSelectedNames.has(f.name) ||
-            (matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f) && matchesNewFilter(f)))
+        if (!_sfSelectedNames.size) _sfSelectedView = '';
+        const matchesFilters = (f) => matchesSearch(f) && matchesTagFilter(f) && matchesCreatorFilter(f) && matchesEffectsFilter(f) && matchesNeedsReviewFilter(f) && matchesInUseFilter(f) && matchesNewFilter(f);
+        const matching = sorted.filter(f => _sfSelectedView === 'only' ? _sfSelectedNames.has(f.name) :
+          matchesNameFilter(f) && ((_sfSelectedNames.has(f.name) && !_sfSelectedView) || matchesFilters(f))
         );
+        _sfSelectedHeld = matching.filter(f => !matchesFilters(f)).length;
         const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterTagsWithout.size > 0 || _sfActiveFilterCreatorsWithout.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfActiveFilterNames.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
         // Needs Review filter button: visible only when at least one entry
         // has the flag. Badge shows the count; button gets the active style
@@ -30282,6 +30317,13 @@ require(['vs/editor/editor.main'], function () {
             inUseBadge.style.display = 'none';
           }
         }
+        const selBtn = document.getElementById('btn-sf-selected-filter');
+        if (selBtn) {
+          selBtn.style.display = _sfSelectedNames.size ? '' : 'none';
+          selBtn.classList.toggle('active', _sfSelectedView === 'only');
+        }
+        const selBadge = document.getElementById('sf-selected-count');
+        if (selBadge) selBadge.textContent = String(_sfSelectedNames.size);
         const notInUseBtn = document.getElementById('btn-sf-not-in-use-filter');
         const notInUseBadge = document.getElementById('sf-not-in-use-count');
         if (notInUseBtn) {
@@ -33641,7 +33683,9 @@ require(['vs/editor/editor.main'], function () {
         // would push `total` past the >= 2 threshold below and show "Clear all" beside
         // a single chip.
         const namesActive = _sfActiveFilterNames.size ? 1 : 0;
-        const total = searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterTagsWithout.size + _sfActiveFilterCreatorsWithout.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + namesActive + needsReviewActive + inUseActive + newActive;
+        const selectedOnly = _sfSelectedView === 'only';
+        const selectedActive = selectedOnly || _sfSelectedHeld ? 1 : 0;   // [B-600] counted, as above
+        const total = selectedActive + searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterTagsWithout.size + _sfActiveFilterCreatorsWithout.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + namesActive + needsReviewActive + inUseActive + newActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -33702,6 +33746,9 @@ require(['vs/editor/editor.main'], function () {
           : '';
         // Shown with ANY active filter (2026-10-21): with only one it was hidden behind that chip's
         // small x, the harder target of the two.
+        const selectedChip = selectedActive
+          ? `<span class="styles-active-filter-chip sf-active-filter-in-use" data-selected="1">Selected (${selectedOnly ? _sfSelectedNames.size : _sfSelectedHeld})<button class="styles-active-filter-remove" data-filter-remove-selected="1" title="Remove">&#10005;</button></span>`
+          : '';
         const clearAll = total >= 1
           ? `<button class="styles-active-filter-clear" id="sf-clear-all-filters">Clear all</button>`
           : '';
@@ -33742,10 +33789,12 @@ require(['vs/editor/editor.main'], function () {
         // The boolean facets have no internal structure, so they are plain chips that
         // AND with everything else — which is what the gaps between groups already say.
         const flags = `${namesChip}${needsReviewChip}${newChip}${inUseChip}`;
+        // [B-600] Selected is the one OR: it adds to what the filters show, and says why those are there.
         strip.innerHTML = `<span class="styles-active-filters-label">Filtering by:</span>`
-                        + groups.join('<span class="sf-filter-join">and</span>')
-                        + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
-                        + flags + clearAll;
+                        + (selectedOnly ? selectedChip : groups.join('<span class="sf-filter-join">and</span>')
+                          + (groups.length && flags ? '<span class="sf-filter-join">and</span>' : '')
+                          + flags + (selectedChip ? '<span class="sf-filter-join">or</span>' + selectedChip : ''))
+                        + clearAll;
       };
       // Left click toggles the picked polarity and right click the WITHOUT one; setting either clears the
       // other, so a value is never both. The chip's x clears both. [B-564]
@@ -55965,6 +56014,11 @@ require(['vs/editor/editor.main'], function () {
           : new Set();
         _sfRenderGrid();
       });
+      document.getElementById('btn-sf-selected-filter')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _sfSelectedView = _sfSelectedView ? '' : 'only';
+        _sfRenderGrid();
+      });
       document.getElementById('btn-sf-in-use-filter')?.addEventListener('click', (e) => {
         e.stopPropagation();
         _sfInUseFilter = _sfInUseFilter === 'in' ? '' : 'in';
@@ -56149,6 +56203,13 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           _sfNewFilterOn = false;
           _sfNewHeld = new Set();
+          _sfRenderGrid();
+          return;
+        }
+        const selectedRemove = e.target.closest('[data-filter-remove-selected]');
+        if (selectedRemove) {
+          e.stopPropagation();
+          _sfSelectedView = _sfSelectedView === 'only' ? '' : 'hidden';
           _sfRenderGrid();
           return;
         }

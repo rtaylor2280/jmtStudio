@@ -59,8 +59,8 @@ function ok(name, cond, extra) {
   ok('it has one producer on window',
      /window\._sfShowNamesInLibrary = \(names, label\) =>/.test(html));
 
-  ok('it narrows like search, OUTSIDE the selection override',
-     /matchesSearch\(f\) && matchesNameFilter\(f\) &&/.test(html),
+  ok('it narrows OUTSIDE the selection override',
+     /matchesNameFilter\(f\) && \(\(_sfSelectedNames/.test(html),
      'inside the override, a stale selection would smuggle extra cards into the answer');
 
   ok('it counts as filtering', /_sfActiveFilterNames\.size > 0/.test(html));
@@ -122,17 +122,17 @@ function ok(name, cond, extra) {
 // a grep for "_sfActiveFilterNames" would have passed on the broken build too, since
 // the name appears five other places in the same function.
 {
-  const line = (html.match(/const total = searchActive \+[^;]+;/) || [])[0];
+  const line = (html.match(/const total = selectedActive \+ searchActive \+[^;]+;/) || [])[0];
   ok('the gate expression is findable', !!line, 'if this fails the shape changed — re-read it');
 
   const evalTotal = (names) => new Function(
     'searchActive', '_sfActiveFilterTags', '_sfActiveFilterCreators',
     '_sfActiveFilterEffects', '_sfActiveFilterEffectsMissing', '_sfActiveFilterNames',
     'namesActive', 'needsReviewActive', 'inUseActive', 'newActive',
-    '_sfActiveFilterTagsWithout', '_sfActiveFilterCreatorsWithout',   // [B-564]
+    '_sfActiveFilterTagsWithout', '_sfActiveFilterCreatorsWithout', 'selectedActive',   // [B-564] [B-600]
     `${line} return total;`)(
       0, { size: 0 }, { size: 0 }, { size: 0 }, { size: 0 },
-      { size: names }, names ? 1 : 0, 0, 0, 0, { size: 0 }, { size: 0 });
+      { size: names }, names ? 1 : 0, 0, 0, 0, { size: 0 }, { size: 0 }, 0);
 
   ok('a name filter ALONE opens the strip',
      evalTotal(4) >= 1,

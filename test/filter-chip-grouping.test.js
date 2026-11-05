@@ -50,7 +50,7 @@ function ok(name, cond, extra) {
 // ── the row, rendered for real ─────────────────────────────────────────────
 const render = (counts) => {
   const i = html.indexOf('const _group = (label, chipsHtml, count, joiner)');
-  const j = html.indexOf('+ flags + clearAll', i);
+  const j = html.indexOf('+ clearAll;', i);
   const body = html.slice(i, html.indexOf(';', j) + 1);
   const fn = new Function(
     'searchChip', 'tagChips', 'creatorChips', 'effectChips', 'effectMissingChips',
@@ -58,6 +58,7 @@ const render = (counts) => {
     '_sfActiveFilterTags', '_sfActiveFilterCreators', '_sfActiveFilterEffects',
     '_sfActiveFilterEffectsMissing', 'strip',
     'tagWithoutChips', 'creatorWithoutChips', '_sfActiveFilterTagsWithout', '_sfActiveFilterCreatorsWithout',   // [B-564]
+    'selectedOnly', 'selectedChip',   // [B-600] left undefined: no selection in these cases
     body + '; return strip.innerHTML;');
   const chip = (t) => `<span class="styles-active-filter-chip">${t}</span>`;
   const many = (n, p) => Array.from({ length: n }, (_, k) => chip(`${p}${k}`)).join('');
