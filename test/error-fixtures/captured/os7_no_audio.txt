@@ -1,0 +1,77 @@
+FAILED
+In file included from <OS>\sound\sound.h:146,
+                 from <OS>\ProffieOS.ino:437:
+<OS>\common\sd_card.h: In member function 'virtual void SDCard::Loop()':
+<OS>\common\sd_card.h:62:9: error: 'AudioStreamWork' has not been declared
+   62 |         AudioStreamWork::LockSD_nomount(true);
+      |         ^~~~~~~~~~~~~~~
+<OS>\common\sd_card.h:63:9: error: 'AudioStreamWork' has not been declared
+   63 |         AudioStreamWork::CloseAllOpenFiles();
+      |         ^~~~~~~~~~~~~~~
+<OS>\common\sd_card.h:66:9: error: 'AudioStreamWork' has not been declared
+   66 |         AudioStreamWork::LockSD_nomount(false);
+      |         ^~~~~~~~~~~~~~~
+<OS>\common\sd_card.h:71:9: error: 'AudioStreamWork' has not been declared
+   71 |         AudioStreamWork::LockSD_nomount(true);
+      |         ^~~~~~~~~~~~~~~
+<OS>\common\sd_card.h:73:9: error: 'AudioStreamWork' has not been declared
+   73 |         AudioStreamWork::LockSD_nomount(false);
+      |         ^~~~~~~~~~~~~~~
+In file included from <OS>\transitions\doeffect.h:5,
+                 from <OS>\ProffieOS.ino:571:
+<OS>\sound\hybrid_font.h: At global scope:
+<OS>\sound\hybrid_font.h:268:10: error: 'BufferedWavPlayer' was not declared in this scope
+  268 |   RefPtr<BufferedWavPlayer> hum_player_;
+      |          ^~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h:268:27: error: template argument 1 is invalid
+  268 |   RefPtr<BufferedWavPlayer> hum_player_;
+      |                           ^
+<OS>\sound\hybrid_font.h:269:10: error: 'BufferedWavPlayer' was not declared in this scope
+  269 |   RefPtr<BufferedWavPlayer> next_hum_player_;
+      |          ^~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h:269:27: error: template argument 1 is invalid
+  269 |   RefPtr<BufferedWavPlayer> next_hum_player_;
+      |                           ^
+<OS>\sound\hybrid_font.h:270:10: error: 'BufferedWavPlayer' was not declared in this scope
+  270 |   RefPtr<BufferedWavPlayer> swing_player_;
+      |          ^~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h:270:27: error: template argument 1 is invalid
+  270 |   RefPtr<BufferedWavPlayer> swing_player_;
+      |                           ^
+<OS>\sound\hybrid_font.h:271:10: error: 'BufferedWavPlayer' was not declared in this scope
+  271 |   RefPtr<BufferedWavPlayer> lock_player_;
+      |          ^~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h:271:27: error: template argument 1 is invalid
+  271 |   RefPtr<BufferedWavPlayer> lock_player_;
+      |                           ^
+<OS>\sound\hybrid_font.h:310:10: error: 'BufferedWavPlayer' was not declared in this scope
+  310 |   RefPtr<BufferedWavPlayer> PlayPolyphonic(const Effect::FileID& f)  {
+      |          ^~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h:310:27: error: template argument 1 is invalid
+  310 |   RefPtr<BufferedWavPlayer> PlayPolyphonic(const Effect::FileID& f)  {
+      |                           ^
+<OS>\sound\hybrid_font.h:323:10: error: 'BufferedWavPlayer' was not declared in this scope
+  323 |   RefPtr<BufferedWavPlayer> PlayPolyphonic(Effect* f)  {
+      |          ^~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h:323:27: error: template argument 1 is invalid
+  323 |   RefPtr<BufferedWavPlayer> PlayPolyphonic(Effect* f)  {
+      |                           ^
+<OS>\sound\hybrid_font.h:464:33: error: 'BufferedWavPlayer' was not declared in this scope
+  464 |   Effect::FileID getNext(RefPtr<BufferedWavPlayer> previous, Effect* next) {
+      |                                 ^~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h:464:50: error: template argument 1 is invalid
+  464 |   Effect::FileID getNext(RefPtr<BufferedWavPlayer> previous, Effect* next) {
+      |                                                  ^
+<OS>\sound\hybrid_font.h: In member function 'void HybridFont::Activate()':
+<OS>\sound\hybrid_font.h:202:5: error: 'SetupStandardAudio' was not declared in this scope
+  202 |     SetupStandardAudio();
+      |     ^~~~~~~~~~~~~~~~~~
+<OS>\sound\hybrid_font.h: In member function 'void HybridFont::Deactivate()':
+<OS>\sound\hybrid_font.h:259:18: error: request for member 'Free' in '((HybridFont*)this)->HybridFont::lock_player_', which is of non-class type 'int'
+  259 |     lock_player_.Free();
+      |                  ^~~~
+<OS>\sound\hybrid_font.h:260:17: error: request for member 'Free' in '((HybridFont*)this)->HybridFont::hum_player_', which is of non-class type 'int'
+  260 |     hum_player_.Free();
+      |                 ^~~~
+<OS>\sound\hybrid_font.h:261:22: error: request for member 'Free' in '((HybridFont*)this)->HybridFont::next_hum_player_', which is of non-class type 'int'
+  261 |     next_hum_player_.Free();

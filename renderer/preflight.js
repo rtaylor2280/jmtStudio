@@ -121,6 +121,8 @@
       // The selected OS version and board, for checks whose answer depends on
       // them. Absent is normal and must be handled as "cannot tell", never as a
       // default.
+      // The open config's file name. Empty is normal.
+      configName:  o.configName || '',
       versionName: o.versionName || '',
       board:       o.board || '',
       // [B-170] The selected USB type, e.g. 'cdc_webusb' or 'cdc_msc'. A BUILD
@@ -290,6 +292,9 @@
           title:    f.title || '',
           detail:   f.detail || '',
           items:    f.items || [],
+          // What the list shows when it says more than the bare name. Never compared by tests.
+          labels:   f.labels || null,
+          labelLead: f.labelLead || '',
           fix:      f.fix || null,
           // A finding may offer SEVERAL remedies where the right one is the user's call rather
           // than ours. An orphaned define can be a typo to replace, a leftover to delete, or

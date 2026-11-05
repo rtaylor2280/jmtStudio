@@ -14,6 +14,8 @@
 
 'use strict';
 
+const { resolve: _resolveMatrix } = require('./compileErrorMatrix');
+
 const _ANSI_RE = /\[[0-9;]*[A-Za-z]/g;
 function _stripAnsi(s) { return String(s).replace(_ANSI_RE, ''); }
 
@@ -234,6 +236,15 @@ function _translateKnownFailure(text, ctx) {
       || _translateHostOom(text);
 }
 
+// The matrix's answer as a message: where, what it means, what to do. Noise is never the
+// reason a build failed, so it translates to nothing.
+function _translateMatrix(text, ctx) {
+  const hit = _resolveMatrix(text, ctx && ctx.configText, ctx && ctx.stylesText, ctx && ctx.propFiles);
+  if (!hit || hit.severity === 'noise') return null;
+  const where = !hit.line ? '' : (hit.stopsAfter ? `Just before line ${hit.line}: ` : `Line ${hit.line}: `);
+  return [`${where}${hit.title}`, '', hit.meaning, '', hit.fix].join('\n');
+}
+
 function extractCompileError(raw, ctx) {
   const lines = _stripAnsi(raw).split(/\r?\n/);
   // Checked before the generic paths: when we can say what a failure MEANS, the
@@ -242,6 +253,8 @@ function extractCompileError(raw, ctx) {
   // so every existing caller and test keeps working without it. (2026-08-15)
   const translated = _translateKnownFailure(lines.join('\n'), ctx);
   if (translated) return translated;
+  const fromMatrix = _translateMatrix(lines.join('\n'), ctx);
+  if (fromMatrix) return fromMatrix;
   const errorLines = lines.filter(l =>
     / error: /.test(l) && !/ note: /.test(l) && !l.startsWith('>')
       && !_LD_EXIT_NOISE_RE.test(l)
@@ -312,4 +325,5 @@ module.exports = {
   _fallbackFailureSummary,
   _stripToolPathPrefix,
   _translateKnownFailure,
+  _translateMatrix,
 };

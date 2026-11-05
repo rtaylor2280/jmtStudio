@@ -1,0 +1,67 @@
+FAILED
+<OS>\config\my_config.h:19:1: error: 'Preset' does not name a type
+   19 | Preset presets[] = {
+      | ^~~~~~
+<OS>\config\my_config.h:27:1: error: 'BladeConfig' does not name a type
+   27 | BladeConfig blades[] = {
+      | ^~~~~~~~~~~
+<OS>\config\my_config.h:19:8: error: redefinition of 'Preset presets []'
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:19:8: note: 'Preset presets [2]' previously defined here
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:27:13: error: redefinition of 'BladeConfig blades []'
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:27:13: note: 'BladeConfig blades [1]' previously defined here
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:19:8: error: redefinition of 'Preset presets []'
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:19:8: note: 'Preset presets [2]' previously defined here
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:27:13: error: redefinition of 'BladeConfig blades []'
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:27:13: note: 'BladeConfig blades [1]' previously defined here
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:19:8: error: redefinition of 'Preset presets []'
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:19:8: note: 'Preset presets [2]' previously defined here
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:27:13: error: redefinition of 'BladeConfig blades []'
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:27:13: note: 'BladeConfig blades [1]' previously defined here
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:19:8: error: redefinition of 'Preset presets []'
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:19:8: note: 'Preset presets [2]' previously defined here
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:27:13: error: redefinition of 'BladeConfig blades []'
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:27:13: note: 'BladeConfig blades [1]' previously defined here
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:19:8: error: redefinition of 'Preset presets []'
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:19:8: note: 'Preset presets [2]' previously defined here
+   19 | Preset presets[] = {
+      |        ^~~~~~~
+<OS>\config\my_config.h:27:13: error: redefinition of 'BladeConfig blades []'
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:27:13: note: 'BladeConfig blades [1]' previously defined here
+   27 | BladeConfig blades[] = {
+      |             ^~~~~~

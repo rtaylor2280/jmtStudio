@@ -1,0 +1,18 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:389:
+<OS>\common\saber_base.h:347:17: error: operator '==' has no left operand
+  347 | #if NUM_BUTTONS == 0
+      |                 ^~
+In file included from <OS>\ProffieOS.ino:682:
+<OS>\props\saber.h:62:17: error: operator '==' has no left operand
+   62 | #if NUM_BUTTONS == 0
+      |                 ^~
+<OS>\props\saber.h:134:17: error: operator '==' has no left operand
+  134 | #if NUM_BUTTONS == 0
+      |                 ^~
+<OS>\props\saber.h:162:17: error: operator '==' has no left operand
+  162 | #if NUM_BUTTONS == 1
+      |                 ^~
+<OS>\props\saber.h:210:17: error: operator '==' has no left operand
+  210 | #if NUM_BUTTONS == 0
+      |                 ^~

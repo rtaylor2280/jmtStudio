@@ -1,0 +1,22 @@
+FAILED
+<OS>\config\my_config.h:23:26: error: 'GateBlue' was not declared in this scope; did you mean 'RareBlue'?
+   23 |     StylePtr<InOutHelper<GateBlue, 300, 800, Black>>(),
+      |                          ^~~~~~~~
+      |                          RareBlue
+<OS>\config\my_config.h:23:46: error: template argument 1 is invalid
+   23 |     StylePtr<InOutHelper<GateBlue, 300, 800, Black>>(),
+      |                                              ^~~~~
+<OS>\config\my_config.h:23:53: error: no matching function for call to 'StylePtr<<expression error> >()'
+   23 |     StylePtr<InOutHelper<GateBlue, 300, 800, Black>>(),
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+<OS>\styles\style_ptr.h:135:16: note: candidate: 'template<class STYLE> StyleFactory* StylePtr()'
+  135 | StyleAllocator StylePtr() {
+      |                ^~~~~~~~
+<OS>\styles\style_ptr.h:135:16: note:   template argument deduction/substitution failed:
+<OS>\config\my_config.h:23:53: error: template argument 1 is invalid
+   23 |     StylePtr<InOutHelper<GateBlue, 300, 800, Black>>(),
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+<OS>\styles\style_ptr.h:159:16: note: candidate: 'template<class STYLE> StyleFactory* StylePtr(const char*)'
+  159 | StyleAllocator StylePtr(const char* default_arguments) {
+      |                ^~~~~~~~
+<OS>\styles\style_ptr.h:159:16: note:   candidate expects 1 argument, 0 provided

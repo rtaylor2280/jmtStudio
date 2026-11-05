@@ -56,6 +56,24 @@
   // across presets is [B-366]. The finding points at the empty slot in the Styles
   // row, where the app already knows how to do this.
 
+  // A preset as a title names it. One with no name already reads "Preset 3".
+  const _presetName = (name, word = 'Preset') => (/^preset\s/i.test(name) ? name : `${word} ${name}`);
+
+  // A preset in a list: its position, as the Presets panel shows it, then its name if it has one.
+  const _presetEntry = ({ index, name }) => (/^preset\s/i.test(name) ? `${index}` : `${index}. "${name}"`);
+
+  // The list line for a card naming presets, from the names the check already holds.
+  const _presetList = (ctx, names) => {
+    const all = ((ctx.parsed && ctx.parsed.arrays) || []).flatMap(a => a.presets || []);
+    return {
+      labels: names.map((name) => {
+        const p = all.find(x => (x.displayName || '').trim() === name || `Preset ${x.index}` === name);
+        return p ? _presetEntry({ index: p.index, name }) : `"${name}"`;
+      }),
+      labelLead: names.length === 1 ? 'Preset to update' : 'Presets to update',
+    };
+  };
+
   const _stripForCount = s => String(s || '')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
@@ -126,7 +144,7 @@
           const name = (!nameRaw || nameRaw === (p.track || '').trim())
             ? `Preset ${p.index}`
             : nameRaw;
-          (isOver ? over : short).push({ name, actual: isOver ? slots : actual, array: arr.name });
+          (isOver ? over : short).push({ name, index: p.index, actual: isOver ? slots : actual, array: arr.name });
         }
       }
       if (!short.length && !over.length) return null;
@@ -138,7 +156,7 @@
       const bankNote = (list) => {
         const banks = [...new Set(list.map(s => s.array).filter(Boolean))];
         return (ctx.parsed.arrays || []).length > 1 && banks.length
-          ? `${banks.length === 1 ? 'All in' : 'Across'} ${banks.join(', ')}. `
+          ? (banks.length === 1 ? `In the ${banks[0]} bank. ` : `Across the ${banks.join(', ')} banks. `)
           : '';
       };
 
@@ -166,10 +184,11 @@
           // is an adversative and wants "but".
           title: `Your config has ${blades}, but `
                + `${one ? '1 preset has' : `${short.length} presets have`} ${countPhrase}.`,
-          detail: `${bankNote(short)}Every preset needs one style per blade, so this `
-                + `cannot compile. Open ${one ? 'that preset' : 'each preset'} in Presets and fill `
-                + `the empty ${slotWord} in the Styles row.`,
+          detail: `${bankNote(short)}Every preset needs one style per blade. Open `
+                + `${one ? 'it' : 'each one'} in Presets and fill the empty ${slotWord} in the Styles row.`,
           items: short.map(s => s.name),
+          labels: short.map(_presetEntry),
+          labelLead: one ? 'Preset to update' : 'Presets to update',
           fix: null,
           kind: 'under',
         });
@@ -201,10 +220,11 @@
           // is an adversative and wants "but".
           title: `Your config has ${blades}, but `
                + `${one ? '1 preset has' : `${over.length} presets have`} ${countPhrase}.`,
-          detail: `${bankNote(over)}Every preset needs one style per blade and no more, so this `
-                + `cannot compile. Open ${one ? 'that preset' : 'each preset'} in Presets and `
-                + `remove the extra ${extraWord} from the Styles row.`,
+          detail: `${bankNote(over)}Every preset needs one style per blade and no more. Open `
+                + `${one ? 'it' : 'each one'} in Presets and remove the extra ${extraWord} from the Styles row.`,
           items: over.map(s => s.name),
+          labels: over.map(_presetEntry),
+          labelLead: one ? 'Preset to update' : 'Presets to update',
           fix: null,
           kind: 'over',
         });
@@ -359,6 +379,7 @@
         if (!shared.length) {
           missing.push({
             index: p.index,
+            index: p.index,
             font: preflight.fontDir(font) || font,
             label: p.displayName || '',
             range: p.fontRange,
@@ -403,19 +424,19 @@
 
       return {
         findings: [{
-          title: `${req.via === 'menuspec'
-            ? "Your config's OS8 menu system (MENU_SPEC_TEMPLATE) requires a voicepack"
-            : 'Your prop requires a voicepack on ProffieOS 8'}, but `
-            // "but", same rule as the blade-count titles. [B-375] The requirement and its
-            // violation in one sentence is an adversative. The voicepack title carried the
-            // identical construction and was found by sweeping for the SHAPE rather than the
-            // phrase - which is what the entry asked for. The 'no prop is included' title below
-            // already said "but", so the house style was right in one place and not the others.
-            + `${one ? 'this preset does' : `${missing.length} presets do`} not list a shared folder.`,
-          detail: `Unless ${one ? 'that font contains its' : 'those fonts contain their'} own copy of the `
-            + `voicepack, the saber will announce "voice pack not found" every time you switch to `
-            + `${one ? 'it' : 'them'}. ${cardLine}`,
+          // "but", same rule as the blade-count titles. [B-375] The requirement and its violation
+          // in one sentence is an adversative.
+          title: `${one ? 'This preset needs' : `${missing.length} presets need`} a voicepack, but `
+            + `${one ? 'it does' : 'they do'} not list a shared folder.`,
+          detail: `${req.via === 'menuspec'
+              ? 'Your config turns on the ProffieOS 8 on-saber menus (MENU_SPEC_TEMPLATE), and those menus speak through a voicepack.'
+              : 'Your prop needs a voicepack on ProffieOS 8.'} `
+            + `Without a shared folder, the saber will say "voice pack not found" every time you switch `
+            + `to ${one ? 'this preset' : 'these presets'}, unless ${one ? 'its font has' : 'their fonts have'} `
+            + `a copy of the voicepack. ${cardLine}`,
           items: missing.map(p => p.label ? `${p.font} (${p.label})` : p.font),
+          labels: missing.map(p => _presetEntry({ index: p.index, name: p.label || `Preset ${p.index}` })),
+          labelLead: one ? 'Preset to update' : 'Presets to update',
           fix: {
             label: one ? `Add ;${repairName} to 1 preset` : `Add ;${repairName} to ${missing.length} presets`,
             // Returns edits; the caller batches every accepted fix into ONE atomic
@@ -484,22 +505,34 @@
     { prefix: 'SABERSENSE', headers: ['saber_sabersense_buttons.h'] },
   ];
 
+  // The defines in this config that belong to a known prop family, one entry per family.
+  function _propOwnedDefines(clean) {
+    const present = [];
+    for (const { prefix, headers } of PROP_DEFINE_OWNERS) {
+      const re = new RegExp('^\\s*#\\s*define\\s+(' + prefix + '_[A-Z0-9_]+)', 'gm');
+      const hits = [];
+      let m;
+      while ((m = re.exec(clean)) !== null) hits.push(m[1]);
+      if (hits.length) present.push({ prefix, headers, hits });
+    }
+    return present;
+  }
+
+  // True when the config has no prop include, so prop-defines-without-prop owns these defines.
+  function _noPropIncluded(clean) {
+    const propBody = preflight.sectionBody(clean, 'CONFIG_PROP');
+    return !(propBody && /#\s*include\s*[<"][^">]+[">]/.test(propBody));
+  }
+
   preflight.register({
     id: 'prop-defines-without-prop',
     severity: 'warn',
     title: 'Prop defines with no prop',
-    run(ctx) {
+    async run(ctx) {
       const clean = ctx.cleanText;
       if (!clean) return null;
 
-      const present = [];
-      for (const { prefix, headers } of PROP_DEFINE_OWNERS) {
-        const re = new RegExp('^\\s*#\\s*define\\s+(' + prefix + '_[A-Z0-9_]+)', 'gm');
-        const hits = [];
-        let m;
-        while ((m = re.exec(clean)) !== null) hits.push(m[1]);
-        if (hits.length) present.push({ prefix, headers, hits });
-      }
+      const present = await _propGroups(ctx);
       if (!present.length) return null;
 
       // ABSTAIN ON A FRAGMENT. Seven of thirteen wild "findings" turned out to be
@@ -524,20 +557,201 @@
 
       // Aggregated to ONE finding per prefix. Afrojedi's config would otherwise
       // produce two dozen identical rows, and attention is the scarce thing.
-      return {
-        findings: present.map(({ prefix, headers, hits }) => ({
-          title: `Your config sets ${hits.length} ${prefix}_ option${hits.length === 1 ? '' : 's'}, `
-               + `but no prop is included.`,
-          detail: `Without a prop, ProffieOS uses its default and every one of these does nothing — `
-                + `the saber will boot, and none of the controls you set up will work. Add the prop `
-                + `to the CONFIG_PROP section; for these options that is usually ${headers[0]}.`,
-          items: hits.slice(0, 3),
-          fix: null,
-        })),
-      };
+      const hits = present.flatMap(g => g.hits);
+      const rows = [];
+      for (const name of hits) rows.push(await _defineRow(ctx, name));
+      const one = hits.length === 1;
+      const { prop, prefix } = present[0];
+      const props = present.map(g => g.prop);
+      const lastOr = `${props.slice(0, -1).join(', ')} or ${props[props.length - 1]}`;
+      return { findings: [{
+        title: present.length > 1
+          ? `Your config sets options for ${props.length} different props, but no prop is included.`
+          : prefix
+            ? `Your config sets ${hits.length} ${prefix}_ option${one ? '' : 's'}, but no prop is included.`
+            : `Your config sets ${one ? 'an option' : `${hits.length} options`} for ${prop}, but no prop is included.`,
+        detail: `Without a prop, ProffieOS uses its default and ignores ${one ? 'it' : 'these'}. The config `
+              + `will compile, but the saber may not behave as you expect. `
+              + (present.length > 1
+                ? `To use them, add the prop you want to the CONFIG_PROP section: ${lastOr}. Options for `
+                + `any other prop stay ignored.`
+                : `To use ${one ? 'it' : 'them'}, add ${prop} to the CONFIG_PROP section.`),
+        items: hits.slice(0, 3),
+        labels: [],
+        rows,
+        fix: null,
+      }] };
     },
   });
 
+
+  // Defines nothing in the selected version reads with this config's prop.
+  async function _orphanDefines(ctx) {
+    const clean = ctx.cleanText;
+    const orphans = [];
+    for (const name of ctx.defines) {
+      if (_BUILD_LEVEL_DEFINES.has(name)) continue;
+      // A FUNCTION-LIKE MACRO IS THE USER'S OWN CODE, NOT AN OPTION. `#define FIRE1PTR(NUM,
+      // DELAY)` is a helper someone wrote to build their own styles; no prop was ever going to
+      // read it, so "nothing reads this, here is Delete" is both wrong and alarming. Measured on
+      // a real config 2026-10-16, where it accused FIRE1PTR and FIRE1_DELAY alongside two
+      // genuine orphans. The distinguisher is the open bracket immediately after the name,
+      // which is what makes a define a macro rather than a value.
+      if (new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + name + '\\(', 'm').test(clean)) continue;
+      if (await _treeHasName(ctx, name)) continue;
+      // A define the config uses ITSELF is correct and read by nobody in the OS tree - a
+      // value referenced from the blade array, or a flag the user tests in their own styles.
+      const uses = (clean.match(new RegExp('\\b' + name + '\\b', 'g')) || []).length;
+      const defs = (clean.match(new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + name + '\\b', 'gm')) || []).length;
+      if (uses > defs) continue;
+      orphans.push(name);
+    }
+    return orphans;
+  }
+
+  // The props in the selected version that read a name. prop_base.h is every prop's base class,
+  // so it says nothing about which one is wanted.
+  async function _propsReading(ctx, name) {
+    const index = await _treeIndex(ctx);
+    let files = [];
+    if (index) {
+      const e = index.names[name];
+      files = e ? e.f.map(i => index.files[i]) : [];
+    } else {
+      const hits = await ctx.searchVersionFiles(ctx.versionName, name);
+      files = hits && hits.ok && Array.isArray(hits.results)
+        ? hits.results.filter(r => r && r.type !== 'dir').map(r => r.path) : [];
+    }
+    return files.map(f => (String(f).replace(/\\/g, '/').match(/(^|\/)props\/([^/]+\.h)$/i) || [])[2])
+      .filter(f => f && !/^prop_base\.h$/i.test(f));
+  }
+
+  // The defines that belong to a prop this config does not have, one entry per prop. The selected
+  // version says which prop reads each. With no version to ask, the known families stand in.
+  async function _propGroups(ctx) {
+    const clean = ctx.cleanText;
+    if (!ctx.versionName || !(await _searchIsTrustworthy(ctx))) {
+      return _propOwnedDefines(clean).map(({ prefix, headers, hits }) => ({ prop: headers[0], prefix, hits }));
+    }
+    const readers = new Map();   // define -> props
+    for (const name of await _orphanDefines(ctx)) {
+      const props = await _propsReading(ctx, name);
+      if (props.length) readers.set(name, new Set(props));
+    }
+    // A prop covers what it includes, so the fewest props that cover every define is the advice.
+    // Most defines first; on a tie the prop that pulls in the least.
+    const reach = new Map();
+    for (const props of readers.values()) {
+      for (const f of props) if (!reach.has(f)) reach.set(f, await _propReach(ctx, f));
+    }
+    const left = new Set(readers.keys());
+    const groups = [];
+    while (left.size) {
+      const covers = (f) => [...left].filter(n => [...readers.get(n)].some(r => reach.get(f).has(r)));
+      const best = [...reach.keys()].sort((x, y) =>
+        covers(y).length - covers(x).length || reach.get(x).size - reach.get(y).size || x.localeCompare(y))[0];
+      const hits = covers(best);
+      if (!hits.length) break;
+      hits.forEach(n => left.delete(n));
+      groups.push({ prop: best, hits });
+    }
+    return groups;
+  }
+
+  // A prop file and every prop file it includes.
+  async function _propReach(ctx, file) {
+    const seen = new Set();
+    const queue = [file];
+    while (queue.length) {
+      const f = queue.pop();
+      if (seen.has(f)) continue;
+      seen.add(f);
+      let res = null;
+      try { res = await ctx.readVersionFile(ctx.versionName, `ProffieOS/props/${f}`); } catch { res = null; }
+      if (!res || !res.ok || !res.content) continue;
+      for (const m of preflight.stripComments(res.content).matchAll(/#\s*include\s*"(?:[^"]*\/)?([^"/]+\.h)"/g)) queue.push(m[1]);
+    }
+    return seen;
+  }
+
+  // One define as a row: its name, where it is, and Disable and Delete.
+  async function _defineRow(ctx, name) {
+    const suggestion = _suggestFor(name, await _familyNames(ctx, name.split('_')[0]));
+    const where = _defineLines(ctx.text, name);
+    // Renaming the define wherever it is defined. Shared by the two ways a new name can
+    // arrive: typed into the row's own editor, or taken from the suggestion below it.
+    const renameTo = (c, value) => {
+      const edits = [];
+      for (const w of _defineLines(c.text, name)) {
+        const col = w.text.indexOf(name);
+        if (col < 0) continue;
+        edits.push({ startLine: w.line, startCol: col,
+                     endLine: w.line, endCol: col + name.length, text: value });
+      }
+      return edits;
+    };
+
+    return {
+      label: name,
+      // Static, so the row reads as the line it came from and the keyword stays out of the
+      // field the user is editing.
+      prefix: '#define',
+      note: where.length
+        ? (where.length === 1 ? `line ${where[0].line}`
+                              : `lines ${where.map(w => w.line).join(', ')}`)
+        : '',
+      // TWO SEPARATE OFFERS, because they are different acts. The editor is the user
+      // supplying a name we do not have; the suggestion is us proposing one, and it only
+      // appears when there IS a near match. Pre-filling the editor with the suggestion would
+      // merge them and make taking our guess the path of least resistance - the same call the
+      // sound-font import makes in its own note.
+      rename: {
+        placeholder: 'define name',
+        hint: 'Correct a misspelled name and re-check',
+        plan: renameTo,
+      },
+      suggest: suggestion ? { name: suggestion, plan: renameTo } : null,
+      fixes: [
+        {
+          label: 'Disable',
+          hint: 'Comment out the line but leave it in your config',
+          // A PLAIN `//`, not the preset list's `@jmt-disabled` marker. That marker exists
+          // because the preset list has to find those entries again and render them as
+          // disabled; a commented-out define is just a commented-out line, and the user
+          // reads it in the editor rather than through a UI that has to parse it back.
+          // Indentation is preserved so the line stays where it sits in its block.
+          plan(c) {
+            const edits = [];
+            for (const w of _defineLines(c.text, name)) {
+              const indent = (w.text.match(/^[ \t]*/) || [''])[0];
+              edits.push({ startLine: w.line, startCol: 0,
+                           endLine: w.line, endCol: w.text.length,
+                           text: `${indent}//${w.text.slice(indent.length)}` });
+            }
+            return edits;
+          },
+        },
+        {
+          label: 'Delete',
+          hint: 'Remove the line from your config',
+          plan(c) {
+            const edits = [];
+            const total = String(c.text || '').split('\n').length;
+            for (const w of _defineLines(c.text, name)) {
+              // The whole line including its break, so deleting does not leave a blank where
+              // the define was. The last line of the file has no break to take.
+              if (w.line < total) {
+                edits.push({ startLine: w.line, startCol: 0, endLine: w.line + 1, endCol: 0, text: '' });
+              } else {
+                edits.push({ startLine: w.line, startCol: 0, endLine: w.line, endCol: w.text.length, text: '' });
+              }
+            }
+            return edits;
+          },
+        },
+      ],
+    };
+  }
 
   // ── A define that nothing in the selected OS version reads ───────────────
   //
@@ -844,27 +1058,13 @@
       // The prop the judgement was made against. ProffieOS.ino falls back to props/saber.h when a
       // config includes none, so there is always one to name - and naming it is the point: the
       // answer is only true for this version WITH this prop.
-      const _propFile = (vpkPropIncludes(ctx.text).map(p => p.split('/').pop()).filter(Boolean)[0])
+      const _propFile = (vpkPropIncludes(ctx.text).map(p => p.split('/').pop())
+        .filter(f => f && !/^my_config\.h$/i.test(f))[0])
         || 'saber.h';
 
-      const orphans = [];
-      for (const name of ctx.defines) {
-        if (_BUILD_LEVEL_DEFINES.has(name)) continue;
-        // A FUNCTION-LIKE MACRO IS THE USER'S OWN CODE, NOT AN OPTION. `#define FIRE1PTR(NUM,
-        // DELAY)` is a helper someone wrote to build their own styles; no prop was ever going to
-        // read it, so "nothing reads this, here is Delete" is both wrong and alarming. Measured on
-        // a real config 2026-10-16, where it accused FIRE1PTR and FIRE1_DELAY alongside two
-        // genuine orphans. The distinguisher is the open bracket immediately after the name,
-        // which is what makes a define a macro rather than a value.
-        if (new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + name + '\\(', 'm').test(clean)) continue;
-        if (await _treeHasName(ctx, name)) continue;
-        // A define the config uses ITSELF is correct and read by nobody in the OS tree - a
-        // value referenced from the blade array, or a flag the user tests in their own styles.
-        const uses = (clean.match(new RegExp('\\b' + name + '\\b', 'g')) || []).length;
-        const defs = (clean.match(new RegExp('^[ \\t]*#[ \\t]*define[ \\t]+' + name + '\\b', 'gm')) || []).length;
-        if (uses > defs) continue;
-        orphans.push(name);
-      }
+      const ownedByPropCard = new Set(_noPropIncluded(clean)
+        ? (await _propGroups(ctx)).flatMap(g => g.hits) : []);
+      const orphans = (await _orphanDefines(ctx)).filter(name => !ownedByPropCard.has(name));
       if (!orphans.length) return null;
 
       // ONE MESSAGE, A LIST UNDERNEATH - the shape the export-conflict dialog uses. The
@@ -874,83 +1074,7 @@
       // Splitting this into one finding per define said the same sentence five times and buried
       // the single fact they share.
       const rows = [];
-      for (const name of orphans) {
-        const suggestion = _suggestFor(name, await _familyNames(ctx, name.split('_')[0]));
-        const where = _defineLines(ctx.text, name);
-        // Renaming the define wherever it is defined. Shared by the two ways a new name can
-        // arrive: typed into the row's own editor, or taken from the suggestion below it.
-        const renameTo = (c, value) => {
-          const edits = [];
-          for (const w of _defineLines(c.text, name)) {
-            const col = w.text.indexOf(name);
-            if (col < 0) continue;
-            edits.push({ startLine: w.line, startCol: col,
-                         endLine: w.line, endCol: col + name.length, text: value });
-          }
-          return edits;
-        };
-
-        rows.push({
-          label: name,
-          // Static, so the row reads as the line it came from and the keyword stays out of the
-          // field the user is editing.
-          prefix: '#define',
-          note: where.length
-            ? (where.length === 1 ? `line ${where[0].line}`
-                                  : `lines ${where.map(w => w.line).join(', ')}`)
-            : '',
-          // TWO SEPARATE OFFERS, because they are different acts. The editor is the user
-          // supplying a name we do not have; the suggestion is us proposing one, and it only
-          // appears when there IS a near match. Pre-filling the editor with the suggestion would
-          // merge them and make taking our guess the path of least resistance - the same call the
-          // sound-font import makes in its own note.
-          rename: {
-            placeholder: 'define name',
-            hint: 'Correct a misspelled name and re-check',
-            plan: renameTo,
-          },
-          suggest: suggestion ? { name: suggestion, plan: renameTo } : null,
-          fixes: [
-            {
-              label: 'Disable',
-              hint: 'Comment out the line but leave it in your config',
-              // A PLAIN `//`, not the preset list's `@jmt-disabled` marker. That marker exists
-              // because the preset list has to find those entries again and render them as
-              // disabled; a commented-out define is just a commented-out line, and the user
-              // reads it in the editor rather than through a UI that has to parse it back.
-              // Indentation is preserved so the line stays where it sits in its block.
-              plan(c) {
-                const edits = [];
-                for (const w of _defineLines(c.text, name)) {
-                  const indent = (w.text.match(/^[ \t]*/) || [''])[0];
-                  edits.push({ startLine: w.line, startCol: 0,
-                               endLine: w.line, endCol: w.text.length,
-                               text: `${indent}//${w.text.slice(indent.length)}` });
-                }
-                return edits;
-              },
-            },
-            {
-              label: 'Delete',
-              hint: 'Remove the line from your config',
-              plan(c) {
-                const edits = [];
-                const total = String(c.text || '').split('\n').length;
-                for (const w of _defineLines(c.text, name)) {
-                  // The whole line including its break, so deleting does not leave a blank where
-                  // the define was. The last line of the file has no break to take.
-                  if (w.line < total) {
-                    edits.push({ startLine: w.line, startCol: 0, endLine: w.line + 1, endCol: 0, text: '' });
-                  } else {
-                    edits.push({ startLine: w.line, startCol: 0, endLine: w.line, endCol: w.text.length, text: '' });
-                  }
-                }
-                return edits;
-              },
-            },
-          ],
-        });
-      }
+      for (const name of orphans) rows.push(await _defineRow(ctx, name));
 
       const n = rows.length;
       return {
@@ -973,9 +1097,9 @@
           // and prerequisites are enforced with #error: jmt_fett263_wrapper.h:91 stops the build
           // when JMT_SWING_ON_BLOCK has no blade detect method. Misspell BLADE_DETECT_PIN there
           // and the compile fails. The promise was reachable and false.
-          detail: `On their own these do nothing. If one is a misspelling, the define you meant `
-                + `is missing, which can change how the saber behaves or stop the build where `
-                + `something else requires it.`,
+          detail: `${n === 1 ? 'This will be ignored. If it is a misspelling' : 'These will be ignored. If one is a misspelling'}, `
+                + `the define you meant is missing, which can change how the saber behaves or stop `
+                + `the build where something else requires it.`,
           rows,
         }],
       };
@@ -1220,6 +1344,7 @@
                     ? ` Your ProffieOS version provides: ${[...fromOs].sort().join(', ')}.`
                     : ''),
           items: presets,
+          ..._presetList(ctx, presets),
           fix: fixable ? {
             label: `Change to ${suggestion}`,
             // Rewrites the NAME only, never the template arguments or the call, and
@@ -1308,6 +1433,229 @@
     return out;
   }
 
+  const _lineOf = (text, at) => String(text).slice(0, at).split('\n').length;
+
+  // Where an #ifdef is: its line in the config, or the Style Library when the config has none.
+  function _ifdefWhere(ctx, guard) {
+    const i = ctx.cleanText.split('\n').findIndex(l => new RegExp(`^\\s*#\\s*ifdef\\s+${guard}\\b`).test(l));
+    return i < 0 ? ' in your Style Library' : ` on line ${i + 1}`;
+  }
+
+  // Where a preset's raw text sits in the document. Two presets can be identical, so the line
+  // the parser recorded picks the right one.
+  function _rawOffset(text, p) {
+    let at = -1, first = -1;
+    while ((at = String(text).indexOf(p.raw, at + 1)) >= 0) {
+      if (first < 0) first = at;
+      if (_lineOf(text, at) === p.startLine) return at;
+    }
+    return first;
+  }
+
+  // Where something is, as it reads in a title.
+  function _onLines(lines) {
+    if (lines.length === 1) return `line ${lines[0]}`;
+    if (lines.length > 6) return `${lines.length} lines, starting at line ${lines[0]}`;
+    return `lines ${lines.slice(0, -1).join(', ')} and ${lines[lines.length - 1]}`;
+  }
+
+  // A zero-width edit at an absolute offset.
+  function _insertAt(text, abs, insert) {
+    const before = String(text).slice(0, abs);
+    const line = before.split('\n').length;
+    const col = abs - (before.lastIndexOf('\n') + 1);
+    return { startLine: line, startCol: col, endLine: line, endCol: col, text: insert };
+  }
+
+  // Comments dropped; a string, a word, a preprocessor line or a single character each make
+  // one token carrying its offsets.
+  function _codeTokens(src) {
+    const toks = [];
+    let i = 0, lineStart = true;
+    const n = src.length;
+    while (i < n) {
+      const c = src[i], d = src[i + 1];
+      if (c === '\n') { lineStart = true; i++; continue; }
+      if (/\s/.test(c)) { i++; continue; }
+      if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+      if (c === '/' && d === '*') {
+        i += 2;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+        i += 2; continue;
+      }
+      const start = i;
+      if (c === '#' && lineStart) {
+        while (i < n && src[i] !== '\n') i++;
+        toks.push({ kind: 'pp', text: src.slice(start, i), start, end: i });
+      } else if (c === '"') {
+        i++;
+        while (i < n && src[i] !== '"' && src[i] !== '\n') { if (src[i] === '\\') i++; i++; }
+        i++;
+        toks.push({ kind: 'str', text: src.slice(start, i), start, end: i });
+      } else if (/[A-Za-z_0-9]/.test(c)) {
+        while (i < n && /[A-Za-z_0-9.]/.test(src[i])) i++;
+        toks.push({ kind: 'word', text: src.slice(start, i), start, end: i });
+      } else {
+        i++;
+        toks.push({ kind: 'ch', text: c, start, end: i });
+      }
+      lineStart = false;
+    }
+    return toks;
+  }
+
+  // The first place a preset's parts run together: { at, after }, or null. A preset is
+  // font, track, styles, name, so a string or a closed style at the top level has to be
+  // followed by a comma or the end of the preset.
+  //
+  // "a" "b" is legal C++ and joins into one string, so two strings together only count when
+  // they sit in the font and the next part is not the track. A preprocessor line can hide
+  // part of a preset, so a preset with one in it says nothing.
+  function _presetCommaGap(raw) {
+    let toks = _codeTokens(String(raw || ''));
+    if (toks.some(t => t.kind === 'pp')) return null;
+    if (toks[0]?.text === '{') toks = toks.slice(1, -1);
+
+    const label = (field) => (field === 0 ? 'its font' : field === 1 ? 'its track' : `style ${field - 1}`);
+    let depth = 0, angle = 0, field = 0;
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i], next = toks[i + 1];
+      if (t.kind === 'ch' && '({['.includes(t.text)) depth++;
+      if (t.kind === 'ch' && ')}]'.includes(t.text)) depth--;
+      if (depth !== 0) continue;
+      if (t.kind === 'ch' && t.text === '<') angle++;
+      if (t.kind === 'ch' && t.text === '>') angle--;
+      if (t.kind === 'ch' && t.text === ',') { if (angle === 0) field++; continue; }
+      if (!next || (next.kind === 'ch' && (next.text === ',' || next.text === '}'))) continue;
+      if (t.kind !== 'str' && !(t.kind === 'ch' && t.text === ')')) continue;
+      if (t.kind === 'str' && next.kind === 'str') {
+        if (field !== 0) continue;
+        const comma = toks.findIndex((x, j) => j > i && x.kind === 'ch' && x.text === ',');
+        if (comma < 0 || toks[comma + 1]?.kind === 'str') continue;
+        return { at: t.end, after: label(field) };
+      }
+      if (next.kind === 'str' || next.kind === 'word' || next.text === '&') {
+        return { at: t.end, after: label(field) };
+      }
+    }
+    return null;
+  }
+
+  // Two presets with nothing between them, and a list that does not end in };
+  function _arrayCommaGaps(text) {
+    const toks = _codeTokens(String(text || ''));
+    const gaps = [];
+    for (let i = 0; i < toks.length; i++) {
+      if (toks[i].text !== 'Preset' || toks[i + 1]?.kind !== 'word' || toks[i + 2]?.text !== '[') continue;
+      const open = toks.findIndex((t, j) => j > i && t.text === '{');
+      if (open < 0) break;
+      let depth = 0, index = 0;
+      for (let j = open; j < toks.length; j++) {
+        const t = toks[j];
+        if (t.kind === 'pp') { if (depth === 1) break; continue; }
+        if (t.kind !== 'ch') continue;
+        if (t.text === '{') depth++;
+        if (t.text === '}') {
+          depth--;
+          if (depth === 0) {
+            const after = toks[j + 1];
+            if (after && !(after.kind === 'ch' && after.text === ';')) {
+              gaps.push({ array: toks[i + 1].text, end: after.kind === 'ch' ? 'early' : 'semicolon', at: t.end });
+            }
+            break;
+          }
+          if (depth === 1) {
+            if (toks[j + 1]?.kind === 'ch' && toks[j + 1].text === '{') {
+              gaps.push({ array: toks[i + 1].text, index, at: t.end });
+            }
+            index++;
+          }
+        }
+      }
+    }
+    return gaps;
+  }
+
+  // One row per BladeConfig entry: { line, blades }. blades is null when the row cannot be
+  // counted. Commas inside <> and () belong to a blade, so only those at the row's own level
+  // divide it.
+  function _bladeConfigRows(text) {
+    const toks = _codeTokens(String(text || ''));
+    const rows = [];
+    for (let i = 0; i < toks.length; i++) {
+      if (toks[i].text !== 'BladeConfig' || toks[i + 1]?.kind !== 'word' || toks[i + 2]?.text !== '[') continue;
+      const open = toks.findIndex((t, j) => j > i && t.text === '{');
+      if (open < 0) break;
+      let depth = 0;
+      for (let j = open; j < toks.length; j++) {
+        const t = toks[j];
+        if (t.kind !== 'ch') continue;
+        if (t.text === '{') {
+          depth++;
+          if (depth === 2) {
+            const row = _readBladeRow(toks, j);
+            rows.push({ line: _lineOf(text, t.start), blades: row.blades });
+            j = row.end;
+            depth--;
+          }
+        } else if (t.text === '}') {
+          depth--;
+          if (depth === 0) break;
+        }
+      }
+    }
+    return rows;
+  }
+
+  function _readBladeRow(toks, open) {
+    const args = [[]];
+    let brace = 0, paren = 0, angle = 0, j = open + 1, bad = false;
+    for (; j < toks.length; j++) {
+      const t = toks[j];
+      if (t.kind === 'pp') bad = true;
+      if (t.kind === 'ch') {
+        if (t.text === '}' && brace === 0) break;
+        if (t.text === '{') brace++;
+        if (t.text === '}') brace--;
+        if (t.text === '(') paren++;
+        if (t.text === ')') paren--;
+        if (t.text === '<') angle++;
+        if (t.text === '>') angle--;
+        if (t.text === ',' && !brace && !paren && !angle) { args.push([]); continue; }
+      }
+      args[args.length - 1].push(t);
+    }
+    const end = args.findIndex(a => a[0]?.text === 'CONFIGARRAY');
+    if (bad || end < 1) return { blades: null, end: j };
+    const blades = args.slice(1, end);
+    return { blades: blades.every(a => a.some(t => t.text === '(')) ? blades.length : null, end: j };
+  }
+
+  // Offsets of curly quotes outside comments and strings. A string ends at its closing quote
+  // or the end of the line, so one stray quote cannot hide the rest of the file.
+  function _curlyQuotes(src) {
+    const hits = [];
+    let i = 0;
+    const n = src.length;
+    while (i < n) {
+      const c = src[i], d = src[i + 1];
+      if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+      if (c === '/' && d === '*') {
+        i += 2;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+        i += 2; continue;
+      }
+      if (c === '"') {
+        i++;
+        while (i < n && src[i] !== '"' && src[i] !== '\n') { if (src[i] === '\\') i++; i++; }
+        i++; continue;
+      }
+      if ('\u201C\u201D\u201E\u201F\u2018\u2019'.includes(c)) hits.push(i);
+      i++;
+    }
+    return hits;
+  }
+
   preflight.register({
     id: 'preset-delimiters',
     severity: 'block',
@@ -1336,6 +1684,7 @@
         const clean = _balanceStrip(ctx.text);
         const re = /\bPreset\s+[\w-]*\s*\[\s*\]\s*=\s*\{/g;
         let m;
+        const unclosed = [];
         while ((m = re.exec(clean)) !== null) {
           let depth = 0, closed = false;
           for (let i = m.index + m[0].length - 1; i < clean.length; i++) {
@@ -1344,11 +1693,15 @@
             else if (ch === '}') { depth--; if (depth === 0) { closed = true; break; } }
           }
           if (closed) continue;
-          const line = clean.slice(0, m.index).split('\n').length;
+          unclosed.push(clean.slice(0, m.index).split('\n').length);
+        }
+        if (unclosed.length) {
+          const one = unclosed.length === 1;
           findings.push({
-            title: `The preset list starting on line ${line} never closes.`,
-            detail: 'Everything after it reads as part of it, so the compiler will report the '
-                  + 'problem a long way from the real mistake — usually inside a later preset. '
+            title: one ? `The preset list starting on line ${unclosed[0]} never closes.`
+                       : `The preset lists starting on ${_onLines(unclosed)} never close.`,
+            detail: 'The compiler keeps reading everything below as part of the list and reports '
+                  + 'the error somewhere further down, often nowhere near the missing brace. '
                   + 'Check that every preset ends with }, and that the list itself ends with };',
             items: [],
             fix: null,
@@ -1360,6 +1713,8 @@
       }
 
       if (!(ctx.parsed.arrays || []).length) return null;
+      // One card per kind of fault, however many presets have it, so the explanation shows once.
+      const commas = [], unbalanced = [];
       for (const arr of ctx.parsed.arrays) {
         // The parser hands back the array body it already located. If it could not
         // read the array at all there is nothing to count, and guessing at the
@@ -1371,56 +1726,16 @@
         for (const p of presets) {
           if (!p.raw) continue;
 
-          // ── (b) THE MISSING COMMA, WHICH IS THE HEADLINE CASE ───────────────
-          // LiamSaber.h, 2026-07-24: a missing `,` after the track string, and gcc
-          // said `expected '}' before 'StylePtr'` — a different line, in a different
-          // preset. THE PARSER IS BLIND TO IT: it reads font, track and styles
-          // happily without the separator, so this cannot be inferred from the parse
-          // and has to be read off the text.
-          // A preset is { font, track, styles…, name }, so whatever follows the
-          // SECOND string must be a comma. `}` is excluded because a two-element
-          // preset is a different fault (the blade-count check names it).
-          const strs = [...p.raw.matchAll(/"(?:[^"\\]|\\.)*"/g)];
-          if (strs.length >= 2) {
-            const after = p.raw.slice(strs[1].index + strs[1][0].length);
-            const next = after.replace(/^\s+/, '')[0];
-            if (next && next !== ',' && next !== '}') {
-              const name = (p.displayName || '').trim() || `Preset ${p.index}`;
-              // THIS ONE GETS A FIX, and it is the safest in the whole set: we are
-              // not guessing WHAT is missing or WHERE. The separator goes directly
-              // after the track string, that position is known exactly, and a comma
-              // is the only thing that can legally sit there. (2026-09-13: "if we
-              // know we're missing a comma we should offer to add it".)
-              // The other delimiter faults deliberately have none — an unbalanced
-              // brace could be repaired in several places and only the author knows
-              // which was meant.
-              const insertAt = strs[1].index + strs[1][0].length;
-              findings.push({
-                title: `Preset ${name} is missing a comma after its track.`,
-                detail: 'Every part of a preset is separated by a comma. Without one the compiler '
-                      + 'reads the next line as part of this one and reports the error somewhere '
-                      + 'further down, often in a different preset entirely.',
-                items: [name],
-                fix: {
-                  label: 'Add the comma',
-                  plan(c) {
-                    // Re-locate the preset in the CURRENT document rather than
-                    // trusting the offsets this finding was built from: the caller
-                    // re-derives after every fix, but a plan must still be correct
-                    // against the text as it is when it runs.
-                    const at = String(c.text).indexOf(p.raw);
-                    if (at < 0) return [];
-                    const abs = at + insertAt;
-                    const before = String(c.text).slice(0, abs);
-                    const line = before.split('\n').length;
-                    const col = abs - (before.lastIndexOf('\n') + 1);
-                    // A zero-width range: an insertion, touching nothing else.
-                    return [{ startLine: line, startCol: col, endLine: line, endCol: col, text: ',' }];
-                  },
-                },
-              });
-              continue;            // one finding per preset; the first is the honest one
-            }
+          // ── (b) A MISSING COMMA BETWEEN THE PARTS OF A PRESET ────────────────
+          // The parser reads font, track and styles happily without the separators, so
+          // this is read off the text. gcc reports it on a later line, often in a later
+          // preset. The fix is a zero-width insertion directly after the part, the one
+          // place a comma can legally go.
+          const gap = _presetCommaGap(p.raw);
+          if (gap) {
+            const name = (p.displayName || '').trim() || `Preset ${p.index}`;
+            commas.push({ name, index: p.index, after: gap.after, at: _rawOffset(ctx.text, p) + gap.at });
+            continue;            // one per preset; the first is the honest one
           }
 
           const body = _balanceStrip(p.raw);
@@ -1438,21 +1753,221 @@
             }
             if (bad || depth !== 0) {
               const name = (p.displayName || '').trim() || `Preset ${p.index}`;
-              findings.push({
-                title: `Preset ${name} has unbalanced ${open}${close}.`,
-                detail: `There is ${depth > 0 ? `no closing ${close}` : `an extra ${close}`} `
-                      + `inside this preset. The compiler will report this somewhere further down `
-                      + `the file, often in a different preset, because it keeps reading past the `
-                      + `real mistake. Check this preset's ${open}${close} pairs.`,
-                items: [name],
-                fix: null,
-              });
+              unbalanced.push({ name, open, close, missing: depth > 0 ? `no closing ${close}` : `an extra ${close}` });
               break;                 // one finding per preset; the first is the honest one
             }
           }
         }
       }
+      const noSemicolon = [], closedEarly = [];
+      for (const miss of _arrayCommaGaps(ctx.text)) {
+        if (miss.end) { (miss.end === 'semicolon' ? noSemicolon : closedEarly).push(miss.at); continue; }
+        const arr = ctx.parsed.arrays.find(a => a.name === miss.array) || ctx.parsed.arrays[0];
+        const p = arr && (arr.presets || [])[miss.index];
+        if (!p) continue;
+        const name = (p.displayName || '').trim() || `Preset ${p.index}`;
+        commas.push({ name, index: p.index, after: 'it', at: miss.at });
+      }
+
+      if (commas.length) {
+        const one = commas.length === 1;
+        findings.push({
+          title: one ? `${_presetName(commas[0].name)} is missing a comma after ${commas[0].after}.`
+                     : `${commas.length} commas are missing from the presets.`,
+          detail: 'Every part of a preset is separated by a comma, and so is every preset in the '
+                + 'list. Without one the compiler reads the next line as part of this one and '
+                + 'reports the error somewhere further down, often in a different preset entirely.',
+          items: one ? [] : commas.map(g => `${g.name} (after ${g.after})`),
+          labels: one ? null : commas.map(g => `${_presetEntry(g)} after ${g.after}`),
+          labelLead: 'Presets to update',
+          // Every comma goes in at once: one edit, one undo, all against this same text.
+          fix: {
+            label: one ? 'Add the comma' : 'Add the commas',
+            plan: (c) => (c.text === ctx.text ? commas.map(g => _insertAt(c.text, g.at, ',')) : []),
+          },
+        });
+      }
+      if (noSemicolon.length) {
+        const lines = noSemicolon.map(at => _lineOf(ctx.text, at));
+        const one = lines.length === 1;
+        findings.push({
+          title: one ? `The preset list ending on line ${lines[0]} is missing its semicolon.`
+                     : `The preset lists ending on ${_onLines(lines)} are missing their semicolons.`,
+          detail: 'A preset list ends with };',
+          items: [],
+          fix: {
+            label: one ? 'Add the semicolon' : 'Add the semicolons',
+            plan: (c) => (c.text === ctx.text ? noSemicolon.map(at => _insertAt(c.text, at, ';')) : []),
+          },
+        });
+      }
+      if (closedEarly.length) {
+        const lines = closedEarly.map(at => _lineOf(ctx.text, at));
+        const one = lines.length === 1;
+        findings.push({
+          title: one ? `The preset list closes early on line ${lines[0]}.`
+                     : `Preset lists close early on ${_onLines(lines)}.`,
+          detail: 'There is an extra } on or before that line, so the presets after it are '
+                + 'outside the list. Cancel and check the braces up to that line before compiling.',
+          items: [],
+          fix: null,
+        });
+      }
+      if (unbalanced.length) {
+        const one = unbalanced.length === 1;
+        findings.push({
+          title: one ? `${_presetName(unbalanced[0].name)} has unbalanced ${unbalanced[0].open}${unbalanced[0].close}.`
+                     : `${unbalanced.length} presets have unbalanced brackets.`,
+          detail: (one ? `There is ${unbalanced[0].missing} inside this preset. ` : '')
+                + 'The compiler will report this somewhere further down the file, often in a '
+                + 'different preset, because it keeps reading past the real mistake.',
+          items: one ? [] : unbalanced.map(u => `${u.name} (${u.missing})`),
+          fix: null,
+        });
+      }
       return findings.length ? { findings } : null;
+    },
+  });
+
+  // ── Blade configs: how many blades, and which preset list ────────────────
+  //
+  // BladeConfig is positional too: an id, NUM_BLADES blades, then the preset list. One blade
+  // too many lands in the preset slot, so gcc reports "cannot convert 'BladeBase*' to 'Preset*'"
+  // on the extra blade and says nothing about the count.
+  //
+  // A macro standing in for blades can expand to any number of them, and a preprocessor line
+  // can hide part of a row, so either one makes the row unreadable and the check says nothing.
+  preflight.register({
+    id: 'bladeconfig-blade-count',
+    severity: 'block',
+    title: 'A blade config has the wrong number of blades',
+    run(ctx) {
+      const defs = [...ctx.cleanText.matchAll(/^[ \t]*#[ \t]*define[ \t]+NUM_BLADES[ \t]+(\d+)[ \t]*$/gm)]
+        .map(m => Number(m[1]));
+      if (!defs.length) return null;
+      if (new Set(defs).size > 1) return { unsure: 'NUM_BLADES is defined more than once' };
+      const expected = defs[0];
+
+      const groups = new Map();
+      for (const row of _bladeConfigRows(ctx.text)) {
+        if (row.blades === null || row.blades === expected) continue;
+        if (!groups.has(row.blades)) groups.set(row.blades, []);
+        groups.get(row.blades).push(row.line);
+      }
+      if (!groups.size) return null;
+
+      return { findings: [...groups].map(([count, lines]) => {
+        const over = count > expected;
+        return {
+          kind: over ? 'over' : 'under',
+          title: `${lines.length === 1 ? 'A blade config' : `${lines.length} blade configs`} on `
+               + `${_onLines(lines)} ${lines.length === 1 ? 'lists' : 'list'} `
+               + `${count} ${count === 1 ? 'blade' : 'blades'}, but NUM_BLADES is ${expected}.`,
+          detail: over
+            ? 'Raise NUM_BLADES, or remove the extra blade. The compiler reports this as a '
+            + "conversion error on the extra blade and doesn't mention the count."
+            : 'Lower NUM_BLADES, or add the missing blade.',
+          items: [],
+          fix: null,
+        };
+      }) };
+    },
+  });
+
+  // The name inside CONFIGARRAY(...) has to be a preset list. If it appears anywhere else in
+  // the config, a macro or an include may be supplying it, so the check says nothing.
+  preflight.register({
+    id: 'bladeconfig-preset-list',
+    severity: 'block',
+    title: 'A blade config points at a preset list that does not exist',
+    run(ctx) {
+      const toks = _codeTokens(ctx.text);
+      if (toks.some(t => t.kind === 'pp' && /^#\s*include\s*"/.test(t.text)
+                      && !/_config\.h"|props\/|blades\/|styles\//.test(t.text))) return null;
+      const refs = new Map();
+      const uses = new Map();
+      for (let i = 0; i < toks.length; i++) {
+        const t = toks[i];
+        if (t.kind !== 'word') continue;
+        uses.set(t.text, (uses.get(t.text) || 0) + 1);
+        if (t.text === 'CONFIGARRAY' && toks[i + 1]?.text === '(' && toks[i + 2]?.kind === 'word'
+            && toks[i + 3]?.text === ')') {
+          const name = toks[i + 2].text;
+          if (!refs.has(name)) refs.set(name, []);
+          refs.get(name).push(_lineOf(ctx.text, t.start));
+        }
+      }
+      const findings = [];
+      for (const [name, lines] of refs) {
+        if (uses.get(name) !== lines.length) continue;
+        findings.push({
+          title: `${lines.length === 1 ? 'A blade config' : 'Blade configs'} on ${_onLines(lines)} `
+               + `${lines.length === 1 ? 'uses' : 'use'} the preset list ${name}, but this config `
+               + `has no list with that name.`,
+          detail: 'Rename the list it points at, or add one with that name.',
+          items: [],
+          fix: null,
+        });
+      }
+      return findings.length ? { findings } : null;
+    },
+  });
+
+  // ── Curly quotes ─────────────────────────────────────────────────────────
+  //
+  // A word processor swaps straight quotes for curly ones. Inside a string they are ordinary
+  // characters and compile fine, so a preset name with a curly apostrophe must never fire. Only
+  // a curly quote standing where the compiler needs a real one is a fault.
+  preflight.register({
+    id: 'curly-quotes',
+    severity: 'block',
+    title: 'Curly quotes where straight quotes are required',
+    run(ctx) {
+      const hits = _curlyQuotes(ctx.text);
+      if (!hits.length) return null;
+      const lines = [...new Set(hits.map(h => _lineOf(ctx.text, h)))];
+      return { findings: [{
+        title: `This config has curly quotes on ${_onLines(lines)} where it needs straight ones.`,
+        detail: 'They usually come from a word processor. They look like quotes, but the compiler rejects them.',
+        items: [],
+        fix: {
+          label: 'Use straight quotes',
+          plan: (c) => _curlyQuotes(c.text).map(h => {
+            const e = _insertAt(c.text, h, '"');
+            return { ...e, endCol: e.endCol + 1 };
+          }),
+        },
+      }] };
+    },
+  });
+
+  // ── A config that includes itself ────────────────────────────────────────
+  //
+  // Every build stages the open config as my_config.h, so that name is this file too.
+  preflight.register({
+    id: 'self-include',
+    severity: 'block',
+    title: 'The config includes itself',
+    run(ctx) {
+      const own = String(ctx.configName || '').split(/[\\/]/).pop().toLowerCase();
+      const lines = [];
+      ctx.cleanText.split('\n').forEach((text, i) => {
+        const m = text.match(/^\s*#\s*include\s*"([^"]+)"/);
+        if (!m) return;
+        const base = m[1].split(/[\\/]/).pop().toLowerCase();
+        if (base === 'my_config.h' || base === own) lines.push(i + 1);
+      });
+      if (!lines.length) return null;
+      return { findings: [{
+        title: `This config includes itself on ${_onLines(lines)}.`,
+        detail: 'The compiler follows the include around in a circle until it gives up, and '
+              + 'reports that the includes are nested too deeply.',
+        items: [],
+        fix: {
+          label: lines.length === 1 ? 'Remove the line' : 'Remove the lines',
+          plan: () => lines.map(n => ({ startLine: n, startCol: 0, endLine: n + 1, endCol: 0, text: '' })),
+        },
+      }] };
     },
   });
 
@@ -1526,16 +2041,35 @@
         const present = res.entries.some(e => e.type === 'file' && e.name === fileName);
         if (present) continue;
 
+        // The same rule as an unknown style: two edits earns a suggestion, one earns a button.
+        let near = null, nearD = 99;
+        for (const e of res.entries) {
+          if (e.type !== 'file' || !/\.h$/i.test(e.name)) continue;
+          const d = _distance(fileName, e.name);
+          if (d < nearD) { nearD = d; near = e.name; }
+        }
+        const suggestion = near && nearD <= 2 ? near : null;
+
         findings.push({
-          title: `${fileName} is not in ${ctx.versionName}.`,
-          detail: `This config builds with ${ctx.versionName}, and its props folder does not have `
-                + `that file, so the build will stop on it. Switch this config to a version that `
-                + `has the prop, or link a prop that exists in ${ctx.versionName}.`,
+          title: suggestion ? 'Probably a typo in the prop name.' : `${fileName} is not in ${ctx.versionName}.`,
+          detail: suggestion
+            ? `${ctx.versionName} does not have ${fileName}. It does have ${suggestion}. If that's the one `
+            + `you meant, ${nearD === 1 ? 'use the button' : `change the include to ${suggestion}`}. If not, `
+            + `choose Import prop in the Prop dropdown, switch to a version that has it, or link a different prop.`
+            : `This config builds with ${ctx.versionName}, and its props folder does not have that file, so `
+            + `the build will stop on it. Choose Import prop in the Prop dropdown to add it to this version, `
+            + `switch to a version that has it, or link a different prop.`,
           items: [inc],
-          // No fix: choosing a different prop or a different OS version is a
-          // decision about what the saber does, and we cannot know which one was
-          // meant. The Link Prop flow is where that choice already lives.
-          fix: null,
+          fix: suggestion && nearD === 1 ? {
+            label: `Change to ${suggestion}`,
+            plan(c) {
+              const lines = String(c.text).split('\n');
+              const i = lines.findIndex(l => /^\s*#\s*include\b/.test(l) && l.includes(fileName));
+              if (i < 0) return [];
+              const col = lines[i].indexOf(fileName);
+              return [{ startLine: i + 1, startCol: col, endLine: i + 1, endCol: col + fileName.length, text: suggestion }];
+            },
+          } : null,
         });
       }
       return findings.length ? { findings } : null;
@@ -1649,6 +2183,7 @@
                 + `"font directory not found" on that preset, because ProffieOS looks for every `
                 + `folder a preset names.`,
           items: [preset],
+          ..._presetList(ctx, [preset]),
           // The correct spelling is the user's OWN convention, used at least three
           // times in this same config — stronger evidence than any external list,
           // which is why a rename is offered here at two edits where [B-324] stops
@@ -1925,6 +2460,7 @@
               + `${need.prop} defines it, so with this prop the compile stops at the link step with "undefined `
               + `reference to ${need.name}". Choose that prop to use ${many ? 'them' : 'it'}, or use a different style.`,
             items: b.presets,
+            ..._presetList(ctx, b.presets),
           });
         } else if (file) {
           const at = _gateIncludeLine(ctx.text);
@@ -1933,6 +2469,7 @@
             detail: `${many ? 'These styles are' : 'This style is'} only defined when ${file.replace(/^\.\.\//, '')} is included `
               + `(#ifdef ${guard}). Without it the compile stops with "not declared in this scope" at the preset.`,
             items: b.presets,
+            ..._presetList(ctx, b.presets),
             fix: at ? {
               label: `Add #include "${file}"`,
               plan() {
@@ -1942,11 +2479,12 @@
           });
         } else {
           findings.push({
-            title: `${names} ${many ? 'are' : 'is'} only defined when ${guard} is defined, but this config does not define it.`,
-            detail: `${many ? 'These styles sit' : 'This style sits'} inside #ifdef ${guard}. Add the #define ${guard} `
-              + `line your setup needs, or use a different style. Without it the compile stops with "not declared in `
-              + `this scope" at the preset.`,
+            title: `${names} ${many ? 'are' : 'is'} switched off.`,
+            detail: `${many ? 'They sit' : 'It sits'} inside #ifdef ${guard}${_ifdefWhere(ctx, guard)}, and this config never defines `
+              + `${guard}, so the compiler skips ${many ? 'them' : 'it'}. Add #define ${guard} to CONFIG_TOP, or `
+              + `use a different style.`,
             items: b.presets,
+            ..._presetList(ctx, b.presets),
           });
         }
       }

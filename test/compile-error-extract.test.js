@@ -96,7 +96,7 @@ const WITH_DIAG = [
 
 check('a real diagnostic beats the arduino-cli summary line',
   extractCompileError(WITH_DIAG),
-  'Line 41 — \'Blakc\' was not declared in this scope');
+  'Line 41: Blakc is not in this ProffieOS version\n\nIt is either misspelled, or a style or setting from a different ProffieOS version.\n\nCheck the spelling, then check which ProffieOS version this style or config was written for.');
 
 // ── flash overflow: the linker says neither "error" nor "warning" ──────────
 //
@@ -201,7 +201,7 @@ const SRC_DIAG = [
 // length, while the number was always right for the buffer that actually got compiled.
 check('a source path keeps its LINE, and names no file',
   extractCompileError(SRC_DIAG),
-  "Line 431 — expected ',' or ';' before 'BladeConfig'");
+  "Just before line 431: A comma, semicolon or brace is missing just before here\n\nSomething needs separating. This is what a missing comma after a track name, a missing semicolon after the presets array, or an unclosed brace all look like.\n\nCheck the end of the previous line for a missing , or ; and check your braces balance.");
 
 // ── RAM overflow (B-032) ───────────────────────────────────────────────────
 //

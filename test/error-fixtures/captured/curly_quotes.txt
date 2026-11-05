@@ -1,0 +1,53 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:46:
+<OS>\config\my_config.h:2:10: error: extended character “ is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |          ^
+<OS>\config\my_config.h:2:10: error: #include expects "FILENAME" or <FILENAME>
+    2 | #include “proffieboard_v3_config.h”
+      |          ^~~~~~~~~~~~~~~~~~~~~~~
+<OS>\config\my_config.h:2:34: error: extended character ” is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |                                  ^
+In file included from <OS>\ProffieOS.ino:670:
+<OS>\config\my_config.h:2:10: error: extended character “ is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |          ^
+<OS>\config\my_config.h:2:34: error: extended character ” is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |                                  ^
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:2:10: error: extended character “ is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |          ^
+<OS>\config\my_config.h:2:34: error: extended character ” is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |                                  ^
+In file included from <OS>\ProffieOS.ino:678:
+<OS>\config\my_config.h:2:10: error: extended character “ is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |          ^
+<OS>\config\my_config.h:2:34: error: extended character ” is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |                                  ^
+In file included from <OS>\ProffieOS.ino:794:
+<OS>\config\my_config.h:2:10: error: extended character “ is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |          ^
+<OS>\config\my_config.h:2:34: error: extended character ” is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |                                  ^
+In file included from <OS>\ProffieOS.ino:1726:
+<OS>\config\my_config.h:2:10: error: extended character “ is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |          ^
+<OS>\config\my_config.h:2:34: error: extended character ” is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |                                  ^
+In file included from <OS>\ProffieOS.ino:1731:
+<OS>\config\my_config.h:2:10: error: extended character “ is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |          ^
+<OS>\config\my_config.h:2:34: error: extended character ” is not valid in an identifier
+    2 | #include “proffieboard_v3_config.h”
+      |                                  ^

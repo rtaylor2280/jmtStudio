@@ -1,0 +1,77 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:49:
+<OS>\common\capabilities.h: In function 'constexpr bool IsPWMPin(int)':
+<OS>\common\capabilities.h:40:40: error: 'SaberPins' was not declared in this scope
+   40 |     pin == EnumContains_bladePowerPin1<SaberPins>::value ||
+      |                                        ^~~~~~~~~
+<OS>\common\capabilities.h:40:49: error: template argument 1 is invalid
+   40 |     pin == EnumContains_bladePowerPin1<SaberPins>::value ||
+      |                                                 ^
+<OS>\common\capabilities.h:50:1: error: body of 'constexpr' function 'constexpr bool IsPWMPin(int)' not a return-statement
+   50 | }
+      | ^
+In file included from <OS>\ProffieOS.ino:447:
+<OS>\common\battery_monitor.h: In constructor 'BatteryMonitor::BatteryMonitor()':
+<OS>\common\battery_monitor.h:10:28: error: 'batteryLevelPin' was not declared in this scope
+   10 | BatteryMonitor() : reader_(batteryLevelPin,
+      |                            ^~~~~~~~~~~~~~~
+<OS>\common\battery_monitor.h: In member function 'void BatteryMonitor::SetPinHigh(bool)':
+<OS>\common\battery_monitor.h:34:15: error: 'batteryLevelPin' was not declared in this scope
+   34 |       pinMode(batteryLevelPin, OUTPUT);
+      |               ^~~~~~~~~~~~~~~
+<OS>\common\battery_monitor.h:40:15: error: 'batteryLevelPin' was not declared in this scope
+   40 |       pinMode(batteryLevelPin, INPUT_PULLDOWN);
+      |               ^~~~~~~~~~~~~~~
+<OS>\common\battery_monitor.h: In member function 'float BatteryMonitor::battery_now()':
+<OS>\common\battery_monitor.h:133:20: error: 'BATTERY_PULLUP_OHMS' was not declared in this scope
+  133 |     float pullup = BATTERY_PULLUP_OHMS;  // External pullup
+      |                    ^~~~~~~~~~~~~~~~~~~
+In file included from <OS>\ProffieOS.ino:603:
+<OS>\blades\ws2811_blade.h: At global scope:
+<OS>\blades\ws2811_blade.h:373:47: error: 'bladePin' was not declared in this scope
+  373 | template<int LEDS, int CONFIG, int DATA_PIN = bladePin, class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                               ^~~~~~~~
+<OS>\blades\ws2811_blade.h:373:86: error: 'bladePowerPin1' was not declared in this scope
+  373 | template<int LEDS, int CONFIG, int DATA_PIN = bladePin, class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                                                      ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:373:102: error: 'bladePowerPin2' was not declared in this scope
+  373 | template<int LEDS, int CONFIG, int DATA_PIN = bladePin, class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                                                                      ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:373:118: error: 'bladePowerPin3' was not declared in this scope
+  373 | template<int LEDS, int CONFIG, int DATA_PIN = bladePin, class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                                                                                      ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:373:132: error: template argument 1 is invalid
+  373 | template<int LEDS, int CONFIG, int DATA_PIN = bladePin, class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                                                                                                    ^
+<OS>\blades\ws2811_blade.h:373:132: error: template argument 2 is invalid
+<OS>\blades\ws2811_blade.h:373:132: error: template argument 3 is invalid
+<OS>\blades\ws2811_blade.h:386:26: error: 'bladePin' was not declared in this scope
+  386 |           int DATA_PIN = bladePin,
+      |                          ^~~~~~~~
+<OS>\blades\ws2811_blade.h:388:40: error: 'bladePowerPin1' was not declared in this scope
+  388 |           class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                        ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:388:56: error: 'bladePowerPin2' was not declared in this scope
+  388 |           class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                        ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:388:72: error: 'bladePowerPin3' was not declared in this scope
+  388 |           class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                                        ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:388:86: error: template argument 1 is invalid
+  388 |           class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                                                      ^
+<OS>\blades\ws2811_blade.h:388:86: error: template argument 2 is invalid
+<OS>\blades\ws2811_blade.h:388:86: error: template argument 3 is invalid
+<OS>\blades\ws2811_blade.h:400:25: error: 'bladePin' was not declared in this scope
+  400 |          int DATA_PIN = bladePin,
+      |                         ^~~~~~~~
+<OS>\blades\ws2811_blade.h:403:39: error: 'bladePowerPin1' was not declared in this scope
+  403 |          class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                       ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:403:55: error: 'bladePowerPin2' was not declared in this scope
+  403 |          class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                       ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:403:71: error: 'bladePowerPin3' was not declared in this scope
+  403 |          class POWER_PINS = PowerPINS<bladePowerPin1, bladePowerPin2, bladePowerPin3>,
+      |                                                                       ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:403:85: error: template argument 1 is invalid

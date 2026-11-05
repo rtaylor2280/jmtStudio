@@ -1397,8 +1397,12 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     onLog('--- Compile failed ---', true);
     // Capacity comes from the same output being summarised, so it can never
     // describe a different board than the one that failed.
-    const cleanError = extractCompileError(result.stderr + result.stdout,
-                                           _boardCapacityFrom(result.stdout));
+    const cleanError = extractCompileError(result.stderr + result.stdout, {
+      ..._boardCapacityFrom(result.stdout),
+      configText: configContent,
+      stylesText: proffie.readStagedStyles() || '',
+      propFiles: _selectedPropFiles(),
+    });
     return { ok: false, error: cleanError, durationMs, errorClass: _classifyCompileError(output) };
   }
 }
@@ -1463,6 +1467,14 @@ const { extractCompileError } = require('./compileErrors');
 // than one that invents it. (2026-08-15)
 const _PLATFORM_LINE_RE =
   /Using board '([^']+)' from platform in folder:\s*(.+?)\s*$/m;
+
+// The .h files in the selected version's props folder. Empty when it cannot be read.
+function _selectedPropFiles() {
+  try {
+    const listed = proffie.listVersionDir(proffie.getSelectedVersion(), 'ProffieOS/props');
+    return listed.ok ? listed.entries.filter(e => e.type === 'file' && /\.h$/i.test(e.name)).map(e => e.name) : [];
+  } catch { return []; }
+}
 
 function _boardCapacityFrom(output) {
   const m = String(output || '').match(_PLATFORM_LINE_RE);

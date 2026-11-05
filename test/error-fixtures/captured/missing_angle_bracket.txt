@@ -1,0 +1,10 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:20:5: error: parse error in template argument list
+   20 |     StylePtr<InOutHelper<Blue, 300, 800, Black>(),
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   21 |     "One" },
+      |     ~~~~~
+<OS>\config\my_config.h:25:1: error: cannot resolve overloaded function 'StylePtr' based on conversion to type 'StyleFactory*'
+   25 | };
+      | ^

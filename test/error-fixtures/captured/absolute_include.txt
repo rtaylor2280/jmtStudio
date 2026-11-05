@@ -1,0 +1,6 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:46:
+<OS>\config\my_config.h:2:10: fatal error: <HOME>/Documents/proffieboard_v3_config.h: No such file or directory
+    2 | #include "<HOME>/Documents/proffieboard_v3_config.h"
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.

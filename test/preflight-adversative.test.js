@@ -33,14 +33,14 @@ function ok(label, cond, detail) {
   ok('and both use "but"', bladeTitles.every(t => t.includes(', but ')), JSON.stringify(bladeTitles));
 
   ok('the voicepack title uses "but"',
-     /requires a voicepack on ProffieOS 8'\}, but `/.test(src),
-     (src.match(/requires a voicepack on ProffieOS 8'\}, (and|but) `/) || ['not found'])[0]);
+     /a voicepack, but `/.test(src),
+     (src.match(/a voicepack, (and|but) `/) || ['not found'])[0]);
 }
 
 // ── the one that was already right, kept as the precedent ──────────────────
 {
   ok('the no-prop title still uses "but"',
-     /option\$\{hits\.length === 1 \? '' : 's'\}, `\s*\+ `but no prop is included\.`/.test(src.replace(/\r/g, '')),
+     /, but no prop is included\.`/.test(src.replace(/\r/g, '')),
      'this one was correct before the entry and is the reason the rule is house style, not invention');
 }
 

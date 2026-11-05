@@ -1,0 +1,12 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:20:14: error: 'InOutHelperr' was not declared in this scope; did you mean 'InOutHelperX'?
+   20 |     StylePtr<InOutHelperr<Blue, 300, 800, Black>>(),
+      |              ^~~~~~~~~~~~
+      |              InOutHelperX
+<OS>\config\my_config.h:20:5: error: parse error in template argument list
+   20 |     StylePtr<InOutHelperr<Blue, 300, 800, Black>>(),
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+<OS>\config\my_config.h:20:51: error: expected primary-expression before ')' token
+   20 |     StylePtr<InOutHelperr<Blue, 300, 800, Black>>(),
+      |                                                   ^

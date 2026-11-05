@@ -31,8 +31,8 @@ function ok(name, cond, extra) {
   else { failures++; console.log('FAIL ', name, extra === undefined ? '' : `\n      ${extra}`); }
 }
 
-const run = (text) => {
-  const res = check.run(preflight.buildContext({ text }));
+const run = async (text) => {
+  const res = await check.run(preflight.buildContext({ text }));
   return {
     fired:   !!(res && res.findings && res.findings.length),
     unsure:  !!(res && res.unsure),
@@ -63,47 +63,48 @@ ${prop ? `#include "${prop}"` : ''}
 ` : ''}
 ${PRESETS}`;
 
+(async () => {
 {
   // ── 1. the fault it exists for ────────────────────────────────────────
-  const r = run(cfg({ defines: ['FETT263_QUICK_SELECT_ON_BOOT', 'FETT263_TWIST_ON', 'FETT263_EDIT_MODE_MENU'],
+  const r = await run(cfg({ defines: ['FETT263_QUICK_SELECT_ON_BOOT', 'FETT263_TWIST_ON', 'FETT263_EDIT_MODE_MENU'],
                       propSection: false }));
   ok('no prop section at all, with prop defines, fires', r.fired);
   ok('it is a warning, not a block', check.severity === 'warn');
   ok('it says what will happen rather than naming a define',
-     /none of the controls you set up will work/.test(r.findings[0].detail), r.findings[0].detail);
+     /may not behave as you expect/.test(r.findings[0].detail), r.findings[0].detail);
   ok('it names a likely prop without claiming certainty',
-     /usually saber_fett263_buttons\.h/.test(r.findings[0].detail), r.findings[0].detail);
+     /add saber_fett263_buttons\.h to the CONFIG_PROP section/.test(r.findings[0].detail), r.findings[0].detail);
   ok('it offers NO fix — choosing a prop is a decision, not a repair',
      r.findings[0].fix === null);
 }
 {
-  const r = run(cfg({ defines: ['FETT263_TWIST_ON'], prop: null }));
+  const r = await run(cfg({ defines: ['FETT263_TWIST_ON'], prop: null }));
   ok('an EMPTY prop section fires too', r.fired);
 }
 
 // ── 2. the abstentions ────────────────────────────────────────────────
 {
-  const r = run(cfg({ defines: ['FETT263_TWIST_ON'], prop: '../props/saber_fett263_buttons.h' }));
+  const r = await run(cfg({ defines: ['FETT263_TWIST_ON'], prop: '../props/saber_fett263_buttons.h' }));
   ok('the expected prop present -> silent', r.unsure && !r.fired, r.reason);
 }
 {
   // THE 6-FALSE-POSITIVE CASE. The known-good configs include a JMT prop that is not
   // in the stock props/ directory. A filename allowlist called all of them broken.
-  const r = run(cfg({ defines: ['FETT263_TWIST_ON'], prop: '../props/jmt_fett_prop.h' }));
+  const r = await run(cfg({ defines: ['FETT263_TWIST_ON'], prop: '../props/jmt_fett_prop.h' }));
   ok('a CUSTOM prop filename -> abstains, never fires', r.unsure && !r.fired, r.reason);
 }
 {
-  const r = run(cfg({ defines: ['FETT263_TWIST_ON'], prop: '../props/something_nobody_has_seen.h' }));
+  const r = await run(cfg({ defines: ['FETT263_TWIST_ON'], prop: '../props/something_nobody_has_seen.h' }));
   ok('an unknown prop filename -> abstains', r.unsure && !r.fired, r.reason);
 }
 {
-  const r = run(cfg({ defines: [] }));
+  const r = await run(cfg({ defines: [] }));
   ok('no prop defines at all -> nothing to say', r.silent);
 }
 {
   // A CONFIG_TOP block pasted into a forum thread is not a config. Seven of
   // thirteen wild hits were exactly this.
-  const r = run(`
+  const r = await run(`
 #ifdef CONFIG_TOP
 #define FETT263_TWIST_ON
 #endif
@@ -111,7 +112,7 @@ ${PRESETS}`;
   ok('a fragment with no presets -> abstains rather than accusing', r.unsure && !r.fired, r.reason);
 }
 {
-  const r = run(cfg({ defines: ['SHTOK_SOMETHING'], propSection: false }));
+  const r = await run(cfg({ defines: ['SHTOK_SOMETHING'], propSection: false }));
   ok('there is no SHTOK_ prefix, so it cannot fire on one', r.silent);
 }
 {
@@ -122,19 +123,19 @@ ${PRESETS}`;
 /* #define FETT263_EDIT_MODE_MENU */
 #endif
 ${PRESETS}`;
-  ok('commented-out defines do not count', run(commented).silent);
+  ok('commented-out defines do not count', (await run(commented)).silent);
 }
 
 // ── 3. shape of the message ───────────────────────────────────────────
 {
   const many = Array.from({ length: 21 }, (_, i) => `FETT263_OPTION_${i}`);
-  const r = run(cfg({ defines: many, propSection: false }));
+  const r = await run(cfg({ defines: many, propSection: false }));
   ok('21 defines produce ONE finding, not 21', r.findings.length === 1, String(r.findings.length));
   ok('the count is stated', /sets 21 FETT263_ options/.test(r.findings[0].title), r.findings[0].title);
   ok('only a few examples are carried, not all 21', r.findings[0].items.length <= 3);
 }
 {
-  const r = run(cfg({ defines: ['SA22C_NO_LOCKUP_HOLD'], propSection: false }));
+  const r = await run(cfg({ defines: ['SA22C_NO_LOCKUP_HOLD'], propSection: false }));
   ok('a second prop family works the same way',
      r.fired && /SA22C_/.test(r.findings[0].title), r.findings[0] && r.findings[0].title);
   ok('singular reads as singular', /sets 1 SA22C_ option,/.test(r.findings[0].title), r.findings[0].title);
@@ -154,16 +155,19 @@ ${PRESETS}`;
 
   if (!known.length && !wild.length) console.log('SKIP  no config corpus on this machine');
   else {
-    const firedIn = (files) => files.filter(f => run(fs.readFileSync(f, 'utf8')).fired)
-      .map(f => path.basename(f));
+    const firedIn = async (files) => {
+      const out = [];
+      for (const f of files) if ((await run(fs.readFileSync(f, 'utf8'))).fired) out.push(path.basename(f));
+      return out;
+    };
 
-    const badKnown = firedIn(known);
+    const badKnown = await firedIn(known);
     ok(`none of the ${known.length} known-good configs fire`, badKnown.length === 0, badKnown.join(', '));
 
     // Measured in the research harness before this was ported, and re-measured
     // here: exactly one genuine fault in the wild corpus. 21 FETT263_ options and
     // no CONFIG_PROP section at all — that saber boots with no working controls.
-    const badWild = firedIn(wild);
+    const badWild = await firedIn(wild);
     ok(`exactly the one known real fault fires across ${wild.length} wild configs`,
        badWild.length === 1 && badWild[0] === '7957_9.h', badWild.join(', '));
   }
@@ -171,3 +175,4 @@ ${PRESETS}`;
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall prop-define check tests passed');
 process.exit(failures ? 1 : 0);
+})();

@@ -1,0 +1,21 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:20:44: error: '"300"' is not a valid template argument for type 'int' because string literals can never be used in this context
+   20 |     StylePtr<InOutHelper<Blue, "300", 800, Black>>(),
+      |                                            ^~~~~
+<OS>\config\my_config.h:20:51: error: no matching function for call to 'StylePtr<<expression error> >()'
+   20 |     StylePtr<InOutHelper<Blue, "300", 800, Black>>(),
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+In file included from <OS>\styles\fire.h:4,
+                 from <OS>\ProffieOS.ino:484:
+<OS>\styles\style_ptr.h:135:16: note: candidate: 'template<class STYLE> StyleFactory* StylePtr()'
+  135 | StyleAllocator StylePtr() {
+      |                ^~~~~~~~
+<OS>\styles\style_ptr.h:135:16: note:   template argument deduction/substitution failed:
+<OS>\config\my_config.h:20:51: error: template argument 1 is invalid
+   20 |     StylePtr<InOutHelper<Blue, "300", 800, Black>>(),
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+<OS>\styles\style_ptr.h:159:16: note: candidate: 'template<class STYLE> StyleFactory* StylePtr(const char*)'
+  159 | StyleAllocator StylePtr(const char* default_arguments) {
+      |                ^~~~~~~~
+<OS>\styles\style_ptr.h:159:16: note:   candidate expects 1 argument, 0 provided

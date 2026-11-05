@@ -3995,6 +3995,11 @@
      (location, suggestion) instead of being a single ellipsised span. */
   .preflight-row .sf-save-conflict-name { display: flex; flex-direction: column; gap: 2px;
                                           white-space: normal; overflow: visible; }
+  .preflight-headline { margin: 4px 0 10px; color: var(--c-text-sub); }
+  .preflight-card-list { margin-top: 8px; }
+  .preflight-cards { display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .preflight-card { padding: 10px 12px; line-height: 1.45; background: var(--c-bg-raised);
+                    border: 1px solid var(--c-border-faint); border-radius: 4px; }
   .preflight-row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .preflight-row-prefix { font-family: 'Cascadia Code', 'Consolas', monospace;
                           color: var(--c-text-dim); font-weight: 400; flex-shrink: 0; }
@@ -10783,6 +10788,7 @@ window.runPreflight = async function () {
 
   const makeCtx = () => window.preflight.buildContext({
     text: editor.getValue(),
+    configName: currentFilePath || '',
     versionName: document.getElementById('input-version')?.value?.trim() || '',
     // NOT WIRED, DELIBERATELY LEFT EMPTY. No check reads the board yet, and
     // `selectedFqbn` is module-local to buildPanel.js with no accessor. A first
@@ -10852,15 +10858,17 @@ window.runPreflight = async function () {
   const cancelBtn = document.getElementById('modal-confirm-cancel');
 
   const rowsHtml = (findings) => findings.map((f, i) => {
-    const items = (f.items || []).slice(0, 8).map(_preflightEsc).join(', ');
-    const more  = (f.items || []).length > 8 ? `, and ${f.items.length - 8} more` : '';
+    // A name the title already says is not worth a line of its own.
+    const listed = (f.labels || f.items || []).filter(it => !String(f.title).includes(it));
+    const items = listed.slice(0, 8).map(_preflightEsc).join(', ');
+    const more  = listed.length > 8 ? `, and ${listed.length - 8} more` : '';
     // ONE BUTTON PER REMEDY, because some findings have more than one right answer and
     // choosing between them is the user's call. An orphaned define may be a typo to replace, a
     // leftover to delete, or something to disable while they decide, and the text cannot say
     // which. Findings with a single remedy render exactly as before.
     const fixes  = f.fixes && f.fixes.length ? f.fixes : (f.fix ? [f.fix] : []);
     const fixBtn = fixes.length
-      ? `<div style="margin:6px 0 2px;display:flex;gap:6px;align-items:center;flex-wrap:nowrap">`
+      ? `<div style="margin:8px 0 2px;display:flex;gap:6px;align-items:center;flex-wrap:nowrap">`
         + fixes.map((fx, j) =>
             // A remedy that needs a VALUE carries its field in the row rather than behind a
             // dialog. Seeded with the suggestion when there is one, so taking it is pressing the
@@ -10942,13 +10950,13 @@ window.runPreflight = async function () {
         + `</div>`
       : '';
 
-    return `<li style="margin-bottom:14px;line-height:1.45">`
+    return `<div class="preflight-card">`
       + `<strong>${_preflightEsc(f.title)}</strong>`
-      + (items ? `<br><strong>${items}</strong>${more}.` : '')
       + (f.detail ? `<br>${_preflightEsc(f.detail)}` : '')
+      + (items ? `<div class="preflight-card-list">${f.labelLead ? `${_preflightEsc(f.labelLead)}: ` : ''}${items}${more}</div>` : '')
       + rowsList
       + fixBtn
-      + `</li>`;
+      + `</div>`;
   }).join('');
 
   // THE BUTTON SLOTS ARE NOT INTERCHANGEABLE, AND GETTING THAT WRONG COST A
@@ -10974,7 +10982,10 @@ window.runPreflight = async function () {
       ? (one ? 'This Config Cannot Compile' : 'This Config Cannot Compile Yet')
       : 'Before You Compile';
     cancelBtn.textContent = res.blocking ? 'Cancel Compile' : 'Cancel';
-    msgEl.innerHTML = `<ul style="margin:8px 0 0 18px;padding:0">${rowsHtml(res.findings)}</ul>`;
+    const n = res.findings.length;
+    msgEl.innerHTML = `<div class="preflight-headline">Pre-flight found ${n} potential `
+      + `${n === 1 ? 'issue that requires' : 'issues that require'} your attention.</div>`
+      + `<div class="preflight-cards">${rowsHtml(res.findings)}</div>`;
   };
 
   let busy = false;
@@ -11359,7 +11370,7 @@ function updateStatusMeta() {
 // the established rule: insert at the top of an existing `#ifdef CONFIG_TOP` block if one
 // exists; otherwise create a fresh CONFIG_TOP block at the very top of the file, AFTER any
 // leading comments (preserved verbatim).
-const _BOARD_INCLUDE_RE = /^([ \t]*)#include\s+["']proffieboard_v(\d)_config\.h["'][ \t]*(\r?\n)?/m;
+const _BOARD_INCLUDE_RE = /^([ \t]*)#include\s+["'\u201C\u201D]proffieboard_v(\d)_config\.h["'\u201C\u201D][ \t]*(\r?\n)?/m;
 const _BOARD_INCLUDE_FILE_BY_DROPDOWN = {
   'Proffieboard':    'proffieboard_v1_config.h',
   'Proffieboard V2': 'proffieboard_v2_config.h',
@@ -12086,7 +12097,8 @@ function flashEditorLine(lineNumber) {
 // commented-include case by requiring the `#include` directive to start the line
 // (after optional whitespace) — `// #include ...` won't match.
 function _detectBoardFromInclude(content) {
-  const m = /^[ \t]*#include\s+["']proffieboard_v(\d)_config\.h["']/m.exec(content || '');
+  // Curly quotes count: the file still names its board, and the preflight check owns the quotes.
+  const m = /^[ \t]*#include\s+["'\u201C\u201D]proffieboard_v(\d)_config\.h["'\u201C\u201D]/m.exec(content || '');
   if (!m) return null;
   switch (m[1]) {
     case '1': return 'Proffieboard';

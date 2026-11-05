@@ -1,0 +1,5 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:25:1: error: cannot resolve overloaded function 'StylePtr' based on conversion to type 'StyleFactory*'
+   25 | };
+      | ^

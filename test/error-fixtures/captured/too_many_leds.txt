@@ -1,0 +1,9 @@
+FAILED
+<OS>\blades\ws2811_blade.h: In instantiation of 'BladeBase* WS2811BladePtr() [with int LEDS = 144; int CONFIG = 2; int DATA_PIN = 0; POWER_PINS = PowerPINS<21, 22>; PinClass = WS2811Pin; int reset_us = 300; int t0h = 294; int t1h = 892; int POWER_OFF_DELAY_MS = 3000]':
+<OS>\config\my_config.h:27:109:   required from here
+   27 |   { 0, WS2811BladePtr<144, WS2811_800kHz | WS2811_GRB, bladePin, PowerPINS<bladePowerPin2, bladePowerPin3> >(),
+      |        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+<OS>\blades\ws2811_blade.h:378:22: error: static assertion failed: update maxLedsPerStrip
+  378 |   static_assert(LEDS <= maxLedsPerStrip, "update maxLedsPerStrip");
+      |                 ~~~~~^~~~~~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:378:22: note: the comparison reduces to '(144 <= 100)'

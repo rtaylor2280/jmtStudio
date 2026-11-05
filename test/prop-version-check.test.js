@@ -69,7 +69,7 @@ const run = async (text, extra) => {
        /saber_sa22c_buttons\.h is not in ProffieOS 8\.10\./.test(r.findings[0].title),
        r.findings[0] && r.findings[0].title);
     ok('it says what to do about it, in both directions',
-       /Switch this config to a version that has the prop, or link a prop that exists/
+       /Import prop in the Prop dropdown.*switch to a version that has it, or link a different prop/
          .test(r.findings[0].detail), r.findings[0] && r.findings[0].detail);
     ok('it offers no fix — which prop, or which version, is a decision',
        r.findings[0].fix === null);

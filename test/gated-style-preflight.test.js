@@ -102,7 +102,7 @@ const run = async (text, { tree = TREE, library = LIBRARY } = {}) => {
 
   r = await run(config({ styles: ['PinStyle'] }));
   check('a define gate: named, with no fix (its value is the user\'s)',
-    r.found.length === 1 && /PinStyle is only defined when CHARGE_DETECT_PIN is defined/.test(r.found[0].title)
+    r.found.length === 1 && /PinStyle is switched off/.test(r.found[0].title)
     && r.found[0].fixes.length === 0, JSON.stringify(r.found.map((x) => [x.title, x.fixes.length])));
   r = await run(config({ styles: ['PinStyle'], top: '#define CHARGE_DETECT_PIN 7' }));
   check('the define present: nothing', r.found.length === 0);

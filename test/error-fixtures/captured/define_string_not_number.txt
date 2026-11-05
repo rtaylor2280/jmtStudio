@@ -1,0 +1,58 @@
+FAILED
+In file included from <OS>\display\rgb565frame.h:6,
+                 from <OS>\styles\display.h:5,
+                 from <OS>\ProffieOS.ino:525:
+<OS>\display\layer_controller.h: In member function 'virtual int VolumeVariableSource::percent()':
+<OS>\display\layer_controller.h:96:54: error: invalid operands of types 'long int' and 'const char [5]' to binary 'operator/'
+   96 |     return clampi32(dynamic_mixer.get_volume() * 100 / VOLUME, 0, 100);
+      |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^
+      |                                                |
+      |                                                long int
+In file included from <OS>\ProffieOS.ino:567:
+<OS>\functions\volume_level.h: In member function 'int VolumeLevelSVF::calculate(BladeBase*)':
+<OS>\functions\volume_level.h:16:47: error: invalid operands of types 'long int' and 'const char [5]' to binary 'operator/'
+   16 |     return dynamic_mixer.get_volume() * 32768 / VOLUME;
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^
+      |                                       |
+      |                                       long int
+In file included from <OS>\ProffieOS.ino:631:
+<OS>\modes\settings_menues.h: In member function 'virtual int mode::SmoothVolumeMode<SPEC>::get()':
+<OS>\modes\settings_menues.h:29:24: error: invalid operands of types 'float' and 'const char [5]' to binary 'operator/'
+   29 |     float ret = volume / VOLUME;
+      |                 ~~~~~~ ^
+      |                 |
+      |                 float
+<OS>\modes\settings_menues.h: In member function 'virtual void mode::SmoothVolumeMode<SPEC>::set(int)':
+<OS>\modes\settings_menues.h:44:45: error: invalid operands of types 'const char [5]' and 'float' to binary 'operator*'
+   44 |                     << " final= " << VOLUME * powf(ret, VOLUME_MENU_GAMMA)
+      |                                             ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                   |
+      |                                                   float
+<OS>\modes\settings_menues.h:52:37: error: invalid operands of types 'const char [5]' and 'float' to binary 'operator*'
+   52 |     dynamic_mixer.set_volume(VOLUME * ret);
+      |                                     ^ ~~~
+      |                                       |
+      |                                       float
+In file included from <OS>\ProffieOS.ino:770:
+<OS>\buttons\pots.h: In member function 'virtual void ChangeVolumeAnalogReceiver::Set(float)':
+<OS>\buttons\pots.h:21:37: error: invalid operands of types 'const char [5]' and 'float' to binary 'operator*'
+   21 |     dynamic_mixer.set_volume(VOLUME * value);
+      |                                     ^ ~~~~~
+      |                                       |
+      |                                       float
+In file included from <OS>\ProffieOS.ino:46:
+<OS>\sound\dynamic_mixer.h: In instantiation of 'AudioDynamicMixer<N>::AudioDynamicMixer() [with int N = 9]':
+<OS>\sound\dynamic_mixer.h:201:40:   required from here
+  201 | AudioDynamicMixer<NUM_WAV_PLAYERS + 2> dynamic_mixer;
+      |                                        ^~~~~~~~~~~~~
+<OS>\config\my_config.h:5:16: error: invalid conversion from 'const char*' to 'int32_t' {aka 'long int'} [-fpermissive]
+    5 | #define VOLUME "1500"
+      |                ^~~~~~
+      |                |
+      |                const char*
+<OS>\ProffieOS.ino:77:21: note: in expansion of macro 'VOLUME'
+   77 | #define BOOT_VOLUME VOLUME
+      |                     ^~~~~~
+<OS>\sound\dynamic_mixer.h:193:21: note: in expansion of macro 'BOOT_VOLUME'
+  193 |   int32_t volume_ = BOOT_VOLUME;
+      |                     ^~~~~~~~~~~

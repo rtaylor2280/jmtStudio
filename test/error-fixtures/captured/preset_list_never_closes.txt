@@ -1,0 +1,25 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:26:13: error: expected primary-expression before 'blades'
+   26 | BladeConfig blades[] = {
+      |             ^~~~~~
+<OS>\config\my_config.h:26:13: error: expected '}' before 'blades'
+<OS>\config\my_config.h:18:20: note: to match this '{'
+   18 | Preset presets[] = {
+      |                    ^
+In file included from <OS>\common\capabilities.h:4,
+                 from <OS>\ProffieOS.ino:49:
+<OS>\props\prop_base.h: In member function 'size_t PropBase::FindBestConfigForId(float)':
+<OS>\props\prop_base.h:566:25: error: 'blades' was not declared in this scope; did you mean 'OnBlades'?
+  566 |     static_assert(NELEM(blades) > 0, "blades array cannot be empty");
+      |                         ^~~~~~
+<OS>\common\common.h:18:26: note: in definition of macro 'NELEM'
+   18 | #define NELEM(X) (sizeof(X)/sizeof((X)[0]))
+      |                          ^
+In file included from <OS>\props\saber.h:34,
+                 from <OS>\ProffieOS.ino:682:
+<OS>\props\prop_base.h: In member function 'void PropBase::FindBlade(bool)':
+<OS>\props\prop_base.h:652:22: error: 'blades' was not declared in this scope; did you mean 'OnBlades'?
+  652 |     current_config = blades + best_config;
+      |                      ^~~~~~
+      |                      OnBlades

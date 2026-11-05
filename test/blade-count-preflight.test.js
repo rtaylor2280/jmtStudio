@@ -162,7 +162,7 @@ BladeConfig blades[] = {{ 0, WS281XBladePtr<100, bladePin>(), CONFIGARRAY(testba
   {
     const r = await check(mk(2, [{ n: 2, name: 'Fine' }, { n: 1, name: 'Lonely' }]));
     ok('one short preset reads as singular',
-       /1 preset has 1 of 2 blade styles/.test(r.body) && /that preset/.test(r.body), r.body);
+       /1 preset has 1 of 2 blade styles/.test(r.body) && /Open it in Presets/.test(r.body), r.body);
   }
   {
     const r = await check(mk(4, [{ n: 3, name: 'Three' }, { n: 2, name: 'Two' }]));
