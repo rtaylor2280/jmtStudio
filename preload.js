@@ -512,6 +512,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreCommonFile:     (params)     => ipcRenderer.invoke('common:restoreFile', params),
   listCommonFiles:       (params)     => ipcRenderer.invoke('common:listFiles', params),
   addCommonFiles:        (params)     => ipcRenderer.invoke('common:addFiles', params),
+  listJmtSounds:         (params)     => ipcRenderer.invoke('common:jmtSounds', params),
+  addJmtSounds:          (params)     => ipcRenderer.invoke('common:addJmtSounds', params),
   renameCommonFile:      (params)     => ipcRenderer.invoke('common:renameFile', params),
   deleteCommonFile:      (params)     => ipcRenderer.invoke('common:deleteFile', params),
   createCommonSubfolder: (params)     => ipcRenderer.invoke('common:createSubfolder', params),

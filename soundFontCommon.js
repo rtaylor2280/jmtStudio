@@ -1350,6 +1350,26 @@ async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onByte
   return { ok: true, cancelled: _stopped, added, failed, refused: refusedIn };
 }
 
+// Which of `sounds` ({ file, sha256 }) a common already holds, by content, as the library picker's
+// "already in entry" does: the sound itself or a numbered variant of it, in the folder's root.
+// { present, taken }, sets of file names, taken being a different file under the same name.
+function commonSoundsHeld(userData, uuid, sounds) {
+  const root = _resolveFilesPath(userData, uuid, '');
+  const names = fs.existsSync(root) ? fs.readdirSync(root) : [];
+  const present = new Set(), taken = new Set();
+  for (const s of sounds) {
+    const stem = path.basename(s.file, '.wav').toLowerCase();
+    const mine = names.filter(n => new RegExp(`^${stem}\\d*\\.wav$`, 'i').test(n));
+    const same = mine.some(n => {
+      try { return require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root, n))).digest('hex') === s.sha256; }
+      catch { return false; }
+    });
+    if (same) present.add(s.file);
+    else if (mine.length) taken.add(s.file);
+  }
+  return { present, taken };
+}
+
 // Rename one file inside a common. Validates the new name doesn't collide
 // with anything else in the same subfolder.
 function renameCommonFile(userData, uuid, subPath, newName) {
@@ -2531,6 +2551,7 @@ module.exports = {
   deleteCommonGroup,
   listCommonFiles,
   addFilesToCommon,
+  commonSoundsHeld,
   renameCommonFile,
   deleteCommonFile,
   createCommonSubfolder,

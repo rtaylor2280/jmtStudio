@@ -31597,6 +31597,9 @@ require(['vs/editor/editor.main'], function () {
                     <button id="btn-sf-common-add-browse" class="styles-tag-dropdown-item">
                       <span class="styles-tag-dropdown-name">Browse&hellip;</span>
                     </button>
+                    <button id="btn-sf-common-add-jmt" class="styles-tag-dropdown-item" style="display:none" title="The sounds the JMT add-ons play: charging and chassis in or out">
+                      <span class="styles-tag-dropdown-name">JMT add-on sounds&hellip;</span>
+                    </button>
                   </div>
                 </span>
               </div>
@@ -33145,6 +33148,67 @@ require(['vs/editor/editor.main'], function () {
         // AFTER the refresh, so the list behind the toast is already correct.
         const _n = pick.filePaths.length;
         await _sfOfferEjectInToast(_ejSrc, `Added ${_n} file${_n === 1 ? '' : 's'}`, 'from');
+      };
+      // JMT add-on sounds for a common folder [B-167]. Both doors ask first. + Add is there once a
+      // version has the add-ons; the export asks only when the open config needs one, because it alone
+      // knows both the config and the folder.
+      const _sfCommonName = (uuid) => _sfCommons.find(c => c.uuid === uuid)?.meta?.name || 'this common folder';
+      // The add-ons play a sound by its exact name, so a numbered one sits unused until the user swaps it.
+      const _sfJmtTakenNote = (names) => {
+        if (!names.length) return '';
+        const list = _sfEscape(names.join(', '));
+        const one = names.length === 1;
+        return `<div style="margin:12px 0">This folder already has a different ${list}, so the JMT ${one ? 'version is' : 'versions are'} added with a number. `
+          + `The add-ons only use the exact name, so to use ${one ? 'it' : 'them'}, delete the existing ${one ? 'file' : 'files'} and remove the number.</div>`;
+      };
+      const _sfJmtSoundRows = (sounds) => '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin:12px 0">'
+        + sounds.map(s => `<span>${_sfEscape(s.file)}</span><span style="color:var(--c-text-muted)">${_sfEscape(s.what)}`
+          + `${s.taken ? ', added numbered' : ''}</span>`).join('') + '</div>'
+        + _sfJmtTakenNote(sounds.filter(s => s.taken).map(s => s.file));
+      const _sfAddJmtSounds = async (uuid, sounds) => {
+        const res = await window.electronAPI.addJmtSounds({ uuid, files: sounds.map(s => s.file) });
+        if (!res || !res.ok) { promptError('Could not add the JMT add-on sounds', `Nothing was changed. ${(res && res.error) || ''}`); return; }
+        await _sfRefreshCommons({ preserveSelection: true });
+        const n = (res.added || []).length;
+        showToast(`Added ${n} JMT add-on sound${n === 1 ? '' : 's'} to ${_sfCommonName(uuid)}`);
+      };
+      const _sfJmtSoundsForCommon = async (uuid) => {
+        const r = await window.electronAPI.listJmtSounds({ uuid });
+        if (!r || !r.ok) { promptError('Could not reach the JMT add-on sounds', `Nothing was changed. ${(r && r.error) || ''}`); return; }
+        const missing = r.sounds.filter(s => !s.present);
+        const name = _sfCommonName(uuid);
+        if (!missing.length) { showToast(`${name} already has all the JMT add-on sounds`); return; }
+        const have = r.sounds.filter(s => s.present).map(s => s.file);
+        const yes = await promptConfirm({
+          title: 'Add JMT add-on sounds?',
+          messageHtml: `Adds these to ${_sfEscape(name)}. The JMT add-ons can use them, depending on your config.`
+            + _sfJmtSoundRows(missing)
+            + (have.length ? `Already there: ${_sfEscape(have.join(', '))}` : ''),
+          confirmText: `Add ${missing.length}`,
+          confirmKind: 'primary',
+        });
+        if (yes) await _sfAddJmtSounds(uuid, missing);
+      };
+      // Never stops the export. If the repo can't be reached there is nothing to offer, and + Add has it.
+      const _sfOfferJmtSoundsForExport = async (slots) => {
+        const text = (typeof editor !== 'undefined' && editor) ? editor.getValue() : '';
+        if (!/\bjmt_\w+\.h\b/.test(window.preflight.stripComments(text))) return;
+        const defines = window.preflight.configDefines(text);
+        for (const uuid of new Set(slots.map(s => s.uuid))) {
+          const r = await window.electronAPI.listJmtSounds({ uuid });
+          if (!r || !r.ok) return;
+          const missing = r.sounds.filter(s => !s.present && s.needs.some(d => defines.has(d)));
+          if (!missing.length) continue;
+          const yes = await promptConfirm({
+            title: 'Add JMT add-on sounds?',
+            messageHtml: `Your config's JMT add-ons can use sounds ${_sfEscape(_sfCommonName(uuid))} doesn't have.`
+              + _sfJmtSoundRows(missing),
+            confirmText: `Add ${missing.length}`,
+            confirmKind: 'primary',
+            cancelText: 'Not now',
+          });
+          if (yes) await _sfAddJmtSounds(uuid, missing);
+        }
       };
       // Rename a folder inside a common's file tree. Uses the unified
       // fileOps:rename IPC since it handles both files and dirs.
@@ -51675,6 +51739,7 @@ require(['vs/editor/editor.main'], function () {
             }
           }
         }
+        if (commonSlots.length) await _sfOfferJmtSoundsForExport(commonSlots);   // [B-167]
         // Derived, so every downstream site that only asks "is any shared folder being
         // written" keeps working unchanged.
         includeCommon = commonSlots.length > 0;
@@ -56378,6 +56443,11 @@ require(['vs/editor/editor.main'], function () {
           e.stopPropagation();
           const dd = document.getElementById('sf-common-add-dropdown');
           if (dd) dd.style.display = dd.style.display === 'none' ? '' : 'none';
+          // Only once an OS version has the JMT add-ons. [B-167]
+          window.electronAPI.listVersionsDetails().then(details => {
+            const jmt = document.getElementById('btn-sf-common-add-jmt');
+            if (jmt) jmt.style.display = (details || []).some(d => d.jmtVersion) ? '' : 'none';
+          }).catch(() => {});
           return;
         }
         if (e.target.closest('#btn-sf-common-add-browse')) {
@@ -56385,6 +56455,13 @@ require(['vs/editor/editor.main'], function () {
           const dd = document.getElementById('sf-common-add-dropdown');
           if (dd) dd.style.display = 'none';
           _sfAddCommonFiles();
+          return;
+        }
+        if (e.target.closest('#btn-sf-common-add-jmt')) {
+          e.stopPropagation();
+          const dd = document.getElementById('sf-common-add-dropdown');
+          if (dd) dd.style.display = 'none';
+          if (_sfSelectedCommonUuid) _sfJmtSoundsForCommon(_sfSelectedCommonUuid);
           return;
         }
         if (e.target.closest('#btn-sf-common-add-library')) {

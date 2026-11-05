@@ -59,6 +59,7 @@ const INWARD = [
   'common:importFromZip',
   'common:importFromFolder',
   'common:addFiles',
+  'common:addJmtSounds',
   'sharedTracks:addFiles',
   'fileOps:addFiles',
   'attachments:addToSources',

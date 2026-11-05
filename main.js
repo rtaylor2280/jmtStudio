@@ -8299,6 +8299,48 @@ async function _getJmtManifest() {
 ipcMain.handle('versions:fetchJmtManifest', () => _getJmtManifest());
 
 ipcMain.handle('versions:getAddonBranch', () => _addonBranch);
+
+// ── JMT sounds for a common folder [B-167] ──
+// The sounds the JMT wrapper plays, in sounds/ in the add-ons repo. Always read from main, whichever
+// add-on branch is selected: they are not part of the manifest, so an add-on install never touches them.
+const _JMT_SOUNDS_BASE = `${_JMT_REPO_BASE}main/sounds/`;
+async function _jmtSoundsFor(uuid) {
+  const { sounds } = JSON.parse(await _httpsGet(`${_JMT_SOUNDS_BASE}sounds.json`, { 'User-Agent': 'JMT-Studio' }));
+  const { present, taken } = soundFontCommon.commonSoundsHeld(app.getPath('userData'), uuid, sounds);
+  return sounds.map(s => ({ ...s, present: present.has(s.file), taken: taken.has(s.file) }));
+}
+ipcMain.handle('common:jmtSounds', async (_, { uuid } = {}) => {
+  try { return { ok: true, sounds: await _jmtSoundsFor(uuid) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+// Every file is fetched and checked before any is added, so a dropped connection changes nothing.
+// A sound the folder already holds is left out, so adding twice adds nothing. A different file under
+// the same name lands numbered, as on any other + Add.
+ipcMain.handle('common:addJmtSounds', async (_, { uuid, files } = {}) => {
+  let dir = null;
+  try {
+    const wanted = (await _jmtSoundsFor(uuid)).filter(s => !s.present && (files || []).includes(s.file));
+    if (!wanted.length) return { ok: true, added: [] };
+    dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'jmt-sounds-'));
+    const paths = [];
+    for (const s of wanted) {
+      const chunks = [];
+      await _httpsGet(`${_JMT_SOUNDS_BASE}${s.file}`, { 'User-Agent': 'JMT-Studio' }, c => chunks.push(c));
+      const bytes = Buffer.concat(chunks);
+      if (require('crypto').createHash('sha256').update(bytes).digest('hex') !== s.sha256) {
+        return { ok: false, error: `${s.file} did not download correctly.` };
+      }
+      const dest = path.join(dir, s.file);
+      fs.writeFileSync(dest, bytes);
+      paths.push(dest);
+    }
+    return await soundFontCommon.addFilesToCommon(app.getPath('userData'), uuid, '', paths);
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  } finally {
+    try { if (dir) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+});
 ipcMain.handle('versions:setAddonBranch', (_, branch) => {
   _addonBranch = branch === 'dev' ? 'dev' : 'main';
   // Flush everything branch-scoped so the next fetch resolves the new branch's
