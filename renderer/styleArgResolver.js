@@ -111,10 +111,11 @@
   }
 
   /**
-   * A style's colours as written: { args, main }. args holds each RgbArg it uses, once, in the
+   * A style's colours as written: { args, main, mainText }. args holds each RgbArg it uses, once, in the
    * registry's order, as { name, label, rgb16 }, the default it is written with. A default that
    * isn't a colour yet (a template parameter) has no value to show, so it is left out. main is
-   * the first colour written outside its arguments when it has no Base, or null. [B-608]
+   * the first colour written outside its arguments when it has no Base, or null, and mainText
+   * that colour as the code spells it. [B-608]
    */
   function styleColors(code) {
     const pa = root.proffieArgs;
@@ -132,7 +133,7 @@
     const args = [...found.values()].sort((a, b) => a.pos - b.pos);
     const outside = rgbArgs.reduceRight((t, a) => t.slice(0, a.start) + t.slice(a.end), text);
     const hit = found.has('BASE_COLOR_ARG') ? null : pa.earliestColor(outside);
-    return { args, main: hit ? hit.rgb16 : null };
+    return { args, main: hit ? hit.rgb16 : null, mainText: hit ? hit.matchStr : null };
   }
 
   root.styleArgResolver = { findArgs, resolveStyleArgs, readArgValue, writeArgValue, styleColors, proffieToCSS, cssToProffie };

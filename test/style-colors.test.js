@@ -60,6 +60,17 @@ check('each colour renders once, at idle, and its dots share it', /_colorDotImag
 check('only the hovered dot animates', (html.match(/animated: true, width: 14/g) || []).length === 1 && /dot\.addEventListener\('mouseenter'/.test(html));
 check('the colours sit at the foot of the card, and cards in a grid match', /\.style-card-colors \{[^}]*margin-top: auto/.test(html) && /\.style-cards \{[^}]*grid-auto-rows: 1fr/.test(html));
 
+check('the detected colour is named as the code spells it', styleColors('Layers<AudioFlicker<Rgb<135,0,255>,Blue>,RgbArg<OFF_COLOR_ARG,Red>>').mainText === 'Rgb<135,0,255>');
+check('a colour in the window searches the code, as Ctrl+F does', /addEventListener\('click', \(\) => _findInDetailCode\(colors\[i\]\.find\)\)/.test(html)
+  && /getContribution\('editor\.contrib\.findController'\)/.test(html) && /searchString: text, isRegex: false/.test(html) && /find\.moveToNextMatch\(\)/.test(html));
+check('a colour on a card narrows to that slot and leaves the card shut', /data-slot-color="\$\{c\.slot\}\|\$\{c\.rgb16\.join\(\)\}"/.test(html) && /e\.stopPropagation\(\);\s+flipSlot\(el, i, _activeFilterSlots, _activeFilterSlotsMissing\);/.test(html));
+check('a narrowed colour counts as filtering, and shows and clears as a chip', /_activeFilterSlots\.size > 0 \|\| _activeFilterSlotsMissing\.size > 0;/.test(html) && /case 'slot':\s+_activeFilterSlots\.delete\(v\)/.test(html)
+  && /_activeFilterSlots = new Map\(\);\s+_activeFilterSlotsMissing = new Map\(\);\s+_activeFilterEffects = new Set\(\);/.test(html) && /&& _styleInSlotScope\(card\);/.test(html));
+
+check('right-clicking a colour leaves it out, as a facet does, and clears as a chip', /e\.preventDefault\(\);\s+e\.stopPropagation\(\);\s+flipSlot\(el, i, _activeFilterSlotsMissing, _activeFilterSlots\);/.test(html)
+  && /!\[\.\.\._activeFilterSlotsMissing\.keys\(\)\]\.some\(has\)/.test(html) && /case 'slot-without':\s+_activeFilterSlotsMissing\.delete\(v\)/.test(html));
+check('Detected and Base are one slot, and the chip says Base', /slot: 'BASE_COLOR_ARG', label: 'Detected'/.test(html) && /`\$\{_COLOR_NAMES\[c\.slot\]\}: /.test(html));
+
 const balanced = eval(`(${html.match(/function _balancedColorColumns[\s\S]*?\n\}/)[0]})`);
 check('colours that fit stay on one row', balanced(7, 675) === 7, balanced(7, 675));
 check('10 in a width that fits 8 go 5 and 5', balanced(10, 675) === 5, balanced(10, 675));
@@ -80,10 +91,10 @@ check('the families read as the wheel, nine of them', Array.from(colorFamilies).
 check('each family has a colour for its dot', Array.from(colorFamilies).every(f => namedColors[f.swatch]));
 check('the picker and the filter share one wheel', /const _colorOrder = _pa\.colorOrder;/.test(html) && !/const _colorOrder = \(r16/.test(html));
 check('a card is filed by Base or Detected only', /c\.real === 'BASE_COLOR_ARG' \|\| c\.label === 'Detected'/.test(html));
-check('Color filters as the other dropdowns do', /&& _styleInColorScope\(card\);/.test(html) && /own !== 'color' && !_styleInColorScope/.test(html));
+check('Color filters as the other dropdowns do', /&& _styleInColorScope\(card\) &&/.test(html) && /own !== 'color' && !_styleInColorScope/.test(html));
 check('Color counts as filtering, and shows and clears as a chip', /_activeFilterColors\.size > 0 \|\| _activeFilterColorsMissing\.size > 0/.test(html)
   && /case 'color':\s+_activeFilterColors\.delete\(v\)/.test(html) && /case 'color-without':\s+_activeFilterColorsMissing\.delete\(v\)/.test(html)
-  && /_activeFilterColors = new Set\(\);\s+_activeFilterColorsMissing = new Set\(\);\s+_activeFilterEffects = new Set\(\);/.test(html));
+  && /_activeFilterColors = new Set\(\);\s+_activeFilterColorsMissing = new Set\(\);\s+_activeFilterSlots = new Map\(\);/.test(html));
 check('Color keeps its wheel order, with no sort bar', /fixedOrder: true/.test(html) && /fixedOrder \? '' : _facetSortBarHtml\(\)/.test(html));
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');

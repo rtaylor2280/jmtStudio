@@ -4489,11 +4489,15 @@
   /* A style's colours, at the foot of the card as a font's Font and Hum are. Each colour draws once
      and every dot of that colour shares the picture; the animated swatch is only under the pointer. [B-603] */
   .style-card-colors { display: flex; gap: 4px; margin-top: auto; padding-top: 5px; }
-  .style-card-color { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 27px; }
+  .style-card-color { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 27px; cursor: pointer; }
+  .style-card-color:hover .style-card-color-name { color: var(--c-text); }
+  .style-card-color.active .style-card-color-name { color: var(--jmt-blue); }
+  .style-card-color.active .style-color-dot { box-shadow: 0 0 0 1px var(--jmt-blue); }
   .style-card-color-name { font-size: 0.58rem; line-height: 1; color: var(--c-text-muted); }
   .style-color-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; overflow: hidden; line-height: 0; background-size: cover; box-shadow: 0 0 0 1px var(--c-border-strong); }
   .style-color-dot canvas { pointer-events: none; clip-path: circle(50% at 50% 50%); }
-  .detail-color { display: inline-flex; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--c-text-muted); }
+  .detail-color { display: inline-flex; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--c-text-muted); cursor: pointer; }
+  .detail-color:hover { color: var(--c-text); }
   .detail-colors-wrap { display: grid; grid-template-columns: repeat(auto-fill, 72px); gap: 4px; align-items: center; flex: 1; }
   .style-effect-chip { font-size: 0.6rem; color: var(--c-text-muted); background: transparent; border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 0px 4px; white-space: nowrap; opacity: 0.7; }
   /* Style detail modal */
@@ -21255,6 +21259,9 @@ let _activeFilterSegmentsMissing = new Set();
 // Colour families picked and left out, read from a style's Base or detected colour. [B-608]
 let _activeFilterColors        = new Set();
 let _activeFilterColorsMissing = new Set();
+// A colour clicked on a card, narrowing to that colour in that slot: 'slot|r,g,b' to its chip text. [B-609]
+let _activeFilterSlots = new Map();
+let _activeFilterSlotsMissing = new Map();
 let _activeFilterEffects   = new Set();
 // [B-286] Effects a style must NOT have, set by right-click, as on Sound Fonts. Setting one polarity
 // of an effect clears the other.
@@ -22466,6 +22473,8 @@ function _stylesClearAllFilters() {
   _activeFilterSegmentsMissing = new Set();
   _activeFilterColors = new Set();
   _activeFilterColorsMissing = new Set();
+  _activeFilterSlots = new Map();
+  _activeFilterSlotsMissing = new Map();
   _activeFilterEffects = new Set();
   _activeFilterEffectsMissing = new Set();
   _stylesInUseFilter   = '';
@@ -22479,7 +22488,7 @@ function _applyStylesSearch() {
   let inUseCount = 0, notInUseCount = 0;
   cards.forEach(card => {
     const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
-    const matchesTags = _styleInTagScope(card) && _styleInCreatorScope(card) && _styleInHelperScope(card) && _styleInSegmentScope(card) && _styleInColorScope(card);
+    const matchesTags = _styleInTagScope(card) && _styleInCreatorScope(card) && _styleInHelperScope(card) && _styleInSegmentScope(card) && _styleInColorScope(card) && _styleInSlotScope(card);
     const matchesEffects = matchesTags && _styleInEffectScope(card);
     const inUse = card.classList.contains('in-use');
     const others = matchesQ && matchesTags && matchesEffects;
@@ -22488,6 +22497,7 @@ function _applyStylesSearch() {
     const vis = others && matchesInUse;
     card.style.display = vis ? '' : 'none';
     if (vis) shown++;
+    card.querySelectorAll('.style-card-color').forEach(el => el.classList.toggle('active', _activeFilterSlots.has(el.dataset.slotColor)));
   });
   // [B-286] Counts follow the other filters, as on Sound Fonts. In use shows while anything is in
   // use or the filter is on; Not in use only once either polarity is on.
@@ -22528,7 +22538,7 @@ function _applyStylesSearch() {
   const isFiltering = !!q || _activeFilterTags.size > 0 || _activeFilterTagsMissing.size > 0 || _activeFilterEffects.size > 0
     || _activeFilterEffectsMissing.size > 0 || !!_stylesInUseFilter || _activeFilterCreators.size > 0 || _activeFilterCreatorsMissing.size > 0
     || _activeFilterHelpers.size > 0 || _activeFilterHelpersMissing.size > 0 || _activeFilterSegments.size > 0 || _activeFilterSegmentsMissing.size > 0
-    || _activeFilterColors.size > 0 || _activeFilterColorsMissing.size > 0;
+    || _activeFilterColors.size > 0 || _activeFilterColorsMissing.size > 0 || _activeFilterSlots.size > 0 || _activeFilterSlotsMissing.size > 0;
   const autoClear  = _stylesAutoClearOnEmpty;
   _stylesAutoClearOnEmpty = false;
   if (listEl) {
@@ -22605,6 +22615,17 @@ function _styleInColorScope(card) {
   if (_activeFilterColors.size && !_activeFilterColors.has(c)) return false;
   return !_activeFilterColorsMissing.has(c);
 }
+// Colours clicked in one slot OR, different slots AND: Base one of these, and Clash that. A colour
+// right-clicked leaves out every style with it in that slot.
+function _styleInSlotScope(card) {
+  const slots = new Map();
+  for (const key of _activeFilterSlots.keys()) {
+    const slot = key.split('|')[0];
+    slots.set(slot, [...(slots.get(slot) || []), key]);
+  }
+  const has = key => _styleHas(card, '.style-card-color', 'data-slot-color', key);
+  return [...slots.values()].every(keys => keys.some(has)) && ![..._activeFilterSlotsMissing.keys()].some(has);
+}
 function _styleInEffectScope(card) {
   if (_activeFilterEffects.size) {
     let any = false;
@@ -22626,6 +22647,7 @@ function _matchingCardsForFacet(own) {
     if (own !== 'helper' && !_styleInHelperScope(card)) return false;
     if (own !== 'segment' && !_styleInSegmentScope(card)) return false;
     if (own !== 'color' && !_styleInColorScope(card)) return false;
+    if (!_styleInSlotScope(card)) return false;
     if (own !== 'effect' && !_styleInEffectScope(card)) return false;
     if (_stylesInUseFilter && card.classList.contains('in-use') !== (_stylesInUseFilter === 'in')) return false;
     return true;
@@ -22905,7 +22927,7 @@ function _renderActiveFilterChips() {
   if (!strip) return;
   // Search counts as a filter here, same as on the Sound Fonts side (B-156).
   const searchQ = (document.getElementById('styles-search')?.value || '').trim();
-  const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + creCount + helCount + segCount + colCount + _activeFilterEffects.size + _activeFilterEffectsMissing.size
+  const totalActive = _activeFilterTags.size + _activeFilterTagsMissing.size + creCount + helCount + segCount + colCount + _activeFilterSlots.size + _activeFilterSlotsMissing.size + _activeFilterEffects.size + _activeFilterEffectsMissing.size
     + (searchQ ? 1 : 0) + (_stylesInUseFilter ? 1 : 0);
   if (!totalActive) {
     strip.style.display = 'none';
@@ -22941,6 +22963,9 @@ function _renderActiveFilterChips() {
     group('color',   Array.from(_activeFilterColors).map(c => chip(c, 'color', c)),                          'or'),
     group('without', Array.from(_activeFilterColorsMissing).map(c =>
       chip(c, 'color-without', c, ' sf-active-filter-effect-missing')),                                       'and'),
+    group('slot',    Array.from(_activeFilterSlots).map(([key, text]) => chip(text, 'slot', key)),            'and'),
+    group('without', Array.from(_activeFilterSlotsMissing).map(([key, text]) =>
+      chip(text, 'slot-without', key, ' sf-active-filter-effect-missing')),                                   'and'),
     group('effect',  Array.from(_activeFilterEffects).map(fx => chip(fx, 'effect', fx)),                      'or'),
     group('without', Array.from(_activeFilterEffectsMissing).map(fx =>
       chip(fx, 'without', fx, ' sf-active-filter-effect-missing')),                                           'and'),
@@ -22976,6 +23001,8 @@ function _renderActiveFilterChips() {
         case 'segment-without': _activeFilterSegmentsMissing.delete(v); break;
         case 'color':   _activeFilterColors.delete(v); break;
         case 'color-without': _activeFilterColorsMissing.delete(v); break;
+        case 'slot':    _activeFilterSlots.delete(v); break;
+        case 'slot-without': _activeFilterSlotsMissing.delete(v); break;
         case 'effect':  _activeFilterEffects.delete(v); break;
         case 'without': _activeFilterEffectsMissing.delete(v); break;
         case 'in-use':  _stylesInUseFilter = ''; break;
@@ -23563,19 +23590,31 @@ const _COLOR_NAMES = { BASE_COLOR_ARG: 'Base', ALT_COLOR_ARG: 'Alt', IGNITION_CO
 const _CARD_COLORS = ['BASE_COLOR_ARG', 'ALT_COLOR_ARG', 'BLAST_COLOR_ARG', 'CLASH_COLOR_ARG',
   'LOCKUP_COLOR_ARG', 'STAB_COLOR_ARG', 'OFF_COLOR_ARG'];
 
+// The window's code editor, searching as Ctrl+F does: the bar opens or takes the new search, and the
+// first match shows. Search options the user left on (regex, whole word) would miss, so they go off. [B-609]
+async function _findInDetailCode(text) {
+  const find = _stylesDetailEditor?.getContribution('editor.contrib.findController');
+  if (!find || !text) return;
+  await find.start({ seedSearchStringFromSelection: 'none', seedSearchStringFromNonEmptySelection: false,
+    seedSearchStringFromGlobalClipboard: false, forceRevealReplace: false, updateSearchScope: false,
+    shouldFocus: 0, shouldAnimate: true, loop: true },
+    { searchString: text, isRegex: false, wholeWord: false, matchCase: false });
+  find.moveToNextMatch();
+}
+
 function _colorDotHtml(rgb16, title) {
   const [r, g, b] = rgb16;
   return `<span class="style-color-dot" data-rgb="${[r, g, b].map(v => Math.round(v / 257)).join(',')}"`
     + ` style="background-color:${styleArgResolver.proffieToCSS(r, g, b)}" title="${title || window.proffieArgs.colorLabel(r, g, b)}"></span>`;
 }
 
-// What a card or the window draws: [{ label, real, rgb16 }], from code with its helpers and segments
-// written in.
+// What a card or the window draws: [{ slot, label, real, find, rgb16 }], from code with its helpers and
+// segments written in. find is what the code editor searches for when the colour is clicked. [B-609]
 function _styleColorList(code, cardOnly) {
-  const { args, main } = styleArgResolver.styleColors(code);
-  const detected = main ? [{ label: 'Detected', real: 'No Base color argument: the first color in the code', rgb16: main }] : [];
+  const { args, main, mainText } = styleArgResolver.styleColors(code);
+  const detected = main ? [{ slot: 'BASE_COLOR_ARG', label: 'Detected', real: 'No Base color argument: the first color in the code', find: mainText, rgb16: main }] : [];
   return [...detected, ...args.filter(a => !cardOnly || _CARD_COLORS.includes(a.name))
-    .map(a => ({ label: _COLOR_NAMES[a.name] || a.name, real: a.name, rgb16: a.rgb16 }))];
+    .map(a => ({ slot: a.name, label: _COLOR_NAMES[a.name] || a.name, real: a.name, find: a.name, rgb16: a.rgb16 }))];
 }
 
 // The window's colours on one row if they fit, otherwise in even rows: 10 go 5 and 5, not 8 and 2.
@@ -25400,7 +25439,7 @@ function _buildStylesVisual() {
     const mainColor  = cardColors.find(c => c.real === 'BASE_COLOR_ARG' || c.label === 'Detected');
     card.dataset.colorFamily = (mainColor && window.proffieArgs.colorFamily(mainColor.rgb16)) || '';
     const colorsHtml = cardColors
-      .map(c => `<span class="style-card-color"><span class="style-card-color-name" title="${c.real}">${c.label}</span>${_colorDotHtml(c.rgb16)}</span>`).join('');
+      .map(c => `<span class="style-card-color" data-slot-color="${c.slot}|${c.rgb16.join()}"><span class="style-card-color-name" title="${c.real}">${c.label}</span>${_colorDotHtml(c.rgb16)}</span>`).join('');
     const effectsHtml = effects.map(e => {
       const active = _activeFilterEffects.has(e) ? ' active' : '';
       return `<span class="style-effect-chip${active}" data-effect="${e}">${e}</span>`;
@@ -25430,6 +25469,25 @@ function _buildStylesVisual() {
       <button class="style-card-select-btn" title="Select">${_stylesSelected.has(name) ? '&#10003;' : ''}</button>`;
 
     _wireColorDots(card);
+    const flipSlot = (el, i, into, from) => {
+      const key = el.dataset.slotColor, c = cardColors[i];
+      from.delete(key);
+      if (!into.delete(key)) into.set(key, `${_COLOR_NAMES[c.slot]}: ${window.proffieArgs.colorLabel(...c.rgb16)}`);
+      _applyStylesSearch();
+      _refreshOpenFacetDropdowns();
+    };
+    card.querySelectorAll('.style-card-color').forEach((el, i) => {
+      el.addEventListener('click', e => {
+        if (e.shiftKey || e.ctrlKey || e.metaKey) return;   // selecting, as anywhere on the card
+        e.stopPropagation();
+        flipSlot(el, i, _activeFilterSlots, _activeFilterSlotsMissing);
+      });
+      el.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        flipSlot(el, i, _activeFilterSlotsMissing, _activeFilterSlots);
+      });
+    });
 
     // Delete button
     card.querySelector('.card-delete-btn').addEventListener('click', e => {
@@ -25764,6 +25822,7 @@ function _openStyleDetail(entry) {
   const colorsWrap = document.getElementById('detail-colors');
   colorsWrap.innerHTML = colors.map(c => `<span class="detail-color">${_colorDotHtml(c.rgb16)}<span title="${c.real}">${c.label}</span></span>`).join('');
   _wireColorDots(colorsWrap);
+  colorsWrap.querySelectorAll('.detail-color').forEach((el, i) => el.addEventListener('click', () => _findInDetailCode(colors[i].find)));
   (_detailColorsObserver ||= new ResizeObserver(_balanceDetailColors)).observe(colorsWrap);
   _balanceDetailColors();
   document.getElementById('detail-colors-row').style.display = colors.length ? '' : 'none';
