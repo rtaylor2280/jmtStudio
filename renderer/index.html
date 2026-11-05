@@ -1819,8 +1819,8 @@
   #modal-about .about-header img { width: 52px; height: 52px; object-fit: contain; flex-shrink: 0; }
   #modal-about .about-app-name { font-size: 1.1rem; color: var(--c-text-bright); font-weight: 700; letter-spacing: 0.01em; }
   #modal-about .about-byline { font-size: 0.78rem; color: var(--c-text-dim); margin-top: 2px; }
-  #modal-about .about-desc { font-size: 0.82rem; color: var(--c-text-muted); line-height: 1.55; margin-bottom: 20px; }
-  #modal-about .about-grid { display: grid; grid-template-columns: 130px 1fr; gap: 10px 0; margin-bottom: 20px; align-items: baseline; }
+  #modal-about .about-desc { font-size: 0.82rem; color: var(--c-text-muted); line-height: 1.55; margin-bottom: 12px; }
+  #modal-about .about-grid { display: grid; grid-template-columns: 130px 1fr; gap: 7px 0; margin-bottom: 14px; align-items: baseline; }
   #modal-about .about-grid-label { font-size: 0.72rem; color: var(--c-text-faint); padding-top: 1px; }
   #modal-about .about-grid-val { font-size: 0.82rem; color: var(--c-text-sub); line-height: 1.5; }
   #modal-about .about-grid-val a { color: #4a9edd; text-decoration: none; }
@@ -8085,6 +8085,15 @@ file holding only the styles that config uses. A readme says what they are and h
         <span id="about-version-str">—</span>
         <button class="settings-item-btn enabled" id="btn-check-updates">Check for Updates</button>
         <span id="update-status-msg" style="display:none;font-size:0.78rem"></span>
+      </div>
+
+      <div class="about-grid-label" title="The information Studio works from, like error messages and sound font identification. It can be improved between app releases.">Studio Data</div>
+      <div class="about-grid-val" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span><span id="about-data-version">—</span> <span id="about-data-date" style="font-size:0.72rem;color:var(--c-text-dim);"></span></span>
+        <button class="settings-item-btn enabled" id="btn-data-check" style="display:none" title="Looks for newer data now.">Check Now</button>
+        <span id="about-data-result" style="display:none;font-size:0.78rem"></span>
+        <span id="about-data-auto" style="color:var(--c-text-faint)"
+              title="On: Studio looks for newer data in the background each time it starts, and nothing waits for it.&#10;Off: Studio keeps the data it has until you click Check Now.">Auto update: <a href="#" id="btn-data-updates">On</a></span>
       </div>
 
       <div class="about-grid-label">Website</div>
@@ -15537,6 +15546,8 @@ async function openAboutModal() {
   document.getElementById('cache-confirm-panel').style.display = 'none';
   document.getElementById('workspace-confirm-panel').style.display = 'none';
   document.getElementById('btn-clear-cache').textContent = 'Clear';
+  // The check runs after startup, so the row can be behind what the rail now holds.
+  window._refreshDataRow?.();
   // Remembered choices opens collapsed every time. [B-561]
   document.getElementById('settings-remembered-body').style.display = 'none';
   const _rememberedBtn = document.getElementById('btn-settings-remembered');
@@ -34664,6 +34675,54 @@ require(['vs/editor/editor.main'], function () {
       if (_sfToggleEl) {
         _sfToggleEl.checked = _soundFontsEnabled;
         _sfToggleEl.addEventListener('change', _sfHandleToggle);
+      }
+      const _dataUpdatesBtn = document.getElementById('btn-data-updates');
+      if (_dataUpdatesBtn) {
+        let _dataUpdatesOn = (await window.electronAPI.getSetting('dataUpdatesEnabled', true)) !== false;
+        const _dataCheckBtn = document.getElementById('btn-data-check');
+        const _dataAuto = document.getElementById('about-data-auto');
+        const _dataAutoTip = _dataAuto.title;
+        let _dataCheckFailed = false;
+        // A failed check is the one thing that can leave someone behind without knowing, so it
+        // shows here and nowhere else: no message, only this row for anyone who comes looking.
+        const _paintDataUpdates = () => {
+          const failed = _dataUpdatesOn && _dataCheckFailed;
+          _dataUpdatesBtn.textContent = _dataUpdatesOn ? 'On' : 'Off';
+          _dataUpdatesBtn.style.color = failed ? 'var(--c-danger-text)' : '';
+          _dataCheckBtn.style.display = _dataUpdatesOn && !failed ? 'none' : '';
+          _dataAuto.title = failed
+            ? "The last check didn't go through, so there may be newer data. Studio tries again the next time it starts, or you can click Check Now."
+            : _dataAutoTip;
+        };
+        _paintDataUpdates();
+        _dataUpdatesBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          _dataUpdatesOn = !_dataUpdatesOn;
+          _paintDataUpdates();
+          window.electronAPI.setSetting('dataUpdatesEnabled', _dataUpdatesOn);
+        });
+        const _paintDataStatus = (status) => {
+          const date = new Date(`${status.updated}T12:00:00`)
+            .toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+          document.getElementById('about-data-version').textContent = `v${status.version}`;
+          document.getElementById('about-data-date').textContent = `(updated ${date})`;
+          _dataCheckFailed = status.lastCheck === 'failed';
+          _paintDataUpdates();
+        };
+        window._refreshDataRow = async () => _paintDataStatus(await window.electronAPI.dataRailStatus());
+        window._refreshDataRow();
+        const _dataResult = document.getElementById('about-data-result');
+        _dataCheckBtn.addEventListener('click', async () => {
+          _dataCheckBtn.disabled = true;
+          _dataCheckBtn.textContent = 'Checking…';
+          const { result, status } = await window.electronAPI.dataRailCheck();
+          _paintDataStatus(status);
+          _dataCheckBtn.disabled = false;
+          _dataCheckBtn.textContent = 'Check Now';
+          _dataResult.textContent = { updated: 'Updated', current: 'Up to date', failed: "Couldn't check" }[result];
+          _dataResult.style.display = '';
+          setTimeout(() => { _dataResult.style.display = 'none'; }, 4000);
+        });
       }
       // Library-picker duplicate detection. Default ON (true); null/undefined from the store also
       // resolves to ON so a fresh install gets the feature without an explicit opt-in.

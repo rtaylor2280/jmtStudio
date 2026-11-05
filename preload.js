@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
   getSetting: (key, def)         => ipcRenderer.invoke('store:getSetting', key, def),
   setSetting: (key, value)       => ipcRenderer.invoke('store:setSetting', key, value),
+  dataRailStatus: ()             => ipcRenderer.invoke('dataRail:status'),
+  dataRailCheck: ()              => ipcRenderer.invoke('dataRail:check'),
   readDefaultTemplate: ()        => ipcRenderer.invoke('template:readDefault'),
   resetDefaultTemplate: ()       => ipcRenderer.invoke('template:resetDefault'),
   getTemplateStatus: ()          => ipcRenderer.invoke('template:getStatus'),

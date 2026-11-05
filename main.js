@@ -6,6 +6,9 @@ const crypto      = require('crypto');
 const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
+const { DataRail } = require('./dataRail');
+const compileMatrix = require('./compileErrorMatrix');
+const compileErrorData = require('./compileErrorData');
 const cacheManager = require('./cacheManager');
 const coreVersions = require('./coreVersions');
 const soundFontSources = require('./soundFontSources');
@@ -218,6 +221,8 @@ function createWindow() {
   });
 }
 
+let dataRail = null;
+
 app.whenReady().then(() => {
   // [B-398] Arm the stall probe before any work can happen, so a freeze during the very first
   // import is still measured. Returns false and costs nothing when the flag file is absent.
@@ -236,6 +241,20 @@ app.whenReady().then(() => {
   } catch {}
   // Evict stale cache entries before window opens
   try { cacheManager.startupEviction(); } catch {}
+
+  // Newer error messages, kept from an earlier run and checked for in the background.
+  try {
+    dataRail = new DataRail({
+      userData: app.getPath('userData'),
+      appVersion: app.getVersion(),
+      bundled: compileErrorData,
+      apply: data => compileMatrix.setSignatures(data.signatures, app.getVersion()),
+      isAtLeast: (have, want) => have.localeCompare(want, undefined, { numeric: true }) >= 0,
+      get: url => _httpsGet(url, { 'User-Agent': 'JMT-Studio' }),
+    });
+    dataRail.loadKept();
+    if (Store.get('settings.dataUpdatesEnabled') !== false) setTimeout(() => dataRail.check(), 10000);
+  } catch {}
 
   // Clear sound-font sources that were staged by an import that never finished.
   // At startup nothing can be in flight BY DEFINITION, so this needs no age test
@@ -956,6 +975,11 @@ ipcMain.handle('styles:replace', async () => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
+ipcMain.handle('dataRail:status', () => (dataRail ? dataRail.status() : compileErrorData));
+ipcMain.handle('dataRail:check', async () => ({
+  result: dataRail ? await dataRail.check() : 'failed',
+  status: dataRail ? dataRail.status() : compileErrorData,
+}));
 ipcMain.handle('store:getSetting', (_, key, def) => {
   const val = Store.get(`settings.${key}`);
   return val !== undefined ? val : def;
