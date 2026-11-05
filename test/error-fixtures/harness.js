@@ -27,7 +27,7 @@ function trim(out, sketch) {
   return out.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
     .filter(l => !/^(Used |Error during|Multiple libraries|FQBN|Platform |In file included|\s+from |\s*$)/.test(l))
     .filter(l => !/\\Arduino15\\/.test(l))
-    .map(l => l.replace(/[A-Za-z]:[\\/]Users[\\/][^\\/\s]+/g, '<HOME>'))
+    .map(l => l.replace(/[A-Za-z]:[\\/]Users[\\/](?!me[\\/])[^\\/\s]+/g, '<HOME>'))
     .filter(l => !/arm-none-eabi-g\+\+|arduino-builder|^"?[A-Z]:\\.*\.exe/.test(l))
     .map(l => l.replace(new RegExp(esc, 'gi'), '<OS>').slice(0, MAX_LINE))
     .slice(0, MAX_LINES)
