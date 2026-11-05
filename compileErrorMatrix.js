@@ -161,7 +161,7 @@ function _selectedBoard(ctx, g) {
 
 // A name sitting bare where a preset's font or track goes.
 function _unquotedName(ctx, g) {
-  const src = String(ctx.configText || '');
+  const src = String(ctx.configText || '').split(/\bBladeConfig\b/)[0];
   return new RegExp(`\\{\\s*${g.symbol}\\s*,|\\{\\s*"[^"]*"\\s*,\\s*${g.symbol}\\s*,`).test(src);
 }
 
