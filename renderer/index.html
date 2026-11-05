@@ -4202,7 +4202,7 @@
   .styles-view-switch { flex-shrink: 0; white-space: nowrap; }
   .styles-code-search-step { flex-shrink: 0; padding-left: 8px; padding-right: 8px; }
   .styles-empty { font-size: 0.82rem; color: var(--c-text-dim); padding: 32px 0; text-align: center; }
-  .style-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-content: start; }
+  .style-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); grid-auto-rows: 1fr; gap: 10px; align-content: start; }
   .style-card { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 5px; padding: 10px 12px; cursor: pointer; transition: border-color 0.15s, background 0.15s; display: flex; flex-direction: column; gap: 3px; position: relative; }
   .style-card:hover { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
   @keyframes card-highlight-pulse { 0% { box-shadow: 0 0 0 0 rgba(255,160,0,0.9); } 40% { box-shadow: 0 0 0 6px rgba(255,160,0,0.5); } 100% { box-shadow: 0 0 0 10px rgba(255,160,0,0); } }
@@ -4486,6 +4486,15 @@
   .style-card-effects:not(:has(.style-effect-chip.active)) { display: none; }
   .style-effect-chip.active { color: var(--jmt-blue); background: rgba(0,130,255,0.1); border-color: rgba(0,130,255,0.35); opacity: 1; }
   .style-card-effects { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+  /* A style's colours, at the foot of the card as a font's Font and Hum are. Each colour draws once
+     and every dot of that colour shares the picture; the animated swatch is only under the pointer. [B-603] */
+  .style-card-colors { display: flex; gap: 4px; margin-top: auto; padding-top: 5px; }
+  .style-card-color { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 27px; }
+  .style-card-color-name { font-size: 0.58rem; line-height: 1; color: var(--c-text-muted); }
+  .style-color-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; overflow: hidden; line-height: 0; background-size: cover; box-shadow: 0 0 0 1px var(--c-border-strong); }
+  .style-color-dot canvas { pointer-events: none; clip-path: circle(50% at 50% 50%); }
+  .detail-color { display: inline-flex; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--c-text-muted); }
+  .detail-colors-wrap { display: grid; grid-template-columns: repeat(auto-fill, 72px); gap: 4px; align-items: center; flex: 1; }
   .style-effect-chip { font-size: 0.6rem; color: var(--c-text-muted); background: transparent; border: 1px solid var(--c-border-faint); border-radius: 3px; padding: 0px 4px; white-space: nowrap; opacity: 0.7; }
   /* Style detail modal */
   #modal-style-detail .modal { width: 820px; max-width: 96vw; height: min(90vh, 700px); display: flex; flex-direction: column; padding-bottom: 16px; }
@@ -5782,6 +5791,10 @@
       <div class="style-meta-row" id="detail-effects-row" style="display:none">
         <span class="style-meta-label">Effects</span>
         <div class="detail-tags-wrap" id="detail-effects-chips"></div>
+      </div>
+      <div class="style-meta-row" id="detail-colors-row" style="display:none">
+        <span class="style-meta-label">Colors</span>
+        <div class="detail-colors-wrap" id="detail-colors"></div>
       </div>
       <div class="style-meta-row">
         <span class="style-meta-label">Tags</span>
@@ -23487,6 +23500,90 @@ function _librarySegments() {
     .map(_segInfo);
 }
 
+// A colour argument's short name, on a card and in the window; hovering the name shows the real one.
+// A card shows these seven, in this order, whatever a style lacks left out. The window shows every
+// colour argument. A style with none shows its detected colour, as a preset slot does. [B-603]
+const _COLOR_NAMES = { BASE_COLOR_ARG: 'Base', ALT_COLOR_ARG: 'Alt', IGNITION_COLOR_ARG: 'Ignition', BLAST_COLOR_ARG: 'Blast',
+  CLASH_COLOR_ARG: 'Clash', LOCKUP_COLOR_ARG: 'Lockup', DRAG_COLOR_ARG: 'Drag', LB_COLOR_ARG: 'Lightning', STAB_COLOR_ARG: 'Stab',
+  SWING_COLOR_ARG: 'Swing', EMITTER_COLOR_ARG: 'Emitter', PREON_COLOR_ARG: 'PreOn', RETRACTION_COLOR_ARG: 'Retraction',
+  POSTOFF_COLOR_ARG: 'PostOff', OFF_COLOR_ARG: 'Off', ALT_COLOR2_ARG: 'Alt 2', ALT_COLOR3_ARG: 'Alt 3' };
+const _CARD_COLORS = ['BASE_COLOR_ARG', 'ALT_COLOR_ARG', 'BLAST_COLOR_ARG', 'CLASH_COLOR_ARG',
+  'LOCKUP_COLOR_ARG', 'STAB_COLOR_ARG', 'OFF_COLOR_ARG'];
+
+function _colorDotHtml(rgb16) {
+  const [r, g, b] = rgb16;
+  return `<span class="style-color-dot" data-rgb="${[r, g, b].map(v => Math.round(v / 257)).join(',')}"`
+    + ` style="background-color:${styleArgResolver.proffieToCSS(r, g, b)}" title="${window.proffieArgs.colorLabel(r, g, b)}"></span>`;
+}
+
+// What a card or the window draws: [{ label, real, rgb16 }], from code with its helpers and segments
+// written in.
+function _styleColorList(code, cardOnly) {
+  const { args, main } = styleArgResolver.styleColors(code);
+  if (main) return [{ label: 'Detected', real: 'No color arguments: the first color in the code', rgb16: main }];
+  return args.filter(a => !cardOnly || _CARD_COLORS.includes(a.name))
+    .map(a => ({ label: _COLOR_NAMES[a.name] || a.name, real: a.name, rgb16: a.rgb16 }));
+}
+
+// The window's colours on one row if they fit, otherwise in even rows: 10 go 5 and 5, not 8 and 2.
+// Columns are 72px, room for the longest name, with a 4px gap.
+function _balancedColorColumns(count, width) {
+  const fit = Math.max(1, Math.floor((width + 4) / 76));
+  return Math.ceil(count / Math.ceil(count / fit));
+}
+let _detailColorsObserver = null;
+function _balanceDetailColors() {
+  const wrap = document.getElementById('detail-colors');
+  if (wrap.clientWidth) wrap.style.gridTemplateColumns = `repeat(${_balancedColorColumns(wrap.children.length || 1, wrap.clientWidth)}, 72px)`;
+}
+
+// A GlowSwatch is the full blade render frozen, about 17ms and half a megabyte each, so 750 of them
+// is 13 seconds (measured). A library has far fewer colours than dots: each colour renders once, at
+// idle, and its dots share the picture. Until then a dot is its plain colour.
+const _colorDotImages = new Map(), _colorDotQueue = new Set();
+let _colorDotIdle = false;
+function _drawColorDotImages() {
+  if (_colorDotIdle || !_colorDotQueue.size) return;
+  _colorDotIdle = true;
+  requestIdleCallback(() => {
+    _colorDotIdle = false;
+    const [key] = _colorDotQueue;
+    _colorDotQueue.delete(key);
+    try {
+      const swatch = GlowSwatch.create({ animated: false, width: 14, height: 14, color: key.split(',').map(Number) });
+      const image = `url(${swatch.element.toDataURL()})`;
+      swatch.destroy();
+      _colorDotImages.set(key, image);
+      document.querySelectorAll(`.style-color-dot[data-rgb="${key}"]`).forEach(d => { d.style.backgroundImage = image; });
+    } catch {}
+    _drawColorDotImages();
+  });
+}
+
+// One animated swatch at a time, built on the way in and gone on the way out. A card can redraw
+// under the pointer, so the next hover puts away the last one.
+let _colorDotSwatch = null;
+function _wireColorDots(root) {
+  root.querySelectorAll('.style-color-dot').forEach(dot => {
+    const image = _colorDotImages.get(dot.dataset.rgb);
+    if (image) dot.style.backgroundImage = image;
+    else _colorDotQueue.add(dot.dataset.rgb);
+    dot.addEventListener('mouseenter', () => {
+      _colorDotSwatch?.destroy();
+      _colorDotSwatch = null;
+      try {
+        _colorDotSwatch = GlowSwatch.create({ animated: true, width: 14, height: 14, color: dot.dataset.rgb.split(',').map(Number) });
+        dot.appendChild(_colorDotSwatch.element);
+      } catch {}
+    });
+    dot.addEventListener('mouseleave', () => {
+      _colorDotSwatch?.destroy();
+      _colorDotSwatch = null;
+    });
+  });
+  _drawColorDotImages();
+}
+
 // A style's code with the segments it uses written in, so its effects are read through them.
 function _withSegmentBodies(code, segments) {
   let out = String(code || '');
@@ -25246,6 +25343,8 @@ function _buildStylesVisual() {
       const active = _activeFilterTags.has(t) ? ' active' : '';
       return `<span class="style-tag${active}${_isStyleAppTag(t) ? ' app' : ''}" data-tag="${t}">${t}</span>`;
     }).join('');
+    const colorsHtml = _styleColorList(_withSegmentBodies(entry.usingCode, [...helpers, ...segmentEntries]), true)
+      .map(c => `<span class="style-card-color"><span class="style-card-color-name" title="${c.real}">${c.label}</span>${_colorDotHtml(c.rgb16)}</span>`).join('');
     const effectsHtml = effects.map(e => {
       const active = _activeFilterEffects.has(e) ? ' active' : '';
       return `<span class="style-effect-chip${active}" data-effect="${e}">${e}</span>`;
@@ -25270,8 +25369,11 @@ function _buildStylesVisual() {
       ${creator       ? `<div class="style-card-source style-card-creator">${escAttr(creator)}</div>` : ''}
       ${displaySource ? `<div class="style-card-source">${displaySource}</div>` : ''}
       ${userTagsHtml  ? `<div class="style-card-tags">${userTagsHtml}</div>` : ''}
+      ${colorsHtml    ? `<div class="style-card-colors">${colorsHtml}</div>` : ''}
       ${effectsHtml   ? `<div class="style-card-effects">${effectsHtml}</div>` : ''}
       <button class="style-card-select-btn" title="Select">${_stylesSelected.has(name) ? '&#10003;' : ''}</button>`;
+
+    _wireColorDots(card);
 
     // Delete button
     card.querySelector('.card-delete-btn').addEventListener('click', e => {
@@ -25598,6 +25700,17 @@ function _openStyleDetail(entry) {
   notesToggle.classList.toggle('has-notes', !!_detailNotes);
   notesToggle.classList.remove('open');
   notesBody.classList.remove('visible');
+
+  // Colors (read-only, read from the code) [B-603]
+  const libText = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+  const blocks = libText ? _classifyStyleEntries(_parseStyleEntries(libText)).filter(e => e.isHelper || e.isSegment) : [];
+  const colors = _styleColorList(_withSegmentBodies(usingCode, blocks), false);
+  const colorsWrap = document.getElementById('detail-colors');
+  colorsWrap.innerHTML = colors.map(c => `<span class="detail-color">${_colorDotHtml(c.rgb16)}<span title="${c.real}">${c.label}</span></span>`).join('');
+  _wireColorDots(colorsWrap);
+  (_detailColorsObserver ||= new ResizeObserver(_balanceDetailColors)).observe(colorsWrap);
+  _balanceDetailColors();
+  document.getElementById('detail-colors-row').style.display = colors.length ? '' : 'none';
 
   // Effects (read-only, code-scanned)
   const detectedEffects = _scanEffects(_withSegmentBodies(usingCode, _librarySegments()));   // through its segments [B-177]
@@ -62835,27 +62948,7 @@ Rename the folder to "${newFolder}/" and update every preset's track field that 
     // we want the base, not the modifier. Shared by the collapsed slot tile's swatch and
     // the expanded slot editor's "Detected Base Color" so both views agree.
     function _earliestColorInText(text) {
-      if (!text || !window.proffieArgs) return null;
-      const m16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
-      const m8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
-      let namedPos = Infinity, namedRgb16 = null, namedStr = null;
-      const cwRe = /\b([A-Z][A-Za-z]*)\b/g;
-      let cwm;
-      while ((cwm = cwRe.exec(text)) !== null) {
-        const res = window.proffieArgs.resolveColorDefault(cwm[1]);
-        if (res[0] || res[1] || res[2]) { namedRgb16 = res; namedPos = cwm.index; namedStr = cwm[1]; break; }
-      }
-      const p16 = m16 ? m16.index : Infinity;
-      const p8  = m8  ? m8.index  : Infinity;
-      const pMin = Math.min(p16, p8, namedPos);
-      if (pMin === Infinity) return null;
-      if (pMin === p16) {
-        return { rgb16: [parseInt(m16[1],10), parseInt(m16[2],10), parseInt(m16[3],10)], matchStr: m16[0], matchIndex: m16.index, scale: '16' };
-      }
-      if (pMin === p8) {
-        return { rgb16: window.proffieArgs.resolveColorDefault(`Rgb<${m8[1]},${m8[2]},${m8[3]}>`), matchStr: m8[0], matchIndex: m8.index, scale: '8' };
-      }
-      return { rgb16: namedRgb16, matchStr: namedStr, matchIndex: namedPos, scale: null };
+      return window.proffieArgs ? window.proffieArgs.earliestColor(text) : null;
     }
 
     // Wrapper-vs-inner color mismatch. When a slot is a wrapper template with a

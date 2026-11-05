@@ -187,6 +187,32 @@
     return [0, 0, 0];
   }
 
+  // The first colour written in a piece of style code, skipping black: that is what a slot, or a
+  // style with no arguments, paints as its main colour.
+  function earliestColor(text) {
+    if (!text) return null;
+    const m16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
+    const m8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
+    let namedPos = Infinity, namedRgb16 = null, namedStr = null;
+    const cwRe = /\b([A-Z][A-Za-z]*)\b/g;
+    let cwm;
+    while ((cwm = cwRe.exec(text)) !== null) {
+      const res = resolveColorDefault(cwm[1]);
+      if (res[0] || res[1] || res[2]) { namedRgb16 = res; namedPos = cwm.index; namedStr = cwm[1]; break; }
+    }
+    const p16 = m16 ? m16.index : Infinity;
+    const p8  = m8  ? m8.index  : Infinity;
+    const pMin = Math.min(p16, p8, namedPos);
+    if (pMin === Infinity) return null;
+    if (pMin === p16) {
+      return { rgb16: [parseInt(m16[1],10), parseInt(m16[2],10), parseInt(m16[3],10)], matchStr: m16[0], matchIndex: m16.index, scale: '16' };
+    }
+    if (pMin === p8) {
+      return { rgb16: resolveColorDefault(`Rgb<${m8[1]},${m8[2]},${m8[3]}>`), matchStr: m8[0], matchIndex: m8.index, scale: '8' };
+    }
+    return { rgb16: namedRgb16, matchStr: namedStr, matchIndex: namedPos, scale: null };
+  }
+
   // ── Slot map (from ProffieOS enum ArgumentName) ──────────────────────────
   //
   // Source of truth for ARG_NAME → slot number is the user's selected ProffieOS
@@ -422,6 +448,7 @@
   root.proffieArgs = {
     registry,
     resolveColorDefault,
+    earliestColor,
     readRegistryArg,
     writeRegistryArg,
     rematchColors,

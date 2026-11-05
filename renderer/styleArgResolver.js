@@ -3,7 +3,7 @@
  * Parses RgbArg/IntArg from a ProffieOS style expression and reads/writes
  * positional values in the StylePtr parens string ("65535,0,0").
  *
- * Public API:  window.styleArgResolver = { findArgs, resolveStyleArgs, readArgValue, writeArgValue, proffieToCSS, cssToProffie }
+ * Public API:  window.styleArgResolver = { findArgs, resolveStyleArgs, readArgValue, writeArgValue, styleColors, proffieToCSS, cssToProffie }
  */
 
 (function (root) {
@@ -107,6 +107,29 @@
     return [Math.round(r * 257), Math.round(g * 257), Math.round(b * 257)];
   }
 
-  root.styleArgResolver = { findArgs, resolveStyleArgs, readArgValue, writeArgValue, proffieToCSS, cssToProffie };
+  /**
+   * A style's colours as written: { args, main }. args holds each RgbArg it uses, once, in the
+   * registry's order, as { name, label, rgb16 }, the default it is written with. A default that
+   * isn't a colour yet (a template parameter) has no value to show, so it is left out. main is
+   * the style's one colour when it has no arguments, or null.
+   */
+  function styleColors(code) {
+    const pa = root.proffieArgs;
+    const text = String(code || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+      .replace(/^\s*using\s+[^=]+=/, '');
+    const found = new Map();
+    for (const a of findArgs(text)) {
+      if (a.kind !== 'RgbArg' || found.has(a.name)) continue;
+      const rgb16 = pa.resolveColorDefault(a.defaultExpr);
+      if (!rgb16.some(Boolean) && !/^(Black|BLACK|Rgb(16)?\s*<\s*0\s*,\s*0\s*,\s*0\s*>)$/.test(a.defaultExpr)) continue;
+      const reg = pa.registry.find(r => r.name === a.name);
+      found.set(a.name, { name: a.name, label: reg ? reg.label : a.name, pos: reg ? reg.pos : Infinity, rgb16 });
+    }
+    const args = [...found.values()].sort((a, b) => a.pos - b.pos);
+    const hit = args.length ? null : pa.earliestColor(text);
+    return { args, main: hit ? hit.rgb16 : null };
+  }
+
+  root.styleArgResolver = { findArgs, resolveStyleArgs, readArgValue, writeArgValue, styleColors, proffieToCSS, cssToProffie };
 
 })(window);
