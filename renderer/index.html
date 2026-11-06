@@ -4600,6 +4600,12 @@
   #detail-notes-input { width: 100%; box-sizing: border-box; font-size: 0.75rem; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border); border-radius: 3px; padding: 5px 7px; outline: none; resize: vertical; min-height: 56px; font-family: inherit; line-height: 1.4; }
   #detail-notes-input:focus { border-color: var(--jmt-blue); }
   #style-detail-editor { flex: 1; min-height: 0; border: 1px solid var(--c-border); border-radius: 4px; overflow: hidden; }
+  .fold-bar { position: absolute; top: 4px; right: 16px; z-index: 20; display: flex; gap: 1px; padding: 1px; background: var(--c-bg-raised); border: 1px solid var(--c-border); border-radius: 3px; opacity: 0.7; }
+  .fold-bar:hover { opacity: 1; }
+  #styles-helper-monaco .fold-bar { display: none; }
+  #helper-expanded-slot #styles-helper-monaco .fold-bar { display: flex; }
+  .fold-bar button { background: none; border: none; border-radius: 2px; padding: 1px 6px; color: var(--c-text-sub); font-family: inherit; font-size: 0.68rem; line-height: 1.3; cursor: pointer; }
+  .fold-bar button:hover { background: var(--c-bg-hover); color: var(--c-text); }
   body.jmt-opening, body.jmt-opening * { cursor: progress !important; }
   .modal-btn-close { position: absolute; top: 12px; right: 14px; font-size: 1.1rem; background: none; border: none; color: var(--c-text-hint); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
   .modal-btn-close:hover { color: var(--c-text); background: var(--c-bg-hover); }
@@ -26828,6 +26834,8 @@ function _expandHelperEditor() {
   if (!area || !area.classList.contains('active') || _helperEditorExpanded()) return;
   document.getElementById('helper-expanded-slot').appendChild(area);
   document.getElementById('modal-helper-expanded').classList.add('active');
+  // The side panel is too narrow for folding; only the expanded view has it.
+  _stylesHelperEditor?.updateOptions({ folding: true, stickyScroll: { enabled: true } });
   _stylesHelperEditor?.layout();
   requestAnimationFrame(() => _stylesHelperEditor?.focus());
 }
@@ -26836,6 +26844,8 @@ function _collapseHelperEditor() {
   const area = document.getElementById('styles-helper-editor-area');
   document.getElementById('styles-helpers-list').after(area);
   document.getElementById('modal-helper-expanded').classList.remove('active');
+  _stylesHelperEditor?.getAction('editor.unfoldAll')?.run();
+  _stylesHelperEditor?.updateOptions({ folding: false, stickyScroll: { enabled: false } });
   _stylesHelperEditor?.layout();
   if (area.classList.contains('active')) requestAnimationFrame(() => _stylesHelperEditor?.focus());
 }
@@ -28735,6 +28745,34 @@ document.getElementById('btn-styles-segment-filter')?.addEventListener('click', 
 window.initStylesPanel = function() {
   if (_addStyleEditor) return; // already initialized
   const theme = document.documentElement.classList.contains('light-mode') ? 'vs' : 'vs-dark';
+  // Collapse a style's layers by depth, so a long style reads as one line per layer.
+  const _installFoldBar = (ed, hostId) => {
+    const host = document.getElementById(hostId);
+    if (!host) return;
+    host.style.position = 'relative';
+    const bar = document.createElement('div');
+    bar.className = 'fold-bar';
+    // A fold level only adds folds, so a number opens everything first and works in both directions.
+    const add = (label, title, level) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener('click', async () => {
+        await ed.getAction('editor.unfoldAll')?.run();
+        // A fold level skips whatever holds the cursor, so the cursor goes to the top. Level 1 holds the
+        // top line too, which leaves folding everything as the way to reach it.
+        ed.setPosition({ lineNumber: 1, column: 1 });
+        if (level === 1) await ed.getAction('editor.foldAll')?.run();
+        else if (level) await ed.getAction(`editor.foldLevel${level}`)?.run();
+        ed.focus();
+      });
+      bar.appendChild(b);
+    };
+    for (const n of [1, 2, 3, 4]) add(String(n), `Collapse to level ${n}`, n);
+    add('Open', 'Expand everything', 0);
+    host.appendChild(bar);
+  };
   const editorOpts = {
     language: 'cpp', theme, fontSize: 13,
     fontFamily: "'Cascadia Code', 'Fira Code', Consolas, monospace",
@@ -28744,6 +28782,7 @@ window.initStylesPanel = function() {
     scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
     bracketPairColorization: { enabled: true },
     guides: { bracketPairs: true, bracketPairsHorizontal: true },
+    stickyScroll: { enabled: true, maxLineCount: 6, defaultModel: 'indentationModel' },
   };
   _stylesEditorInstance = monaco.editor.create(
     document.getElementById('styles-code-editor'), { value: '', ...editorOpts, minimap: { enabled: true } });
@@ -28779,7 +28818,8 @@ window.initStylesPanel = function() {
   _stylesDetailEditor = monaco.editor.create(
     document.getElementById('style-detail-editor'), { value: '', ...editorOpts,
       lineNumbers: 'off', minimap: { enabled: false }, folding: true,
-      foldingStrategy: 'indentation' });
+      foldingStrategy: 'indentation', showFoldingControls: 'always' });
+  _installFoldBar(_stylesDetailEditor, 'style-detail-editor');
   _stylesDetailEditor.onDidChangeModelContent(() => {
     if (_detailEntry) _setDetailDirty(true);
     else _updateDetailErrorMarkers();
@@ -28825,8 +28865,10 @@ window.initStylesPanel = function() {
 
   _stylesHelperEditor = monaco.editor.create(
     document.getElementById('styles-helper-monaco'), { value: '', ...editorOpts,
-      lineNumbers: 'off', minimap: { enabled: false }, folding: false,
+      lineNumbers: 'off', minimap: { enabled: false }, folding: false, stickyScroll: { enabled: false },
+      foldingStrategy: 'indentation', showFoldingControls: 'always',
       scrollBeyondLastLine: false, wordWrap: 'off' });
+  _installFoldBar(_stylesHelperEditor, 'styles-helper-monaco');
   _stylesHelperEditor.onDidChangeModelContent(() => {
     if (!_stylesHelperEditor) return;
     const nameInput = document.getElementById('styles-helper-editor-name');
@@ -28852,8 +28894,10 @@ window.initStylesPanel = function() {
 
   _addStyleEditor = monaco.editor.create(
     document.getElementById('add-style-editor'), { value: '', ...editorOpts,
-      lineNumbers: 'off', minimap: { enabled: false }, folding: false,
+      lineNumbers: 'off', minimap: { enabled: false }, folding: true,
+      foldingStrategy: 'indentation', showFoldingControls: 'always',
       wordWrap: 'on', scrollBeyondLastLine: false });
+  _installFoldBar(_addStyleEditor, 'add-style-editor');
   // Editor → name field: if editor contains `using NAME =`, sync to name input
   _addStyleEditor.onDidChangeModelContent(() => {
     const content = _addStyleEditor.getValue();
