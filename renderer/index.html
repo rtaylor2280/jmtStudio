@@ -2634,7 +2634,8 @@
   #sf-shared-tracks-file-list .sf-entry-files-row { width: 230px; }
   /* Room on the right for the card's delete ×, which shows on hover in the top corner: without it the ×
      sat on the Link button, a click away from delete. [B-582] */
-  .sf-card-name-row { display: flex; align-items: baseline; gap: 5px; min-width: 0; padding-right: 10px; }
+  .sf-card-name-row { display: flex; align-items: center; gap: 5px; min-width: 0; padding-right: 10px; }
+  .sf-card-name-row .sf-card-link, .sf-card-name-row .sf-card-needs-review-chip { display: inline-flex; align-items: center; box-sizing: border-box; height: 18px; flex-shrink: 0; line-height: 1.3; }
   .sf-card-name { font-size: 0.84rem; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
   .sf-card-link { font-size: 0.66rem; color: var(--jmt-blue); background: rgba(60, 130, 200, 0.12); border: 1px solid rgba(60, 130, 200, 0.35); border-radius: 3px; padding: 1px 6px; cursor: pointer; flex-shrink: 0; font-family: inherit; line-height: 1.3; }
   .sf-card-link:hover { background: rgba(60, 130, 200, 0.22); border-color: var(--jmt-blue); }
@@ -4345,8 +4346,8 @@
   /* Card badge: the same green, on the card itself, so NEW is visible without
      opening the filter. Border only - a fill would fight the in-use tint. */
   .sf-card.is-new { border-color: rgba(63,157,82,0.55); }
-  .sf-card-new-badge { font-size: 0.6rem; font-weight: 700; letter-spacing: .06em; color: var(--jmt-green);
-                       border: 1px solid rgba(63,157,82,0.5); border-radius: 3px; padding: 0 4px; margin-left: 6px; }
+  .sf-card-new-badge { display: inline-flex; align-items: center; box-sizing: border-box; height: 18px; flex-shrink: 0; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.02em; line-height: 1.3; color: var(--jmt-green);
+                       border: 1px solid rgba(63,157,82,0.5); border-radius: 3px; padding: 1px 6px; }
   .styles-active-filter-chip.sf-active-filter-needs-review { color: var(--jmt-amber); background: rgba(212,155,58,0.10); border-color: rgba(212,155,58,0.5); }
   .styles-active-filter-chip.sf-active-filter-needs-review .styles-active-filter-remove { color: var(--jmt-amber); }
   /* In Use filter mirrors the .sf-card.in-use blue tint so the visual
