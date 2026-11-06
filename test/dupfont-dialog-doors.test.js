@@ -130,9 +130,10 @@ function ok(name, cond, extra) {
     '_sfActiveFilterEffects', '_sfActiveFilterEffectsMissing', '_sfActiveFilterNames',
     'namesActive', 'needsReviewActive', 'inUseActive', 'newActive',
     '_sfActiveFilterTagsWithout', '_sfActiveFilterCreatorsWithout', 'selectedActive',   // [B-564] [B-600]
+    '_sfActiveFilterTagsNarrow',
     `${line} return total;`)(
       0, { size: 0 }, { size: 0 }, { size: 0 }, { size: 0 },
-      { size: names }, names ? 1 : 0, 0, 0, 0, { size: 0 }, { size: 0 }, 0);
+      { size: names }, names ? 1 : 0, 0, 0, 0, { size: 0 }, { size: 0 }, 0, { size: 0 });
 
   ok('a name filter ALONE opens the strip',
      evalTotal(4) >= 1,

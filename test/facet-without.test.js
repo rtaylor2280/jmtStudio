@@ -21,11 +21,11 @@ const end = html.indexOf('// PRESENT effects OR; ABSENT effects AND-NOT.', at);
 const src = at > -1 && end > at ? html.slice(at, end) : '';
 check('located', src.length > 600, 're-anchor: an empty slice runs nothing');
 const env = new Function('_sfEntryAllTags', '_sfEscape', '_SF_NO_CREATOR_KEY',
-  `let _sfActiveFilterTags = new Set(), _sfActiveFilterTagsWithout = new Set();
+  `let _sfActiveFilterTags = new Set(), _sfActiveFilterTagsWithout = new Set(), _sfActiveFilterTagsNarrow = new Set();
    let _sfActiveFilterCreators = new Set(), _sfActiveFilterCreatorsWithout = new Set();
    ${src}
    return { tag: _sfInTagScope, creator: _sfInCreatorScope, row: _sfFacetRowState,
-     set: (k, v) => { ({ tags: () => { _sfActiveFilterTags = new Set(v); }, tagsOut: () => { _sfActiveFilterTagsWithout = new Set(v); },
+     set: (k, v) => { ({ tags: () => { _sfActiveFilterTags = new Set(v); }, tagsOut: () => { _sfActiveFilterTagsWithout = new Set(v); }, narrow: () => { _sfActiveFilterTagsNarrow = new Set(v); },
        cre: () => { _sfActiveFilterCreators = new Set(v); }, creOut: () => { _sfActiveFilterCreatorsWithout = new Set(v); } })[k](); } };`)(
   (f) => f.tags || [], (x) => String(x), '(no creator)');
 
@@ -47,6 +47,13 @@ env.set('tagsOut', ['free']);
 check('without a tag leaves its fonts out', names(env.tag) === 'Rey-Flex,Ben,Loose', names(env.tag));
 env.set('tags', ['kenobi', 'rey']); env.set('tagsOut', ['obi-wan']);
 check('picked tags OR, then WITHOUT removes (any case)', names(env.tag) === 'Rey-Flex', names(env.tag));
+env.set('tags', ['kenobi', 'rey']); env.set('tagsOut', []); env.set('narrow', ['obi-wan']);
+check('a tag clicked on a card narrows the picked tags (any case)', names(env.tag) === 'Ben', names(env.tag));
+env.set('tags', []); env.set('narrow', ['obi-wan', 'kenobi']);
+check('two clicked on cards: both must match', names(env.tag) === 'Ben', names(env.tag));
+env.set('narrow', ['obi-wan', 'rey']);
+check('two no font has: nothing', names(env.tag) === '', names(env.tag));
+env.set('narrow', []);
 env.set('tags', []); env.set('tagsOut', []);
 check('nothing set: everything', names(env.tag) === 'Rey-Flex,Analog,Ben,Loose' && names(env.creator) === 'Rey-Flex,Analog,Ben,Loose');
 const out = env.row(false, true, 'creator');
@@ -59,16 +66,32 @@ check('right-click on a tag row and a creator row sets WITHOUT',
   && /_sfCreatorDropdown\?\.addEventListener\('contextmenu'[\s\S]{0,300}_sfRightToggleFilterCreator\(item\.dataset\.creator\)/.test(html));
 check('setting one polarity clears the other', /if \(!_sfDropCI\(own, value\)\) \{ _sfDropCI\(other, value\); own\.add\(value\); \}/.test(html));
 check('WITHOUT chips, red, in a without group after their facet',
-  /_group\('tag',[^\n]*\n[^\n]*\n\s*_group\('without', tagWithoutChips/.test(html)
+  /_group\('tag',[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\s*_group\('without', tagWithoutChips/.test(html)
   && /_group\('creator',[^\n]*\n\s*_group\('without', creatorWithoutChips/.test(html)
   && /tagWithoutChips = [\s\S]{0,120}sf-active-filter-effect-missing/.test(html));
 check("a chip's x clears either polarity", /if \(tag\) _sfRemoveTagFilter\(tag\);/.test(html) && /if \(c\) _sfRemoveCreatorFilter\(c\);/.test(html));
 check('counted in the strip, the badges and isFiltering, and cleared by Clear all',
   /_sfActiveFilterTagsWithout\.size \+ _sfActiveFilterCreatorsWithout\.size \+/.test(html)
   && /_sfActiveFilterCreators\.size \+ _sfActiveFilterCreatorsWithout\.size\],/.test(html)
-  && /const _tagN = _sfActiveFilterTags\.size \+ _sfActiveFilterTagsWithout\.size;/.test(html)
+  && /const _tagN = _sfActiveFilterTags\.size \+ _sfActiveFilterTagsNarrow\.size \+ _sfActiveFilterTagsWithout\.size;/.test(html)
   && /_sfActiveFilterTagsWithout\.size > 0 \|\| _sfActiveFilterCreatorsWithout\.size > 0 \|\|/.test(html)
   && /_sfActiveFilterTagsWithout = new Set\(\);\s*_sfActiveFilterCreatorsWithout = new Set\(\);\s*_sfActiveFilterEffects = new Set\(\);\s*_sfActiveFilterEffectsMissing = new Set\(\);\s*_sfActiveFilterNames/.test(html));
+
+check('a card tag narrows, a dropdown tag stays OR, and each clears the other',
+  /const tag = chip\.textContent\.trim\(\);\s*if \(tag\) _sfNarrowByCardTag\(tag\);/.test(html)
+  && /const tag = item\.dataset\.tag;\s*if \(tag\) _sfToggleFilterTag\(tag\);/.test(html)
+  && /if \(_sfDropCI\(_sfActiveFilterTagsNarrow, tag\)\) _sfRenderGrid\(\);/.test(html)
+  && /if \(_sfDropCI\(_sfActiveFilterTags, tag\)\) _sfRenderGrid\(\);/.test(html));
+check('the narrowing tags have their own AND group, are counted, and Clear all clears them',
+  /_group\('tag',\s+tagNarrowChips,\s+_sfActiveFilterTagsNarrow\.size,\s+'and'\)/.test(html)
+  && /searchActive \+ _sfActiveFilterTags\.size \+ _sfActiveFilterTagsNarrow\.size/.test(html)
+  && /_sfActiveFilterTags\.size > 0 \|\| _sfActiveFilterTagsNarrow\.size > 0/.test(html)
+  && /_sfActiveFilterTagsNarrow = new Set\(\);\s*_sfActiveFilterCreators = new Set\(\);/.test(html));
+
+check('right-click a tag on a card sets WITHOUT and takes it off any narrowing, with no card menu',
+  /const chip = e\.target\.closest\('\.sf-card-tag'\);[\s\S]{0,160}if \(tag\) _sfRightToggleFilterTag\(tag\);/.test(html)
+  && /_sfDropCI\(_sfActiveFilterTagsNarrow, tag\);\s*_sfTogglePolarity\(tag, _sfActiveFilterTagsWithout, _sfActiveFilterTags\);/.test(html)
+  && /if \(e\.target\.closest\('\.sf-card-tag'\)\) return;/.test(html));
 
 console.log('3. Style Library tags');
 {

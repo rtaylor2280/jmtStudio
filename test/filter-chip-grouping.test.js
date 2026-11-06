@@ -59,6 +59,7 @@ const render = (counts) => {
     '_sfActiveFilterEffectsMissing', 'strip',
     'tagWithoutChips', 'creatorWithoutChips', '_sfActiveFilterTagsWithout', '_sfActiveFilterCreatorsWithout',   // [B-564]
     'selectedOnly', 'selectedChip',   // [B-600] left undefined: no selection in these cases
+    '_sfActiveFilterTagsNarrow', 'tagNarrowChips',
     body + '; return strip.innerHTML;');
   const chip = (t) => `<span class="styles-active-filter-chip">${t}</span>`;
   const many = (n, p) => Array.from({ length: n }, (_, k) => chip(`${p}${k}`)).join('');
@@ -78,7 +79,9 @@ const render = (counts) => {
     { size: counts.effects || 0 }, { size: counts.effectsMissing || 0 },
     strip,
     many(counts.tagsOut || 0, 'tx'), many(counts.creatorsOut || 0, 'cx'),
-    { size: counts.tagsOut || 0 }, { size: counts.creatorsOut || 0 });
+    { size: counts.tagsOut || 0 }, { size: counts.creatorsOut || 0 },
+    undefined, undefined,
+    { size: counts.tagsNarrow || 0 }, many(counts.tagsNarrow || 0, 'n'));
 };
 
 {
@@ -190,8 +193,9 @@ const render = (counts) => {
      /_group\('without', effectMissingChips, _sfActiveFilterEffectsMissing\.size, 'and'\)/.test(html));
   ok('tags now render as an OR group',
      /_group\('tag',\s+tagChips,\s+_sfActiveFilterTags\.size,\s+'or'\)/.test(html));
-  ok('…and no group still claims tags are AND',
-     !/_group\('tag',[^)]*'and'\)/.test(html));
+  ok('…and the picked tags are not claimed as AND (only tags clicked on a card are)',
+     !/_group\('tag',\s+tagChips,[^)]*'and'\)/.test(html)
+     && /_group\('tag',\s+tagNarrowChips,[^)]*'and'\)/.test(html));
 }
 
 // ── the tag dropdown must NOT narrow its own option list  [B-382] ──────────

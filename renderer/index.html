@@ -29644,6 +29644,7 @@ require(['vs/editor/editor.main'], function () {
       };
       let _sfSearchQuery = '';
       let _sfActiveFilterTags = new Set();
+      let _sfActiveFilterTagsNarrow = new Set();   // Clicked on a card: each must match, as a Style card's colors do.
       let _sfActiveFilterCreators = new Set();
       // WITHOUT, as Effects has it: right-click a tag or creator to leave out the fonts that have it. [B-564]
       let _sfActiveFilterTagsWithout = new Set();
@@ -30096,15 +30097,16 @@ require(['vs/editor/editor.main'], function () {
         if (isOut) return { cls: ' selected sf-effect-state-absent', mark: '&#10005;', tip };
         return { cls: '', mark: '', tip };
       };
-      // Picked tags OR; WITHOUT tags AND-NOT, the same asymmetry as effects.
+      // Picked tags OR; WITHOUT tags AND-NOT, the same asymmetry as effects. A tag clicked on a card narrows.
       const _sfInTagScope = (f) => {
-        if (_sfActiveFilterTags.size === 0 && _sfActiveFilterTagsWithout.size === 0) return true;
+        if (_sfActiveFilterTags.size === 0 && _sfActiveFilterTagsWithout.size === 0 && _sfActiveFilterTagsNarrow.size === 0) return true;
         const t = new Set(_sfEntryAllTags(f).map(x => x.toLowerCase()));
         if (_sfActiveFilterTags.size) {
           let any = false;
           for (const ft of _sfActiveFilterTags) if (t.has(String(ft).toLowerCase())) { any = true; break; }
           if (!any) return false;
         }
+        for (const ft of _sfActiveFilterTagsNarrow) if (!t.has(String(ft).toLowerCase())) return false;
         for (const ft of _sfActiveFilterTagsWithout) if (t.has(String(ft).toLowerCase())) return false;
         return true;
       };
@@ -30164,6 +30166,7 @@ require(['vs/editor/editor.main'], function () {
         const _sc = document.getElementById('sf-search-clear');
         if (_sc) _sc.style.display = 'none';
         _sfActiveFilterTags = new Set();
+        _sfActiveFilterTagsNarrow = new Set();
         _sfActiveFilterCreators = new Set();
         _sfActiveFilterTagsWithout = new Set();
         _sfActiveFilterCreatorsWithout = new Set();
@@ -30294,7 +30297,7 @@ require(['vs/editor/editor.main'], function () {
           matchesNameFilter(f) && ((_sfSelectedNames.has(f.name) && !_sfSelectedView) || matchesFilters(f))
         );
         _sfSelectedHeld = matching.filter(f => !matchesFilters(f)).length;
-        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterTagsWithout.size > 0 || _sfActiveFilterCreatorsWithout.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfActiveFilterNames.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
+        const isFiltering = !!q || _sfActiveFilterTags.size > 0 || _sfActiveFilterTagsNarrow.size > 0 || _sfActiveFilterCreators.size > 0 || _sfActiveFilterTagsWithout.size > 0 || _sfActiveFilterCreatorsWithout.size > 0 || _sfActiveFilterEffects.size > 0 || _sfActiveFilterEffectsMissing.size > 0 || _sfActiveFilterNames.size > 0 || _sfNeedsReviewFilterOn || !!_sfInUseFilter || _sfNewFilterOn;
         // Needs Review filter button: visible only when at least one entry
         // has the flag. Badge shows the count; button gets the active style
         // when the filter is on.
@@ -30542,7 +30545,7 @@ require(['vs/editor/editor.main'], function () {
           const demoUrl = meta.demoUrl || '';
           const linkUrl = meta.linkUrl || '';
           const demoBtn = demoUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(demoUrl)}" title="${_sfEscape(demoUrl)}">Demo</button>` : '';
-          const linkBtn = linkUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(linkUrl)}" title="${_sfEscape(linkUrl)}">Link</button>` : '';
+          const linkBtn = linkUrl ? `<button class="sf-card-link" data-card-link="${_sfEscape(linkUrl)}" data-card-capture="1" title="${_sfEscape(linkUrl)}">Link</button>` : '';
           const isSelected = _sfSelectedNames.has(f.name);
           const isInUse = inUseFonts.has(f.name);
           const needsReview = !!meta.needsReview;
@@ -33735,7 +33738,7 @@ require(['vs/editor/editor.main'], function () {
         const list = document.getElementById('sf-tag-dropdown-list');
         const badge = document.getElementById('sf-tag-filter-badge');
         const btn = document.getElementById('btn-sf-tag-filter');
-        const _tagN = _sfActiveFilterTags.size + _sfActiveFilterTagsWithout.size;
+        const _tagN = _sfActiveFilterTags.size + _sfActiveFilterTagsNarrow.size + _sfActiveFilterTagsWithout.size;
         if (badge) {
           if (_tagN > 0) {
             badge.textContent = String(_tagN);
@@ -33768,7 +33771,7 @@ require(['vs/editor/editor.main'], function () {
             else counts.set(key, { display: tag, count: 1 });
           }
         }
-        const _tagIn = (k) => Array.from(_sfActiveFilterTags).some(t => t.toLowerCase() === k);
+        const _tagIn = (k) => [..._sfActiveFilterTags, ..._sfActiveFilterTagsNarrow].some(t => t.toLowerCase() === k);
         const _tagOut = (k) => Array.from(_sfActiveFilterTagsWithout).some(t => t.toLowerCase() === k);
         const _tagActive = (k) => _tagIn(k) || _tagOut(k);
         const entries = _sfFreezeFacetRows('tag', Array.from(counts.entries())
@@ -33808,7 +33811,7 @@ require(['vs/editor/editor.main'], function () {
         const namesActive = _sfActiveFilterNames.size ? 1 : 0;
         const selectedOnly = _sfSelectedView === 'only';
         const selectedActive = selectedOnly || _sfSelectedHeld ? 1 : 0;   // [B-600] counted, as above
-        const total = selectedActive + searchActive + _sfActiveFilterTags.size + _sfActiveFilterCreators.size + _sfActiveFilterTagsWithout.size + _sfActiveFilterCreatorsWithout.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + namesActive + needsReviewActive + inUseActive + newActive;
+        const total = selectedActive + searchActive + _sfActiveFilterTags.size + _sfActiveFilterTagsNarrow.size + _sfActiveFilterCreators.size + _sfActiveFilterTagsWithout.size + _sfActiveFilterCreatorsWithout.size + _sfActiveFilterEffects.size + _sfActiveFilterEffectsMissing.size + namesActive + needsReviewActive + inUseActive + newActive;
         if (total === 0) {
           strip.style.display = 'none';
           strip.innerHTML = '';
@@ -33824,11 +33827,13 @@ require(['vs/editor/editor.main'], function () {
         const searchChip = searchActive
           ? `<span class="styles-active-filter-chip sf-active-filter-search" data-search="1">&#8220;${_sfEscape(_sfSearchQuery.trim())}&#8221;<button class="styles-active-filter-remove" data-filter-remove-search="1" title="Remove">&#10005;</button></span>`
           : '';
-        const tagChips = Array.from(_sfActiveFilterTags).map(tag => {
+        const _tagChip = (tag) => {
           const isFree = tag.toLowerCase() === 'free';
           const cls = isFree ? 'styles-active-filter-chip sf-active-filter-free' : 'styles-active-filter-chip';
           return `<span class="${cls}" data-tag="${_sfEscape(tag)}">${_sfEscape(tag)}<button class="styles-active-filter-remove" data-filter-remove-tag="${_sfEscape(tag)}" title="Remove">&#10005;</button></span>`;
-        }).join('');
+        };
+        const tagChips = Array.from(_sfActiveFilterTags).map(_tagChip).join('');
+        const tagNarrowChips = Array.from(_sfActiveFilterTagsNarrow).map(_tagChip).join('');
         const creatorChips = Array.from(_sfActiveFilterCreators).map(c =>
           `<span class="styles-active-filter-chip" data-creator="${_sfEscape(c)}">${_sfEscape(c)}<button class="styles-active-filter-remove" data-filter-remove-creator="${_sfEscape(c)}" title="Remove">&#10005;</button></span>`
         ).join('');
@@ -33897,6 +33902,8 @@ require(['vs/editor/editor.main'], function () {
           _group('search',  searchChip,   searchActive,                        'or'),
           // [B-382] Tags are OR: matchesTagFilter returns true on ANY selected tag.
           _group('tag',     tagChips,     _sfActiveFilterTags.size,            'or'),
+          // Tags clicked on a card AND, in a group of their own, as a Style card's colors do.
+          _group('tag',     tagNarrowChips, _sfActiveFilterTagsNarrow.size,            'and'),
           // WITHOUT groups sit right after their facet and AND-NOT, as the effects one does.
           _group('without', tagWithoutChips, _sfActiveFilterTagsWithout.size, 'and'),
           // Creators OR, and it is FORCED: meta.author is a single string, so ANDing
@@ -33930,11 +33937,23 @@ require(['vs/editor/editor.main'], function () {
         if (!_sfDropCI(own, value)) { _sfDropCI(other, value); own.add(value); }
         _sfRenderGrid();
       };
-      const _sfToggleFilterTag = (tag) => _sfTogglePolarity(tag, _sfActiveFilterTags, _sfActiveFilterTagsWithout);
-      const _sfRightToggleFilterTag = (tag) => _sfTogglePolarity(tag, _sfActiveFilterTagsWithout, _sfActiveFilterTags);
+      // From the dropdown: a tag already narrowing comes off, or it would come straight back as an OR.
+      const _sfToggleFilterTag = (tag) => {
+        if (_sfDropCI(_sfActiveFilterTagsNarrow, tag)) _sfRenderGrid();
+        else _sfTogglePolarity(tag, _sfActiveFilterTags, _sfActiveFilterTagsWithout);
+      };
+      const _sfRightToggleFilterTag = (tag) => {
+        _sfDropCI(_sfActiveFilterTagsNarrow, tag);
+        _sfTogglePolarity(tag, _sfActiveFilterTagsWithout, _sfActiveFilterTags);
+      };
+      // From a card: narrows what is showing. A tag already filtering comes off, whichever way it got there.
+      const _sfNarrowByCardTag = (tag) => {
+        if (_sfDropCI(_sfActiveFilterTags, tag)) _sfRenderGrid();
+        else _sfTogglePolarity(tag, _sfActiveFilterTagsNarrow, _sfActiveFilterTagsWithout);
+      };
       const _sfRemoveTagFilter = (tag) => {
         if (!tag) return;
-        _sfDropCI(_sfActiveFilterTags, tag); _sfDropCI(_sfActiveFilterTagsWithout, tag);
+        _sfDropCI(_sfActiveFilterTags, tag); _sfDropCI(_sfActiveFilterTagsNarrow, tag); _sfDropCI(_sfActiveFilterTagsWithout, tag);
         _sfRenderGrid();
       };
       // Creator-filter dropdown mirrors the tag dropdown: shows available
@@ -42231,6 +42250,14 @@ require(['vs/editor/editor.main'], function () {
           promptError('Save failed', (res && res.error) || 'unknown error');
           return false;
         }
+        // A known creator brings its website on the way through. Read it back, or the window shows
+        // an empty field and its next save writes that empty field over the website.
+        const _broughtSite = res.meta && res.meta.vendorWebsite;
+        if (_broughtSite && !_sfSourceEdit.vendorWebsite) {
+          _sfSourceEdit.vendorWebsite = _broughtSite;
+          if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = _broughtSite;
+          _sfSyncSourceLinkDisplay();
+        }
         }
         // ── PENDING COMMON ROW EDITS ───────────────────────────── [B-493, 2026-10-19]
         // Three separate writes per row because each field already owns its own rules:
@@ -42250,14 +42277,6 @@ require(['vs/editor/editor.main'], function () {
               if (ed.description !== (c.meta.description || '')) {
                 const r = await window.electronAPI.setCommonDescription({ uuid: u, description: ed.description });
                 if (!r || !r.ok) failures.push(`${c.meta.name}: ${(r && r.error) || 'description failed'}`);
-        // A known creator brings its website on the way through. Read it back, or the window shows
-        // an empty field and its next save writes that empty field over the website.
-        const _broughtSite = res.meta && res.meta.vendorWebsite;
-        if (_broughtSite && !_sfSourceEdit.vendorWebsite) {
-          _sfSourceEdit.vendorWebsite = _broughtSite;
-          if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = _broughtSite;
-          _sfSyncSourceLinkDisplay();
-        }
               }
               if (ed.group !== (c.meta.group || '')) {
                 const r = await window.electronAPI.setCommonGroup({ uuid: u, groupName: ed.group });
@@ -48164,6 +48183,28 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('btn-sf-source-picture-find')?.addEventListener('click', (e) => {
         if (_sfSourceEdit) _sfOpenSourceCapture(e, SF_IMAGE_SEARCH_URL, _sfSourceOriginalUuid, null);
       });
+      const _sfCaptureMenu = (e, c) => {
+        e.preventDefault();
+        const menu = document.getElementById('preset-ctx-menu');
+        if (!menu) return;
+        menu.innerHTML = '';
+        const d = document.createElement('div');
+        d.className = 'preset-ctx-item';
+        d.textContent = 'Open in app browser';
+        d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; _sfOpenSourceCapture(e2, c.url, c.uuid, c.first); });
+        menu.appendChild(d);
+        _jmtPlaceMenu(menu, e.clientX, e.clientY);
+      };
+      // The same from a card's Link button, without opening the font.
+      document.getElementById('sf-cards')?.addEventListener('contextmenu', (e) => {
+        const btn = e.target.closest('[data-card-capture]');
+        const name = btn && btn.closest('[data-font]')?.getAttribute('data-font');
+        const entry = name && (_sfAllEntries || []).find(x => x.name === name);
+        const uuid = entry && entry.meta && entry.meta.sourceUuid;
+        if (!uuid) return;
+        e.stopPropagation();
+        _sfCaptureMenu(e, { url: btn.getAttribute('data-card-link'), uuid, first: name });
+      });
       for (const [el, ctx] of [
         [_sfEntryDetailEls.websiteDisplay, () => _sfDetailEdit && { url: _sfDetailEdit.vendorWebsite, uuid: _sfDetailSourceUuid(), first: _sfDetailOriginalName }],
         [_sfSourceDetailEls.websiteDisplay, () => _sfSourceEdit && { url: _sfSourceEdit.vendorWebsite, uuid: _sfSourceOriginalUuid, first: null }],
@@ -48174,16 +48215,7 @@ require(['vs/editor/editor.main'], function () {
         el?.addEventListener('contextmenu', (e) => {
           const c = ctx();
           if (!c || !c.url) return;
-          e.preventDefault();
-          const menu = document.getElementById('preset-ctx-menu');
-          if (!menu) return;
-          menu.innerHTML = '';
-          const d = document.createElement('div');
-          d.className = 'preset-ctx-item';
-          d.textContent = 'Open in app browser';
-          d.addEventListener('mousedown', (e2) => { e2.stopPropagation(); menu.style.display = 'none'; _sfOpenSourceCapture(e2, c.url, c.uuid, c.first); });
-          menu.appendChild(d);
-          _jmtPlaceMenu(menu, e.clientX, e.clientY);
+          _sfCaptureMenu(e, c);
         });
       }
       // Saving from the browser and Undo on its strip go through the same steps. [B-563]
@@ -54603,7 +54635,7 @@ require(['vs/editor/editor.main'], function () {
         if (chip) {
           e.stopPropagation();
           const tag = chip.textContent.trim();
-          if (tag) _sfToggleFilterTag(tag);
+          if (tag) _sfNarrowByCardTag(tag);
           return;
         }
         const card = e.target.closest('.sf-card');
@@ -54643,6 +54675,15 @@ require(['vs/editor/editor.main'], function () {
         menu.style.top = `${e.pageY}px`;
         const close = () => { menu.style.display = 'none'; document.removeEventListener('mousedown', close); };
         document.addEventListener('mousedown', close);
+      });
+      // Right-click a tag on a card: fonts without it, as a Style card's colors do.
+      document.getElementById('sf-cards')?.addEventListener('contextmenu', (e) => {
+        const chip = e.target.closest('.sf-card-tag');
+        if (!chip) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const tag = chip.textContent.trim();
+        if (tag) _sfRightToggleFilterTag(tag);
       });
       // Right-click on a card-level effect chip → context menu listing
       // every wav variant for that effect (mirrors the modal's behavior
@@ -55314,6 +55355,7 @@ require(['vs/editor/editor.main'], function () {
         // and don't want a card-body context.
         if (e.target.closest('[data-card-effect]')) return;
         if (e.target.closest('[data-card-link]')) return;
+        if (e.target.closest('.sf-card-tag')) return;
         if (e.target.closest('[data-card-select]')) return;
         if (e.target.closest('[data-card-delete]')) return;
         const card = e.target.closest('[data-font]');

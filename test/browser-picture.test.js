@@ -34,6 +34,10 @@ check('no video size yet: nothing', R({ x: 0, y: 0, w: 640, h: 360, vw: 0, vh: 0
 console.log('2. wiring');
 const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
+check("a card's Link button offers the browser, and Demo does not",
+  /const linkBtn = [^\n]*data-card-capture="1"/.test(html) && !/const demoBtn = [^\n]*data-card-capture/.test(html));
+check('the card opens the browser for its own font and source, without opening the font',
+  /closest\('\[data-card-capture\]'\)[\s\S]{0,400}_sfCaptureMenu\(e, \{ url: btn\.getAttribute\('data-card-link'\), uuid, first: name \}\)/.test(html));
 check('the inset clears a 12 px corner (more than 0.3 of the radius)', /const _YT_FRAME_INSET = 6;/.test(main));
 check('only a paused video with a picture is offered', /if \(!v \|\| !v\.paused \|\| !v\.videoWidth\) return null;/.test(main));
 check('only YouTube: frames are found by their YouTube video id', /async function _youtubeFrame\(page\)[\s\S]{0,300}soundFontLinkImport\.youtubeVideoId\(f\.url\)/.test(main));
