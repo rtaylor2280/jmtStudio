@@ -3650,6 +3650,7 @@
   .sf-guided-row .g-fld input, .sf-guided-row .g-fld textarea { width: 100%; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.8rem; outline: none; box-sizing: border-box; font-family: inherit; }
   .sf-guided-row .g-fld input:focus, .sf-guided-row .g-fld textarea:focus { border-color: var(--jmt-blue); }
   .sf-guided-row .g-fld textarea { resize: vertical; min-height: 40px; }
+  .sf-guided-row .g-free-row { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: var(--c-text-sub); }
   .sf-guided-row .g-fld-inline { display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
   .sf-guided-row .g-fld-grow { flex: 0 0 auto; }
   .sf-guided-row .g-fld-check { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--c-text); cursor: pointer; padding-bottom: 5px; }
@@ -16736,6 +16737,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (e && e.catalogueDemo && !row.el.dataset.demourl) _guidedSetDemo(row, e.catalogueDemo);
     if (e && e.catalogueStore && !row.linkInput.value.trim()) _guidedSetLink(row, e.catalogueStore);
     if (e && e.catalogueName && row.srcNameInput && row.srcNameInput.value === row.srcNameInput.defaultValue) row.srcNameInput.value = e.catalogueName;
+    if (e && e.catalogueTags && e.catalogueTags.length && !row.tagsInput.value) row.tagsInput.value = e.catalogueTags.join(', ');
+    if (e && e.catalogueFree) { row.freeInput.checked = true; row.freeInput.dataset.set = '1'; }
     // Late docx naming: the async pass cracked a Word readme the sync scan couldn't,
     // and recovered a real name for what fell back to a generic folder name. Apply it
     // (only if the field still holds the original fallback, so a manual edit wins) and
@@ -16935,6 +16938,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       + `<div class="g-details">`
       +   `<label class="g-fld"><span>Source name</span><input type="text" class="g-srcname" maxlength="64" value="${srcName}" autocomplete="off"></label>`
       +   `<label class="g-fld g-fld-grow"><span>Acquired</span><input type="date" class="g-date"></label>`
+      +   `<label class="g-fld"><span>Tags</span><input type="text" class="g-tags" maxlength="300" placeholder="Separated by commas" autocomplete="off"></label>`
+      +   `<label class="g-free-row" title="The creator offers this font free of charge, publicly, to anyone"><input type="checkbox" class="g-free"><span>Free content</span></label>`
       +   `<label class="g-fld"><span>Notes</span><textarea class="g-notes" rows="2" maxlength="500" placeholder="Anything to remember about this font (optional)"></textarea></label>`
       + `</div>`;
     const checkbox = row.querySelector('.g-check');
@@ -17026,7 +17031,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       dateInput,
       srcNameInput: row.querySelector('.g-srcname'),
       notesInput: row.querySelector('.g-notes'),
+      tagsInput: row.querySelector('.g-tags'),
+      freeInput: row.querySelector('.g-free'),
     };
+    // Marking a font free by hand is an attestation; the catalogue's mark is already one.
+    rowObj.freeInput.addEventListener('change', async () => {
+      rowObj.freeInput.dataset.set = '1';
+      if (rowObj.freeInput.checked && !(await window.confirmFreeContent({ fonts: 1, sourceName: nameInput.value.trim() }))) rowObj.freeInput.checked = false;
+    });
     // Per-font Demo link — identical behavior to the single-source import via
     // the shared _sfWireDemoLink. Dedup the font's GROUP website and its Link so
     // neither auto-pastes into a demo slot (group is assigned later, at regroup
@@ -19538,6 +19550,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       guidedAcquisitionDate: (r.dateInput && r.dateInput.value) || undefined,
       guidedSourceName: (r.srcNameInput && r.srcNameInput.value.trim()) || undefined,
       guidedNotes: (r.notesInput && r.notesInput.value.trim()) || undefined,
+      guidedTags: r.tagsInput.value.split(',').map(t => t.trim()).filter(Boolean),
+      guidedFree: r.freeInput.dataset.set ? r.freeInput.checked : undefined,
     }));
     _guidedCaptureClose();
     if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
@@ -22659,6 +22673,23 @@ function _stylesClearAllFilters() {
   _applyStylesSearch();
 }
 
+// Search ignores spaces and punctuation in both the query and what it searches, so "style-1", "style 1"
+// and "Style_1" find each other. Each field is folded on its own, so a match cannot run across two fields.
+function _searchFold(text) {
+  return String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+function _searchBlob(fields) {
+  const present = fields.filter(Boolean);
+  return `${present.join('\n').toLowerCase()}\n${present.map(_searchFold).join('\n')}`;
+}
+// A query that is only punctuation has nothing to fold, so it matches as typed.
+function _searchHit(blob, q) {
+  if (!q) return true;
+  if (blob.includes(q)) return true;
+  const folded = _searchFold(q);
+  return !!folded && blob.includes(folded);
+}
+
 function _applyStylesSearch() {
   const q     = (document.getElementById('styles-search')?.value || '').toLowerCase();
   const cards = document.querySelectorAll('#styles-visual-list .style-card');
@@ -22667,7 +22698,7 @@ function _applyStylesSearch() {
   if (!_stylesSelected.size) _stylesSelectedView = '';
   _stylesSelectedHeld = 0;
   cards.forEach(card => {
-    const matchesQ = !q || (card.dataset.searchBlob || '').includes(q);
+    const matchesQ = _searchHit(card.dataset.searchBlob || '', q);
     const matchesTags = _styleInTagScope(card) && _styleInCreatorScope(card) && _styleInHelperScope(card) && _styleInSegmentScope(card) && _styleInColorScope(card) && _styleInSlotScope(card);
     const matchesEffects = matchesTags && _styleInEffectScope(card);
     const inUse = card.classList.contains('in-use');
@@ -22831,7 +22862,7 @@ function _matchingCardsForFacet(own) {
   const q = (document.getElementById('styles-search')?.value || '').toLowerCase();
   const all = Array.from(document.querySelectorAll('#styles-visual-list .style-card'));
   return all.filter(card => {
-    if (q && !(card.dataset.searchBlob || '').includes(q)) return false;
+    if (!_searchHit(card.dataset.searchBlob || '', q)) return false;
     if (own !== 'tag' && !_styleInTagScope(card)) return false;
     if (own !== 'creator' && !_styleInCreatorScope(card)) return false;
     if (own !== 'helper' && !_styleInHelperScope(card)) return false;
@@ -25627,7 +25658,7 @@ function _buildStylesVisual() {
     card.dataset.segments = (segmentsBy.get(name) || []).join('\n');
     const userTags       = meta.userTags || [];
     const effects        = _scanEffects(_withSegmentBodies(entry.usingCode, segmentEntries));   // through its segments [B-177]
-    card.dataset.searchBlob = [
+    card.dataset.searchBlob = `${_searchBlob([
       name,
       creator,
       displaySource,
@@ -25635,8 +25666,7 @@ function _buildStylesVisual() {
       (userTags || []).join(' '),
       effects.join(' '),
       meta.userNotes || '',
-      entry.usingCode || ''
-    ].join(' ').toLowerCase();
+    ])}\n${(entry.usingCode || '').toLowerCase()}`;
     const userTagsHtml = userTags.slice(0, 8).map(t => {
       const active = _activeFilterTags.has(t) ? ' active' : '';
       return `<span class="style-tag${active}${_isStyleAppTag(t) ? ' app' : ''}" data-tag="${t}">${t}</span>`;
@@ -30107,7 +30137,7 @@ require(['vs/editor/editor.main'], function () {
         const tagBlob = _sfEntryAllTags(entry).join(' ');
         const src = (m.sourceUuid && _sfAllSourcesByUuid[m.sourceUuid]) || null;
         const sm = src ? (src.meta || {}) : {};
-        return [
+        return _searchBlob([
           entry.name,
           m.author,
           m.description,
@@ -30119,7 +30149,7 @@ require(['vs/editor/editor.main'], function () {
           sm.vendor,
           sm.vendorWebsite,
           sm.userNotes,
-        ].filter(Boolean).join(' ').toLowerCase();
+        ]);
       };
       // Returns every tag attributed to an entry: stored user tags plus the
       // virtual "free" tag when m.purchased === false. Used both for search
@@ -30337,7 +30367,7 @@ require(['vs/editor/editor.main'], function () {
         const filterTagsLower = Array.from(_sfActiveFilterTags).map(t => t.toLowerCase());
         const matchesSearch = (f) => {
           if (!q) return true;
-          return _sfEntrySearchBlob(f).includes(q);
+          return _searchHit(_sfEntrySearchBlob(f), q);
         };
         // ── [B-382] TAGS ARE OR ───────────────────────────────────────────────
         // Ruled 2026-09-03, and the model has no exceptions:
@@ -33865,7 +33895,7 @@ require(['vs/editor/editor.main'], function () {
         const filterEffectsLower = Array.from(_sfActiveFilterEffects).map(e => e.toLowerCase());
         const filterEffectsMissingLower = Array.from(_sfActiveFilterEffectsMissing).map(e => e.toLowerCase());
         const matchSet = _sfAllEntries.filter(f => {
-          if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
+          if (!_searchHit(_sfEntrySearchBlob(f), q)) return false;
           if (!_sfInNameScope(f)) return false;   // [B-390] same scope as search
           if (!_sfInCreatorScope(f)) return false;  // [B-382] OR, and forced
           if (!_sfInEffectScope(f)) return false;   // [B-382] present OR, absent AND-NOT
@@ -34175,7 +34205,7 @@ require(['vs/editor/editor.main'], function () {
         // prevent multi-select. Tags + search + effects still apply
         // across dimensions.
         const matchSet = _sfAllEntries.filter(f => {
-          if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
+          if (!_searchHit(_sfEntrySearchBlob(f), q)) return false;
           if (!_sfInNameScope(f)) return false;   // [B-390] same scope as search
           if (!_sfInTagScope(f)) return false;      // [B-382] OR, one definition
           if (!_sfInEffectScope(f)) return false;   // [B-382] present OR, absent AND-NOT
@@ -34270,7 +34300,7 @@ require(['vs/editor/editor.main'], function () {
         // can cycle any effect's state without having to clear other
         // filters first.
         const matchSet = _sfAllEntries.filter(f => {
-          if (q && !_sfEntrySearchBlob(f).includes(q)) return false;
+          if (!_searchHit(_sfEntrySearchBlob(f), q)) return false;
           if (!_sfInNameScope(f)) return false;   // [B-390] same scope as search
           if (!_sfInTagScope(f)) return false;      // [B-382] OR, one definition
           if (!_sfInCreatorScope(f)) return false;  // [B-382] OR, and forced
@@ -38128,7 +38158,7 @@ require(['vs/editor/editor.main'], function () {
               purchased,
               acquisitionDate: purchaseDate,
               description: _curPick.description || '',
-              tags,
+              tags: [...tags, ...((((_sfImport?.vendor?.catalogue?.byPath || {})[pick.candidate?.path || ''] || {}).font || {}).tags || []).filter(t => !tags.includes(t))],
               demoUrl: pick.demoUrl || '',
             },
           });
@@ -38803,7 +38833,7 @@ require(['vs/editor/editor.main'], function () {
           const who = (entry && entry.duplicateOfName) || 'a font already in your library';
           const gain = entry && entry.closeMatchGain;
           return gain
-            ? `Close match to ${who}: this copy has ${gain} yours doesn’t (possibly a different version). Keep both, or delete one.`
+            ? `Close match to ${who}: this copy has ${gain} the existing copy doesn’t (possibly a different version). Keep both, or delete one.`
             : `Close match to ${who} (possibly a different version). Keep both, or delete one.`;
         },
       };
@@ -43045,12 +43075,17 @@ require(['vs/editor/editor.main'], function () {
         if (!row) return;
         const name = row.getAttribute('data-entry-name');
         if (!name) return;
+        await _sfSourceCommitChain;
+        // While rows are being edited, clicking another row edits it too; Apply saves them together.
+        if (row.parentElement?.querySelector('.sf-source-entry-row.editing')) {
+          row.querySelector(`[data-entry-edit-toggle="${CSS.escape(name)}"]`)?.click();
+          return;
+        }
         // Three-way prompt mirrors the entry→source path so the user
         // gets the same Cancel | Discard | Save options regardless of
         // which direction they're navigating. Save keeps the source
         // modal active so the swap-to-entry-detail handshake below
         // still has a from-modal to atomically deactivate.
-        await _sfSourceCommitChain;
         if (_sfSourceHasOpenEdit()) {
           const choice = await promptUnsaved('Some edits on this source are not applied yet. Save them before going to this font?');
           if (choice === 'cancel') return;

@@ -62,7 +62,7 @@ class FontCatalogue {
     return {
       tier,
       creator: { name: best.creator.name, website: best.creator.website },
-      font: tier === 'creator' ? null : { name: best.font.name, demo: best.font.demo, store: best.font.store },
+      font: tier === 'creator' ? null : { name: best.font.name, demo: best.font.demo, store: best.font.store, tags: best.font.tags || [], free: !!best.font.free },
       matched: best.matched,
       total: best.total,
       percent: Math.round(best.share * 100),
@@ -119,7 +119,7 @@ function mergeDetection(detection, found) {
   const fills = best.tier === 'fill';
   if (fills) merged.catalogue.store = best.font.store;
   if (!fills && detection.vendor && detection.confidence === 'content') return merged;
-  return { ...merged, vendor: best.creator.name, vendorWebsite: best.creator.website || null,
+  return { ...merged, ...(fills && best.font.free ? { purchasedDefault: false } : {}), vendor: best.creator.name, vendorWebsite: best.creator.website || null,
     confidence: fills ? 'content' : 'structural', matchType: 'catalogue',
     matched: best.matched, total: best.total };
 }
@@ -138,6 +138,8 @@ function applyToEnrichment(e, result) {
     e.catalogueName = result.font.name;
     e.catalogueDemo = result.font.demo;
     e.catalogueStore = result.font.store;
+    e.catalogueTags = result.font.tags || [];
+    e.catalogueFree = !!result.font.free;
   }
 }
 

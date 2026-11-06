@@ -18,6 +18,7 @@ const SHA = /^[0-9a-f]{64}$/;
 const MAX_CREATORS = 500;
 const MAX_FONTS = 5000;
 const MAX_SOUNDS = 5000;
+const MAX_TAGS = 50;
 const MAX_TEXT = 300;
 const MAX_URL = 500;
 
@@ -30,7 +31,9 @@ const INDEX_PATH = 'fonts/index.json';
 
 const fontFile = f => ({ id: f.id, sounds: f.sounds });
 const creatorFile = c => ({ id: c.id, name: c.name, website: c.website,
-  fonts: c.fonts.map(({ id, name, demo, store, sha256: sum }) => ({ id, name, demo, store, sha256: sum })) });
+  fonts: c.fonts.map(({ id, name, demo, store, tags, free, sha256: sum }) => ({
+    id, name, demo, store, ...(tags && tags.length ? { tags } : {}), ...(free ? { free: true } : {}), sha256: sum,
+  })) });
 
 // The catalogue split into its published files, with each checksum written onto what it describes.
 function catalogueFiles(data) {
@@ -58,6 +61,8 @@ const isLink = s => s === '' || (isText(s, MAX_URL) && /^https?:\/\//i.test(s));
 function fontProblem(f) {
   if (!f || !ID.test(f.id) || !f.name || !isText(f.name)) return 'font';
   if (!isLink(f.demo) || !isLink(f.store) || !SHA.test(f.sha256)) return `${f.id}: details`;
+  if (f.tags !== undefined && (!Array.isArray(f.tags) || f.tags.length > MAX_TAGS || !f.tags.every(t => t && isText(t)))) return `${f.id}: tags`;
+  if (f.free !== undefined && typeof f.free !== 'boolean') return `${f.id}: free`;
   if (!Array.isArray(f.sounds) || !f.sounds.length || f.sounds.length > MAX_SOUNDS) return `${f.id}: sounds`;
   for (const s of f.sounds) {
     if (!Array.isArray(s) || !isText(s[0]) || !HASH.test(s[1])) return `${f.id}: sound`;

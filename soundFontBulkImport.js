@@ -1378,7 +1378,8 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   //   2. "free" in the source filename
   //   3. Default paid (true)
   let purchasedDefault;
-  if (vendorRes && vendorRes.purchasedDefault === false) purchasedDefault = false;
+  if (!src.guidedName && src._enrich && src._enrich.catalogueFree) purchasedDefault = false;
+  else if (vendorRes && vendorRes.purchasedDefault === false) purchasedDefault = false;
   else if (/\bfree\b/i.test(src.rawName || '')) purchasedDefault = false;
   else purchasedDefault = true;
   // The guided Free-content checkbox (sent on every guided-path source)
@@ -1558,7 +1559,7 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
     // quiet because nameSource looks confident. Guided imports arrive with
     // guidedName carrying the same (possibly user-edited) value, so this branch
     // only fires for the quick path. Single-candidate only, same rationale as above.
-    else if ((src.nameSource === 'readme' || src.nameSource === 'name-tag')
+    else if ((src.nameSource === 'readme' || src.nameSource === 'name-tag' || src.nameSource === 'folder')
         && src.cleanedName && candidates.length === 1) {
       proposedName = src.cleanedName;
     }
@@ -1631,6 +1632,10 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
     const tags = (bundleName && candidates.length >= 2) ? [bundleName] : [];
     // Shared tags from the guided review's static tag bar — applied to every
     // font in this batch (deduped against the source-name tag above).
+    // A reviewed row carries its own tags, so a cleared one stays cleared. Quick import has no review.
+    const _rowTags = Array.isArray(src.guidedTags) ? src.guidedTags
+      : (!src.guidedName && src._enrich && src._enrich.catalogueTags) || [];
+    for (const t of _rowTags) if (t && !tags.includes(t)) tags.push(t);
     if (Array.isArray(src.guidedSharedTags)) {
       for (const t of src.guidedSharedTags) {
         const tt = String(t || '').trim();
@@ -1765,7 +1770,8 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
           let reason = null;
           if (compare.isFullyOwned(m)) {
             reason = 'already_in_library';
-          } else if (m.coreContainment >= compare.VARIANT_DISPLAY_MIN) {
+          // A font the catalogue knows is its own release, so sharing sounds with a sibling is no question.
+          } else if (m.coreContainment >= compare.VARIANT_DISPLAY_MIN && !(src._enrich && src._enrich.catalogueName)) {
             reason = 'close_match';
             const gain = compare.missingPhrase(m);
             if (gain) updates.closeMatchGain = gain;

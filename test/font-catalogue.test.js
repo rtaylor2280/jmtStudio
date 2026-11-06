@@ -79,6 +79,28 @@ ok('full length hashes match too', full.identify(sample.map(h => h.padEnd(64, '0
 ok('the shipped fonts recognize themselves', right >= full.fonts.length - 1, `${right} of ${full.fonts.length}`);
 }
 
+{
+  const { catalogueFiles, catalogueProblem } = require('../catalogueRail');
+  const hash = 'a'.repeat(16);
+  const data = { schema: 1, version: 9, updated: '2030-01-01', creators: [{ id: 'maker', name: 'Maker', website: '', fonts: [
+    { id: 'maker--one', name: 'One', demo: '', store: '', tags: ['Darth Vader'], free: true, sounds: [['hum.wav', hash]] },
+    { id: 'maker--two', name: 'Two', demo: '', store: '', sounds: [['hum.wav', hash.replace(/a/g, 'b')]] },
+  ] }] };
+  const built = catalogueFiles(data);
+  const creator = JSON.parse(built.files.get('fonts/creators/maker.json'));
+  ok('a font carries its tags and free', creator.fonts[0].tags[0] === 'Darth Vader' && creator.fonts[0].free === true);
+  ok('a font with neither carries neither', !('tags' in creator.fonts[1]) && !('free' in creator.fonts[1]));
+  ok('the catalogue with both is usable', catalogueProblem(built.data) === null, catalogueProblem(built.data));
+  ok('bad tags are refused', catalogueProblem({ ...built.data, creators: [{ ...built.data.creators[0], fonts: [{ ...built.data.creators[0].fonts[0], tags: 'Darth Vader' }] }] }) !== null);
+  const fc = require('../fontCatalogue');
+  const e = { fontCount: 1 };
+  fc.applyToEnrichment(e, { tier: 'fill', creator: { name: 'Maker' }, font: { name: 'One', demo: '', store: '', tags: ['Darth Vader'], free: true } });
+  ok('a bulk row takes tags and free from a match', e.catalogueTags[0] === 'Darth Vader' && e.catalogueFree === true && e.catalogueName === 'One');
+  const bundle = { fontCount: 3 };
+  fc.applyToEnrichment(bundle, { tier: 'fill', creator: { name: 'Maker' }, font: { name: 'One', tags: ['Darth Vader'], free: true } });
+  ok('a bundle row does not', !bundle.catalogueTags && !bundle.catalogueFree);
+}
+
 const bulk = require('fs').readFileSync(require('path').join(__dirname, '..', 'soundFontBulkImport.js'), 'utf8');
 ok('bulk reads a staged source from its tree: it has no manifest yet', /_stagedSoundRecords\(path\.join\(soundFontSources\.sourcesRoot\(userData\), r\.prepared\.uuid, 'source'\)\)/.test(bulk));
 ok('bulk looks in the folders the fonts were found in, inner zips included', /identifySource\(records, paths\)/.test(bulk) && /\.zip!/.test(bulk) && /out\.candidatePaths = /.test(bulk));
