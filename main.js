@@ -5911,6 +5911,8 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
   page.webContents.on('context-menu', async (_e, params) => {
     const link = params.linkURL && /^https?:\/\//i.test(params.linkURL) ? params.linkURL : null;
     const url = link || page.webContents.getURL();
+    // A logo links to the site's home page, and that is never what is being saved: the page is.
+    const saveUrl = soundFontLinkImport.isHomeLink(url, page.webContents.getURL()) ? page.webContents.getURL() : url;
     const names = typeof fonts === 'function' ? (fonts() || []) : null;
     const DEMO_HINT = 'A demo of this font';
     // The Link hover names what the Link is for when the fonts are known (the review and the font and
@@ -5982,11 +5984,11 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       { label: link ? 'Copy link URL' : 'Copy page URL', click: () => clipboard.writeText(soundFontLinkImport.stripSessionParams(url)) },
       ...(highlight ? [{ label: 'Copy link to highlight', click: () => clipboard.writeText(highlight) }] : []),
       { type: 'separator' },
-      { label: 'Save as Link', click: () => save('linkUrl', 'Link', url, null, 'Saved as Link', LINK_HINT) },
+      { label: 'Save as Link', click: () => save('linkUrl', 'Link', saveUrl, null, 'Saved as Link', LINK_HINT) },
       ...(highlight ? [{ label: 'Save as Link to highlight', click: () => save('linkUrl', 'Link', highlight, null, 'Saved as Link', LINK_HINT) }] : []),
     ];
     if (!names || names.length) {
-      items.push(demoItem('Save as Demo', url));
+      items.push(demoItem('Save as Demo', saveUrl));
       const moment = await _youtubeMoment(page);
       if (moment) items.push(demoItem(`Save as Demo at ${moment.label}`, moment.url));
     }

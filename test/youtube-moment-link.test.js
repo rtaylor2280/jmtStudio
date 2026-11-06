@@ -14,6 +14,16 @@ function check(label, got, want) {
   if (!ok) failures++;
 }
 
+console.log("a logo's link home is not what is being saved");
+const P = 'https://www.kyberphonicfonts.com/product/code-fulcrum';
+check('the logo on a product page', L.isHomeLink('https://www.kyberphonicfonts.com/', P), true);
+check('with or without www', L.isHomeLink('https://kyberphonicfonts.com', P), true);
+check('a link to another product is kept', L.isHomeLink('https://www.kyberphonicfonts.com/product/grumpy-uncle', P), false);
+check('a home page on another site is kept', L.isHomeLink('https://www.ksithsaberfonts.com/', P), false);
+check('on the home page itself, nothing changes', L.isHomeLink('https://www.kyberphonicfonts.com/', 'https://www.kyberphonicfonts.com/'), false);
+check('a home page with a query is a real address', L.isHomeLink('https://www.youtube.com/?v=x', 'https://www.youtube.com/watch?v=y'), false);
+check('not an address', L.isHomeLink('', P), false);
+
 console.log('the video id, from every link shape');
 check('watch page', L.youtubeVideoId('https://www.youtube.com/watch?v=OVaql8OJahk&t=5'), 'OVaql8OJahk');
 check('short link', L.youtubeVideoId('https://youtu.be/OVaql8OJahk'), 'OVaql8OJahk');

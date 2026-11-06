@@ -426,6 +426,15 @@ function youtubeMoment(id, seconds) {
 // #:~:text=, as Chrome's Copy link to highlight). A short selection on one line is matched whole; a
 // long one, or one spanning lines, by its first and last few words. Any earlier text fragment on the
 // address is replaced; a #section anchor is kept. Null when nothing usable is selected.
+// Is this link the home page of the site the page is on, while the page is somewhere else on it?
+function isHomeLink(linkUrl, pageUrl) {
+  let link, here;
+  try { link = new URL(linkUrl); here = new URL(pageUrl); } catch { return false; }
+  const site = (u) => u.hostname.replace(/^www\./i, '').toLowerCase();
+  const home = (u) => /^\/(index\.html?)?$/i.test(u.pathname) && !u.search;
+  return site(link) === site(here) && home(link) && !home(here);
+}
+
 function highlightLink(pageUrl, selection) {
   const lines = String(selection || '').split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
   if (!lines.length || !/^https?:\/\//i.test(String(pageUrl || ''))) return null;
@@ -462,4 +471,4 @@ function videoFrameRect(video, offset, view, inset) {
   return rect.width >= 32 && rect.height >= 32 ? rect : null;
 }
 
-module.exports = { resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams, highlightLink, videoFrameRect };
+module.exports = { isHomeLink, resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams, highlightLink, videoFrameRect };
