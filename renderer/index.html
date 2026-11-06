@@ -8963,6 +8963,34 @@ window._sfRefuseNotEnoughRoom = _sfRefuseNotEnoughRoom;
 // `promptConfirm` with no await in front of it. That is luck, not design - it is the same shape
 // and it would flash the moment anything async were added ahead of its dialog.
 async function _sfRefuseUnhealthyDestination(bad, { blockedDelete = false, destDir = null, closePrevious = null } = {}) {
+  if (bad && bad.saberUnsafeCluster) {
+    // The way forward is a card reader, so the card has to come out. The same Eject row as the end
+    // of an export, and with no way to continue this dialog is the last moment to offer it.
+    let ctx = {};
+    try { ctx = (await window._sfEjectContext?.(destDir)) || {}; } catch {}
+    try { if (closePrevious) closePrevious(); } catch {}
+    const refused = promptConfirm({
+      title: 'Not safe to write to this card over Proffieboard mass storage',
+      message: 'This card has 32 KB clusters, and writing to it through a Proffieboard over USB mass '
+        + `storage on Windows corrupts it. Nothing was exported.${blockedDelete ? ' Nothing was deleted.' : ''}\n\n`
+        + 'Use a card reader instead. The card works fine in the Proffieboard afterward. '
+        + 'Or reformat it at 16 KB, which erases it.',
+      confirmText: 'OK',
+      confirmKind: 'danger',
+      hideCancel: true,
+    });
+    if (ctx.ejectTarget && window._sfEjectRowHtml && window._sfPlaceEjectRowInButtons && window._sfWireEjectRow) {
+      const holder = document.createElement('div');
+      holder.innerHTML = window._sfEjectRowHtml(ctx.ejectTarget, ctx.ejectVocab);
+      if (holder.firstElementChild) {
+        document.getElementById('modal-confirm-msg').appendChild(holder.firstElementChild);
+        window._sfPlaceEjectRowInButtons();
+        window._sfWireEjectRow({ target: ctx.ejectTarget, vocab: ctx.ejectVocab, auto: false });
+      }
+    }
+    await refused;
+    return;
+  }
   let named = '';
   try { named = (await _sfDestDisplay(destDir || '')) || ''; } catch {}
   const label = named || (bad && bad.label) || 'this card';

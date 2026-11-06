@@ -562,6 +562,11 @@ const FIT_CHECK_MIN_BYTES = 0;
 // the whole case - a rare false refusal costs a retry; attempting a write we can predict will
 // fail costs a part-written archive on a card. And it lands hardest on backup, because a
 // truncated backup is the artefact someone reaches for on the day everything else went wrong.
+// [B-594] Writing to a card with 32 KB clusters through a saber on Windows corrupts it, the same
+// way every time: 9 of 9, across two computers and two plugins, while 8, 16 and 64 KB came through
+// clean. Only this exact size, and only through a board. Not known why. A reader is fine.
+const SABER_UNSAFE_CLUSTER = 32768;
+
 async function preflight(destDir, {
   fileSizes = null, totalBytes = 0, fileCount = 0, dirCount = 0, classify = false,
 } = {}) {
@@ -599,7 +604,13 @@ async function preflight(destDir, {
   // the transport regardless of size.
   const wantBoard = classify === true || isSlowWriteJob(files, bytes);
 
-  const d = await describe(destDir, { classify: wantBoard });
+  // The cluster size costs 0.3 ms and the board answer ~1,900 ms, so only a card at the unsafe size
+  // pays for the lookup on a small write. Any size of write has to be asked: this refuses, it
+  // does not warn.
+  let d = await describe(destDir, { classify: wantBoard });
+  if (!wantBoard && process.platform === 'win32' && d.blockSize === SABER_UNSAFE_CLUSTER) {
+    d = await describe(destDir, { classify: true });
+  }
   out.ok = !!d.ok;
   out.bytesFree = d.bytesFree;
   out.blockSize = d.blockSize;
@@ -612,6 +623,13 @@ async function preflight(destDir, {
   // conflation is safe, and `transport: null` is what distinguishes the two for anyone
   // inspecting the result.
   out.boardCard = isSlowTransport(d.transport);
+
+  // Rides `unhealthy` because every door already refuses on that and writes nothing. An unknown
+  // transport is not a board card, so a failed lookup writes, the same ruling as everywhere else.
+  if (out.boardCard && d.blockSize === SABER_UNSAFE_CLUSTER) {
+    out.unhealthy = { saberUnsafeCluster: true };
+    return out;
+  }
 
   // ── 1. Is it in a state worth writing to at all ── [B-441]
   //
@@ -671,7 +689,7 @@ async function preflight(destDir, {
 module.exports = {
   describe, checkFit, onDiskCost, classifyTransport, preflight, driveKind,
   SLOW_WRITE_MIN_BYTES, SLOW_CLEANUP_MIN_FILES, FIT_CHECK_MIN_BYTES,
-  isSlowWriteJob, isSlowCleanupJob, isSlowTransport,
+  isSlowWriteJob, isSlowCleanupJob, isSlowTransport, SABER_UNSAFE_CLUSTER,
   // [B-441] Exported so the check can be exercised against real volumes rather than only
   // through `preflight`, which cannot be pointed at a specific card from a test.
   volumeDirty, destinationHealth, rawVolumePath,
