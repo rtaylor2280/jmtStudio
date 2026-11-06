@@ -5848,8 +5848,10 @@ async function _pdfAllowed(page) {
 // folder, creating it on first use. With `images` (a function returning true when the opener can take them)
 // an image is saved per font as 'image:<index>' ({ filePath, fileName, thumb }, a PNG in its own temp folder).
 // onUndo(key), when given, puts back what that key's save replaced; the strip's Undo on a row calls it
-// and removes the row. Undo lasts while the browser is open.
-function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', onSave, onUndo = null, images = null }) {
+// and removes the row. Undo lasts while the browser is open. With `linkPerFont` (a function returning true
+// when each font is its own source) a Link is saved per font as 'link:<index>', and there is no proof of purchase.
+// With `nameOneFont` (a function returning true) a lone font is named on its menu items.
+function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', onSave, onUndo = null, images = null, linkPerFont = null, nameOneFont = null }) {
   const { Menu, clipboard } = require('electron');
   const shown = new Map();   // row key -> { label, hint, value }, most recently saved first
   let strip = null;
@@ -5931,20 +5933,26 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       : `The creator's page for this ${names.length > 1 ? 'font bundle' : 'font'}, like its product page.`;
     // One Demo item for a given address: straight to the font, or a submenu of the checked fonts
     // with "All checked fonts" first when there are two or more.
-    const demoItem = (label, demoUrl) => {
-      const one = (i) => save(`demo:${i}`, `Demo · ${names[i]}`, demoUrl, null, `Saved as Demo for ${names[i]}`, DEMO_HINT);
-      if (!names) return { label, click: () => save('demoUrl', 'Demo', demoUrl, null, 'Saved as Demo', DEMO_HINT) };
-      if (names.length === 1) return { label, click: () => one(0) };
+    const perFontItem = (prefix, word, hint, label, itemUrl) => {
+      const one = (i) => save(`${prefix}:${i}`, `${word} · ${names[i]}`, itemUrl, null, `Saved as ${word} for ${names[i]}`, hint);
+      // Opened on a creator's site rather than from a font, so its one font is named.
+      if (names.length === 1) return { label: (typeof nameOneFont === 'function' && nameOneFont()) ? `${label} for ${names[0]}` : label, click: () => one(0) };
       return { label, submenu: [
         { label: names.length === 2 ? allLabel.replace(/^All\b/, 'Both') : allLabel, click: () => {
-          const cleanUrl = soundFontLinkImport.stripSessionParams(demoUrl);
-          names.forEach((n, i) => { shown.delete(`demo:${i}`); shown.set(`demo:${i}`, { label: `Demo · ${n}`, hint: DEMO_HINT, value: cleanUrl }); try { onSave(`demo:${i}`, cleanUrl); } catch {} });
+          const cleanUrl = soundFontLinkImport.stripSessionParams(itemUrl);
+          names.forEach((n, i) => { shown.delete(`${prefix}:${i}`); shown.set(`${prefix}:${i}`, { label: `${word} · ${n}`, hint, value: cleanUrl }); try { onSave(`${prefix}:${i}`, cleanUrl); } catch {} });
           show();
         } },
         { type: 'separator' },
         ...names.map((n, i) => ({ label: n, click: () => one(i) })),
       ] };
     };
+    const demoItem = (label, demoUrl) => (names ? perFontItem('demo', 'Demo', DEMO_HINT, label, demoUrl)
+      : { label, click: () => save('demoUrl', 'Demo', demoUrl, null, 'Saved as Demo', DEMO_HINT) });
+    const eachFontOwnsLink = !!(names && typeof linkPerFont === 'function' && linkPerFont());
+    const FONT_LINK_HINT = "The creator's page for this font, like its product page.";
+    const linkItem = (label, linkUrl) => (eachFontOwnsLink ? perFontItem('link', 'Link', FONT_LINK_HINT, label, linkUrl)
+      : { label, click: () => save('linkUrl', 'Link', linkUrl, null, 'Saved as Link', LINK_HINT) });
     const highlight = soundFontLinkImport.highlightLink(
       soundFontLinkImport.stripSessionParams(page.webContents.getURL()), params.selectionText);
     // One picture item: straight to the font, or a submenu of the fonts with the all-fonts row first.
@@ -5994,8 +6002,10 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       { label: link ? 'Copy link URL' : 'Copy page URL', click: () => clipboard.writeText(soundFontLinkImport.stripSessionParams(url)) },
       ...(highlight ? [{ label: 'Copy link to highlight', click: () => clipboard.writeText(highlight) }] : []),
       { type: 'separator' },
-      { label: 'Save as Link', click: () => save('linkUrl', 'Link', saveUrl, null, 'Saved as Link', LINK_HINT) },
-      ...(highlight ? [{ label: 'Save as Link to highlight', click: () => save('linkUrl', 'Link', highlight, null, 'Saved as Link', LINK_HINT) }] : []),
+      ...((!eachFontOwnsLink || names.length) ? [
+        linkItem('Save as Link', saveUrl),
+        ...(highlight ? [linkItem('Save as Link to highlight', highlight)] : []),
+      ] : []),
     ];
     if (!names || names.length) {
       items.push(demoItem('Save as Demo', saveUrl));
@@ -6015,7 +6025,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
         if (names.length > 1) items.push({ ...sourceImageItem(() => _captureYoutubeFrame(page, frame)), label: 'Save video frame as source image' });
       }
     }
-    if (await _pdfAllowed(page)) {
+    if (!eachFontOwnsLink && await _pdfAllowed(page)) {
       items.push({ type: 'separator' }, { label: 'Save page as proof of purchase (PDF)', click: savePdf });
     }
     if (page.isDestroyed()) return;
@@ -6422,19 +6432,23 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, sav
 // this window gathers details, it does not import.
 let _captureBrowser = null;
 let _captureImages = false;   // the opener takes pictures (the font and source windows; not import review yet)
+let _captureLinkPerFont = false;   // each font is its own source, so a Link goes to a font (bulk review)
+let _captureNameOneFont = false;   // opened on a creator's site, so a lone font is named on the menu
 let _captureFonts = [];   // the review's checked fonts, kept current by linkCapture:fonts
 ipcMain.on('linkCapture:fonts', (_e, { fonts } = {}) => {
   _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
 });
 let _captureFor = '';      // the font or source the window was opened for, shown ahead of the page title
 const _captureTitle = (pageTitle) => (_captureFor ? `${_captureFor}  ·  ${pageTitle || ''}` : pageTitle);
-ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName, images } = {}) => {
+ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName, images, linkPerFont, nameOneFont } = {}) => {
   const os = require('os');
   const { session } = require('electron');
   if (!url || !/^https?:\/\//i.test(url)) return { ok: false };
   _captureFonts = Array.isArray(fonts) ? fonts.map(String) : [];
   _captureFor = typeof forName === 'string' ? forName.trim() : '';
   _captureImages = images === true;
+  _captureLinkPerFont = linkPerFont === true;
+  _captureNameOneFont = nameOneFont === true;
   if (_captureBrowser && !_captureBrowser.isDestroyed()) {
     if (_captureFor) _captureBrowser.setTitle(_captureFor);
     _captureBrowser.loadURL(url).catch(() => {});
@@ -6472,6 +6486,8 @@ ipcMain.handle('linkCapture:open', async (event, { url, fonts, allLabel, forName
   _attachLinkPicks(bw, {
     fonts: () => _captureFonts,
     images: () => _captureImages,
+    linkPerFont: () => _captureLinkPerFont,
+    nameOneFont: () => _captureNameOneFont,
     allLabel: typeof allLabel === 'string' && allLabel ? allLabel : 'All fonts',
     getDir: () => {
       // The review removes the folder once it has attached a PDF, so a second save makes a new one.

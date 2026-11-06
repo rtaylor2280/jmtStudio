@@ -3364,8 +3364,14 @@
   .sf-review-candidate-row .cand-link-toggle.has-url, .sf-guided-row .cand-link-toggle.has-url { color: var(--jmt-blue); border-color: var(--jmt-blue); }
   .sf-review-candidate-row .cand-demo-row, .sf-guided-row .cand-demo-row { display: flex; align-items: center; gap: 6px; padding-left: 30px; margin-top: 7px; }
   .sf-review-candidate-row .cand-demo-label, .sf-guided-row .cand-demo-label { font-size: 0.78rem; color: var(--c-text-sub); width: 50px; flex-shrink: 0; }
-  .sf-review-candidate-row .cand-demo-input, .sf-guided-row .cand-demo-input { flex: 1; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
-  .sf-review-candidate-row .cand-demo-input:focus, .sf-guided-row .cand-demo-input:focus { border-color: var(--jmt-blue); }
+  .sf-review-candidate-row .cand-demo-input, .sf-guided-row .cand-demo-input, .sf-guided-row .cand-link-input { flex: 1; background: var(--c-bg-raised); border: 1px solid var(--c-border-input); border-radius: 3px; color: var(--c-text); padding: 4px 7px; font-size: 0.82rem; outline: none; box-sizing: border-box; font-family: inherit; }
+  .sf-review-candidate-row .cand-demo-input:focus, .sf-guided-row .cand-demo-input:focus, .sf-guided-row .cand-link-input:focus { border-color: var(--jmt-blue); }
+  .sf-guided-row .cand-demo-row { flex-direction: column; align-items: stretch; }
+  .sf-guided-row .g-url-row { display: flex; align-items: center; gap: 6px; }
+  .sf-guided-row .g-url-open { width: 124px; flex-shrink: 0; margin-left: 0; font-size: 0.78rem; text-align: right; white-space: nowrap; }
+  .sf-guided-row .g-url-open.g-open-off { visibility: hidden; }
+  .g-group-website-open { font-size: 0.78rem; white-space: nowrap; }
+  .g-group-website-open.g-open-off { display: none; }
   .sf-review-candidate-row .cand-demo-clear, .sf-guided-row .cand-demo-clear { background: transparent; border: none; color: var(--c-text-sub); cursor: pointer; padding: 4px 6px; opacity: 0.45; font-size: 0.85rem; }
   .sf-review-candidate-row .cand-demo-clear:hover, .sf-guided-row .cand-demo-clear:hover { opacity: 1; color: var(--c-text); }
   /* A font image saved from the browser, held until Import [B-563]: a thumbnail the size of the Demo toggle, and its ×. */
@@ -16449,6 +16455,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (els.ejectWrap) els.ejectWrap.style.opacity = '';
     if (els.progBar) { els.progBar.classList.remove('indeterminate'); els.progBar.style.width = '0%'; }
     if (progressUnsub) { try { progressUnsub(); } catch {} progressUnsub = null; }
+    _guidedCaptureClose();
     if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
     // CANCEL THE ANALYZE. [B-398 door 6] THIS LINE IS THE MORNING'S RUNAWAY, IN ONE PLACE.
     //
@@ -16725,12 +16732,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   const _fillGuidedRow = (row, e) => {
     row.enriched = e;
     row.el.classList.remove('enriching');
-    if (e && e.catalogueDemo && !row.el.dataset.demourl) {
-      row.el.dataset.demourl = e.catalogueDemo;
-      const dInput = row.el.querySelector('.cand-demo-input');
-      const dRow = row.el.querySelector('.cand-demo-row');
-      if (dInput && dRow) { dInput.value = e.catalogueDemo; dRow.style.display = ''; }
-    }
+    if (e && e.catalogueDemo && !row.el.dataset.demourl) _guidedSetDemo(row, e.catalogueDemo);
+    if (e && e.catalogueStore && !row.linkInput.value.trim()) _guidedSetLink(row, e.catalogueStore);
     // Late docx naming: the async pass cracked a Word readme the sync scan couldn't,
     // and recovered a real name for what fell back to a generic folder name. Apply it
     // (only if the field still holds the original fallback, so a manual edit wins) and
@@ -16797,6 +16800,94 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // Last demo URL committed this guided session — powers the smart-paste dedup
   // across sibling rows (same role as _sfImport._lastDemoUrl in single import).
   let _guidedLastDemoUrl = '';
+  const _guidedPasteBtn = `<button type="button" class="sf-url-input-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>`;
+  const _guidedOpenTitle = 'Open this page in the in-app browser to save a Link or a Demo';
+  // A URL field on the review: paste, clear, and an Open link while it holds an address.
+  const _guidedWireUrlField = (input, open, onOpen) => {
+    const wrap = input.closest('.sf-url-input-wrap');
+    const changed = () => { input.dispatchEvent(new Event('input')); input.dispatchEvent(new Event('change')); };
+    const refresh = () => { if (open) open.classList.toggle('g-open-off', !/^https?:\/\/\S/i.test(input.value.trim())); };
+    input.addEventListener('input', refresh);
+    wrap.querySelector('.sf-url-input-paste').addEventListener('click', async () => {
+      let clip = '';
+      try { clip = await window.electronAPI.readClipboard(); }
+      catch { try { clip = await navigator.clipboard.readText(); } catch {} }
+      const t = (clip || '').trim();
+      if (/^https?:\/\/\S+$/i.test(t)) { input.value = t; changed(); input.focus(); }
+    });
+    wrap.querySelector('.sf-url-input-clear').addEventListener('click', () => { input.value = ''; changed(); input.focus(); });
+    open?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const url = input.value.trim();
+      if (/^https?:\/\//i.test(url)) onOpen(url);
+    });
+    refresh();
+  };
+  // Link and Demo share one block on the row, so a value in either shows both.
+  const _guidedShowUrls = (r) => {
+    const has = !!(r.linkInput.value.trim() || r.demoInput.value.trim());
+    const block = r.el.querySelector('.cand-demo-row');
+    if (block) block.style.display = has ? '' : 'none';
+    r.el.querySelector('.cand-link-toggle')?.classList.toggle('has-url', has);
+  };
+  const _guidedSetLink = (r, value) => {
+    r.linkInput.value = value;
+    r.linkInput.dispatchEvent(new Event('input'));
+    _guidedShowUrls(r);
+  };
+  const _guidedSetDemo = (r, value) => {
+    r.demoInput.value = value;
+    r.demoInput.dispatchEvent(new Event('change'));
+    _guidedShowUrls(r);
+  };
+  // The in-app browser opened from the review. A Link or a Demo goes to a font picked in its menu, since
+  // each row is its own source. Saves can be undone from the browser's strip while it is open.
+  let _guidedCaptureScope = null;   // returns the rows the browser offers
+  let _guidedCaptureRows = [];
+  let _guidedCaptureBefore = new Map();
+  const _guidedCaptureNames = () => {
+    _guidedCaptureRows = _guidedCaptureScope ? _guidedCaptureScope() : [];
+    return _guidedCaptureRows.map(r => r.nameInput.value.trim() || 'Untitled');
+  };
+  const _guidedOpenCapture = async (url, scope, forName, nameOneFont = false) => {
+    _guidedCaptureScope = scope;
+    _guidedCaptureBefore = new Map();
+    window._sfCaptureTarget = 'bulk';
+    try {
+      await window.electronAPI.linkCaptureOpen({ url, fonts: _guidedCaptureNames(), allLabel: 'All checked fonts', forName, linkPerFont: true, nameOneFont });
+    } catch {}
+  };
+  const _guidedCaptureClose = () => {
+    if (!_guidedCaptureScope) return;
+    _guidedCaptureScope = null;
+    try { window.electronAPI.linkCaptureClose(); } catch {}
+  };
+  // Ticking, unticking or renaming a font while the browser is open updates its menu.
+  const _guidedCaptureResend = () => {
+    if (_guidedCaptureScope) { try { window.electronAPI.linkCaptureFonts(_guidedCaptureNames()); } catch {} }
+  };
+  els.guidedList?.addEventListener('change', _guidedCaptureResend);
+  els.guidedList?.addEventListener('input', _guidedCaptureResend);
+  const _guidedCaptureField = (key) => {
+    const m = /^(link|demo):(\d+)$/.exec(String(key || ''));
+    const r = m && _guidedCaptureRows[parseInt(m[2], 10)];
+    if (!r || !r.el.isConnected) return null;
+    return m[1] === 'link' ? { r, input: r.linkInput, set: _guidedSetLink } : { r, input: r.demoInput, set: _guidedSetDemo };
+  };
+  window.electronAPI.onLinkCapturePick?.(({ key, value } = {}) => {
+    if (window._sfCaptureTarget !== 'bulk') return;
+    const f = _guidedCaptureField(key);
+    if (!f) return;
+    if (!_guidedCaptureBefore.has(key)) _guidedCaptureBefore.set(key, { ...f, value: f.input.value });
+    f.set(f.r, value);
+  });
+  window.electronAPI.onLinkCaptureUndo?.(({ key } = {}) => {
+    if (window._sfCaptureTarget !== 'bulk') return;
+    const b = _guidedCaptureBefore.get(key);
+    if (!b) return;
+    _guidedCaptureBefore.delete(key);
+    if (b.r.el.isConnected) b.set(b.r, b.value);
+  });
   const _buildGuidedRow = (src, idx) => {
     const row = document.createElement('div');
     row.className = 'sf-guided-row enriching';
@@ -16816,19 +16907,24 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // play chips sit where the "Proffie variant" badge is on that row (top),
       // with the .wav count beneath them.
       + `<div class="g-meta"><div class="g-preview"></div><div class="g-wavcount"></div></div>`
-      // Per-font Demo link, same chain-icon pattern as the single-source import.
-      + `<button type="button" class="cand-link-toggle" title="Add demo link">&#128279;</button>`
+      // Per-font Link and Demo, same chain-icon pattern as the single-source import.
+      + `<button type="button" class="cand-link-toggle" title="Add a Link or a Demo">&#128279;</button>`
       + `</div>`
       + `<div class="cand-demo-row" style="display:none">`
-      +   `<span class="cand-demo-label">Demo</span>`
-      +   `<input type="url" class="cand-demo-input" placeholder="Link to a demo of this font">`
-      +   `<button type="button" class="cand-demo-clear" title="Clear demo link">&#10005;</button>`
+      +   `<div class="g-url-row">`
+      +     `<span class="cand-demo-label" title="The creator&#39;s page for this font, like its product page.">Link</span>`
+      +     `<span class="sf-url-input-wrap"><input type="text" class="cand-link-input" placeholder="Where to learn more or get it" maxlength="200" autocomplete="off">${_guidedPasteBtn}<button type="button" class="sf-url-input-clear" title="Clear">&#10005;</button></span>`
+      +     `<a href="#" class="sf-vendor-suggest-apply sf-review-open-browser g-url-open g-open-off" title="${_guidedOpenTitle}">Open in app browser</a>`
+      +   `</div>`
+      +   `<div class="g-url-row">`
+      +     `<span class="cand-demo-label">Demo</span>`
+      +     `<span class="sf-url-input-wrap"><input type="url" class="cand-demo-input" placeholder="Link to a demo of this font">${_guidedPasteBtn}<button type="button" class="sf-url-input-clear" title="Clear">&#10005;</button></span>`
+      +     `<span class="g-url-open"></span>`
+      +   `</div>`
       + `</div>`
       // Footer: expand toggle for the per-font metadata + the source's text
       // files (listed outright, each opens in the doc viewer). Vendor, website
-      // and free/paid live at the GROUP level, not per row. The "where to get
-      // it" link is source-tied and deferred; the per-font Demo link above is
-      // the one per-font link we surface.
+      // and free/paid live at the GROUP level, not per row.
       + `<div class="g-sub"><button type="button" class="g-details-toggle">Details</button><button type="button" class="g-move-vendor" title="Move this font to another creator">Change creator</button><span class="g-docs"></span></div>`
       + `<div class="g-details">`
       +   `<label class="g-fld"><span>Source name</span><input type="text" class="g-srcname" maxlength="64" value="${srcName}" autocomplete="off"></label>`
@@ -16920,19 +17016,26 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     const rowObj = {
       src, idx, enriched: null, el: row, checkbox, nameInput, group: null,
       demoInput: row.querySelector('.cand-demo-input'),
+      linkInput: row.querySelector('.cand-link-input'),
       dateInput,
       srcNameInput: row.querySelector('.g-srcname'),
       notesInput: row.querySelector('.g-notes'),
     };
     // Per-font Demo link — identical behavior to the single-source import via
-    // the shared _sfWireDemoLink. Dedup the font's GROUP website so it never
-    // auto-pastes into a demo slot (group is assigned later, at regroup time,
-    // so read it lazily inside the closure).
+    // the shared _sfWireDemoLink. Dedup the font's GROUP website and its Link so
+    // neither auto-pastes into a demo slot (group is assigned later, at regroup
+    // time, so read it lazily inside the closure).
     if (window._sfWireDemoLink) window._sfWireDemoLink(row, {
-      dedupUrls: () => [rowObj.group && rowObj.group.websiteInput && rowObj.group.websiteInput.value],
+      dedupUrls: () => [rowObj.group && rowObj.group.websiteInput && rowObj.group.websiteInput.value, rowObj.linkInput.value],
       getLast: () => _guidedLastDemoUrl,
       setLast: (u) => { _guidedLastDemoUrl = u; },
+      addTitle: 'Add a Link or a Demo',
+      setTitle: 'Link or Demo set, toggle to show/hide',
+      hasOther: () => rowObj.linkInput.value.trim(),
     });
+    _guidedWireUrlField(rowObj.linkInput, row.querySelector('a.g-url-open'), (url) => _guidedOpenCapture(url, () => [rowObj], nameInput.value.trim()));
+    _guidedWireUrlField(rowObj.demoInput, null);
+    rowObj.linkInput.addEventListener('input', () => row.querySelector('.cand-link-toggle')?.classList.toggle('has-url', !!(rowObj.linkInput.value.trim() || rowObj.demoInput.value.trim())));
     return rowObj;
   };
 
@@ -17121,6 +17224,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         +   `<button type="button" class="sf-url-input-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>`
         +   `<button type="button" class="sf-url-input-clear" title="Clear">&#10005;</button>`
         + `</span>`
+        + `<a href="#" class="sf-vendor-suggest-apply sf-review-open-browser g-group-website-open g-open-off" title="${_guidedOpenTitle}">Open in app browser</a>`
         + `</div>`
         + `<div class="g-group-body"></div>`;
       const body = sec.querySelector('.g-group-body');
@@ -17150,17 +17254,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       g.el = sec;
       g.vendorInput = sec.querySelector('.g-group-vendor');
       g.websiteInput = sec.querySelector('.g-group-website');
-      // Website paste + clear (same shell as the single-source import).
-      const gwPaste = sec.querySelector('.g-group-website-wrap .sf-url-input-paste');
-      const gwClear = sec.querySelector('.g-group-website-wrap .sf-url-input-clear');
-      gwPaste?.addEventListener('click', async () => {
-        let clip = '';
-        try { clip = await window.electronAPI.readClipboard(); }
-        catch { try { clip = await navigator.clipboard.readText(); } catch {} }
-        const t = (clip || '').trim();
-        if (/^https?:\/\/\S+$/i.test(t)) { g.websiteInput.value = t; g.websiteInput.focus(); }
-      });
-      gwClear?.addEventListener('click', () => { g.websiteInput.value = ''; g.websiteInput.focus(); });
+      // Website paste + clear + open (same shell as the single-source import). The browser offers the
+      // checked fonts under this creator.
+      _guidedWireUrlField(g.websiteInput, sec.querySelector('.g-group-website-open'),
+        (url) => _guidedOpenCapture(url, () => g.rows.filter(r => r.checkbox.checked), g.vendorInput.value.trim(), true));
       sec.querySelector('.g-group-toggle').addEventListener('click', () => sec.classList.toggle('collapsed'));
       g.vendorInput.addEventListener('input', () => { g.vendor = g.vendorInput.value.trim(); _updateGuidedGroupReview(g); });
       _updateGuidedGroupReview(g);
@@ -19383,6 +19480,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // Guided flow: counts screen → wider candidate view → curated import.
   els.reviewBtn?.addEventListener('click', openGuided);
   els.guidedBackBtn?.addEventListener('click', () => {
+    _guidedCaptureClose();
     if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
     try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
     showPhase('review');
@@ -19424,11 +19522,14 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // per-font link; it maps to the entry's demoUrl. Prefer the live input
       // value, fall back to the tracked dataset value.
       guidedLink: ((r.demoInput && r.demoInput.value.trim()) || (r.el && r.el.dataset.demourl) || '') || undefined,
-      guidedStore: (r.enriched && r.enriched.catalogueStore) || undefined,
+      // The catalogue's address stays a suggestion; anything else on the row, empty included, is the user's.
+      guidedStore: (r.enriched && r.enriched.catalogueStore && r.linkInput.value.trim() === r.enriched.catalogueStore) ? r.enriched.catalogueStore : undefined,
+      guidedLinkUrl: (r.enriched && r.enriched.catalogueStore && r.linkInput.value.trim() === r.enriched.catalogueStore) ? undefined : r.linkInput.value.trim(),
       guidedAcquisitionDate: (r.dateInput && r.dateInput.value) || undefined,
       guidedSourceName: (r.srcNameInput && r.srcNameInput.value.trim()) || undefined,
       guidedNotes: (r.notesInput && r.notesInput.value.trim()) || undefined,
     }));
+    _guidedCaptureClose();
     if (enrichUnsub) { try { enrichUnsub(); } catch {} enrichUnsub = null; }
     try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
     // Unchecking the tracks row means exactly that: no tracks folder goes to the
@@ -35206,8 +35307,9 @@ require(['vs/editor/editor.main'], function () {
           row.dataset.demourl = trimmed;
           const tb = row.querySelector('.cand-link-toggle');
           if (tb) {
-            tb.title = trimmed ? 'Demo link set, toggle to show/hide' : 'Add demo link';
-            tb.classList.toggle('has-url', !!trimmed);
+            const other = opts.hasOther && opts.hasOther();
+            tb.title = (trimmed || other) ? (opts.setTitle || 'Demo link set, toggle to show/hide') : (opts.addTitle || 'Add demo link');
+            tb.classList.toggle('has-url', !!(trimmed || other));
           }
           if (trimmed && opts.setLast) opts.setLast(trimmed);
         };

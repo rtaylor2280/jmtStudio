@@ -68,7 +68,7 @@ const ctx = ctxAt > -1 ? mainSrc.slice(ctxAt, mainSrc.indexOf('Menu.buildFromTem
 check('the menu was located', ctx.length > 500, true);
 check('highlight built from the page and the selection', /highlightLink\(\s*soundFontLinkImport\.stripSessionParams\(page\.webContents\.getURL\(\)\), params\.selectionText\)/.test(ctx), true);
 check('Copy link to highlight, only with a selection', /\.\.\.\(highlight \? \[\{ label: 'Copy link to highlight', click: \(\) => clipboard\.writeText\(highlight\) \}\] : \[\]\)/.test(ctx), true);
-check('Save as Link to highlight saves it as the Link', /label: 'Save as Link to highlight', click: \(\) => save\('linkUrl', 'Link', highlight,/.test(ctx), true);
+check('Save as Link to highlight saves it as the Link', /linkItem\('Save as Link to highlight', highlight\)/.test(ctx) && /save\('linkUrl', 'Link', linkUrl, null/.test(ctx), true);
 check('no Demo to highlight (a Demo is a video)', !/Save as Demo to highlight/.test(ctx), true);
 
 console.log(failures ? `\nyoutube-moment-link: ${failures} FAILED` : '\nyoutube-moment-link: all passed');

@@ -1375,8 +1375,13 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // Persist vendor info onto the source meta (source of truth; projected onto
   // entries at read time). For structural matches we still apply the value AND
   // mark needsReview so the user can verify.
-  const _storeLink = !_carriedSource.linkUrl
-    && (src.guidedStore || (src._enrich && src._enrich.catalogueStore));
+  // A reviewed row's own Link wins, and a row cleared of the catalogue's stays clear.
+  const _userLink = typeof src.guidedLinkUrl === 'string' ? src.guidedLinkUrl.trim() : null;
+  const _storeLink = _userLink || (_userLink === null && !_carriedSource.linkUrl
+    && (src.guidedStore || (!src.guidedName && src._enrich && src._enrich.catalogueStore))) || '';
+  if (_storeLink && !effectiveVendor) {
+    try { soundFontSources.updateSourceMeta(userData, sourceUuid, { linkUrl: _storeLink }); } catch {}
+  }
   if (effectiveVendor) {
     try {
       soundFontSources.updateSourceMeta(userData, sourceUuid, {
