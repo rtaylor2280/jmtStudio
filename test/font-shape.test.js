@@ -61,6 +61,24 @@ const font = (name, extra = {}) => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+  const card = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-asteria-'));
+  try {
+    const { classifyCard } = require('../sdCardDetect');
+    fs.mkdirSync(path.join(card, 'Bank1', 'Clash'), { recursive: true });
+    fs.mkdirSync(path.join(card, 'Bank1', 'Hum'));
+    fs.writeFileSync(path.join(card, 'Bank1', 'Clash', 'clash1.wav'), 'x');
+    fs.writeFileSync(path.join(card, 'Bank1', 'Hum', 'hum.wav'), 'x');
+    fs.writeFileSync(path.join(card, 'SETTING.txt'), 'x');
+    fs.writeFileSync(path.join(card, 'COLORMATRIX.txt'), 'x');
+    const c = classifyCard({ mountPath: card });
+    ok('an Asteria card is not called Proffie', c.kind === 'asteria', c.kind);
+    ok('its banks are not offered as fonts', c.counts.fonts === 0, c.counts.fonts);
+    fs.rmSync(path.join(card, 'SETTING.txt'));
+    const p = classifyCard({ mountPath: card });
+    ok('Bank folders alone stay Proffie', p.kind === 'proffie', p.kind);
+  } finally {
+    fs.rmSync(card, { recursive: true, force: true });
+  }
   assert.ok(true);
   console.log(failed ? `\n${failed} failure(s)` : '\nall font shape tests passed');
   process.exit(failed ? 1 : 0);

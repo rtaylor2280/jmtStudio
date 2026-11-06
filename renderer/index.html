@@ -13970,6 +13970,23 @@ function _sdExecUnder(rel) {
   const t = rel.toLowerCase() + '/';
   return _sdExecList().some(p => p.toLowerCase().startsWith(t));
 }
+// What a card's flagged files are called. A shortcut is not a program, it can only start one.
+function _execWords(paths) {
+  const list = paths || [];
+  const sc = list.filter(p => /\.lnk$/i.test(String(p))).length;
+  const pr = list.length - sc;
+  const count = (n, word) => (n === 1 ? `a ${word}` : `${n} ${word}s`);
+  const single = list.length === 1;
+  const noun = sc && pr ? 'program files and shortcuts' : sc ? (single ? 'shortcut' : 'shortcuts') : (single ? 'program file' : 'program files');
+  return {
+    single,
+    noun,
+    count: sc && pr ? `${count(pr, 'program file')} and ${count(sc, 'shortcut')}` : sc ? count(sc, 'shortcut') : count(pr, 'program file'),
+    subject: sc && pr ? 'A program file or shortcut' : sc ? 'A shortcut' : 'A program file',
+    note: sc ? ` ${pr ? 'A shortcut points' : 'It points'} to something else, and it can start a program when opened.` : '',
+    file: sc && !pr ? (single ? 'the shortcut is' : 'the shortcuts are') : (single ? 'the file is' : 'the files are'),
+  };
+}
 // "card" or "folder" — the report is reachable from a picked folder as well as a
 // mounted card, and one helper keeps the chooser's line and the full warning below
 // from naming the same thing two different ways.
@@ -13981,9 +13998,8 @@ function _sdExecNoun(c) { return (c && c.isFolder) ? 'folder' : 'card'; }
 function _sdExecLineHtml(c) {
   const scan = c && c._execScan;
   if (!scan || !scan.files || !scan.files.length) return '';
-  const n = scan.files.length;
   return `<div class="sd-exec-warn-line">&#9888; This ${_sdExecNoun(c)} carries `
-    + `${n === 1 ? 'a program file' : n + ' program files'}.</div>`;
+    + `${_execWords(scan.files).count}.</div>`;
 }
 function _sdExecWarningHtml(c) {
   const scan = c && c._execScan;
@@ -13997,15 +14013,16 @@ function _sdExecWarningHtml(c) {
   const limit = n <= CAP + 1 ? n : CAP;
   const shown = scan.files.slice(0, limit).map(p => `<li>${_sdEsc(p)}</li>`).join('');
   const more = n > limit ? `<li>and ${n - limit} more</li>` : '';
+  const w = _execWords(scan.files);
   return `<div class="sd-exec-warn">`
-    + `<div class="sd-exec-warn-head">&#9888; This ${_sdExecNoun(c)} carries ${n === 1 ? 'a program file' : n + ' program files'}.</div>`
+    + `<div class="sd-exec-warn-head">&#9888; This ${_sdExecNoun(c)} carries ${w.count}.</div>`
     + `<ul class="sd-exec-warn-list">${shown}${more}</ul>`
-    + `<div class="sd-exec-warn-body">A program file has no reason to be on a saber card. Your saber will never `
+    + `<div class="sd-exec-warn-body">${w.subject} has no reason to be on a saber card.${w.note} Your saber will never `
     + `run it, because ProffieOS does not execute files from the card. There is no way to tell from the card `
     + `${n === 1 ? 'its intent or what it does' : 'their intent or what they do'}. Any risk is to a computer, `
-    + `and only if ${n === 1 ? 'the file is' : 'the files are'} opened.</div>`
-    + `<div class="sd-exec-warn-body">If you choose to import anyway, ${n === 1 ? 'the program file' : 'the program files'} `
-    + `will not be included.</div>`
+    + `and only if ${w.file} opened.</div>`
+    + (((c.classification && c.classification.counts) || {}).fonts
+      ? `<div class="sd-exec-warn-body">If you choose to import anyway, the ${w.noun} will not be included.</div>` : '')
     + `</div>`;
 }
 function _sdActionRowHtml(c) {
@@ -14025,8 +14042,8 @@ function _sdActionRowHtml(c) {
   // "anyway" is the most consequential word in this flow, and a title costs nothing.
   const _nExec = _anyExec ? c._execScan.files.length : 0;
   const _importTitle = _anyExec
-    ? (_nExec === 1 ? 'The fonts import. The program file stays behind.'
-                    : `The fonts import. ${_allOf(_nExec, { cap: true })} program files stay behind.`)
+    ? (_nExec === 1 ? `The fonts import. The ${_execWords(c._execScan.files).noun} stays behind.`
+                    : `The fonts import. ${_allOf(_nExec, { cap: true })} ${_execWords(c._execScan.files).noun} stay behind.`)
     : '';
   const _titleAttr = _importTitle ? ` title="${_sdEsc(_importTitle)}"` : '';
   if (canFonts) btns.push(`<button id="sd-act-import" class="${ctx === 'sfl' ? 'modal-btn-primary' : 'modal-btn-cancel'} sd-act-btn"${_titleAttr}>${_importLabel}</button>`);
@@ -14407,9 +14424,10 @@ async function _sdRenderBrowse() {
     const _isExec = !e.isDir && _sdExecHas(_rel);
     const _holdsExec = e.isDir && _sdExecUnder(_rel);
     if (_isExec || _holdsExec) cls.push('sd-exec');
-    const _execTip = _isExec ? ' (program file, never imported)'
-      : _holdsExec ? ' (contains a program file)' : '';
-    const _execMark = (_isExec || _holdsExec) ? '<span class="sd-exec-mark" title="Program file">&#9888;</span>' : '';
+    const _isLnk = /\.lnk$/i.test(e.name);
+    const _execTip = _isExec ? ` (${_isLnk ? 'shortcut' : 'program file'}, never imported)`
+      : _holdsExec ? ' (contains a program file or shortcut)' : '';
+    const _execMark = (_isExec || _holdsExec) ? `<span class="sd-exec-mark" title="${_isExec && _isLnk ? 'Shortcut' : _holdsExec ? 'Program file or shortcut' : 'Program file'}">&#9888;</span>` : '';
     return `<div class="${cls.join(' ')}" data-idx="${i}" title="${_sdEsc(e.name + sizeTitle + _execTip)}"><span class="sf-entry-files-row-icon">${icon}</span>${_execMark}<span class="sf-entry-files-row-name">${_sdEsc(e.name)}</span></div>`;
   }).join('');
   // Font context: when you're inside a Proffie FONT — its root or any of its
@@ -16991,7 +17009,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       const _prog = _refused.filter(x => (x.kind || 'program') === 'program').length;
       const _macro = _refused.filter(x => x.kind === 'macro').length;
       const _parts = [];
-      if (_prog) _parts.push(`${_prog} program file${_prog === 1 ? '' : 's'}`);
+      if (_prog) _parts.push(_execWords(_refused.filter(x => (x.kind || 'program') === 'program').map(x => x.relPath)).count);
       if (_macro) _parts.push(`${_macro} document${_macro === 1 ? '' : 's'} with macros`);
       const _note = document.createElement('div');
       _note.className = 'g-corrupt-note';
@@ -18519,10 +18537,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const _more = _removed.length > 5 ? `<li>and ${_removed.length - 5} more</li>` : '';
         html += `<ul class="br-fail-list" style="color:#e5534b;">${_shown}${_more}</ul>`;
         const _one = _execCount === 1;
-        html += `<div class="br-exec-note">A program file has no reason to be on a saber card. Your saber `
+        const _w = _execWords(_progAll.map(x => x.rel));
+        html += `<div class="br-exec-note">${_w.subject} has no reason to be on a saber card.${_w.note} Your saber `
           + `will never run it, because ProffieOS does not execute files from the card. There is no way to `
           + `tell from the card ${_one ? 'its intent or what it does' : 'their intent or what they do'}. `
-          + `Any risk is to a computer, and only if ${_one ? 'the file is' : 'the files are'} opened.</div>`;
+          + `Any risk is to a computer, and only if ${_w.file} opened.</div>`;
         // NAMED SEPARATELY WHEN THE BYTES GAVE IT AWAY ([B-214]). The card report tests
         // NAMES only, so this is a file it could never have shown, and the reader deserves
         // to know the check went deeper than the one they already saw.
@@ -18538,7 +18557,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // Cancel is still on screen and nothing has been committed yet, so leaving is a
         // real option. Same 'if you choose' framing as the card report, which acknowledges
         // the reader is deciding against a warning rather than being told what happens.
-        html += `<div class="br-exec-note">If you choose to import, ${_one ? 'the program file' : 'the program files'} `
+        html += `<div class="br-exec-note">If you choose to import, the ${_w.noun} `
           + `will not be included. Cancel leaves this card alone.</div>`;
       }
       if (plan.depthHalted) {
@@ -18564,9 +18583,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       _execStance = _execCount > 0;
       if (_execStance) {
         els.startBtn.disabled = true;
-        els.startBtn.title = _execCount === 1
-          ? 'Quick import is unavailable because a program file was found on this card.'
-          : 'Quick import is unavailable because program files were found on this card.';
+        els.startBtn.title = `Quick import is unavailable because ${_execWords(_progAll.map(x => x.rel)).count} ${_execCount === 1 ? 'was' : 'were'} found on this card.`;
       } else if (els.startBtn) {
         els.startBtn.title = '';
       }
@@ -19403,7 +19420,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       const _p = refusedGroups.flatMap(g => g.files).filter(x => (x.kind || 'program') === 'program').length;
       const _m = refusedTotal - _p;
       const _what = [
-        _p ? `${_p} program file${_p === 1 ? '' : 's'}` : null,
+        _p ? _execWords(refusedGroups.flatMap(g => g.files).filter(x => (x.kind || 'program') === 'program').map(x => x.relPath || x.rel || x.name)).count : null,
         _m ? `${_m} document${_m === 1 ? '' : 's'} with macros` : null,
       ].filter(Boolean).join(' and ');
       els.summaryRefused.innerHTML =
@@ -32122,18 +32139,19 @@ require(['vs/editor/editor.main'], function () {
             const _pp = _pb.filter(x => (x.kind || 'program') === 'program');
             const _pm = _pb.filter(x => x.kind === 'macro');
             const _parts = [];
-            if (_pp.length) _parts.push(`<strong>${_pp.length} program file${_pp.length === 1 ? '' : 's'}</strong>`);
+            const _ppw = _execWords(_pp.map(x => x.relPath));
+            if (_pp.length) _parts.push(`<strong>${_ppw.count}</strong>`);
             if (_pm.length) _parts.push(`<strong>${_pm.length} document${_pm.length === 1 ? '' : 's'} with macros</strong>`);
             const _lim = _pb.length <= 6 ? _pb.length : 5;
             const _names = _pb.slice(0, _lim).map(x => `<li>${_sfEscape(x.relPath)}</li>`).join('');
             const _more = _pb.length > _lim ? `<li>and ${_pb.length - _lim} more</li>` : '';
             const _hid = _pp.filter(x => x.disguised).length;
             const _go = await promptConfirm({
-              title: 'This folder carries program files',
+              title: `This folder carries ${_pp.length ? _ppw.noun : 'files that do not belong'}`,
               messageHtml:
                 `<div style="color:#e5534b;font-weight:600;">&#9888; This folder carries ${_parts.join(' and ')}.</div>`
                 + `<ul style="color:#e5534b;font-size:0.8rem;list-style:none;padding-left:0;margin:6px 0;">${_names}${_more}</ul>`
-                + `<div style="color:var(--c-text-sub);">A program file has no reason to be in a common folder, and `
+                + `<div style="color:var(--c-text-sub);">${_ppw.subject} has no reason to be in a common folder, and `
                 + `your saber would never run it either.</div>`
                 + (_hid
                     ? `<div style="color:#e5534b;margin-top:6px;">`
@@ -37247,7 +37265,7 @@ require(['vs/editor/editor.main'], function () {
             const _prog = _ref.filter(x => (x.kind || 'program') === 'program');
             const _macro = _ref.filter(x => x.kind === 'macro');
             const _parts = [];
-            if (_prog.length) _parts.push(`${_prog.length} program file${_prog.length === 1 ? '' : 's'}`);
+            if (_prog.length) _parts.push(_execWords(_prog.map(x => x.relPath)).count);
             if (_macro.length) _parts.push(`${_macro.length} document${_macro.length === 1 ? '' : 's'} with macros`);
             // Same cap rule as the card warning: never collapse a single item,
             // because "and 1 more" costs exactly the line the filename would have.
@@ -37274,7 +37292,7 @@ require(['vs/editor/editor.main'], function () {
               + `<div class="sd-exec-warn-body">The fonts below still import, complete apart from `
               + `${_ref.length === 1 ? 'that file' : 'those files'}. `
               + (_prog.length
-                  ? `A program file has no reason to be in a sound font, and your saber would never run it either.`
+                  ? `${_execWords(_prog.map(x => x.relPath)).subject} has no reason to be in a sound font, and your saber would never run it either.`
                   : `A document that can contain macros has no use on a saber card.`)
               + `</div>`
               + (_hidden
@@ -46374,7 +46392,7 @@ require(['vs/editor/editor.main'], function () {
         const nM = ref.filter(x => x.kind === 'macro').length;
         const nA = ref.filter(x => x.kind === 'opaque').length;
         const parts = [];
-        if (nP) parts.push(nP === 1 ? 'a program file' : `${nP} program files`);
+        if (nP) parts.push(_execWords(ref.filter(x => x.kind !== 'opaque' && x.kind !== 'macro').map(x => leaf(x))).count);
         if (nM) parts.push(nM === 1 ? 'a document with macros' : `${nM} documents with macros`);
         if (nA) parts.push(nA === 1 ? 'an archive that cannot be opened' : `${nA} archives that cannot be opened`);
         const phrase = parts.length === 1 ? parts[0]
@@ -46480,7 +46498,7 @@ require(['vs/editor/editor.main'], function () {
           + (xs.length > n ? ` and ${xs.length - n} more` : '');
         // Same shape the import dialogs use: name each kind, join with 'and'.
         const parts = [];
-        if (nP) parts.push(`<strong>${nP === 1 ? '1 program file' : `${nP} program files`}</strong>`);
+        if (nP) parts.push(`<strong>${_execWords(heldProg.map(x => x.name)).count}</strong>`);
         if (nM) parts.push(`<strong>${nM === 1 ? '1 document with macros' : `${nM} documents with macros`}</strong>`);
         if (nA) parts.push(`<strong>${nA === 1 ? '1 unreadable archive' : `${nA} unreadable archives`}</strong>`);
         const nAll = held.length;

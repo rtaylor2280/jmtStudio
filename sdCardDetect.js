@@ -278,7 +278,12 @@ function classifyCard(vol) {
   // the same answer, so the card can never print a count beside a claim that contradicts it.
   // A numbered folder is a Xeno slot OR a Proffie bank; its files say which. [B-461]
   const fontDirSet = new Set(), xenoDirSet = new Set();
+  // Asteria (UltimateWorks): settings files at the root and fonts in Bank1, Bank2... Its effect folders
+  // read as Proffie by name, but ProffieOS would find no ignition, retraction or swing sounds in them.
+  const asteria = hasFile('setting.txt') && (hasFile('colormatrix.txt') || hasFile('ledcfg.txt'))
+    && dirNames.some(n => /^bank\d+$/i.test(n));
   for (const n of dirNames) {
+    if (asteria) break;
     if (NON_FONT_DIRS.has(n.toLowerCase()) || VENDOR_NOTE_DIR_RX.test(n)) continue;
     if (/^(set|setting)$/i.test(n)) continue;   // a board's system folder, never a font
     const ents = safeReaddir(path.join(vol.mountPath, n));
@@ -320,6 +325,8 @@ function classifyCard(vol) {
     kind = 'golden-harvest'; confidence = 'high'; matched.push('Golden Harvest layout');
   } else if (nNameDirs.length >= 1 || (hasConfigTxt && hasColorsTxt)) {
     kind = 'cfx'; confidence = 'high'; matched.push('CFX layout (N-name / config.txt+colors.txt)');
+  } else if (asteria) {
+    kind = 'asteria'; confidence = 'high'; matched.push('Asteria: SETTING.txt and Bank folders');
   } else if (snv4 && xenoFonts === 0) {
     kind = 'snv4'; confidence = 'medium';
     matched.push('SNV4: ' + [hasFile('system_flag.ini') && 'system_flag.ini', hasDir('all-lightfile') && 'all-lightfile/'].filter(Boolean).join(' '));
@@ -361,7 +368,7 @@ function classifyCard(vol) {
 }
 
 // ── Plain-language verdict for the UI (no jargon in headline/detail) ──
-const FAMILY_LABELS = { cfx: 'CFX (Crystal Focus)', 'golden-harvest': 'Golden Harvest', verso: 'Verso', xeno: 'Xeno' };
+const FAMILY_LABELS = { cfx: 'CFX (Crystal Focus)', 'golden-harvest': 'Golden Harvest', verso: 'Verso', xeno: 'Xeno', asteria: 'Asteria' };
 
 function buildVerdict(card) {
   const cls = card.classification;
@@ -410,10 +417,12 @@ function buildVerdict(card) {
         + (other >= 1 ? ` Its other ${other === 1 ? 'font is' : `${other} fonts are`} not Proffie. Converting them is planned for a future update.` : '');
       return { level: 'info', headline: `This is a ${FAMILY_LABELS[kind]} ${noun} holding ${fonts}.`, detail };
     }
-    const detail = (cls.contentTypes && cls.contentTypes.includes('Proffie'))
+    const detail = kind === 'asteria'
+      ? 'Its fonts are laid out for that board and would not play fully on a Proffie saber, so they are not offered for import. You can still inspect its files.'
+      : (cls.contentTypes && cls.contentTypes.includes('Proffie'))
       ? 'It also has some Proffie fonts. Converting the rest to Proffie is planned for a future update.'
       : 'Converting its fonts to Proffie is planned for a future update.';
-    return { level: 'info', headline: `This looks like a ${FAMILY_LABELS[kind]} ${noun}, not Proffie.`, detail };
+    return { level: 'info', headline: `This looks like ${/^[aeiou]/i.test(FAMILY_LABELS[kind]) ? 'an' : 'a'} ${FAMILY_LABELS[kind]} ${noun}, not Proffie.`, detail };
   }
   const detail = (cls.contentTypes && cls.contentTypes.length)
     ? `It has ${cls.contentTypes.join(' and ')} content but no clear board layout. You can still inspect its files.`
