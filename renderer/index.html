@@ -42250,6 +42250,14 @@ require(['vs/editor/editor.main'], function () {
               if (ed.description !== (c.meta.description || '')) {
                 const r = await window.electronAPI.setCommonDescription({ uuid: u, description: ed.description });
                 if (!r || !r.ok) failures.push(`${c.meta.name}: ${(r && r.error) || 'description failed'}`);
+        // A known creator brings its website on the way through. Read it back, or the window shows
+        // an empty field and its next save writes that empty field over the website.
+        const _broughtSite = res.meta && res.meta.vendorWebsite;
+        if (_broughtSite && !_sfSourceEdit.vendorWebsite) {
+          _sfSourceEdit.vendorWebsite = _broughtSite;
+          if (_sfSourceDetailEls.websiteInput) _sfSourceDetailEls.websiteInput.value = _broughtSite;
+          _sfSyncSourceLinkDisplay();
+        }
               }
               if (ed.group !== (c.meta.group || '')) {
                 const r = await window.electronAPI.setCommonGroup({ uuid: u, groupName: ed.group });
