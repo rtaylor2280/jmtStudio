@@ -310,6 +310,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('bulkImport:progress', handler);
   },
   bulkImportEnrichGuided: (params)    => ipcRenderer.invoke('bulkImport:enrichGuided', params),
+  candidatePreviews: (params)         => ipcRenderer.invoke('soundFonts:candidatePreviews', params),
   bulkImportEnrichCancel: ()          => ipcRenderer.invoke('bulkImport:enrichCancel'),
   bulkImportReadCandidateFile: (params) => ipcRenderer.invoke('bulkImport:readCandidateFile', params),
   onBulkImportEnrichProgress: (cb) => {

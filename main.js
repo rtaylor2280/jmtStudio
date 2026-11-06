@@ -2098,6 +2098,10 @@ ipcMain.handle('bulkImport:discardPrepared', async (_, { uuids } = {}) => {
 // A rule applied in three places and missed in two is the standing failure this project keeps
 // finding — the fix is not knowing better, it is sweeping for the shape.
 const _enrichGate = require('./bulkImportGate').createGate();
+ipcMain.handle('soundFonts:candidatePreviews', async (_e, params) => {
+  try { return { ok: true, refs: await soundFontBulkImport.candidatePreviewRefs(params || {}) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
 ipcMain.handle('bulkImport:enrichGuided', async (e, { plan } = {}) => {
   const myToken = _enrichGate.begin();
   if (!myToken) {

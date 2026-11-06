@@ -48,6 +48,12 @@ const font = (name, extra = {}) => {
     fs.writeFileSync(path.join(root, 'Shadow_Lord', 'clash (1).wav'), 'x');
     fs.writeFileSync(path.join(root, 'Shadow_Lord', 'hum (1).wav'), 'x');
 
+    const { candidatePreviewRefs } = require('../soundFontBulkImport');
+    fs.writeFileSync(path.join(root, 'Daki_v2', 'font.wav'), 'x');
+    const refs = await candidatePreviewRefs({ sourcePath: root, candidatePaths: ['Daki_v2', 'Bank_01', 'x.zip!Hidden'] });
+    ok('a font finds its font and hum', refs.Daki_v2.font === 'Daki_v2/font.wav' && refs.Daki_v2.hum === 'Daki_v2/hum.wav', JSON.stringify(refs.Daki_v2));
+    ok('a font with no font.wav finds only its hum', !refs.Bank_01.font && refs.Bank_01.hum === 'Bank_01/hum.wav', JSON.stringify(refs.Bank_01));
+    ok('a font in a nested zip gets none', !refs['x.zip!Hidden']);
     const { plan } = await scanForBulkImport({ rootDir: root });
     const by = new Map(plan.sources.map(s => [s.rawName, s]));
     ok('fixture holds the fonts', plan.sources.length === 10, plan.sources.length);

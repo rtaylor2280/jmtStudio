@@ -2023,8 +2023,24 @@ async function enrichPlanForGuided({ plan, userData }, callbacks = {}) {
   return { ok: true, enriched };
 }
 
+// The font and hum sounds of each font in a source, for the single-font review. A font inside a nested
+// zip cannot be played in place, so it gets none.
+async function candidatePreviewRefs({ sourcePath, candidatePaths }) {
+  const source = soundFontSources.openSourceAtPath(sourcePath);
+  if (!source) return {};
+  const entries = await source.listAll();
+  const out = {};
+  for (const p of candidatePaths || []) {
+    if (/!/.test(p)) continue;
+    const inFont = p ? entries.filter(e => e.fileName.startsWith(`${p}/`)) : entries;
+    out[p] = { font: _pickFirstEffectWav(inFont, 'font'), hum: _pickFirstEffectWav(inFont, 'hum') };
+  }
+  return out;
+}
+
 module.exports = {
   scanForBulkImport,
+  candidatePreviewRefs,
   runBulkImport,
   analyzeBulkImport,
   discardPreparedSources,

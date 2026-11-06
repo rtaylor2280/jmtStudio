@@ -3393,6 +3393,8 @@
   .sf-review-candidate-row .cand-path { font-size: 0.68rem; color: var(--c-text-dim); font-family: monospace; word-break: break-all; }
   .sf-review-candidate-row .cand-status { font-size: 0.68rem; min-height: 1em; }
   .sf-review-candidate-row .cand-status.error { color: #e44; }
+  .sf-review-candidate-row .cand-preview { display: flex; gap: 4px; justify-content: flex-end; }
+  .sf-review-candidate-row .cand-preview:empty { display: none; }
   .sf-review-candidate-row .cand-meta { display: flex; flex-direction: column; gap: 3px; align-items: flex-end; font-size: 0.7rem; color: var(--c-text-dim); white-space: nowrap; }
   .sf-review-candidate-row .cand-badges { display: flex; gap: 4px; flex-wrap: wrap; }
   .sf-review-candidate-row .cand-badge { font-size: 0.62rem; padding: 1px 5px; border-radius: 3px; border: 1px solid var(--c-border-faint); color: var(--c-text-dim); background: var(--c-bg-raised); white-space: nowrap; }
@@ -13512,7 +13514,7 @@ function _sdEnsureOverlay() {
   return ov;
 }
 function _sdOpenReport(cards) {
-  _sdReport.cards = cards; _sdReport.stack = []; _sdReport.card = null; _sdReport.textView = false;
+  _sdReport.cards = cards; _sdReport.stack = []; _sdReport.card = null; _sdReport.textView = false; _sdReport.sel = null;
   // [B-424] A NEW REPORT IS NEVER BORN EJECTED. The flag suppresses the eject offer and greys
   // the status dot, so a stale `true` from a previous card would silently disable the feature on
   // the next one - a defect that looks like 'eject just does not appear any more'.
@@ -14487,10 +14489,12 @@ async function _sdRenderBrowse() {
   };
   // Folder multi-select: normal click opens (as always); Ctrl/Cmd or Shift held
   // BYPASSES the open and selects instead, so you can pick several font folders to
-  // import together. Selection lives at this directory level (a fresh render
-  // clears it). Files already multi-select in the library; this brings folders in line.
-  _sdReport.sel = new Set();
+  // import together. As in the library, the selection stays until Clear or Esc, so
+  // it survives going into a folder to look. It belongs to the card.
+  if (!_sdReport.sel || _sdReport.selCard !== _sdReport.card) { _sdReport.sel = new Set(); _sdReport.selCard = _sdReport.card; }
   _sdReport.selAnchor = null;
+  const _sdClearSel = () => { _sdReport.sel.clear(); _sdReport.selAnchor = null; _sdUpdateSelUI(); };
+  _sdReport.clearSel = _sdClearSel;
   const _sdUpdateSelUI = () => {
     body.querySelectorAll('.sf-entry-files-row[data-idx]').forEach(el2 => {
       const e2 = res.entries[+el2.dataset.idx];
@@ -14506,7 +14510,7 @@ async function _sdRenderBrowse() {
         + '<button type="button" class="btn-neutral sd-sel-clear">Clear</button>'
         + '<button type="button" class="modal-btn-primary sd-sel-import">Import selected</button></span>';
       body.appendChild(bar); // static bar at the BOTTOM, below the scrolling list
-      bar.querySelector('.sd-sel-clear').onclick = () => { _sdReport.sel.clear(); _sdReport.selAnchor = null; _sdUpdateSelUI(); };
+      bar.querySelector('.sd-sel-clear').onclick = _sdClearSel;
       bar.querySelector('.sd-sel-import').onclick = () => _sdImportSelected();
     }
     bar.querySelector('.sd-sel-count').textContent = `${n} folder${n === 1 ? '' : 's'} selected`;
@@ -14601,20 +14605,27 @@ async function _sdRenderBrowse() {
         _sdUpdateSelUI();
         return;
       }
-      // Normal click clears any selection, then acts as before.
-      if (_sdReport.sel && _sdReport.sel.size) { _sdReport.sel.clear(); _sdReport.selAnchor = null; _sdUpdateSelUI(); }
       if (e.isDir) { _sdReport.stack.push({ name: e.name, path: e.path }); _sdRenderBrowse(); }
       else if (e.isText) { _sdOpenDoc(e.path, e.name, { size: e.size }); }
       else if (isAud(e.name) && window._sfOpenAudioPlayer) { window._sfOpenAudioPlayer({ kind: 'path', id: e.path, label: e.name }); }
       else if (isImg(e.name)) { _sdOpenDoc(e.path, e.name, { size: e.size }); }
     };
   });
+  if (_sdReport.sel.size) _sdUpdateSelUI();
   // The view is in the DOM — NOW reveal the report modal (a no-op if it is
   // already up, e.g. navigating) and drop the overlay, together. This is the
   // only place the report is brought up.
   document.getElementById('sd-report-overlay')?.classList.add('active');
   hideBusy();
 }
+// Esc clears a card selection first, as it does in the library.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !_sdReport.sel || !_sdReport.sel.size) return;
+  if (!document.getElementById('sd-report-overlay')?.classList.contains('active')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  _sdReport.clearSel?.();
+}, true);
 // Scoped import: scan just the picked folder (a lone font folder = one source)
 // and run it through the same import flow. Mirrors _sdImportFontsFromCard's
 // step-aside-and-restore dance so the SD browser comes back on close.
@@ -16729,22 +16740,25 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // path; zip candidates read the entry out of the archive in place.
   const _guidedEffectChip = (row, ref, label) => {
     if (!ref || !ref.fileName) return null;
-    const kind = ref.absPath ? 'path' : 'inplace';
-    const id = ref.absPath || (row.src && row.src.absPath);
+    return _sfPlayChip(ref.absPath ? 'path' : 'inplace', ref.absPath || (row.src && row.src.absPath), ref.fileName, label);
+  };
+  // A chip that plays one sound from a source not yet imported. Folders play by path, zips in place.
+  const _sfPlayChip = (kind, id, fileName, label) => {
     if (!id) return null;
     const chip = document.createElement('span');
     chip.className = 'sf-effect-chip g-play-chip';
     // Lead with a play glyph so it reads as a button, not just a label.
     chip.textContent = '▶ ' + label;
-    chip.title = `Play ${ref.fileName.split('/').pop()}`;
+    chip.title = `Play ${fileName.split('/').pop()}`;
     chip.addEventListener('click', () => {
       // Toggle: a second click while this chip is playing stops it (same as the
       // library cards), instead of restarting.
       if (window._sfQuickAudioChip === chip) { try { window._sfQuickAudioStop?.(); } catch {} return; }
-      try { window._sfQuickPlay && window._sfQuickPlay({ kind, id, subPath: ref.fileName, chipEl: chip }); } catch {}
+      try { window._sfQuickPlay && window._sfQuickPlay({ kind, id, subPath: fileName, chipEl: chip }); } catch {}
     });
     return chip;
   };
+  window._sfPlayChip = _sfPlayChip;
 
   // Fill one row with its enrichment result once it streams in. Vendor /
   // website / free are NOT set here — they're read off row.enriched when the
@@ -37195,8 +37209,10 @@ require(['vs/editor/editor.main'], function () {
           const _provDate = (_sfImport.curation && _sfImport.curation.provenance
             && (_sfImport.curation.provenance.purchaseDate
                 || _sfImport.curation.provenance.sourceFileDate)) || null;
+          // A folder's date is when it was copied, as on a card, so a folder is acquired today. A
+          // zip's date is when it was downloaded.
           _sfImportEls.purchaseDate.value = _provDate
-            || _sfImport.sourceFileDate
+            || (/\.zip$/i.test(_sfImport.sourcePath || '') ? _sfImport.sourceFileDate : '')
             || _jmtLocalDateString();
         }
         // THE SIDECAR OVERRIDE GOES HERE, AFTER the detector branches and the
@@ -37603,6 +37619,7 @@ require(['vs/editor/editor.main'], function () {
                   </div>
                   <div class="cand-meta">
                     <div class="cand-badges">${badges.join('')}</div>
+                    <div class="cand-preview"></div>
                     <div>${_sfEscape(wavLine)}</div>
                   </div>
                   <span class="cand-image" style="display:none" title="Font image, added when this font is imported">
@@ -37634,6 +37651,24 @@ require(['vs/editor/editor.main'], function () {
           note.classList.toggle('have-it', !!check.checked);
           note.classList.toggle('variant', !check.checked);
         };
+        // The font and hum of each row, as on the bulk review. A row with neither shows no chips.
+        (async () => {
+          const run = _sfImport;
+          const sourcePath = run && run.sourcePath;
+          if (!sourcePath) return;
+          const rows = Array.from(_sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row[data-idx]') || []);
+          const pathOf = r => ((run.candidates[parseInt(r.dataset.idx, 10)] || {}).path || '');
+          const res = await window.electronAPI.candidatePreviews({ sourcePath, candidatePaths: rows.map(pathOf) });
+          if (!res || !res.ok || _sfImport !== run) return;
+          for (const r of rows) {
+            const box = r.querySelector('.cand-preview');
+            const refs = res.refs[pathOf(r)];
+            if (!box || !refs || !r.isConnected) continue;
+            for (const [file, label] of [[refs.font, 'font'], [refs.hum, 'hum']]) {
+              if (file) box.appendChild(window._sfPlayChip('inplace', sourcePath, file, label));
+            }
+          }
+        })().catch(() => {});
         _sfImportEls.candList?.querySelectorAll('.sf-review-candidate-row').forEach(row => {
           if (row.dataset.already === '1') return; // already-imported rows are locked
           const check = row.querySelector('.cand-check');
