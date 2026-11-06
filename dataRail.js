@@ -15,6 +15,7 @@ const vm = require('vm');
 const BASE_URL = 'https://raw.githubusercontent.com/rtaylor2280/jmt-studio-data/main/';
 const SCHEMA = 1;
 const DATASET = 'error-messages';
+const CATALOGUE_DATASET = 'font-catalogue';
 const MAX_PATTERN = 300;
 const MAX_SIGNATURES = 2000;
 const MAX_TEXT = 1000;
@@ -57,7 +58,7 @@ function problemWith(data) {
 const _sha256 = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 
 class DataRail {
-  // opts: userData, appVersion, bundled, apply(data), get(url) -> Promise<string>
+  // opts: userData, appVersion, bundled, apply(data), get(url) -> Promise<string>, catalogue (optional)
   constructor(opts) {
     this.opts = opts;
     this.current = { version: opts.bundled.version, updated: opts.bundled.updated };
@@ -85,8 +86,25 @@ class DataRail {
       const index = JSON.parse(await this.opts.get(`${BASE_URL}index.json`));
       const entry = index && index.schema === SCHEMA && index.datasets && index.datasets[DATASET];
       if (!entry) return 'failed';
+      const results = [await this._checkErrors(entry), await this._checkCatalogue(index.datasets[CATALOGUE_DATASET])];
+      if (results.includes('failed')) return 'failed';
+      return results.includes('updated') ? 'updated' : 'current';
+    } catch { return 'failed'; }
+  }
+
+  _tooNew(entry) {
+    return entry.minAppVersion && !this.opts.isAtLeast(this.opts.appVersion, entry.minAppVersion);
+  }
+
+  async _checkCatalogue(entry) {
+    if (!this.opts.catalogue || !entry || this._tooNew(entry)) return 'current';
+    return this.opts.catalogue.check(BASE_URL, entry);
+  }
+
+  async _checkErrors(entry) {
+    try {
       if (!(entry.version > this.current.version)) return 'current';
-      if (entry.minAppVersion && !this.opts.isAtLeast(this.opts.appVersion, entry.minAppVersion)) return 'current';
+      if (this._tooNew(entry)) return 'current';
       const text = await this.opts.get(`${BASE_URL}${entry.file}`);
       if (_sha256(text) !== entry.sha256) return 'failed';
       const data = JSON.parse(text);
@@ -100,7 +118,13 @@ class DataRail {
     } catch { return 'failed'; }
   }
 
-  status() { return { ...this.current, lastCheck: this.lastCheck }; }
+  // One number for About: the versions added, so it rises when either dataset does.
+  status() {
+    const catalogue = this.opts.catalogue && this.opts.catalogue.current;
+    const version = this.current.version + (catalogue ? catalogue.version : 0);
+    const updated = catalogue && catalogue.updated > this.current.updated ? catalogue.updated : this.current.updated;
+    return { version, updated, lastCheck: this.lastCheck };
+  }
 }
 
 module.exports = { DataRail, problemWith, patternIsSafe, DATASET, SCHEMA };

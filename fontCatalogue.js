@@ -6,6 +6,8 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { segmentCandidateRecords, setsFromRecords } = require('./soundFontCompare');
 
 const FILL_AT = 0.70;
@@ -95,13 +97,18 @@ class FontCatalogue {
 // Loaded the first time a font is identified, so it costs nothing until then. With no data file,
 // nothing matches and import works as it always has.
 let _current = null;
+let _file = path.join(__dirname, 'fontCatalogueData.json');
 function current() {
   if (_current) return _current;
   let data = null;
-  try { data = require('./fontCatalogueData.json'); } catch {}
+  try { data = JSON.parse(fs.readFileSync(_file, 'utf8')); } catch {}
   _current = new FontCatalogue(data);
   return _current;
 }
+// Which file to load from, when a newer copy than the shipped one is kept.
+function useFile(file) { _file = file; _current = null; }
+// A newer catalogue, taking effect for the next font identified.
+function setData(data) { _current = new FontCatalogue(data); }
 
 // A match past the line beats whatever the files said. A suggestion never replaces a creator the
 // files named outright.
@@ -135,4 +142,4 @@ function applyToEnrichment(e, result) {
   }
 }
 
-module.exports = { FontCatalogue, current, mergeDetection, applyToEnrichment, FILL_AT, NAME_AT, CREATOR_AT };
+module.exports = { FontCatalogue, current, useFile, setData, mergeDetection, applyToEnrichment, FILL_AT, NAME_AT, CREATOR_AT };

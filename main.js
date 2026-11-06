@@ -7,6 +7,7 @@ const toolchain   = require('./toolchain');
 const portDetect  = require('./portDetector');
 const proffie     = require('./proffieos');
 const { DataRail } = require('./dataRail');
+const { CatalogueRail } = require('./catalogueRail');
 const compileMatrix = require('./compileErrorMatrix');
 const compileErrorData = require('./compileErrorData');
 const fontCatalogue = require('./fontCatalogue');
@@ -243,15 +244,24 @@ app.whenReady().then(() => {
   // Evict stale cache entries before window opens
   try { cacheManager.startupEviction(); } catch {}
 
-  // Newer error messages, kept from an earlier run and checked for in the background.
+  // Newer error messages and font catalogue, kept from an earlier run and checked for in the background.
   try {
+    const get = url => _httpsGet(url, { 'User-Agent': 'JMT-Studio' });
+    const catalogue = new CatalogueRail({
+      bundled: path.join(__dirname, 'fontCatalogueData.json'),
+      kept: path.join(app.getPath('userData'), 'studio-data', 'font-catalogue.json'),
+      apply: fontCatalogue.setData,
+      get,
+    });
+    fontCatalogue.useFile(catalogue.file);
     dataRail = new DataRail({
       userData: app.getPath('userData'),
       appVersion: app.getVersion(),
       bundled: compileErrorData,
       apply: data => compileMatrix.setSignatures(data.signatures, app.getVersion()),
       isAtLeast: (have, want) => have.localeCompare(want, undefined, { numeric: true }) >= 0,
-      get: url => _httpsGet(url, { 'User-Agent': 'JMT-Studio' }),
+      get,
+      catalogue,
     });
     dataRail.loadKept();
     if (Store.get('settings.dataUpdatesEnabled') !== false) setTimeout(() => dataRail.check(), 10000);
