@@ -20,3 +20,5 @@ developer_id.key
 # Build/dev scratch caught in untracked
 electron
 jmt-studio@*
+# The font catalogue is published on purpose, not by a commit
+fontCatalogueData.json

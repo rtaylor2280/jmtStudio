@@ -9,6 +9,7 @@ const proffie     = require('./proffieos');
 const { DataRail } = require('./dataRail');
 const compileMatrix = require('./compileErrorMatrix');
 const compileErrorData = require('./compileErrorData');
+const fontCatalogue = require('./fontCatalogue');
 const cacheManager = require('./cacheManager');
 const coreVersions = require('./coreVersions');
 const soundFontSources = require('./soundFontSources');
@@ -2209,6 +2210,15 @@ ipcMain.handle('sources:readFile', async (_, { uuid, path: filePath } = {}) => {
 });
 
 
+async function _withCatalogue(ud, uuid, detection) {
+  try {
+    const mf = await soundFontSources.ensureSourceManifest(ud, uuid);
+    const found = await soundFontSources.getCachedCandidates(ud, uuid);
+    const paths = ((found && found.candidates) || []).map(c => c.path || '');
+    return fontCatalogue.mergeDetection(detection, fontCatalogue.current().identifySource(mf && mf.records, paths.length ? paths : ['']));
+  } catch { return detection; }
+}
+
 ipcMain.handle('sources:detectVendor', async (_, { uuid } = {}) => {
   try {
     const ud = app.getPath('userData');
@@ -2222,7 +2232,7 @@ ipcMain.handle('sources:detectVendor', async (_, { uuid } = {}) => {
       learned = soundFontVendors.learnedVendorsFrom(soundFontSources.listSources(ud));
     } catch {}
     const detection = await soundFontVendors.detectVendor(source, { learned });
-    return { ok: true, ...detection };
+    return { ok: true, ...(await _withCatalogue(ud, uuid, detection)) };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }

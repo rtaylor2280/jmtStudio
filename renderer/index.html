@@ -3345,6 +3345,7 @@
   .sf-review-vendor-info { font-size: 0.7rem; color: var(--c-text-dim); margin-top: 4px; min-height: 1em; }
   .sf-review-vendor-info.detected { color: var(--jmt-blue); }
   .sf-review-vendor-info.suggested { color: var(--c-text-sub); }
+  .cand-cat-note { font-size: 0.72rem; color: var(--c-text-sub); margin-top: 2px; }
   .sf-vendor-suggest-apply { color: var(--jmt-blue); text-decoration: underline; cursor: pointer; }
   .sf-vendor-suggest-apply:hover { opacity: 0.85; }
   .sf-review-open-browser { margin-left: 8px; }
@@ -16696,6 +16697,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   const _fillGuidedRow = (row, e) => {
     row.enriched = e;
     row.el.classList.remove('enriching');
+    if (e && e.catalogueDemo && !row.el.dataset.demourl) {
+      row.el.dataset.demourl = e.catalogueDemo;
+      const dInput = row.el.querySelector('.cand-demo-input');
+      const dRow = row.el.querySelector('.cand-demo-row');
+      if (dInput && dRow) { dInput.value = e.catalogueDemo; dRow.style.display = ''; }
+    }
     // Late docx naming: the async pass cracked a Word readme the sync scan couldn't,
     // and recovered a real name for what fell back to a generic folder name. Apply it
     // (only if the field still holds the original fallback, so a manual edit wins) and
@@ -19389,6 +19396,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // per-font link; it maps to the entry's demoUrl. Prefer the live input
       // value, fall back to the tracked dataset value.
       guidedLink: ((r.demoInput && r.demoInput.value.trim()) || (r.el && r.el.dataset.demourl) || '') || undefined,
+      guidedStore: (r.enriched && r.enriched.catalogueStore) || undefined,
       guidedAcquisitionDate: (r.dateInput && r.dateInput.value) || undefined,
       guidedSourceName: (r.srcNameInput && r.srcNameInput.value.trim()) || undefined,
       guidedNotes: (r.notesInput && r.notesInput.value.trim()) || undefined,
@@ -36835,7 +36843,7 @@ require(['vs/editor/editor.main'], function () {
         // the sidecar's or empty. Add-more / duplicate flows hide the source
         // section entirely, so this only ever runs in the user-facing case.
         // A link import from a creator's public page offers that page as the Link too [B-487].
-        if (_sfImportEls.link) _sfImportEls.link.value = _curHas('linkUrl') ? _curSrc.linkUrl : ((_sfImport && _sfImport.linkUrl) || '');
+        if (_sfImportEls.link) _sfImportEls.link.value = _curHas('linkUrl') ? _curSrc.linkUrl : ((_sfImport && _sfImport.linkUrl) || _sfImport?.vendor?.catalogue?.store || '');
         if (_sfImportEls.link) {
           const _nc = Math.max(((_sfImport && _sfImport.candidates) || []).length, 1);
           const _w = window._sfLinkWording ? window._sfLinkWording(_nc) : null;
@@ -36883,7 +36891,9 @@ require(['vs/editor/editor.main'], function () {
           }
           if (_sfImportEls.vendorInfo) {
             const where = v.matchedFile ? ` (matched ${v.matchedFile})` : '';
-            _sfImportEls.vendorInfo.innerHTML = `Auto-detected as ${_sfEscape(v.vendor)}${_sfEscape(where)}`;
+            _sfImportEls.vendorInfo.innerHTML = v.matchType === 'catalogue'
+              ? `Recognized as ${_sfEscape(v.vendor)}. ${v.matched} of ${v.total} sounds match.`
+              : `Auto-detected as ${_sfEscape(v.vendor)}${_sfEscape(where)}`;
             _sfImportEls.vendorInfo.classList.add('detected');
           }
         } else if (hasStructuralMatch) {
@@ -36902,7 +36912,9 @@ require(['vs/editor/editor.main'], function () {
             // the user is deciding whether to trust it.
             // Two suggestions, two sentences; `matchType` is what separates them.
             const learned = v.matchType === 'learnedVendor';
-            const where = learned
+            const fromCatalogue = v.matchType === 'catalogue';
+            const where = fromCatalogue ? `, ${v.matched} of ${v.total} sounds match one of their fonts`
+              : learned
               ? (v.matchedAt ? `, named in ${v.matchedAt}` : '')
               : (v.matchedAt ? ` based on file structure at ${v.matchedAt}` : ' based on file structure');
             const basis = learned ? ' (a creator already in your library)' : '';
@@ -37291,8 +37303,13 @@ require(['vs/editor/editor.main'], function () {
                 ? _curEntry.name : null;
               // [B-521] A Demo saved from the in-app browser goes on the first font.
               const _pickDemo = (i === 0 && _sfImport && _sfImport.picks && _sfImport.picks.demoUrl) || '';
-              const _curDemo = _pickDemo || ((_curEntry && typeof _curEntry.demoUrl === 'string') ? _curEntry.demoUrl : '');
-              const initialName = _curName || _sfSuggestName(c, i, currentPrefix, prependBundle);
+              const _catMatch = (_sfImport?.vendor?.catalogue?.byPath || {})[c.path || ''];
+              const _catFill = _catMatch && _catMatch.tier === 'fill' ? _catMatch.font : null;
+              const _curDemo = _pickDemo || ((_curEntry && typeof _curEntry.demoUrl === 'string') ? _curEntry.demoUrl : '') || (_catFill ? _catFill.demo : '');
+              const initialName = _curName || (_catFill ? _catFill.name : _sfSuggestName(c, i, currentPrefix, prependBundle));
+              const _catNameHtml = _catMatch && _catMatch.tier === 'name' && !_curName
+                ? `<div class="cand-cat-note">Suggested name: ${_sfEscape(_catMatch.font.name)}, ${_catMatch.matched} of ${_catMatch.total} sounds match. <a href="#" class="sf-vendor-suggest-apply" data-cat-name="${_sfEscape(_catMatch.font.name)}" data-cat-demo="${_sfEscape(_catMatch.font.demo || '')}" data-cat-store="${_sfEscape(_catMatch.font.store || '')}">Use this name</a></div>`
+                : '';
               const alreadyName = existingByPath.get(c.path || '');
               const isAlready = !!alreadyName;
               const badges = [];
@@ -37374,6 +37391,7 @@ require(['vs/editor/editor.main'], function () {
                     <input type="text" class="cand-name" value="${_sfEscape(nameVal)}" maxlength="64" autocomplete="off" ${nameAttrs}>
                     <div class="cand-path">${_sfEscape(c.path || '(source root)')}</div>
                     <div class="cand-status">${statusHtml}</div>
+                    ${rowAlreadyData === '1' ? '' : _catNameHtml}
                     ${_damagedHere.length ? `<div class="g-corrupt-note">&#9888; Corrupted sound font. ${_damagedHere.length} damaged file${_damagedHere.length === 1 ? '' : 's'} won't play. Check the box to import this font without ${_damagedHere.length === 1 ? 'it' : 'them'}.${_sfDamagedNames(_damagedHere)}</div>` : ''}
                   </div>
                   <div class="cand-meta">
@@ -37415,6 +37433,21 @@ require(['vs/editor/editor.main'], function () {
           const name  = row.querySelector('.cand-name');
           row.dataset.edited = 'false';
           row.dataset.suggested = name?.value || '';
+          row.querySelector('[data-cat-name]')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const { catName, catDemo, catStore } = e.currentTarget.dataset;
+            name.value = catName;
+            name.dispatchEvent(new Event('input', { bubbles: true }));
+            // Once the name is theirs, the links belong to it. Anything already typed stays.
+            if (catDemo && !row.dataset.demourl) {
+              row.dataset.demourl = catDemo;
+              const dRow = row.querySelector('.cand-demo-row');
+              const dInput = row.querySelector('.cand-demo-input');
+              if (dRow && dInput) { dInput.value = catDemo; dRow.style.display = ''; }
+            }
+            if (catStore && _sfImportEls.link && !_sfImportEls.link.value) _sfImportEls.link.value = catStore;
+            e.currentTarget.parentElement.remove();
+          });
           // A demo link restored from the sidecar has to be SHOWN, not just
           // carried. The demo row is collapsed by default and only opens on the
           // chain icon, so a pre-filled value would commit correctly and stay

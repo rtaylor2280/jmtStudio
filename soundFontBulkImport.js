@@ -38,6 +38,7 @@ const { fontShapeOf } = require('./proffieFontShape');
 const path = require('path');
 const { cleanSuggestedName } = require('./soundFontNameClean');
 const soundFontSources = require('./soundFontSources');
+const fontCatalogue = require('./fontCatalogue');
 const soundFontCandidates = require('./soundFontCandidates');
 const soundFontEntries = require('./soundFontEntries');
 const soundFontVendors = require('./soundFontVendors');
@@ -955,7 +956,10 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
       try { e = await enrichSourceForGuided(src, learned); } catch {}
       if (e) {
         const r = results.find(x => x && x.idx === i);
-        if (r) r.enrich = e;
+        if (r) {
+          r.enrich = e;
+          try { fontCatalogue.applyToEnrichment(e, await _identifyByCatalogue(userData, src, r)); } catch {}
+        }
       }
     }
   } catch {}
@@ -1371,6 +1375,8 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // Persist vendor info onto the source meta (source of truth; projected onto
   // entries at read time). For structural matches we still apply the value AND
   // mark needsReview so the user can verify.
+  const _storeLink = !_carriedSource.linkUrl
+    && (src.guidedStore || (src._enrich && src._enrich.catalogueStore));
   if (effectiveVendor) {
     try {
       soundFontSources.updateSourceMeta(userData, sourceUuid, {
@@ -1378,6 +1384,7 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
         vendorWebsite: effectiveWebsite,
         vendorAutoDetected: !vendorFromUser && !_carriedVendor,
         purchased,
+        ...(_storeLink ? { linkUrl: _storeLink } : {}),
       });
     } catch {}
   }
@@ -1838,6 +1845,20 @@ function _pickFirstEffectWav(entries, base) {
 // text docs. fontWav/humWav/textFiles carry an absPath for folder sources
 // (renderer plays/reads them by disk path directly); zip sources get
 // fileName only for now (preview needs extraction — a later slice).
+// Runs with an empty library too: a first import is when the catalogue helps most.
+async function _identifyByCatalogue(userData, src, r) {
+  const compare = require('./soundFontCompare');
+  let isDir = false;
+  try { isDir = !!(src.absPath && fs.statSync(src.absPath).isDirectory()); } catch {}
+  if (isDir) {
+    const sets = compare.buildFontSetsFromDir(src.absPath);
+    return sets ? fontCatalogue.current().identify(sets.core) : null;
+  }
+  if (!r.prepared) return null;
+  const mf = await soundFontSources.ensureSourceManifest(userData, r.prepared.uuid);
+  return mf ? fontCatalogue.current().identifyRecords(mf.records, '') : null;
+}
+
 async function enrichSourceForGuided(src, learned = []) {
   const out = {
     vendor: null, vendorConfidence: null, vendorWebsite: null,

@@ -62,6 +62,7 @@
     },
     "files": [
       "*.js",
+      "fontCatalogueData.json",
       "renderer/**/*",
       "assets/**/*",
       "LICENSE.txt"
