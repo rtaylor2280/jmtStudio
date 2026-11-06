@@ -222,6 +222,13 @@ function cleanSuggestedName(raw) {
   return s;
 }
 
+// A folder's name is the font's own, so a version in it stays: Daki_v2 is not Daki.
+function cleanFolderName(raw) {
+  const base = cleanSuggestedName(raw);
+  const m = /[\s_-]+([vV]\d+(?:\.\d+)*)\s*$/.exec(String(raw || ''));
+  return m && base && !base.toLowerCase().endsWith(m[1].toLowerCase()) ? `${base}_${m[1]}` : base;
+}
+
 // Derive the per-font prefix from a (cleaned) bundle name. Strips
 // trailing "Bundle" / "Pack" words because while they belong in the
 // source's display name, they're noise when stamped on each child
@@ -248,6 +255,7 @@ function deriveBundlePrefix(bundleName) {
 
 module.exports = {
   cleanSuggestedName,
+  cleanFolderName,
   deriveBundlePrefix,
   VENDOR_PREFIXES,
   TRAILING_TOKENS,

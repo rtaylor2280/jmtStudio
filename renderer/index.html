@@ -7607,7 +7607,7 @@
            Re-checked: this one is `phase === 'explain'`, the other two are both `phase ===
            'progress'`. A phase is a single value, so explain and progress cannot both hold and the
            slot still has exactly one claimant at a time. -->
-      <label class="sf-bulk-explain-auto" id="sf-bulk-explain-auto-wrap"
+      <label class="sf-bulk-explain-auto" id="sf-bulk-explain-auto-wrap" title="Adds every font as found. Leave this off to name and adjust them first."
              style="display:none; margin-right:auto;">
         <input type="checkbox" id="sf-bulk-explain-auto">
         <span id="sf-bulk-explain-auto-label"></span>
@@ -7635,7 +7635,7 @@
            `gap: 6px` matches `.sf-bulk-explain-auto`'s own internal gap rather than introducing
            a fourth spacing value to this row. -->
       <div class="sf-bulk-left-stack">
-      <label class="sf-bulk-explain-auto" id="sf-bulk-prog-auto-wrap"
+      <label class="sf-bulk-explain-auto" id="sf-bulk-prog-auto-wrap" title="Adds every font as found. Leave this off to name and adjust them first."
              style="display:none;">
         <input type="checkbox" id="sf-bulk-prog-auto">
         <span>Continue to quick import without review</span>
@@ -16735,6 +16735,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     row.el.classList.remove('enriching');
     if (e && e.catalogueDemo && !row.el.dataset.demourl) _guidedSetDemo(row, e.catalogueDemo);
     if (e && e.catalogueStore && !row.linkInput.value.trim()) _guidedSetLink(row, e.catalogueStore);
+    if (e && e.catalogueName && row.srcNameInput && row.srcNameInput.value === row.srcNameInput.defaultValue) row.srcNameInput.value = e.catalogueName;
     // Late docx naming: the async pass cracked a Word readme the sync scan couldn't,
     // and recovered a real name for what fell back to a generic folder name. Apply it
     // (only if the field still holds the original fallback, so a manual edit wins) and
@@ -16801,6 +16802,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // Last demo URL committed this guided session — powers the smart-paste dedup
   // across sibling rows (same role as _sfImport._lastDemoUrl in single import).
   let _guidedLastDemoUrl = '';
+  // Folders the scan looked in and found no Proffie font, by name.
+  const _guidedNotFonts = () => ((currentPlan && currentPlan.skipped) || [])
+    .filter(x => x && x.reason === 'no Proffie content found')
+    .map(x => String(x.relPath || x.absPath || '').split(/[\\/]/).pop());
   const _guidedPasteBtn = `<button type="button" class="sf-url-input-paste" title="Paste clipboard URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>`;
   const _guidedOpenTitle = 'Open this page in the in-app browser to save a Link or a Demo';
   // A URL field on the review: paste, clear, and an Open link while it holds an address.
@@ -18396,6 +18401,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // same screen.
         rows.push(['New sound fonts', Math.max(0, st.new - _emptyCount)]);
         if (_emptyCount) rows.push(['No sound font inside (skipped)', _emptyCount, false, true]);
+        const _notFonts = _guidedNotFonts();
+        if (_notFonts.length) rows.push([`Not a Proffie font (skipped)${_notFonts.length <= 3 ? `: ${_notFonts.join(', ')}` : ''}`, _notFonts.length, false, true]);
         // [B-314] Its own line. Folding it into "already in your library" would state
         // something false about the card.
         // "(skipped)" EARNED ITS WORD 2026-09-16 when the second copy stopped being
@@ -19207,6 +19214,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     }
     if (sum.skipped.length) text += `, <strong>${sum.skipped.length}</strong> already in library (skipped)`;
     if (sum.failed.length)  text += `, <strong>${sum.failed.length}</strong> failed`;
+    const _notFonts = _guidedNotFonts();
+    if (_notFonts.length) text += `, <strong>${_notFonts.length}</strong> not a Proffie font (skipped${_notFonts.length <= 3 ? `: ${escapeHtml(_notFonts.join(', '))}` : ''})`;
     // Breakdown line: only render when there's something interesting to
     // call out. Suppress the line entirely on a flat all-singleton run
     // so users importing a single font don't get a noise paragraph.

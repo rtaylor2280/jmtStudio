@@ -79,5 +79,10 @@ ok('full length hashes match too', full.identify(sample.map(h => h.padEnd(64, '0
 ok('the shipped fonts recognize themselves', right >= full.fonts.length - 1, `${right} of ${full.fonts.length}`);
 }
 
+const bulk = require('fs').readFileSync(require('path').join(__dirname, '..', 'soundFontBulkImport.js'), 'utf8');
+ok('bulk reads a staged source from its tree: it has no manifest yet', /_stagedSoundRecords\(path\.join\(soundFontSources\.sourcesRoot\(userData\), r\.prepared\.uuid, 'source'\)\)/.test(bulk));
+ok('bulk looks in the folders the fonts were found in, inner zips included', /identifySource\(records, paths\)/.test(bulk) && /\.zip!/.test(bulk) && /out\.candidatePaths = /.test(bulk));
+ok('quick import takes the demo, and a reviewed row keeps what the row says', /!src\.guidedName && src\._enrich && src\._enrich\.catalogueDemo/.test(bulk));
+
 console.log(failed ? `\n${failed} failure(s)` : '\nall font catalogue tests passed');
 process.exit(failed ? 1 : 0);

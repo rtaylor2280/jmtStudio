@@ -125,7 +125,7 @@ function mergeDetection(detection, found) {
 }
 
 // The bulk doors work from a row's enrichment. A row can hold a whole bundle, so only a single font
-// takes a name and links from its match.
+// takes a name and links from its match. The name goes on the source; the font keeps its folder name.
 function applyToEnrichment(e, result) {
   if (!result) return;
   const fills = result.tier === 'fill';
@@ -135,8 +135,7 @@ function applyToEnrichment(e, result) {
     e.vendorConfidence = fills ? 'content' : 'structural';
   }
   if (fills && e.fontCount === 1) {
-    e.suggestedName = result.font.name;
-    e.nameSource = 'catalogue';
+    e.catalogueName = result.font.name;
     e.catalogueDemo = result.font.demo;
     e.catalogueStore = result.font.store;
   }

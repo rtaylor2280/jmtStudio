@@ -33,10 +33,11 @@
 // shape OR zip, surface depthHalted=true so the caller can prompt the user
 // before continuing further.
 
+const crypto = require('crypto');
 const fs = require('fs');
 const { fontShapeOf } = require('./proffieFontShape');
 const path = require('path');
-const { cleanSuggestedName } = require('./soundFontNameClean');
+const { cleanSuggestedName, cleanFolderName } = require('./soundFontNameClean');
 const soundFontSources = require('./soundFontSources');
 const fontCatalogue = require('./fontCatalogue');
 const soundFontCandidates = require('./soundFontCandidates');
@@ -317,9 +318,8 @@ function safeDirSize(dir) { return safeDirScan(dir).totalBytes; }
 
 // Names that are just a shared prefix plus a trailing number — Bank01/Bank02,
 // Preset1/Preset2, or any prefix a given card happens to use — are slot names, not
-// real font names (nobody names actual fonts Something01..SomethingNN). Detect the
-// series across the sibling set and return the members, so their folder name gets
-// distrusted and the readme/name-tag lookup drives the suggested name instead.
+// always font names. Detect the series across the sibling set and return the members,
+// so a readme or name tag can name them. With neither, the folder name stands.
 function numberedSeriesMembers(names) {
   const groups = new Map();
   for (const n of names) {
@@ -353,9 +353,12 @@ function folderSourceName(absDir, folderName, forceGeneric) {
     if (d && (d.source === 'readme' || d.source === 'name-tag')) {
       return { name: cleanSuggestedName(d.name) || d.name, source: d.source };
     }
-    if (d && d.source === 'folder-fallback') return { name: cleanSuggestedName(folderName), source: 'folder-fallback' };
+    if (d && d.source === 'folder-fallback') {
+      const slot = /^(bank|preset|font|slot)[\s_-]*\d+$/i.test(folderName) || /^\d+$/.test(folderName) || /^\d+[-_ ]/.test(folderName);
+      return { name: cleanFolderName(folderName), source: slot ? 'folder-fallback' : 'folder' };
+    }
   } catch { /* fall through to the plain cleaner */ }
-  return { name: cleanSuggestedName(folderName), source: 'folder' };
+  return { name: cleanFolderName(folderName), source: 'folder' };
 }
 
 // scanForBulkImport({ rootDir }) -> { ok, plan }
@@ -948,6 +951,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
   // and hash it, so the readme reads and the preview picks ride along; review
   // becomes a pure render with no wait at all.
   try {
+    let _libSources = null;
     for (let i = 0; i < sources.length; i++) {
       if (shouldCancel()) break;
       const src = sources[i];
@@ -958,7 +962,14 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
         const r = results.find(x => x && x.idx === i);
         if (r) {
           r.enrich = e;
-          try { fontCatalogue.applyToEnrichment(e, await _identifyByCatalogue(userData, src, r)); } catch {}
+          try { fontCatalogue.applyToEnrichment(e, await _identifyByCatalogue(userData, r, e.candidatePaths)); } catch {}
+          if (r.isDuplicate && !e.vendor) {
+            try {
+              if (!_libSources) _libSources = new Map(soundFontSources.listSources(userData).map(x => [x.uuid, x.meta || x]));
+              const held = _libSources.get(r.existingUuid);
+              if (held && held.vendor) { e.vendor = held.vendor; e.vendorWebsite = held.vendorWebsite || null; }
+            } catch {}
+          }
         }
       }
     }
@@ -1331,7 +1342,10 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // detected; a different typed vendor gets no website guess.
   const _guidedVendor  = src.guidedVendor  && String(src.guidedVendor).trim();
   const _guidedWebsite = src.guidedWebsite && String(src.guidedWebsite).trim();
-  const _guidedLink    = src.guidedLink    && String(src.guidedLink).trim();
+  // A reviewed row carries its Demo in guidedLink, so a cleared one stays cleared. Quick import has no
+  // review to carry it through.
+  const _guidedLink    = (src.guidedLink && String(src.guidedLink).trim())
+    || (!src.guidedName && src._enrich && src._enrich.catalogueDemo) || '';
   const _guidedNotes   = src.guidedNotes   && String(src.guidedNotes).trim();
   const _guidedDate    = src.guidedAcquisitionDate && String(src.guidedAcquisitionDate).trim();
   const vendorFromUser = !!_guidedVendor;
@@ -1461,7 +1475,8 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
   // A guided "Source name" override wins over the auto-detected bundle name;
   // it becomes the source's friendly name and the tag on every font from it.
   const _guidedSourceName = src.guidedSourceName && String(src.guidedSourceName).trim();
-  const bundleName = _guidedSourceName || candidatesRes.bundleName || null;
+  const _catalogueName = !src.guidedName && src._enrich && src._enrich.catalogueName;
+  const bundleName = _guidedSourceName || _catalogueName || candidatesRes.bundleName || null;
   // Persist bundleName + multiCandidate on source meta so the renderer
   // can show "this source produced N fonts" without re-running detection,
   // and the entry detail can surface the bundle link for variants.
@@ -1851,17 +1866,29 @@ function _pickFirstEffectWav(entries, base) {
 // (renderer plays/reads them by disk path directly); zip sources get
 // fileName only for now (preview needs extraction — a later slice).
 // Runs with an empty library too: a first import is when the catalogue helps most.
-async function _identifyByCatalogue(userData, src, r) {
-  const compare = require('./soundFontCompare');
-  let isDir = false;
-  try { isDir = !!(src.absPath && fs.statSync(src.absPath).isDirectory()); } catch {}
-  if (isDir) {
-    const sets = compare.buildFontSetsFromDir(src.absPath);
-    return sets ? fontCatalogue.current().identify(sets.core) : null;
+// A staged source has no meta yet, so it has no manifest to read: its sounds are hashed from the
+// staged tree, which is what a zip has been unpacked to by now.
+async function _stagedSoundRecords(dir, prefix = '') {
+  const records = [];
+  for (const d of await fs.promises.readdir(path.join(dir, prefix), { withFileTypes: true })) {
+    const relPath = prefix ? `${prefix}/${d.name}` : d.name;
+    if (d.isDirectory()) records.push(...await _stagedSoundRecords(dir, relPath));
+    else if (/\.wav$/i.test(d.name)) {
+      const buf = await fs.promises.readFile(path.join(dir, relPath));
+      records.push({ relPath, size: buf.length, fileHash: crypto.createHash('sha256').update(buf).digest('hex') });
+    }
   }
+  return records;
+}
+
+// Looked up by the folders the fonts were found in, so a font wrapped in a folder of its own is found.
+async function _identifyByCatalogue(userData, r, candidatePaths) {
   if (!r.prepared) return null;
-  const mf = await soundFontSources.ensureSourceManifest(userData, r.prepared.uuid);
-  return mf ? fontCatalogue.current().identifyRecords(mf.records, '') : null;
+  const records = await _stagedSoundRecords(path.join(soundFontSources.sourcesRoot(userData), r.prepared.uuid, 'source'));
+  // A path inside an inner zip, Proffie.zip!Proffie, is in the staged tree as Proffie or Proffie/Proffie.
+  const paths = (candidatePaths && candidatePaths.length ? candidatePaths : [''])
+    .flatMap(p => (/\.zip!/i.test(p) ? [p.replace(/[^/!]*\.zip!/gi, ''), p.replace(/\.zip!/gi, '/')] : [p]));
+  return fontCatalogue.current().identifySource(records, paths).best;
 }
 
 async function enrichSourceForGuided(src, learned = []) {
@@ -1912,6 +1939,7 @@ async function enrichSourceForGuided(src, learned = []) {
       // Alternate versions are filtered the same way the commit filters them, or a
       // source holding only an older V1 would read as importable and then refuse.
       out.fontCount = all.filter(c => !c.alternateVersion).length;
+      out.candidatePaths = all.filter(c => !c.alternateVersion).map(c => c.path || '');
     } catch { out.fontCount = null; }
     const entries = await source.listAll();
     const isFolder = source.format === 'folder';

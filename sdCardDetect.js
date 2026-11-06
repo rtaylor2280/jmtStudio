@@ -1074,6 +1074,7 @@ function _isStdTxtName(fileName) {
   if (_STD_TXT_NAMES.has(k) || _STD_TXT_NAMES.has(k.replace(/\s+/g, ''))) return true;
   if (/functions?$/.test(k)) return true;   // "proffie os6.5 functions"
   if (/proffie\s*os/.test(k)) return true;
+  if (/blade\s*style/.test(k)) return true;   // "Blade_Style 1.txt": a style snippet, not a name tag
   return false;
 }
 // Lighter name check for a FILENAME tag than the content-line check: filenames

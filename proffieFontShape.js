@@ -54,8 +54,11 @@ function fontShapeOf(entries) {
       else if (isProffieSoundName(name)) proffieNamed++;
     }
   }
-  if (fontconfig || (wavs > 0 && xenoNamed * 2 > wavs)) return 'xeno';
-  if (proffieNamed > 0 || effectDirs > 0) return 'proffie';
+  if (wavs > 0 && xenoNamed * 2 > wavs) return 'xeno';
+  // A fontconfig.ini left in a font with Proffie effect folders does not make it a Xeno font.
+  if (effectDirs > 0) return 'proffie';
+  if (fontconfig) return 'xeno';
+  if (proffieNamed > 0) return 'proffie';
   return null;
 }
 
