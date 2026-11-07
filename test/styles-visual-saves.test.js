@@ -91,7 +91,7 @@ const fn = (name) => {
 
   console.log('3. wiring');
   const n = (re) => (html.match(re) || []).length;
-  check('thirteen Visual changes go through _stylesChanged (adding a style segment, using a new one across the library, saving an edit as a copy; undo and redo share one step [B-177]; the bulk actions share one [B-582])', n(/^\s*_stylesChanged\(\);/mg) === 13, n(/^\s*_stylesChanged\(\);/mg));
+  check('fourteen Visual changes go through _stylesChanged (styles added in bulk from a config [B-367], adding a style segment, using a new one across the library, saving an edit as a copy; undo and redo share one step [B-177]; the bulk actions share one [B-582])', n(/^\s*_stylesChanged\(\);/mg) === 14, n(/^\s*_stylesChanged\(\);/mg));
   check('the entry Save writes at once', /setValue\(current\);\s*_stylesChanged\(\);/.test(html));
   check('Add Style, Append, delete, reorder, undo and redo write at once',
     /setValue\(_stylesEditorInstance\.getValue\(\) \+ block\);\s*_stylesChanged\(\);/.test(html)

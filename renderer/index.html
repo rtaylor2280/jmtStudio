@@ -1592,11 +1592,11 @@
      the dark theme. Transparent square with subtle border, JMT-blue
      fill + checkmark when on. accent-color alone isn't enough on
      Chromium — the browser still paints a white inner square. */
-  .sf-libpick-row input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin: 0; padding: 0; border: 1px solid var(--c-border-strong); border-radius: 2px; background: transparent; cursor: pointer; flex-shrink: 0; display: inline-grid; place-content: center; transition: background 0.1s, border-color 0.1s; }
-  .sf-libpick-row input[type="checkbox"]:hover { border-color: var(--jmt-blue); }
-  .sf-libpick-row input[type="checkbox"]:checked { background: var(--jmt-blue); border-color: var(--jmt-blue); }
-  .sf-libpick-row input[type="checkbox"]:checked::before { content: ''; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
-  .sf-libpick-row input[type="checkbox"]:disabled { cursor: default; opacity: 0.5; }
+  .sf-libpick-row input[type="checkbox"], .to-library-row input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin: 0; padding: 0; border: 1px solid var(--c-border-strong); border-radius: 2px; background: transparent; cursor: pointer; flex-shrink: 0; display: inline-grid; place-content: center; transition: background 0.1s, border-color 0.1s; }
+  .sf-libpick-row input[type="checkbox"]:hover, .to-library-row input[type="checkbox"]:hover { border-color: var(--jmt-blue); }
+  .sf-libpick-row input[type="checkbox"]:checked, .to-library-row input[type="checkbox"]:checked { background: var(--jmt-blue); border-color: var(--jmt-blue); }
+  .sf-libpick-row input[type="checkbox"]:checked::before, .to-library-row input[type="checkbox"]:checked::before { content: ''; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+  .sf-libpick-row input[type="checkbox"]:disabled, .to-library-row input[type="checkbox"]:disabled { cursor: default; opacity: 0.5; }
   .sf-libpick-row-icon { font-size: 0.85rem; color: var(--c-text-dim); flex-shrink: 0; line-height: 1; }
   .sf-libpick-row.is-dir .sf-libpick-row-icon { color: #d9c468; }
   .sf-libpick-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
@@ -8334,6 +8334,7 @@ function setFileOpen(open) {
     const el = document.getElementById(id);
     if (el) el.disabled = !open;
   });
+  if (open) setTimeout(_syncConfigUndoButtons, 0);
   document.getElementById('diff-toggle-label').disabled = !open;
   document.getElementById('btn-compare').disabled = !open;
   if (!open) {
@@ -14931,6 +14932,17 @@ document.getElementById('btn-close').addEventListener('click', async () => {
     window.electronAPI.setTitle('JMT Studio');
   }
 });
+
+// The history is Monaco's, so the buttons ask it, after the edit that may have changed it has landed.
+function _syncConfigUndoButtons() {
+  const u = document.getElementById('btn-undo'), r = document.getElementById('btn-redo');
+  const model = editor?.getModel?.();
+  if (!u || !r || !fileIsOpen || !model) return;
+  u.disabled = !model.canUndo();
+  r.disabled = !model.canRedo();
+  u.title = u.disabled ? 'Nothing to undo' : 'Undo (Ctrl+Z)';
+  r.title = r.disabled ? 'Nothing to redo' : 'Redo (Ctrl+Y)';
+}
 
 // ── Undo / Redo ────────────────────────────────────────
 document.getElementById('btn-undo').addEventListener('click', () => {
@@ -23325,10 +23337,10 @@ let _stylesSelected = new Set();
 let _stylesSelectedView = '';
 let _stylesSelectedHeld = 0;   // how many are showing only because they are selected
 let _stylesAnchor   = null;
-// Name A-Z until the user picks another; reordering by drag is File order's alone.
+// Name A-Z until the user picks another; reordering by drag is File order's alone, read top down.
 let _stylesSort = { key: 'name', dir: 'asc' };
 const _STYLES_SORTS = [
-  { key: 'file', label: 'File order' },
+  { key: 'file', label: 'File order', asc: 'Oldest', desc: 'Newest' },
   { key: 'name', label: 'Name', asc: 'A–Z', desc: 'Z–A' },
 ];
 try {
@@ -23341,7 +23353,8 @@ try {
   }).catch(() => {});
 } catch {}
 function _stylesSortLabel() {
-  if (_stylesSort.key === 'file') return 'File order';
+  // A style joins the end of the file, so its place there is its age until one is dragged.
+  if (_stylesSort.key === 'file') return `File order ${_stylesSort.dir === 'asc' ? 'Oldest' : 'Newest'}`;
   return `Name ${_stylesSort.dir === 'asc' ? 'A–Z' : 'Z–A'}`;
 }
 function _syncStylesSortLabel() {
@@ -23373,7 +23386,7 @@ function _renderStylesSortDropdown() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const key = btn.dataset.sortKey;
-      if (_stylesSort.key === key && key === 'name') _stylesSort.dir = _stylesSort.dir === 'asc' ? 'desc' : 'asc';
+      if (_stylesSort.key === key) _stylesSort.dir = _stylesSort.dir === 'asc' ? 'desc' : 'asc';
       else _stylesSort = { key, dir: 'asc' };
       try { window.electronAPI.setSetting('styleLibrarySort', _stylesSort); } catch {}
       _syncStylesSortLabel();
@@ -25696,7 +25709,7 @@ function _buildStylesVisual() {
   // [B-286] File order is my_styles.h's own; Name sorts on the style name.
   const ordered = _stylesSort.key === 'name'
     ? [...fullStyles].sort((a, b) => (_stylesSort.dir === 'asc' ? 1 : -1) * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-    : fullStyles;
+    : (_stylesSort.dir === 'desc' ? [...fullStyles].reverse() : fullStyles);
   _syncStylesSortLabel();
   // Which helpers and segments each style names, for their filters; each filter shows once the
   // library has one (or one is picked). [B-177]
@@ -25710,8 +25723,8 @@ function _buildStylesVisual() {
   if (helperWrap) helperWrap.style.display = (helpers.length || _activeFilterHelpers.size || _activeFilterHelpersMissing.size) ? '' : 'none';
   const segmentWrap = document.getElementById('styles-segment-filter-wrap');
   if (segmentWrap) segmentWrap.style.display = (segmentEntries.length || _activeFilterSegments.size || _activeFilterSegmentsMissing.size) ? '' : 'none';
-  // Dragging moves a style in the file, which only File order shows.
-  const canDrag = _stylesSort.key === 'file';
+  // Dragging moves a style in the file, which only File order read top down shows.
+  const canDrag = _stylesSort.key === 'file' && _stylesSort.dir === 'asc';
   ordered.forEach(entry => {
     const { name, meta } = entry;
     const card = document.createElement('div');
@@ -29615,6 +29628,7 @@ require(['vs/editor/editor.main'], function () {
     if (typeof _sfScheduleSidecarRuleRecheck === 'function') _sfScheduleSidecarRuleRecheck();
   });
 
+  editor.onDidChangeModelContent(() => setTimeout(_syncConfigUndoButtons, 0));
   editor.onDidChangeCursorPosition(e => {
     document.getElementById('stat-ln').textContent  = e.position.lineNumber;
     document.getElementById('stat-col').textContent = e.position.column;
@@ -60595,20 +60609,50 @@ require(['vs/editor/editor.main'], function () {
     // ── The config's written-out styles, into the library [B-367] ──
     // Only offered when the library is linked: the presets are about to use its names.
     const _displayText = s => String(s || '').replace(/\\n/g, ' ').trim();
+    const _styleArgs = () => ({
+      findArgs: styleArgResolver.findArgs, resolve: proffieArgs.resolveColorDefault,
+      read: proffieArgs.readRegistryArg, write: proffieArgs.writeRegistryArg,
+    });
+    // A file not named yet, or still called my_config, says nothing about its styles.
+    function _configOwnName() {
+      const file = String(currentFilePath || '').split(/[\\/]/).pop().replace(/\.h$/i, '');
+      return /^(my_?config|config|untitled)$/i.test(file) ? '' : file;
+    }
+    // The bar asks on every rebuild, so what the library holds is read once per version of its text.
+    let _toLibraryRead = { key: null };
+    function _toLibraryLibrary() {
+      const text = _stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '');
+      const key = `${proffieArgs.slotMapVersion}:${text}`;
+      if (_toLibraryRead.key === key) return _toLibraryRead;
+      const entries = _parseStyleEntries(text);
+      const library = new Map();
+      const libraryStyles = [];
+      for (const e of entries) {
+        const code = String(e.usingCode || '').match(/^using\s+\w+\s*=\s*([\s\S]*);$/);
+        if (!code || e.meta?.templatePrefix) continue;
+        library.set(presetParser.styleCodeKey(code[1]), e.name);
+        libraryStyles.push({ name: e.name, expr: code[1] });
+      }
+      _toLibraryRead = { key, entries, library, libraryStyles };
+      return _toLibraryRead;
+    }
+    // New styles add. With none, the presets only move onto what the library already has.
+    const _toLibraryLabel = (added, suffix) => (added
+      ? `Add ${added} ${added === 1 ? 'Style' : 'Styles'}${suffix ? ' to Library' : ''}`
+      : `Update Presets${suffix ? ' from Library' : ''}`);
     function _toLibraryPlan(forModal) {
       const text = editor.getValue();
+      const { entries, library, libraryStyles } = _toLibraryLibrary();
       const opts = {
         localNames: new Set([...text.matchAll(/\busing\s+(\w+)\s*=/g)].map(m => m[1])),
         nameOf: s => _styleNameFromDisplay(_displayText(s)),
+        args: _styleArgs(),
+        library,
+        libraryStyles,
       };
       if (forModal) {
-        const entries = _parseStyleEntries(_stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || ''));
         const taken = new Set(entries.map(e => e.name));
-        opts.library = new Map();
-        for (const e of entries) {
-          const code = String(e.usingCode || '').match(/^using\s+\w+\s*=\s*([\s\S]*);$/);
-          if (code && !e.meta?.templatePrefix) opts.library.set(presetParser.styleCodeKey(code[1]), e.name);
-        }
+        opts.fileName = _configOwnName().replace(/[_\-\s]*v\d+(\.\d+)*$/i, '');
         opts.isTaken = n => taken.has(n) || !!_styleNameOutsideClash(n);
         opts.commentName = slot => {
           const full = _getFullSlotTextFromEditor(slot);
@@ -60620,11 +60664,11 @@ require(['vs/editor/editor.main'], function () {
     function _syncToLibraryBar() {
       const bar = document.getElementById('preset-to-library-bar');
       if (!bar || !editor) return;
-      let count = 0;
-      if (_stylesLinked) { try { count = _toLibraryPlan(false).length; } catch {} }
-      bar.style.display = count ? '' : 'none';
+      let rows = [];
+      if (_stylesLinked) { try { rows = _toLibraryPlan(false); } catch {} }
+      bar.style.display = rows.length ? '' : 'none';
       document.getElementById('btn-preset-to-library').textContent =
-        `Add ${count} ${count === 1 ? 'Style' : 'Styles'} to Library`;
+        _toLibraryLabel(rows.filter(r => !r.existing).length, true);
     }
     window._syncToLibraryBar = _syncToLibraryBar;
 
@@ -60632,9 +60676,10 @@ require(['vs/editor/editor.main'], function () {
       const presets = new Set(row.uses.map(u => `${u.bank}:${u.presetIdx}`));
       const blades = [...new Set(row.uses.map(u => u.blade + 1))].sort((a, b) => a - b);
       const bladeText = `${blades.length > 1 ? 'blades' : 'blade'} ${blades.join(', ')}`;
-      if (presets.size > 1) return `${presets.size} presets, ${bladeText}`;
+      const colors = row.colorCount > 1 ? `, ${row.colorCount} colors` : '';
+      if (presets.size > 1) return `${presets.size} presets, ${bladeText}${colors}`;
       const p = row.uses[0].preset;
-      return `${_displayText(p.displayName) || String(p.font || '').split(';')[0]}, ${bladeText}`;
+      return `${_displayText(p.displayName) || String(p.font || '').split(';')[0]}, ${bladeText}${colors}`;
     }
 
     let _toLibraryRows = [];
@@ -60663,7 +60708,7 @@ require(['vs/editor/editor.main'], function () {
         if (msg) blocked = true;
       }
       const btn = document.getElementById('btn-to-library-confirm');
-      btn.textContent = `Add ${on.length} ${on.length === 1 ? 'Style' : 'Styles'}`;
+      btn.textContent = _toLibraryLabel(on.filter(r => !r.existing).length, false);
       btn.disabled = blocked || !on.length;
     }
     function _openToLibrary() {
@@ -60677,6 +60722,9 @@ require(['vs/editor/editor.main'], function () {
         const box = document.createElement('input');
         box.type = 'checkbox';
         box.checked = true;
+        // Nothing to add here, and using what the library already has is not a choice worth a box.
+        box.disabled = !!plan.existing;
+        if (plan.existing) box.title = 'Already in the library, so nothing is added. Its presets switch to it.';
         box.addEventListener('change', () => { _toLibraryDirty = true; _toLibraryRefresh(); });
         const nameCell = document.createElement('div');
         nameCell.className = 'to-library-name';
@@ -60698,7 +60746,7 @@ require(['vs/editor/editor.main'], function () {
         where.title = where.textContent;
         const msg = document.createElement('div');
         msg.className = 'to-library-msg';
-        if (plan.existing) msg.textContent = 'Already in the library. Its presets switch to it.';
+        if (plan.existing) msg.textContent = `Already in the library. Its presets switch to it${plan.colorCount > 1 ? ' and keep their colors' : ''}.`;
         el.append(box, nameCell, where, msg);
         list.appendChild(el);
         return { el, box, input, msg, key: plan.key, existing: plan.existing };
@@ -60723,17 +60771,20 @@ require(['vs/editor/editor.main'], function () {
       const edits = [];
       const presets = new Set();
       let blocks = '';
-      for (const row of _toLibraryPlan(false)) {
+      const args = _styleArgs();
+      for (const row of _toLibraryPlan(true)) {
         const name = chosen.get(row.key);
         if (!name) continue;
         if (adding.has(row.key)) {
-          const p = _parseClipboardStyle(_getFullSlotTextFromEditor(row.uses[0].slot) || '');
-          const tags = String(p.tags || '').split(',').map(s => s.trim()).filter(Boolean);
-          blocks += _buildStyleBlock(name, _normalizeStyleInput(`using ${name} = ${row.expr};`).expr, p.source || '', tags, p.url || '', p.notes || '');
+          // Every use is this style, so a credit on any of them is its credit. The earliest one wins.
+          const p = row.uses.map(u => _parseClipboardStyle(_getFullSlotTextFromEditor(u.slot) || ''))
+            .find(c => c.source || c.url || c.osVersion || c.tags || c.notes) || {};
+          const tags = [...new Set([...String(p.tags || '').split(','), p.osVersion || ''].map(s => s.trim()).filter(Boolean))];
+          blocks += _buildStyleBlock(name, _normalizeStyleInput(`using ${name} = ${row.expr};`).expr, p.source || _configOwnName(), tags, p.url || '', p.notes || '');
         }
         for (const use of row.uses) {
           const range = _slotRange(use.slot);
-          const next = presetParser.nameSlotStyle(model.getValueInRange(range), name);
+          const next = presetParser.librarySlotText(model.getValueInRange(range), row, use, name, args);
           if (next === null) continue;
           edits.push({ range, text: next });
           presets.add(`${use.bank}:${use.presetIdx}`);

@@ -353,6 +353,8 @@
         // the user wrote. Masking is for deciding what EXISTS, not for rewriting it.
         expr:        text.slice(openAngle + 1, angleGroup.end - 1).trim(),
         colorArg,
+        wrapper:     m[0].replace(/\s*<$/, ''),
+        argText:     parenInner,
         startOffset: m.index,
         endOffset:   parenGroup.end,
       });
@@ -484,6 +486,8 @@
       type:        sp.type,
       expr:        sp.expr,
       colorArg:    sp.colorArg,
+      wrapper:     sp.wrapper,
+      argText:     sp.argText,
       styleClass:  classifyStyle(sp.type, sp.expr),
       startOffset: sp.startOffset,
       endOffset:   sp.endOffset,
@@ -623,22 +627,79 @@
   }
 
   /**
+   * A style with its color defaults set aside: `skeleton` is the code with each color argument's
+   * default blanked, `colors` is argument name -> [r,g,b]. Two styles with the same skeleton differ
+   * only in those defaults. Null when one argument has two defaults, since a preset's string sets
+   * every place an argument appears at once, or when this OS has no such argument.
+   */
+  function colorSignature(expr, args) {
+    let skeleton = styleCodeKey(expr);
+    const colors = new Map();
+    for (const a of args.findArgs(skeleton).reverse()) {
+      if (a.kind !== 'RgbArg') continue;
+      const rgb = args.resolve(a.defaultExpr);
+      if (!rgb.some(Boolean) && !/^(Black|BLACK|Rgb(16)?<0,0,0>)$/.test(a.defaultExpr)) continue;
+      const held = colors.get(a.name);
+      if (held && held.join() !== rgb.join()) return null;
+      if ((args.read(a.name, '') || { unsupported: true }).unsupported) return null;
+      colors.set(a.name, rgb);
+      skeleton = skeleton.slice(0, a.start) + `RgbArg<${a.name},C>` + skeleton.slice(a.end);
+    }
+    return { skeleton, colors };
+  }
+
+  /** A preset can carry its colors only as one plain string on a StylePtr. */
+  function canCarryColors(slot) {
+    if (slot.wrapper !== 'StylePtr') return false;
+    const text = String(slot.argText || '').replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    return !text || /^"[^"\\]*"$/.test(text);
+  }
+
+  /**
+   * The color string that keeps this use looking as it does once it runs on the row's style. What a
+   * use shows is its own string where that sets the argument, else its style's default. A value
+   * matching the row's default needs nothing written. Anything else in the string stays.
+   */
+  function colorStringFor(row, use, args) {
+    const start = use.slot.colorArg || '';
+    let out = start;
+    for (const [name, lead] of row.colors) {
+      const set = args.read(name, start);
+      if (set && !set.isDefault && set.values.every(v => v != null)) {
+        if (set.values.join() !== lead.join()) out = args.write(name, set.values, out);
+        continue;
+      }
+      const shown = use.colors.get(name);
+      if (shown.join() !== lead.join()) out = args.write(name, shown, out);
+    }
+    return out;
+  }
+
+  /**
    * The written-out styles across every bank, one row per distinct style, each with its default
    * name and everywhere it is used. [B-367]
    *
-   * The name is a comment's, then the preset's, then the font's. A later blade adds its label or
-   * blade number. Pure: the caller supplies the name rules.
-   *   opts.localNames  names the config defines itself
-   *   opts.library     Map of styleCodeKey -> library name, for code already in the library
-   *   opts.nameOf      text -> identifier
-   *   opts.commentName (slot) -> a name from the slot's comment, or ''
-   *   opts.isTaken     name -> true when a default must step around it
+   * With opts.args, styles differing only in color defaults become one row, led by the first: its
+   * code goes in as written, so its colors are the defaults, and the others carry theirs in their
+   * preset's string. A style in the library with the same code bar color leads the same way.
+   *
+   * The name is a comment's, then the preset's, then the font's. A style most of the config's
+   * presets share belongs to the config, so it takes the file's name instead of the first preset's.
+   * A later blade adds its label or blade number. Pure: the caller supplies the name rules.
+   *   opts.fileName      the config's own name, or ''
+   *   opts.localNames    names the config defines itself
+   *   opts.library       Map of styleCodeKey -> library name, for code already in the library
+   *   opts.libraryStyles [{ name, expr }], to match the library on code bar color
+   *   opts.args          { findArgs, resolve, read, write } over the style argument string
+   *   opts.nameOf        text -> identifier
+   *   opts.commentName   (slot) -> a name from the slot's comment, or ''
+   *   opts.isTaken       name -> true when a default must step around it
    */
   function planLibraryStyles(arrays, opts = {}) {
     const nameOf = opts.nameOf || (s => s);
     // A display name of "0" is a common placeholder and names nothing, so a name needs a letter.
     const wordOf = s => { const n = nameOf(s || ''); return /[A-Za-z]/.test(n) ? n : ''; };
-    const rows = [];
+    let rows = [];
     const byKey = new Map();
     const used = new Set();
     const free = base => {
@@ -654,20 +715,66 @@
           const key = styleCodeKey(slot.expr);
           let row = byKey.get(key);
           if (!row) {
-            const existing = opts.library ? opts.library.get(key) || '' : '';
-            const font = String(preset.font || '').split(';')[0];
-            const base = wordOf(preset.displayName) || wordOf(font) || 'Style';
-            const label = blade > 0 ? wordOf((arr.labels || {})[blade + 1]) || `blade${blade + 1}` : '';
-            const hint = !existing && opts.commentName ? opts.commentName(slot) : '';
-            row = { key, expr: slot.expr, existing, name: existing || free(hint || (label ? `${base}_${label}` : base)), uses: [] };
+            row = { key, expr: slot.expr, existing: opts.library ? opts.library.get(key) || '' : '', uses: [], colors: null };
             byKey.set(key, row);
             rows.push(row);
           }
-          row.uses.push({ bank, presetIdx, blade, preset, slot });
+          row.uses.push({ bank, presetIdx, blade, preset, slot, colors: null, labels: arr.labels });
         });
       });
     });
+
+    if (opts.args) {
+      const leads = new Map();
+      for (const entry of opts.libraryStyles || []) {
+        let sig = entry.signature;
+        if (sig === undefined) sig = entry.signature = colorSignature(entry.expr, opts.args);
+        if (sig && sig.colors.size && !leads.has(sig.skeleton)) leads.set(sig.skeleton, { name: entry.name, colors: sig.colors });
+      }
+      const kept = [];
+      for (const row of rows) {
+        const sig = row.uses.every(u => canCarryColors(u.slot)) ? colorSignature(row.expr, opts.args) : null;
+        if (!sig || !sig.colors.size) { kept.push(row); continue; }
+        for (const use of row.uses) use.colors = sig.colors;
+        const lead = leads.get(sig.skeleton);
+        if (lead && lead.row) {
+          lead.row.uses.push(...row.uses);
+          continue;
+        }
+        row.colors = row.existing || !lead ? sig.colors : lead.colors;
+        if (lead && !row.existing) row.existing = lead.name;
+        leads.set(sig.skeleton, { name: row.existing, colors: row.colors, row });
+        kept.push(row);
+      }
+      rows = kept;
+      for (const row of rows) {
+        row.colorCount = row.colors ? new Set(row.uses.map(u => colorStringFor(row, u, opts.args))).size : 1;
+      }
+    }
+
+    const presetTotal = (arrays || []).reduce((n, arr) => n + (arr.presets || []).length, 0);
+    const fileWord = wordOf(opts.fileName);
+    for (const row of rows) {
+      const { preset, blade, labels } = row.uses[0];
+      if (row.existing) { row.name = row.existing; continue; }
+      const font = String(preset.font || '').split(';')[0];
+      const covers = new Set(row.uses.map(u => `${u.bank}:${u.presetIdx}`)).size;
+      const shared = fileWord && covers > 1 && covers * 2 > presetTotal;
+      const base = (shared && fileWord) || wordOf(preset.displayName) || wordOf(font) || 'Style';
+      const label = blade > 0 ? wordOf((labels || {})[blade + 1]) || `blade${blade + 1}` : '';
+      const hint = opts.commentName ? row.uses.map(u => opts.commentName(u.slot)).find(Boolean) || '' : '';
+      row.name = free(hint || (label ? `${base}_${label}` : base));
+    }
     return rows;
+  }
+
+  /** A use's new text: on the row's style under `name`, showing the colors it shows now. */
+  function librarySlotText(text, row, use, name, args) {
+    const renamed = nameSlotStyle(text, name);
+    if (renamed === null || !row.colors) return renamed;
+    const next = colorStringFor(row, use, args);
+    if (next === (use.slot.colorArg || '')) return renamed;
+    return `${renamed.slice(0, renamed.indexOf('(', renamed.indexOf(name) + name.length))}(${next ? `"${next}"` : ''})`;
   }
 
   /** A slot's text with its style swapped for `name`: wrapper and color arguments stay as written. */
@@ -952,6 +1059,8 @@
           type:       slot.type,
           expr:       slot.expr,
           colorArg:   slot.colorArg,
+          wrapper:    slot.wrapper,
+          argText:    slot.argText,
           styleClass: slot.styleClass,
           startLine:  lineAt(text, innerBase + slot.startOffset),
           endLine:    lineAt(text, innerBase + slot.endOffset),
@@ -1016,9 +1125,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
+    module.exports = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, librarySlotText, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   } else {
-    root.presetParser = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
+    root.presetParser = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, librarySlotText, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));

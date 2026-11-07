@@ -34,7 +34,7 @@ check('Clear all clears both', /function _stylesClearAllFilters[\s\S]*?_activeFi
 
 console.log('3. sort and drag');
 check('Name A-Z is the default', /let _stylesSort = \{ key: 'name', dir: 'asc' \};/.test(html));
-check('a card drags only in File order', /const canDrag = _stylesSort\.key === 'file';/.test(html) && /card\.draggable = canDrag;/.test(html)
+check('a card drags only in File order read top down', /const canDrag = _stylesSort\.key === 'file' && _stylesSort\.dir === 'asc';/.test(html) && /card\.draggable = canDrag;/.test(html)
   && /if \(!canDrag \|\| e\.target\.classList\.contains\('card-delete-btn'\)\)/.test(html));
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');

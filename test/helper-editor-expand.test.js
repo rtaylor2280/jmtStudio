@@ -12,7 +12,7 @@ const iife = (name) => { const i = html.indexOf(`(function ${name}() {`); let d 
   for (let k = html.indexOf('{', i); k < html.length; k++) { if (html[k] === '{') d++; else if (html[k] === '}') { d--; if (!d) return html.slice(i, k + 4); } } };
 
 console.log('1. markup');
-check('an expand button in the editor header, beside Save', /<button id="btn-helper-expand"[^>]*>&#10530;<\/button>\s*<button id="btn-helper-save"/.test(html));
+check('an expand button in the editor header, then paste, then Save', /<button id="btn-helper-expand"[^>]*>&#10530;<\/button>\s*<button id="btn-helper-paste"[\s\S]*?<\/button>\s*<button id="btn-helper-save"/.test(html));
 check('a modal with a ✕ and a slot for the editor', /id="modal-helper-expanded"[\s\S]{0,200}id="btn-helper-expanded-close"[\s\S]{0,200}id="helper-expanded-slot"/.test(html));
 check('the modal is a style window\'s size', /#modal-helper-expanded \.modal \{ width: 820px; max-width: 96vw; height: min\(90vh, 700px\);/.test(html));
 
@@ -28,7 +28,8 @@ class El {
 }
 const els = {};
 for (const id of ['styles-helpers-panel', 'styles-helpers-list', 'styles-helper-editor-area', 'modal-helper-expanded',
-  'helper-expanded-slot', 'btn-helper-expand', 'btn-helper-expanded-close']) els[id] = new El(id);
+  'helper-expanded-slot', 'btn-helper-expand', 'btn-helper-expanded-close', 'btn-helper-paste']) els[id] = new El(id);
+els['btn-helper-paste'].dataset = {};
 els['styles-helpers-panel'].appendChild(els['styles-helpers-list']);
 els['styles-helpers-panel'].appendChild(els['styles-helper-editor-area']);
 els['modal-helper-expanded'].appendChild(els['helper-expanded-slot']);
@@ -43,7 +44,7 @@ class MutationObserver { constructor(cb) { this.cb = cb; observers.push(this); }
   observe(target) { (target._observers ||= []).push(this); } }
 const flush = () => observers.forEach(o => { if (o.pending) { o.pending = false; o.cb(); } });
 let layouts = 0;
-const editor = { layout: () => layouts++, focus: () => {} };
+const editor = { layout: () => layouts++, focus: () => {}, updateOptions: () => {}, getAction: () => null };
 const run = new Function('document', 'MutationObserver', 'requestAnimationFrame', '_stylesHelperEditor',
   `${fn('_helperEditorExpanded')}\n${fn('_expandHelperEditor')}\n${fn('_collapseHelperEditor')}\n${iife('_initHelperExpand')}
    return { _expandHelperEditor, _collapseHelperEditor, _helperEditorExpanded };`);
