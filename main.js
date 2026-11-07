@@ -6225,7 +6225,10 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, sav
       }
       // The page the user was on when they clicked Download, reported back as the source's Link.
       try { if (bw && !bw.isDestroyed()) pageUrl = bw.webContents.getURL() || null; } catch {}
-      const name = (item.getFilename() || 'sound-font.zip').replace(/[<>:"|?*\x00-\x1f]/g, '_');
+      let pageTitle = '';
+      try { if (bw && !bw.isDestroyed()) pageTitle = bw.webContents.getTitle() || ''; } catch {}
+      const name = soundFontLinkImport.archiveNameFromPage(item.getFilename() || 'sound-font.zip', pageTitle)
+        .replace(/[<>:"|?*\x00-\x1f]/g, '_');
       const destPath = pathL.join(destDir, name);
       item.setSavePath(destPath);
       // The download is captured and continues in the background — hide the

@@ -306,6 +306,25 @@ async function resolveLocalFile(filePath, opts = {}) {
   return { ok: false, reason: 'not-a-font', message: 'That download was not a font archive, and had no link inside it. Download the font from the vendor, then use Pick .zip file.', browserRecoverable: false };
 }
 
+// ── A cloud drive's download name [B-633] ──
+//
+// A folder downloaded from a cloud drive is zipped under the drive's name, not the folder's:
+// OneDrive_1_11-6-2026.zip, drive-download-20261106T120000Z-001.zip. The importer names a source from
+// its file, so every one of these arrived called OneDrive. The page the download started from has the
+// real name in its title. Anything not recognisably a drive's own name is left as it came.
+const DRIVE_FILE_NAME = /^(OneDrive[_\s-]|SharePoint[_\s-]|drive-download-)/i;
+const DRIVE_TITLE_SUFFIX = /\s+[-–—|]\s+(Microsoft\s+)?(OneDrive|SharePoint|Google Drive|Dropbox)\b.*$/i;
+const TITLE_NOT_A_NAME = /^(my files|files|shared|shared with me|shared with you|home|recent|sign in|log in|microsoft onedrive|onedrive|sharepoint|google drive|dropbox)$/i;
+function archiveNameFromPage(fileName, pageTitle) {
+  const name = String(fileName || '');
+  if (!DRIVE_FILE_NAME.test(name)) return name;
+  if (/^\s*https?:/i.test(String(pageTitle || ''))) return name;
+  const title = String(pageTitle || '').replace(DRIVE_TITLE_SUFFIX, '').replace(/\.zip$/i, '')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().replace(/[. ]+$/, '');
+  if (!title || TITLE_NOT_A_NAME.test(title)) return name;
+  return title + (path.extname(name) || '.zip');
+}
+
 // ── Which link to keep as the source's Download [B-487] ─────────────────────────────────────────
 //
 // A download can take several links to reach: a receipt, a document with a link inside it, a
@@ -471,4 +490,4 @@ function videoFrameRect(video, offset, view, inset) {
   return rect.width >= 32 && rect.height >= 32 ? rect : null;
 }
 
-module.exports = { isHomeLink, resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams, highlightLink, videoFrameRect };
+module.exports = { archiveNameFromPage, isHomeLink, resolve, resolveLocalFile, normalizeDropbox, extractUrl, scrapeDownload, pickDownloadUrl, publicLinkFor, isFileHost, isLoginUrl, isCheckoutRecord, youtubeVideoId, youtubeMoment, stripSessionParams, highlightLink, videoFrameRect };
