@@ -2692,7 +2692,8 @@
      vertical strip with a rotated label, matching the preset sidecar
      convention so users who already know one know both. */
   .sf-common-sidecar { position: relative; display: flex; flex-direction: row; border-right: 1px solid var(--c-border); background: var(--c-bg); flex-shrink: 0; transition: width 0.2s ease; width: 320px; }
-  .sf-common-sidecar.collapsed { width: 20px; }
+  #styles-helpers-panel { width: 420px; }
+  .sf-common-sidecar.collapsed, #styles-helpers-panel.collapsed { width: 20px; }
   .sf-common-sidecar.collapsed .sf-common-inner { display: none; }
   .sf-common-sidecar.collapsed .sf-common-divider { border-left: none; }
   /* Drag-to-resize handle on the right edge — same convention the preset
@@ -4142,6 +4143,7 @@
   .styles-helper-editor-btns button:hover { color: var(--c-text); }
   #btn-helper-save { background: #1a3a1a; color: #4d4; border-color: #2a5a2a; }
   #btn-helper-save:disabled { opacity: 0.45; cursor: default; }
+  #btn-helper-paste svg { width: 13px; height: 13px; display: block; }
   html.light-mode #btn-helper-save { background: #e8f5e8; color: #1a6020; border-color: #a0d0a0; }
   .helper-name-group { flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px; overflow: hidden; }
   .helper-name-display { font-size: 0.72rem; font-weight: 700; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -5665,6 +5667,7 @@
           </div>
           <div class="styles-helper-editor-btns">
             <button id="btn-helper-expand" title="Open in a larger window">&#10530;</button>
+            <button id="btn-helper-paste" title="Replace this block's code from the clipboard. Keeps its name and template. Undo with Ctrl+Z."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="8" height="4" rx="1"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/></svg></button>
             <button id="btn-helper-save" disabled>Save</button>
             <button id="btn-helper-right">Close</button>
           </div>
@@ -26535,14 +26538,35 @@ document.getElementById('btn-detail-redo').addEventListener('click', () => _styl
 // with the current style's name. Applied as an undoable Monaco edit so Ctrl+Z
 // (and the ↺ button) restores the pre-paste code — setValue() would wipe the
 // undo stack, so it is deliberately not used here.
+function _clipboardTemplate(text) {
+  const m = String(text).match(/(?:^|\n)[ \t]*(template\s*<[^\n]*>)\s*\n\s*using\b/);
+  return m ? m[1].trim() : '';
+}
+// The code from the clipboard under this name. A template on the clipboard comes with it, since its
+// code needs it; otherwise the one already here stays. Returns false when there is no style code.
+async function _pasteStyleCode(editor, keepName) {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch { return null; }
+  if (!text.trim()) return null;
+  const parsed = _parseClipboardStyle(text);
+  if (!parsed.expr) return false;
+  const prefix = _clipboardTemplate(text) || _splitTemplatePrefix(editor.getValue()).prefix;
+  const usingLine = _formatStyleCode(`using ${keepName} = ${parsed.expr};`);
+  const newEditorCode = prefix ? `${prefix}\n${usingLine}` : usingLine;
+  const model = editor.getModel();
+  editor.pushUndoStop();
+  editor.executeEdits('paste-code', [{ range: model.getFullModelRange(), text: newEditorCode }]);
+  editor.pushUndoStop();
+  editor.setScrollPosition({ scrollTop: 0 });
+  return true;
+}
 async function _runDetailPasteCode() {
   if (!_stylesDetailEditor) return;
-  let text = '';
-  try { text = await navigator.clipboard.readText(); } catch { return; }
-  if (!text.trim()) return;
-  const parsed = _parseClipboardStyle(text);
+  const nameInputVal = (document.getElementById('style-detail-name-input')?.value || '').trim();
+  const pasted = await _pasteStyleCode(_stylesDetailEditor, nameInputVal || _detailName || 'style');
+  if (pasted === null) return;
   const banner = document.getElementById('detail-error-banner');
-  if (!parsed.expr) {
+  if (!pasted) {
     if (banner) {
       banner.textContent = 'No style code found in the clipboard, so nothing was pasted.';
       banner.style.display = '';
@@ -26552,24 +26576,21 @@ async function _runDetailPasteCode() {
     }
     return;
   }
-  // Keep this style's identity: wrap the parsed expression with the current
-  // name (live name-field value, falling back to the loaded name) and preserve
-  // any existing template<...> prefix line. The clipboard's own name/source/
-  // url/tags/notes are intentionally ignored.
-  const nameInputVal = (document.getElementById('style-detail-name-input')?.value || '').trim();
-  const keepName = nameInputVal || _detailName || 'style';
-  const { prefix } = _splitTemplatePrefix(_stylesDetailEditor.getValue());
-  const usingLine = _formatStyleCode(`using ${keepName} = ${parsed.expr};`);
-  const newEditorCode = prefix ? `${prefix}\n${usingLine}` : usingLine;
-  const model = _stylesDetailEditor.getModel();
-  _stylesDetailEditor.pushUndoStop();
-  _stylesDetailEditor.executeEdits('paste-code', [{ range: model.getFullModelRange(), text: newEditorCode }]);
-  _stylesDetailEditor.pushUndoStop();
-  _stylesDetailEditor.setScrollPosition({ scrollTop: 0 });
   if (banner) { banner.style.display = 'none'; banner.textContent = ''; }
   _setDetailDirty(true);
 }
 document.getElementById('btn-style-detail-paste-code').addEventListener('click', _runDetailPasteCode);
+document.getElementById('btn-helper-paste').addEventListener('click', async () => {
+  if (!_stylesHelperEditor) return;
+  const name = (document.getElementById('styles-helper-editor-name')?.value || '').trim() || 'style';
+  const pasted = await _pasteStyleCode(_stylesHelperEditor, name);
+  const err = document.getElementById('helper-name-error');
+  if (pasted === false && err) {
+    err.textContent = 'No style code found in the clipboard, so nothing was pasted.';
+    err.classList.add('visible');
+    setTimeout(() => { if (err.textContent.startsWith('No style code')) err.classList.remove('visible'); }, 4000);
+  }
+});
 // Add Segment [B-177]: a menu of the library's segments; the pick changes the code ON SCREEN, one
 // undo step, and Save keeps it like any other edit here. A pick that belongs in the style this one
 // wraps goes there, straight to the file.
@@ -26676,8 +26697,8 @@ document.getElementById('btn-styles-expand').addEventListener('click', () => {
   _transformAllUsing(code => _formatStyleCode(_compactStyleCode(code)));
 });
 
-// Helpers panel: Sound Fonts' common folder panel, as a pattern. Starts at the common folder panel's
-// width; dragging its edge changes it until the panel closes or the app does; a strip on its right opens and closes it; not shown at all until a helper or a
+// Helpers panel: Sound Fonts' common folder panel, as a pattern. Starts wider than that panel, so a
+// block's code fits; dragging its edge changes it until the panel closes or the app does; a strip on its right opens and closes it; not shown at all until a helper or a
 // segment exists, or one is being added. [B-578]
 function _setHelpersPaneCollapsed(collapsed) {
   const panel = document.getElementById('styles-helpers-panel');
@@ -26836,6 +26857,9 @@ function _expandHelperEditor() {
   document.getElementById('modal-helper-expanded').classList.add('active');
   // The side panel is too narrow for folding; only the expanded view has it.
   _stylesHelperEditor?.updateOptions({ folding: true, stickyScroll: { enabled: true } });
+  const _paste = document.getElementById('btn-helper-paste');
+  _paste.dataset.icon = _paste.innerHTML;
+  _paste.textContent = 'Paste Code';
   _stylesHelperEditor?.layout();
   requestAnimationFrame(() => _stylesHelperEditor?.focus());
 }
@@ -26846,6 +26870,8 @@ function _collapseHelperEditor() {
   document.getElementById('modal-helper-expanded').classList.remove('active');
   _stylesHelperEditor?.getAction('editor.unfoldAll')?.run();
   _stylesHelperEditor?.updateOptions({ folding: false, stickyScroll: { enabled: false } });
+  const _paste = document.getElementById('btn-helper-paste');
+  if (_paste.dataset.icon) _paste.innerHTML = _paste.dataset.icon;
   _stylesHelperEditor?.layout();
   if (area.classList.contains('active')) requestAnimationFrame(() => _stylesHelperEditor?.focus());
 }
