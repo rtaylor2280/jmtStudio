@@ -36,6 +36,7 @@
       "shortcutName": "JMT Studio",
       "include": "build/installer.nsh"
     },
+    "beforePack": "build/fetch-catalogue.js",
     "afterSign": "build/notarize.js",
     "mac": {
       "target": "dmg",
