@@ -601,6 +601,86 @@
     return (a || '').replace(/\s+/g, '') === (b || '').replace(/\s+/g, '');
   }
 
+  /** A style's code with comments and spacing gone, so two copies of it compare equal. */
+  function styleCodeKey(expr) {
+    return (expr || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
+  }
+
+  /**
+   * A written-out style that can become a library entry. Left out: anything that is not a plain
+   * style expression (a raw argument list such as StyleNormalPtr<CYAN,WHITE,300,800>), a bare
+   * color or placeholder, and code that leans on a name this config defines for itself, since
+   * the library cannot see those.
+   */
+  function isLibraryCandidate(slot, localNames) {
+    if (!slot || slot.type !== 'styleptr' || slot.styleClass !== 'inline') return false;
+    const expr = slot.expr || '';
+    if (!expr.includes('<') || hasTopLevelComma(expr)) return false;
+    if (localNames && localNames.size) {
+      for (const w of styleCodeKey(expr).match(/[A-Za-z_]\w*/g) || []) if (localNames.has(w)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * The written-out styles across every bank, one row per distinct style, each with its default
+   * name and everywhere it is used. [B-367]
+   *
+   * The name is a comment's, then the preset's, then the font's. A later blade adds its label or
+   * blade number. Pure: the caller supplies the name rules.
+   *   opts.localNames  names the config defines itself
+   *   opts.library     Map of styleCodeKey -> library name, for code already in the library
+   *   opts.nameOf      text -> identifier
+   *   opts.commentName (slot) -> a name from the slot's comment, or ''
+   *   opts.isTaken     name -> true when a default must step around it
+   */
+  function planLibraryStyles(arrays, opts = {}) {
+    const nameOf = opts.nameOf || (s => s);
+    // A display name of "0" is a common placeholder and names nothing, so a name needs a letter.
+    const wordOf = s => { const n = nameOf(s || ''); return /[A-Za-z]/.test(n) ? n : ''; };
+    const rows = [];
+    const byKey = new Map();
+    const used = new Set();
+    const free = base => {
+      let name = base, n = 2;
+      while (used.has(name) || (opts.isTaken && opts.isTaken(name))) name = `${base}_${n++}`;
+      used.add(name);
+      return name;
+    };
+    (arrays || []).forEach((arr, bank) => {
+      (arr.presets || []).forEach((preset, presetIdx) => {
+        (preset.styles || []).forEach((slot, blade) => {
+          if (!isLibraryCandidate(slot, opts.localNames)) return;
+          const key = styleCodeKey(slot.expr);
+          let row = byKey.get(key);
+          if (!row) {
+            const existing = opts.library ? opts.library.get(key) || '' : '';
+            const font = String(preset.font || '').split(';')[0];
+            const base = wordOf(preset.displayName) || wordOf(font) || 'Style';
+            const label = blade > 0 ? wordOf((arr.labels || {})[blade + 1]) || `blade${blade + 1}` : '';
+            const hint = !existing && opts.commentName ? opts.commentName(slot) : '';
+            row = { key, expr: slot.expr, existing, name: existing || free(hint || (label ? `${base}_${label}` : base)), uses: [] };
+            byKey.set(key, row);
+            rows.push(row);
+          }
+          row.uses.push({ bank, presetIdx, blade, preset, slot });
+        });
+      });
+    });
+    return rows;
+  }
+
+  /** A slot's text with its style swapped for `name`: wrapper and color arguments stay as written. */
+  function nameSlotStyle(text, name) {
+    const scan = maskComments(text);
+    const m = stylePtrOpenRe().exec(scan);
+    if (!m) return null;
+    const open = m.index + m[0].length - 1;
+    const group = readAngleGroup(scan, open);
+    if (!group) return null;
+    return text.slice(0, open + 1) + name + text.slice(group.end - 1);
+  }
+
   /**
    * Decide which followers of `sourceBlade` should receive `newText` within ONE preset.
    *
@@ -936,9 +1016,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
+    module.exports = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   } else {
-    root.presetParser = { parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
+    root.presetParser = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));

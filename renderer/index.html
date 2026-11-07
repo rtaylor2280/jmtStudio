@@ -4905,6 +4905,15 @@
   .preset-row.new-preset { animation: preset-new-glow 0.55s ease-out forwards; }
 
   .preset-detail { flex: 1 1 50%; overflow-y: auto; padding: 8px 10px 12px; font-size: 0.78rem; }
+  #preset-to-library-bar { flex: 0 0 auto; padding: 8px 10px; border-top: 1px solid var(--c-border); }
+  #btn-preset-to-library { width: 100%; }
+  .to-library-rows { flex: 1; min-height: 0; overflow-y: auto; margin-top: 10px; }
+  .to-library-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) minmax(0, 13rem); align-items: center; gap: 4px 10px; padding: 5px 2px; border-bottom: 1px solid var(--c-border); font-size: 0.8rem; }
+  .to-library-row input[type="text"] { width: 100%; min-width: 0; }
+  .to-library-row.off .to-library-name, .to-library-row.off .to-library-where { opacity: 0.45; }
+  .to-library-where { color: var(--c-text-muted); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .to-library-msg { grid-column: 2 / -1; color: #c9960e; font-size: 0.74rem; }
+  .to-library-msg:empty { display: none; }
   .preset-detail-empty { color: var(--c-text-hint); font-style: italic; padding: 12px 0; }
   .preset-detail-heading { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .preset-detail-num { color: var(--c-text-muted); font-weight: 600; }
@@ -6018,6 +6027,7 @@
       <div id="preset-list-top" class="preset-list-top"></div>
       <div id="preset-split-resizer" class="preset-split-resizer"></div>
       <div id="preset-detail" class="preset-detail"></div>
+      <div id="preset-to-library-bar" style="display:none"><button id="btn-preset-to-library" class="btn-blue"></button></div>
     </div>
     <div id="preset-sidecar-resizer" class="preset-sidecar-resizer"></div>
   </div>
@@ -6242,6 +6252,22 @@
       <button class="modal-btn-cancel" id="btn-add-style-cancel">Cancel</button>
       <button class="modal-btn-cancel" id="btn-add-style-clear" style="margin-left:auto;margin-right:8px">Clear</button>
       <button class="modal-btn-primary" id="btn-add-style-confirm" disabled>&#43; Add to Library</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add a config's written-out styles to the library [B-367] ── -->
+<div class="modal-overlay" id="modal-to-library">
+  <div class="modal" style="width:680px;max-width:96vw;max-height:min(92vh,680px);display:flex;flex-direction:column;padding-bottom:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-shrink:0;padding-right:40px">
+      <h2 style="margin:0;flex:1">Add Styles to Library</h2>
+      <button class="modal-btn-close" id="btn-to-library-close">&#10005;</button>
+    </div>
+    <div style="font-size:0.8rem;color:var(--c-text-muted);flex-shrink:0">Each style becomes one library entry, and the presets using it switch to it.</div>
+    <div class="to-library-rows" id="to-library-rows"></div>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="modal-btn-cancel" id="btn-to-library-cancel">Cancel</button>
+      <button class="modal-btn-primary" id="btn-to-library-confirm" style="margin-left:auto"></button>
     </div>
   </div>
 </div>
@@ -12122,7 +12148,7 @@ const _STRUCTURAL_EDITS = new Set([
   'preset-reorder', 'blade-reorder', 'blade-collapse', 'add-missing-style',
   // lines inserted or removed ABOVE the presets, which shifts every slot's
   // captured coordinates even though no slot is added or removed
-  'blade-label', 'blade-follow',
+  'blade-label', 'blade-follow', 'preset-styles-to-library',
 ]);
 
 function _atomicEdit(monacoEditor, source, edits) {
@@ -20168,6 +20194,7 @@ function _updateStylesLinkBtn() {
     ? content.split('\n').some(l => /^\s*#include\s+"[^"]*"\s*$/.test(l) && _isOwnStylesInclude(l))
     : false;
   _stylesLinked = linked;
+  window._syncToLibraryBar?.();
   const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '';
 
   // Config toolbar button — hidden when no file open, when already linked, or when library missing
@@ -60565,6 +60592,178 @@ require(['vs/editor/editor.main'], function () {
       setTimeout(() => _startPresetArrayRename(), 50);
     }
 
+    // ── The config's written-out styles, into the library [B-367] ──
+    // Only offered when the library is linked: the presets are about to use its names.
+    const _displayText = s => String(s || '').replace(/\\n/g, ' ').trim();
+    function _toLibraryPlan(forModal) {
+      const text = editor.getValue();
+      const opts = {
+        localNames: new Set([...text.matchAll(/\busing\s+(\w+)\s*=/g)].map(m => m[1])),
+        nameOf: s => _styleNameFromDisplay(_displayText(s)),
+      };
+      if (forModal) {
+        const entries = _parseStyleEntries(_stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || ''));
+        const taken = new Set(entries.map(e => e.name));
+        opts.library = new Map();
+        for (const e of entries) {
+          const code = String(e.usingCode || '').match(/^using\s+\w+\s*=\s*([\s\S]*);$/);
+          if (code && !e.meta?.templatePrefix) opts.library.set(presetParser.styleCodeKey(code[1]), e.name);
+        }
+        opts.isTaken = n => taken.has(n) || !!_styleNameOutsideClash(n);
+        opts.commentName = slot => {
+          const full = _getFullSlotTextFromEditor(slot);
+          return full ? _styleNameFromDisplay(_parseClipboardStyle(full).name || '') : '';
+        };
+      }
+      return presetParser.planLibraryStyles(presetParser.parsePresets(text).arrays, opts);
+    }
+    function _syncToLibraryBar() {
+      const bar = document.getElementById('preset-to-library-bar');
+      if (!bar || !editor) return;
+      let count = 0;
+      if (_stylesLinked) { try { count = _toLibraryPlan(false).length; } catch {} }
+      bar.style.display = count ? '' : 'none';
+      document.getElementById('btn-preset-to-library').textContent =
+        `Add ${count} ${count === 1 ? 'Style' : 'Styles'} to Library`;
+    }
+    window._syncToLibraryBar = _syncToLibraryBar;
+
+    function _whereUsed(row) {
+      const presets = new Set(row.uses.map(u => `${u.bank}:${u.presetIdx}`));
+      const blades = [...new Set(row.uses.map(u => u.blade + 1))].sort((a, b) => a - b);
+      const bladeText = `${blades.length > 1 ? 'blades' : 'blade'} ${blades.join(', ')}`;
+      if (presets.size > 1) return `${presets.size} presets, ${bladeText}`;
+      const p = row.uses[0].preset;
+      return `${_displayText(p.displayName) || String(p.font || '').split(';')[0]}, ${bladeText}`;
+    }
+
+    let _toLibraryRows = [];
+    let _toLibraryDirty = false;
+    function _toLibraryRefresh() {
+      const on = _toLibraryRows.filter(r => r.box.checked);
+      const seen = new Map();
+      for (const r of on) if (!r.existing) {
+        const n = r.input.value.trim();
+        seen.set(n, (seen.get(n) || 0) + 1);
+      }
+      const taken = new Set(_parseStyleEntries(_stylesEditorInstance ? _stylesEditorInstance.getValue() : (_silentStylesText || '')).map(e => e.name));
+      let blocked = false;
+      for (const r of _toLibraryRows) {
+        r.el.classList.toggle('off', !r.box.checked);
+        if (r.existing) continue;
+        const n = r.input.value.trim();
+        let msg = '';
+        if (r.box.checked) {
+          if (!/^[A-Za-z_]\w*$/.test(n)) msg = 'Use letters, numbers and underscores, not starting with a number.';
+          else if (taken.has(n)) msg = 'The library already has a different style with this name.';
+          else if (seen.get(n) > 1) msg = 'Two styles here have this name.';
+          else msg = _styleNameOutsideClash(n);
+        }
+        r.msg.textContent = msg;
+        if (msg) blocked = true;
+      }
+      const btn = document.getElementById('btn-to-library-confirm');
+      btn.textContent = `Add ${on.length} ${on.length === 1 ? 'Style' : 'Styles'}`;
+      btn.disabled = blocked || !on.length;
+    }
+    function _openToLibrary() {
+      if (!_addStyleEditor) window.initStylesPanel?.();
+      const list = document.getElementById('to-library-rows');
+      list.textContent = '';
+      _toLibraryDirty = false;
+      _toLibraryRows = _toLibraryPlan(true).map(plan => {
+        const el = document.createElement('div');
+        el.className = 'to-library-row';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = true;
+        box.addEventListener('change', () => { _toLibraryDirty = true; _toLibraryRefresh(); });
+        const nameCell = document.createElement('div');
+        nameCell.className = 'to-library-name';
+        let input = null;
+        if (plan.existing) {
+          nameCell.textContent = plan.existing;
+        } else {
+          input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'detail-meta-input visible';
+          input.spellcheck = false;
+          input.value = plan.name;
+          input.addEventListener('input', () => { _toLibraryDirty = true; _toLibraryRefresh(); });
+          nameCell.appendChild(input);
+        }
+        const where = document.createElement('div');
+        where.className = 'to-library-where';
+        where.textContent = _whereUsed(plan);
+        where.title = where.textContent;
+        const msg = document.createElement('div');
+        msg.className = 'to-library-msg';
+        if (plan.existing) msg.textContent = 'Already in the library. Its presets switch to it.';
+        el.append(box, nameCell, where, msg);
+        list.appendChild(el);
+        return { el, box, input, msg, key: plan.key, existing: plan.existing };
+      });
+      _toLibraryRefresh();
+      document.getElementById('modal-to-library').classList.add('active');
+    }
+    function _closeToLibrary() {
+      document.getElementById('modal-to-library').classList.remove('active');
+      _toLibraryRows = [];
+    }
+    async function _dismissToLibrary() {
+      if (_toLibraryDirty && !await _promptDiscard('Discard these changes?')) return;
+      _closeToLibrary();
+    }
+    async function _confirmToLibrary() {
+      const chosen = new Map(_toLibraryRows.filter(r => r.box.checked)
+        .map(r => [r.key, r.existing || r.input.value.trim()]));
+      const adding = new Set(_toLibraryRows.filter(r => r.box.checked && !r.existing).map(r => r.key));
+      // Read fresh, so every range is the document's as it stands now.
+      const model = editor.getModel();
+      const edits = [];
+      const presets = new Set();
+      let blocks = '';
+      for (const row of _toLibraryPlan(false)) {
+        const name = chosen.get(row.key);
+        if (!name) continue;
+        if (adding.has(row.key)) {
+          const p = _parseClipboardStyle(_getFullSlotTextFromEditor(row.uses[0].slot) || '');
+          const tags = String(p.tags || '').split(',').map(s => s.trim()).filter(Boolean);
+          blocks += _buildStyleBlock(name, _normalizeStyleInput(`using ${name} = ${row.expr};`).expr, p.source || '', tags, p.url || '', p.notes || '');
+        }
+        for (const use of row.uses) {
+          const range = _slotRange(use.slot);
+          const next = presetParser.nameSlotStyle(model.getValueInRange(range), name);
+          if (next === null) continue;
+          edits.push({ range, text: next });
+          presets.add(`${use.bank}:${use.presetIdx}`);
+        }
+      }
+      _closeToLibrary();
+      if (!edits.length) return;
+      const wasDirty = _isStylesDirtyFlag;
+      if (blocks) {
+        _stylesUndoPush(`add ${adding.size} styles`);
+        _stylesEditorInstance.setValue(_stylesEditorInstance.getValue() + blocks);
+        _stylesChanged();
+        _buildStylesVisual();
+      }
+      _atomicEdit(editor, 'preset-styles-to-library', edits);
+      if (blocks && !wasDirty && _stylesViewMode !== 'visual') await window.saveStylesFile();
+      const p = presets.size;
+      showToast(`${adding.size ? `Added ${adding.size} ${adding.size === 1 ? 'style' : 'styles'}. ` : ''}${p} ${p === 1 ? 'preset uses' : 'presets use'} the library now.`);
+    }
+    document.getElementById('btn-preset-to-library').addEventListener('click', _openToLibrary);
+    document.getElementById('btn-to-library-confirm').addEventListener('click', _confirmToLibrary);
+    document.getElementById('btn-to-library-cancel').addEventListener('click', _closeToLibrary);
+    document.getElementById('btn-to-library-close').addEventListener('click', _dismissToLibrary);
+    document.getElementById('modal-to-library').addEventListener('mousedown', e => {
+      if (e.target === e.currentTarget && !_toLibraryDirty) _closeToLibrary();
+    });
+    document.getElementById('modal-to-library').addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.stopPropagation(); _dismissToLibrary(); }
+    });
+
     function _rebuildSidecar() {
       if (!editor) return;
       // Live mirror + validation. Both run on every 50ms rebuild — no debounce, no
@@ -60592,6 +60791,7 @@ require(['vs/editor/editor.main'], function () {
         if (typeof _sfWriteBackLastUsedStyles === 'function') _sfWriteBackLastUsedStyles();
       }, 500);
       if (!_sidecarOpen) return;
+      _syncToLibraryBar();
       if (_editingSlot) { _refreshBladeSectionLabel(); return; }
       // Skip the destructive detail re-render while a field input is open OR the Common
       // checkbox has keyboard focus mid-navigation — would otherwise wipe out the
