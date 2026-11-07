@@ -2166,8 +2166,25 @@ let _portWatchInterval = null;
 let _portWatchContext  = null;
 let _lastRawPortKey    = null;
 
+// A board plugged in soon after a compile is the one it was for. Hours later it may be any board,
+// and a flash cannot be undone, so the wait ends and the build waits for a click on Flash instead.
+const FLASH_WAIT_MS = 2 * 60 * 1000;
+let _flashWaitTimer = null;
+function _endFlashWait() {
+  stopPortWatch();
+  setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
+  document.getElementById('bm-abort').style.display = 'none';
+  document.getElementById('bm-retry').style.display = 'none';
+  document.getElementById('bm-close').style.display = 'inline-block';
+  document.getElementById('bm-board-select-wrap').style.display = 'none';
+  document.getElementById('bm-status').textContent = 'Compiled, not flashed. Flash it from the toolbar whenever you are ready.';
+  setBarMode('success');
+  setFlashEnabled(isDfuMode ? !!dfuDeviceReady : !!selectedPort);
+}
+
 function startPortWatch(context) {
   _portWatchContext = context;
+  if (context === 'wait-flash' && !_flashWaitTimer) _flashWaitTimer = setTimeout(_endFlashWait, FLASH_WAIT_MS);
   if (_portWatchInterval) return; // already running, context updated above
   _lastRawPortKey = null;
 
@@ -2184,6 +2201,8 @@ function startPortWatch(context) {
 }
 
 function stopPortWatch() {
+  clearTimeout(_flashWaitTimer);
+  _flashWaitTimer = null;
   if (_portWatchInterval) {
     clearInterval(_portWatchInterval);
     _portWatchInterval = null;
