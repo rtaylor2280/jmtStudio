@@ -7122,7 +7122,7 @@
   <div class="modal sf-voicepack-modal">
     <button class="modal-btn-close" id="sf-voicepack-close" title="Close">&#10005;</button>
     <h2>Download Voicepack</h2>
-    <p class="sf-voicepack-help">Voice prompts used by ProffieOS for menu narration and Edit Mode. This is what goes in your <strong>common folder</strong>. Pick a language and variant, preview the voice, then install.</p>
+    <p class="sf-voicepack-help">Voice prompts used by ProffieOS for menu narration and Edit Mode. This is what goes in your <strong>common folder</strong>. Pick a language and variant, preview the voice, then import.</p>
 
     <div class="sf-voicepack-row">
       <label class="sf-voicepack-label">Version:</label>
@@ -7168,7 +7168,7 @@
 
     <div class="modal-btns sf-voicepack-actions">
       <button class="modal-btn-cancel" id="sf-voicepack-cancel">Cancel</button>
-      <button class="modal-btn-primary" id="sf-voicepack-install">Install</button>
+      <button class="modal-btn-primary" id="sf-voicepack-install">Import</button>
     </div>
 
     <p class="sf-voicepack-attribution">
@@ -13607,6 +13607,8 @@ function _sdDriveLabel(c) {
   if (!c) return '';
   if (c.isFolder) return (String(c.drive || '').split(/[\\/]/).filter(Boolean).pop()) || 'Folder';
   const name = c.label && String(c.label).trim();
+  // macOS has no drive letter: the volume is named by its label alone.
+  if (!c.drive) return name || 'Removable Disk';
   return name ? `${name} (${c.drive})` : `Removable Disk (${c.drive})`;
 }
 // ── Naming a destination, as opposed to spelling it ──────────────────────── [B-403]
@@ -13696,7 +13698,7 @@ function _sfPrimeVolume(dir) {
 // the previous device's identity, and swapping hardware between exports is exactly what
 // testing does. `prime()` discards whatever was there, and an eject discards it too.
 const _sfDestIdentity = {
-  letter: null,
+  volume: null,     // the drive letter on Windows, the /Volumes/<name> root on macOS
   fast: null,       // Promise<{removable, kind}|null>
   board: null,      // Promise<describe result|null>, only created if someone asks
   // The SETTLED board verdict for `letter`: true, false, or null for "nobody has asked".
@@ -13705,21 +13707,24 @@ const _sfDestIdentity = {
   // below is the only reader.
   boardKnown: null,
 
-  _letterOf(dir) {
-    const m = /^([A-Za-z]):/.exec(String(dir || ''));
-    return m ? m[1].toUpperCase() : null;
+  _volumeOf(dir) {
+    const s = String(dir || '');
+    const m = /^([A-Za-z]):/.exec(s);
+    if (m) return m[1].toUpperCase();
+    const mac = /^(\/Volumes\/[^/]+)/.exec(s);
+    return mac ? mac[1] : null;
   },
   // Called when a destination is chosen. Starts the cheap lookup immediately and discards
   // any previous answer. Deliberately does NOT start the expensive one - most exports
   // never need it, and firing a ~1.9s PowerShell spawn per folder-pick is the cost this
   // refactor exists to remove.
   prime(dir) {
-    const L = this._letterOf(dir);
-    if (L !== this.letter) { this.letter = L; this.fast = null; this.board = null; this.boardKnown = null; }
+    const L = this._volumeOf(dir);
+    if (L !== this.volume) { this.volume = L; this.fast = null; this.board = null; this.boardKnown = null; }
     if (!L) return;
     if (!this.fast) this.fast = this._startFast(dir);
   },
-  forget() { this.letter = null; this.fast = null; this.board = null; this.boardKnown = null; },
+  forget() { this.volume = null; this.fast = null; this.board = null; this.boardKnown = null; },
 
   // preflight-busy-exempt: nothing is blocked on the primed call, so an overlay would cover
   // an idle window and steal clicks from someone who is not waiting.
@@ -13732,16 +13737,16 @@ const _sfDestIdentity = {
 
   // "Is it removable?" ~85 ms cold, free once primed. Returns null for cannot-tell.
   async identity(dir) {
-    const L = this._letterOf(dir);
+    const L = this._volumeOf(dir);
     if (!L) return null;
     // THE BOARD RESULT IS DROPPED ONLY WHEN THE LETTER CHANGES, never merely because the fast
-    // lookup is unset. This used to be one condition - `L !== this.letter || !this.fast` - which
+    // lookup is unset. This used to be one condition - `L !== this.volume || !this.fast` - which
     // discarded a cached classify whenever `fast` happened to be null for the same drive, and
     // `boardCard` sets `fast` to null itself. So priming the classify and then asking `removable`
     // threw the classify away, and the next `isBoardCard` paid the ~1,900 ms spawn a second time.
     // `_sfWarnSlowImport` asks in exactly that order. Whether a card sits behind a Proffieboard is
     // a property of the DRIVE, so only a different drive can invalidate it.
-    if (L !== this.letter) { this.letter = L; this.board = null; this.boardKnown = null; this.fast = null; }
+    if (L !== this.volume) { this.volume = L; this.board = null; this.boardKnown = null; this.fast = null; }
     if (!this.fast) this.fast = this._startFast(dir);
     return await this.fast;
   },
@@ -13753,9 +13758,9 @@ const _sfDestIdentity = {
   // "Is it a card through a Proffieboard?" ~1,900 ms, cached. Blocking, so it goes
   // through _sfClassifyDest for the busy overlay - but only the FIRST caller waits.
   async boardCard(dir) {
-    const L = this._letterOf(dir);
+    const L = this._volumeOf(dir);
     if (!L) return null;
-    if (L !== this.letter) { this.letter = L; this.fast = null; this.board = null; this.boardKnown = null; }
+    if (L !== this.volume) { this.volume = L; this.fast = null; this.board = null; this.boardKnown = null; }
     if (!this.board) {
       this.board = Promise.resolve()
         .then(() => _sfClassifyDest({ destDir: dir }))
@@ -13765,7 +13770,7 @@ const _sfDestIdentity = {
     const d = await this.board;
     // Stamped on arrival, and only for the drive still in question - a card swapped while the
     // classify was in flight would otherwise record the old device's verdict under the new one.
-    if (this._letterOf(dir) === this.letter) {
+    if (this._volumeOf(dir) === this.volume) {
       this.boardKnown = !!(d && d.transport === 'proffieboard');
     }
     return d;
@@ -13783,8 +13788,8 @@ const _sfDestIdentity = {
   // guarantees, and tonight proved why both are wanted - the memo silently stopped holding when
   // `identity()` dropped `board` for the same drive, and nothing at the call site could show it.
   knownIsBoardCard(dir) {
-    const L = this._letterOf(dir);
-    if (!L || L !== this.letter) return null;
+    const L = this._volumeOf(dir);
+    if (!L || L !== this.volume) return null;
     return this.boardKnown;
   },
 };
@@ -13912,7 +13917,7 @@ function _sdCardSummaryHtml(c, wide) {
   const label = _sdEsc(_sdDriveLabel(c))
     + (_ejected ? ` <span class="sd-disconnected-badge" title="This card has been ejected">DISCONNECTED</span>` : '');
   const countsTxt = hasContent ? `${_sdPlur(ct.fonts || 0, 'sound font')} &middot; ${_sdPlur(ct.configs || 0, 'config')} &middot; ${_sdPlur(ct.otherFiles || 0, 'other file')}` : '';
-  const metaTxt = c.isFolder ? 'Folder' : `${_sdEsc(c.fileSystem || '')} &middot; ${_sdFmtGB(c.freeBytes)} free of ${_sdFmtGB(c.sizeBytes)} &middot; health: ${_sdEsc(c.health || '?')}`;
+  const metaTxt = c.isFolder ? 'Folder' : `${_sdEsc(c.fileSystem || '')} &middot; ${_sdFmtGB(c.freeBytes)} free of ${_sdFmtGB(c.sizeBytes)}${c.healthReadable === false ? '' : ` &middot; health: ${_sdEsc(c.health || 'unknown')}`}`;
   const stats = [countsTxt, metaTxt].filter(Boolean).join(' &middot; ');
   const dotSpan = `<span style="color:${dot};">&#9679;</span>`;
   if (wide) {
@@ -32811,9 +32816,9 @@ require(['vs/editor/editor.main'], function () {
         _sfVpInstallInFlight = true;
         const installBtn = document.getElementById('sf-voicepack-install');
         const cancelBtn = document.getElementById('sf-voicepack-cancel');
-        if (installBtn) { installBtn.disabled = true; _btnBusy(installBtn, 'Installing'); }
+        if (installBtn) { installBtn.disabled = true; _btnBusy(installBtn, 'Importing'); }
         if (cancelBtn) cancelBtn.disabled = true;
-        _sfVpSetStatus('Installing voicepack…');
+        _sfVpSetStatus('Importing voicepack…');
         _sfVpHideFallback();
         _sfVpSetProgress(true);
         let res;
@@ -32821,14 +32826,14 @@ require(['vs/editor/editor.main'], function () {
         catch (err) { res = { ok: false, error: String(err && err.message || err) }; }
         _sfVpSetProgress(false);
         _sfVpInstallInFlight = false;
-        if (installBtn) { installBtn.disabled = false; _btnIdle(installBtn, 'Install'); }
+        if (installBtn) { installBtn.disabled = false; _btnIdle(installBtn, 'Import'); }
         if (cancelBtn) cancelBtn.disabled = false;
         if (!res || !res.ok) {
-          _sfVpSetStatus(`Install failed: ${(res && res.error) || 'unknown error'}`, 'error');
+          _sfVpSetStatus(`Import failed: ${(res && res.error) || 'unknown error'}`, 'error');
           _sfVpShowFallback(_sfVpSelectedVersion);
           return;
         }
-        _sfVpSetStatus(`Installed as "${res.name}".`, 'success');
+        _sfVpSetStatus(`Imported as "${res.name}".`, 'success');
         _sfSelectedCommonUuid = res.uuid;
         await _sfRefreshCommons();
         // Small delay so the user sees the success status before the
@@ -33427,8 +33432,10 @@ require(['vs/editor/editor.main'], function () {
             // Names BOTH: what was written (`common`, the folder ProffieOS reads) and which
             // pack it came from. Saying only one of the two is the question this door invites.
             const lines = [`Exported ${label} as common: ${amount}.`];
-            // A card root comes back as "H:\", so drop its separator before adding ours.
-            lines.push(`${String(pick.destDir).replace(/[\\/]+$/, '')}\\${TARGET}`);
+            // A card root comes back as "H:\", so drop its separator before adding ours. The
+            // separator is the destination's own: "\" on Windows, "/" on a Mac or Linux path.
+            const _dd = String(pick.destDir);
+            lines.push(`${_dd.replace(/[\\/]+$/, '')}${/\\/.test(_dd) ? '\\' : '/'}${TARGET}`);
             const secs = (Date.now() - _t0) / 1000;
             lines.push(window._sfFormatDuration
               ? `Took ${window._sfFormatDuration(secs)}.`
@@ -49831,6 +49838,54 @@ require(['vs/editor/editor.main'], function () {
       //                     picker - it holds the claim across its scan, long before we see it)
       //   ending            optional override; 'none' means a caller owns the screen (doors 12/13)
       const _sfExportEnding = (kind) => (kind === 'files' ? 'toast' : 'summary');
+      // ── The check before a write: one clock, one Cancel, the files going by ── [B-640]
+      //
+      // A door's plan and compare can read every file at the destination, which is minutes on a
+      // full card. The runner owns this surface as it owns the write's; the door only says where
+      // it is through `at(label, frac, fontName)`, and reads `cancelled` between items. Files
+      // arrive on the byte-progress channel and show as "<font> · <file>". Nothing has been
+      // written during a check, so Cancel just stops. `done()` retires the clock and the Cancel
+      // before a door asks a question of its own.
+      const _sfCheckPhase = () => {
+        const t0 = Date.now();
+        let label = '', frac = null, file = '', prefix = '', cancelled = false, clock = null, off = null;
+        const paint = () => {
+          const secs = Math.floor((Date.now() - t0) / 1000);
+          const el = `${window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`} elapsed`;
+          if (frac == null) _sfDeleteProgress.setIndeterminate(label, file, el);
+          else _sfDeleteProgress.setPhase(label, frac, file, el);
+        };
+        // ARMED BY THE RUNNER, STARTED BY THE DOOR'S FIRST `at()`. A door that paints its own
+        // check (tracks) never calls `at()`, so nothing here repaints over it or clears its Cancel.
+        let armed = false;
+        const begin = () => {
+          if (clock) return;
+          _sfDeleteProgress.offerCancel(async () => { cancelled = true; await _sfExportCancelOpt.onCancel(); });
+          off = window.electronAPI.onSoundFontByteProgress((p) => {
+            if (p && p.name) { file = prefix ? `${prefix} · ${p.name}` : p.name; paint(); }
+          });
+          clock = setInterval(paint, 250);
+        };
+        const ctx = {
+          get cancelled() { return cancelled; },
+          start() { armed = true; },
+          at(l, f, fontName) {
+            label = l || ''; frac = (typeof f === 'number') ? f : null; prefix = fontName || ''; file = prefix;
+            if (armed) begin();
+            paint();
+          },
+          done() {
+            armed = false;
+            if (!clock) return;
+            clearInterval(clock); clock = null;
+            try { off && off(); } catch {}
+            off = null;
+            _sfDeleteProgress.clearCancel();
+          },
+        };
+        return ctx;
+      };
+
       const _sfRunExport = async (door = {}) => {
         const kind = (door.endState && door.endState.kind) || 'tree';
         // A DOOR THAT DECLARES A SUMMARY AND SUPPLIES NONE MUST NOT REPORT NOTHING.
@@ -49933,13 +49988,17 @@ require(['vs/editor/editor.main'], function () {
           try { await _sfDeleteProgress.hide(); } catch {}
         };
         let plan = null;
-        try { plan = door.plan ? await door.plan() : null; }
+        const _check = _sfCheckPhase();
+        if (door.plan) _check.start();
+        try { plan = door.plan ? await door.plan(_check) : null; }
         catch (e) {
           console.warn('[B-420] plan failed for', door.label, e);
           await _dropRaised();
           return out;
         }
+        finally { _check.done(); }
         if (plan === null && door.plan) { await _dropRaised(); return out; }   // refused or cancelled
+        if (_check.cancelled) { await _dropRaised(); return out; }
 
         // AN ARCHIVE WRITES ONE FILE TO THE CARD, WHATEVER IS INSIDE IT. The slow-write
         // threshold's file limb exists because the Proffieboard's USB bridge costs ~773 ms PER
@@ -49980,9 +50039,22 @@ require(['vs/editor/editor.main'], function () {
         // doors have always done and is correct for loose files.
         if (!door.overwriteDecided && typeof door.compare === 'function') {
           let decisions = null;
-          try { decisions = await door.compare(plan, destDir); }
+          // The check reports on the destination modal, so it has to be up. [B-640]
+          try {
+            const m = document.getElementById('modal-sf-bulk-progress');
+            if (!(m && m.classList.contains('active'))) _sfDeleteProgress.show('Checking the destination…', '', 0);
+          } catch {}
+          _check.start();
+          try { decisions = await door.compare(plan, destDir, _check); }
           catch (e) { console.warn('[B-420] compare failed for', door.label, e); }
-          if (decisions === null) return out;         // the user backed out of the question
+          finally { _check.done(); }
+          if (_check.cancelled) decisions = null;
+          // The user backed out of the question. The compare's progress window was left open for
+          // the next step, and there is no next step, so it is closed here. [B-637]
+          if (decisions === null) {
+            try { await _sfDeleteProgress.hide(); } catch {}
+            return out;
+          }
           out.decisions = decisions;
         }
 
@@ -51146,7 +51218,7 @@ require(['vs/editor/editor.main'], function () {
         catch { return false; }
       };
       const SF_BOARD_RESTARTING = 'Ejected. Board restarting';
-      const SF_BOARD_POWER_CYCLE = 'Ejected. Turn the saber off and on before using it.';
+      const SF_BOARD_POWER_CYCLE = 'Ejected. Turn the saber off and on before use.';
       // `inApp`: read before the eject (_sfSharedInApp). The reset is sent only when this app's
       // monitor shared the card with `sd 1`, which proves the board has MOUNT_SD_SETTING; without it
       // a reset boots the board straight back onto the computer as a drive. [B-545]
@@ -52657,6 +52729,7 @@ require(['vs/editor/editor.main'], function () {
         // Safe to cancel ALL live export tokens here: nothing has been written yet at scan
         // time, so there is no other export of ours in flight to disturb.
         let _scanCanceled = false;
+        let _scanDestUnreadable = false;
         _sfDeleteProgress.offerCancel(async () => {
           _scanCanceled = true;
           await _sfExportCancelOpt.onCancel();
@@ -52681,6 +52754,8 @@ require(['vs/editor/editor.main'], function () {
           _scanTick(name);
           try {
             const m = await window.electronAPI.entryMatchesAt({ name, destDir });
+            // A card that could not be read is not an empty one. [B-638]
+            if (m && m.destUnreadable) { _scanDestUnreadable = true; break; }
             if (m && m.ok && m.exists) {
               if (m.identical) unchangedFonts.push(name);
               else conflicts.push(name);
@@ -52818,6 +52893,15 @@ require(['vs/editor/editor.main'], function () {
         // Everything that had to be read has been read. Close the scan before
         // any decision opens, so the two never overlap on screen.
         clearInterval(_scanElapsedTicker);
+        // The card stopped answering during the check. Nothing has been written; stop here
+        // rather than treat the fonts it could not read as missing. [B-638]
+        if (_scanDestUnreadable) {
+          try { await _sfDeleteProgress.hide(); } catch {}
+          await promptError('Could not check the destination',
+            'The card stopped responding while its fonts were being compared with your library, '
+            + 'so nothing was exported.');
+          return false;
+        }
         // LEAVE BEFORE ANY DECISION OPENS. [B-420, 2026-09-24] The three reads above break
         // out on the flag, but a cancel is only honoured if nothing that follows asks a question
         // — a conflict review drawn after the user pressed Cancel is the app ignoring them and
@@ -56235,11 +56319,14 @@ require(['vs/editor/editor.main'], function () {
             // That is the price of one number that never moves, and it is the right trade: the
             // alternative was correcting the total after the modal opened, which is the flash
             // this design exists to remove.
-            plan: async () => {
+            plan: async (check) => {
               let _planned = 0;
+              // The runner owns the surface; this door only says where it is. [B-640]
+              if (check) check.at('Comparing with your library', null, '');
               try {
                 const pr = await window.electronAPI.planFolderWrites({
-                  names: _fonts, destDir: pick.destDir });
+                  names: _fonts, destDir: pick.destDir, reportProgress: true });
+                if ((check && check.cancelled) || (pr && pr.cancelled)) return null;
                 if (pr && pr.ok && pr.plans) {
                   for (const nm of _fonts) if (pr.plans[nm]) _plans[nm] = pr.plans[nm];
                   // The handler already sums workBytes across every name it was given.
@@ -56288,7 +56375,7 @@ require(['vs/editor/editor.main'], function () {
             // `defaultMode: 'skip'` is the ruling, and it matches what the shared prompt
             // already defaults folders to. Skip is the safe answer on a card: Replace overwrites
             // a folder the user may have edited at the destination.
-            compare: async () => {
+            compare: async (_plan, _destDir, check) => {
               let m = null;
               try {
                 // writeCache:false — this question must not seed the sync manifest at the
@@ -56296,31 +56383,32 @@ require(['vs/editor/editor.main'], function () {
                 // The hash is only paid when something IS there: entryMatchesAt short-circuits
                 // on a cheap file-count/byte pre-check, so the ordinary export costs nothing
                 // extra, and the expensive case is the one where the answer decides an overwrite.
-                // ASK THE DOM whether a modal is up rather than assuming the runner left one.
-                const _up = (() => {
-                  try {
-                    const el = document.getElementById('modal-sf-bulk-progress');
-                    return !!(el && el.classList.contains('active'));
-                  } catch { return false; }
-                })();
                 // ONE QUESTION FOR THE WHOLE SELECTION. [B-425] Each font is checked against
                 // the destination, then everything that EXISTS AND DIFFERS goes into a single
                 // conflict prompt. `_sfPromptSaveConflicts` already takes a list and returns a
                 // per-name Map; this door was handing it a one-element array.
                 // Asking per font would be N dialogs for one decision the user makes once.
                 const _differing = [];
-                for (const nm of _fonts) {
-                  let mm = null;
-                  try {
-                    mm = await _sfRunWithByteProgress('Checking the destination', () =>
-                      window.electronAPI.entryMatchesAt({
+                // A count per font, reported to the runner's check. [B-640]
+                try {
+                  for (let i = 0; i < _fonts.length; i++) {
+                    const nm = _fonts[i];
+                    if (check && check.cancelled) return null;
+                    if (check) check.at(`Comparing with your library · ${i + 1} of ${_fonts.length}`, i / _fonts.length, nm);
+                    let mm = null;
+                    try {
+                      mm = await window.electronAPI.entryMatchesAt({
                         name: nm, destDir: pick.destDir, writeCache: false, reportProgress: true,
-                      }), { alreadyOpen: _up, keepOpen: true });
-                  } catch {}
-                  if (!(mm && mm.ok && mm.exists)) { _modes.set(nm, 'rename'); continue; }
-                  if (mm.identical) { _modes.set(nm, 'identical'); continue; }
-                  _differing.push(nm);
-                }
+                      });
+                    } catch {}
+                    if (check && check.cancelled) return null;
+                    // A destination that could not be read is not an empty one. [B-638]
+                    if (mm && mm.destUnreadable) throw new Error(mm.error || 'Cannot read the destination');
+                    if (!(mm && mm.ok && mm.exists)) { _modes.set(nm, 'rename'); continue; }
+                    if (mm.identical) { _modes.set(nm, 'identical'); continue; }
+                    _differing.push(nm);
+                  }
+                } finally { if (check) check.done(); }
                 if (_differing.length) {
                   const _picked = await _sfPromptSaveConflicts(_differing, {
                     title: _differing.length === 1

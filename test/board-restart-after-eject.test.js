@@ -33,13 +33,13 @@ check('CONTROL lifted the handler from main.js', src.includes('_boardPortForSeri
 // A serial port stand-in that records what was written.
 // `presence` is what successive list() calls see of COM18: by default it drops and comes back.
 // `refusals` is how many opens after the reset fail first ("Unknown error code 433" on the bench).
-function makeSerial({ openError = null, presence = [true, false, false, true], refusals = 0 } = {}) {
+function makeSerial({ openError = null, presence = [true, false, false, true], refusals = 0, listPath = 'COM18' } = {}) {
   const written = [];
   let n = 0, opened = 0;
   class FakePort {
     static async list() {
       const h = presence[Math.min(n++, presence.length - 1)];
-      return h ? [{ path: 'COM18' }] : [];
+      return h ? [{ path: listPath }] : [];
     }
     constructor(o) { this.path = o.path; this.isOpen = false; }
     on() {}
@@ -142,6 +142,13 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
       { boardSerial: '2078377E4130', portPath: 'COM18' });
     check('a stale port hint falls back to the lookup', listCalls === 1, JSON.stringify({ r, listCalls }));
 
+    // A Mac: the app holds /dev/cu.*, serialport lists the same port as /dev/tty.* (seen 2026-11-07,
+    // the restart worked and the summary still said to turn the saber off and on).
+    const MAC = '/dev/cu.usbmodem206F329146301';
+    r = await build({ ports: [{ path: MAC, serialNumber: '206F32914630' }],
+      serial: makeSerial({ listPath: '/dev/tty.usbmodem206F329146301' }) })(null, { boardSerial: '206F32914630', portPath: MAC });
+    check('a Mac port listed under its tty. name is seen coming back: ready',
+      r.status === 'restarted' && r.port === MAC && r.back === true && r.ready === true, JSON.stringify(r));
     r = await build({ ports: PORTS, serial: makeSerial() })(null, { boardSerial: 'FFFFFFFFFFFF' });
     check('no port with that serial: no-port', r.status === 'no-port', JSON.stringify(r));
     r = await build({ ports: PORTS, serial: makeSerial() })(null, {});
@@ -211,7 +218,7 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
     const board = Promise.resolve({ transport: 'proffieboard', boardSerial: 'ABC', portP: Promise.resolve('COM18') });
     const notShared = await run(board, false);
     check('not shared from the app: no reset is sent, and it says turn the saber off and on',
-      calls.length === 0 && notShared === 'Ejected. Turn the saber off and on before using it.', JSON.stringify({ calls, notShared }));
+      calls.length === 0 && notShared === 'Ejected. Turn the saber off and on before use.', JSON.stringify({ calls, notShared }));
     const shared = await run(board, true);
     check('shared from the app: the reset is sent to that board',
       calls.length === 1 && calls[0][0] === 'ABC' && calls[0][1] === 'COM18' && shared === 'Board restarted and ready to use.',

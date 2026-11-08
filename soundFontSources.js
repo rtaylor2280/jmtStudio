@@ -25,15 +25,10 @@ const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip
 // OS-level archive noise: macOS Finder shadow tree, AppleDouble sidecars,
 // Windows / Mac metadata leftovers. Never real content. Filtered at
 // extractTo so library entries don't carry junk onto the SD card.
+// The list itself is shared: osNoise.js.
 function _isNoisePath(relPath) {
-  const parts = String(relPath || '').split('/').filter(Boolean);
-  for (const seg of parts) {
-    if (seg === '__MACOSX') return true;
-    if (seg === '.DS_Store') return true;
-    if (seg === 'Thumbs.db' || seg === 'desktop.ini') return true;
-    if (seg.startsWith('._')) return true;
-  }
-  return false;
+  const { isOsNoiseName } = require('./osNoise');
+  return String(relPath || '').split('/').filter(Boolean).some(isOsNoiseName);
 }
 
 function sourcesRoot(userData) {

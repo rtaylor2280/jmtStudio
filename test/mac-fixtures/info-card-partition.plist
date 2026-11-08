@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Bootable</key>
+	<false/>
+	<key>BusProtocol</key>
+	<string>USB</string>
+	<key>CanBeMadeBootable</key>
+	<false/>
+	<key>CanBeMadeBootableRequiresDestroy</key>
+	<false/>
+	<key>Content</key>
+	<string>Windows_FAT_32</string>
+	<key>DeviceBlockSize</key>
+	<integer>512</integer>
+	<key>DeviceIdentifier</key>
+	<string>disk8s1</string>
+	<key>DeviceNode</key>
+	<string>/dev/disk8s1</string>
+	<key>DeviceTreePath</key>
+	<string>IODeviceTree:/arm-io@10F00000/usb-drd3@1A280000/usb-drd3-port-ss@03200000</string>
+	<key>Ejectable</key>
+	<true/>
+	<key>EjectableMediaAutomaticUnderSoftwareControl</key>
+	<true/>
+	<key>EjectableOnly</key>
+	<true/>
+	<key>FilesystemName</key>
+	<string>MS-DOS FAT32</string>
+	<key>FilesystemType</key>
+	<string>msdos</string>
+	<key>FilesystemUserVisibleName</key>
+	<string>MS-DOS (FAT32)</string>
+	<key>FreeSpace</key>
+	<integer>31891881984</integer>
+	<key>GlobalPermissionsEnabled</key>
+	<false/>
+	<key>IOKitSize</key>
+	<integer>31910789120</integer>
+	<key>IORegistryEntryName</key>
+	<string>Untitled 1</string>
+	<key>Internal</key>
+	<false/>
+	<key>MediaName</key>
+	<string></string>
+	<key>MediaType</key>
+	<string>Generic</string>
+	<key>MountPoint</key>
+	<string>/Volumes/PROFFIE</string>
+	<key>OSInternalMedia</key>
+	<false/>
+	<key>ParentWholeDisk</key>
+	<string>disk8</string>
+	<key>PartitionMapPartition</key>
+	<true/>
+	<key>PartitionMapPartitionOffset</key>
+	<integer>4194304</integer>
+	<key>RAIDMaster</key>
+	<false/>
+	<key>RAIDSlice</key>
+	<false/>
+	<key>Removable</key>
+	<true/>
+	<key>RemovableMedia</key>
+	<true/>
+	<key>RemovableMediaOrExternalDevice</key>
+	<true/>
+	<key>SMARTDeviceSpecificKeysMayVaryNotGuaranteed</key>
+	<dict/>
+	<key>SMARTStatus</key>
+	<string>Not Supported</string>
+	<key>Size</key>
+	<integer>31910789120</integer>
+	<key>SupportsGlobalPermissionsDisable</key>
+	<false/>
+	<key>SystemImage</key>
+	<false/>
+	<key>TotalSize</key>
+	<integer>31894028288</integer>
+	<key>VolumeAllocationBlockSize</key>
+	<integer>16384</integer>
+	<key>VolumeName</key>
+	<string>PROFFIE</string>
+	<key>VolumeSize</key>
+	<integer>31894028288</integer>
+	<key>VolumeUUID</key>
+	<string>95104194-58BD-375D-84B0-2CF110ACF35E</string>
+	<key>WholeDisk</key>
+	<false/>
+	<key>Writable</key>
+	<true/>
+	<key>WritableMedia</key>
+	<true/>
+	<key>WritableVolume</key>
+	<true/>
+</dict>
+</plist>

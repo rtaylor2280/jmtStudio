@@ -296,13 +296,8 @@ function looksLikeProffieFont(childFolders, childFiles, byParent) {
 // Proffie-shaped folder. AppleDouble files can also appear outside
 // __MACOSX/ when someone has copied files across volumes, so we match
 // them on the segment regardless of where they show up.
-function isNoiseSegment(seg) {
-  if (seg === '__MACOSX') return true;
-  if (seg === '.DS_Store') return true;
-  if (seg === 'Thumbs.db' || seg === 'desktop.ini') return true;
-  if (seg.startsWith('._')) return true;
-  return false;
-}
+// The list itself is shared: osNoise.js.
+const { isOsNoiseName: isNoiseSegment } = require('./osNoise');
 
 // Group source.listAll() output into a map of parentDir -> array of children
 // with { name, isDir, fileName, size }. Synthesizes ancestor directory

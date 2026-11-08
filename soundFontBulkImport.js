@@ -77,16 +77,8 @@ function hashAndCheckFont(absDir) {
   return { contentHash: soundFontFileHash.hashRecords(records), fileHashes, corruptFiles };
 }
 
-// Noise file/dir segments we never want to descend into or count as
-// content. Mirrors soundFontCandidates.isNoiseSegment but local so the
-// module doesn't need to re-export it.
-function isNoiseName(name) {
-  if (name === '__MACOSX') return true;
-  if (name === '.DS_Store') return true;
-  if (name === 'Thumbs.db' || name === 'desktop.ini') return true;
-  if (name.startsWith('._')) return true;
-  return false;
-}
+// Noise file/dir segments we never want to descend into or count as content.
+const { isOsNoiseName: isNoiseName } = require('./osNoise');
 
 // Detect Proffie-shape on a folder by reading its direct children, by the shared rule the card
 // report uses (proffieFontShape.js), so the count a card shows and what this scan imports agree. A

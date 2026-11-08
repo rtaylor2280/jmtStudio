@@ -168,7 +168,7 @@ function onDiskCost(fileSizes, blockSize, dirCount = 0) {
 
 // ── Transport ────────────────────────────────────────────────────────
 //
-// Windows only. Maps a drive letter to the device behind it so a card mounted through a
+// Windows below; macOS in macDisks.classify. Maps a drive letter to the device behind it so a card mounted through a
 // Proffieboard can be told from the same card in a reader. Measured 2026-09-19, and the
 // three shapes are not close calls:
 //
@@ -278,6 +278,7 @@ function _classifyWindows(driveLetter) {
 //
 // Windows only, and it degrades to null - never to an assumption. [B-028]
 function driveKind(destDir) {
+  if (process.platform === 'darwin') return require('./macDisks').driveKind(destDir).catch(() => null);
   return new Promise((resolve) => {
     if (process.platform !== 'win32') { resolve(null); return; }
     const m = /^([A-Za-z]):/.exec(path.resolve(String(destDir || '')));
@@ -423,7 +424,7 @@ function classifyTransport(model, pnp) {
 
 // ── Describe a destination ───────────────────────────────────────────
 //
-// opts.classify - do the Windows device lookup (a PowerShell spawn). Off by default so a
+// opts.classify - do the device lookup (PowerShell on Windows, diskutil on macOS). Off by default so a
 // caller that only needs "will it fit" never pays for it.
 async function describe(destDir, opts = {}) {
   const out = {
@@ -462,9 +463,8 @@ async function describe(destDir, opts = {}) {
   // transport are decoration for the summary and for the slow-destination warning, and
   // no writer waits on them.
   //
-  // Windows only. macOS and Linux need their own implementations (diskutil/ioreg, lsblk);
-  // until those exist these stay null, which callers must read as "cannot tell" rather
-  // than as "fixed disk".
+  // Windows and macOS. Linux needs its own implementation (lsblk); until it exists these stay
+  // null, which callers must read as "cannot tell" rather than as "fixed disk".
   // ── The cheap fact, asked every time ──
   //
   // REMOVABLE IS NO LONGER GATED BEHIND `classify`. [B-005 item 4, 2026-09-21] It used to
@@ -484,9 +484,10 @@ async function describe(destDir, opts = {}) {
   // the ~1,900 ms question. It changes exactly two behaviours - the slow-write warning and
   // the cancel-cleanup offer - and both are gated on the same size threshold, so below that
   // threshold the answer cannot alter anything and is not worth waiting for.
-  if (opts.classify && process.platform === 'win32') {
-    const letter = path.resolve(destDir).slice(0, 1).toUpperCase();
-    const c = await _classifyWindows(letter);
+  if (opts.classify && (process.platform === 'win32' || process.platform === 'darwin')) {
+    const c = process.platform === 'darwin'
+      ? await require('./macDisks').classify(destDir, classifyTransport).catch(() => null)
+      : await _classifyWindows(path.resolve(destDir).slice(0, 1).toUpperCase());
     if (c) {
       out.transport = c.transport;
       out.boardSerial = c.boardSerial;
@@ -626,7 +627,13 @@ async function preflight(destDir, {
 
   // Rides `unhealthy` because every door already refuses on that and writes nothing. An unknown
   // transport is not a board card, so a failed lookup writes, the same ruling as everywhere else.
-  if (out.boardCard && d.blockSize === SABER_UNSAFE_CLUSTER) {
+  //
+  // WINDOWS ONLY, MEASURED. A Mac does recognise a board card (macDisks), so without this check
+  // the refusal reached the Mac by inference on 2026-11-07. It was then measured: a full 32 KB
+  // write through the board on the Mac came back clean on a read-only chkdsk (20,126 files, no
+  // lost chains), the second clean Mac run, against 9 of 9 corrupted on Windows. The writer is
+  // Windows, not the board. The ruling: "Yep, windows only". [B-594, B-614]
+  if (out.boardCard && d.blockSize === SABER_UNSAFE_CLUSTER && process.platform === 'win32') {
     out.unhealthy = { saberUnsafeCluster: true };
     return out;
   }

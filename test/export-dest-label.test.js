@@ -67,8 +67,11 @@ function ok(name, cond, extra) {
   // about ONE drive instead of enumerating every volume on the system. That mattered: the
   // unfiltered enumeration walked mapped network drives, and one pointing at an unreachable
   // host blocked it for 60+ seconds against a documented ~3,100ms.
+  const sdJs = fs.readFileSync(path.join(__dirname, '..', 'sdCardDetect.js'), 'utf8');
   ok('it reuses the SD module rather than shelling out again',
-     /sdCardDetect\.volumeForLetter\(/.test(mainJs));
+     /sdCardDetect\.volumeForPath\(/.test(mainJs));
+  ok('which asks Windows about one letter',
+     /async function volumeForPath[\s\S]{0,300}volumeForLetter\(m\[1\]\)/.test(sdJs));
   ok('and it asks about ONE letter, not every volume',
      !/sdCardDetect\.enumerateAllVolumes\(\)/.test(mainJs),
      'enumerating everything to find one drive is what let a dead network share hang card detection');

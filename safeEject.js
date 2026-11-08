@@ -213,17 +213,18 @@ const PLATFORMS = {
       return m ? m[1] : null;
     },
     label: (mountPath) => path.basename(String(mountPath || '')),
-    // UNVERIFIED: `diskutil eject` is the documented, non-sudo path and is what Finder's
-    // eject uses underneath. Open to two unknowns on a real box: whether it returns non-zero
-    // when something holds the volume (it should), and whether a Proffieboard-backed volume
-    // needs `diskutil unmountDisk` instead because it presents as a whole disk.
+    // `diskutil eject` needs no sudo. Measured 2026-11-07 on macOS 26 with a card in a USB
+    // reader: exit 0 and the /Volumes entry and the disk both disappear; with a process holding
+    // the volume, exit 1, the card stays mounted, and the output names the holder
+    // ("Unmount was dissented by PID 44405 (/bin/sleep)").
+    // UNVERIFIED: whether a Proffieboard-backed volume needs `diskutil unmountDisk` instead.
     // The return value is NOT the verdict either way - same rule as Windows.
     invoke: async (mountPath) => {
       const r = await _exec('diskutil', ['eject', String(mountPath || '')]);
       return { ok: r.ok, raw: r.out || r.err };
     },
     vocab: {
-      // UNVERIFIED but expected: macOS removes the /Volumes entry on eject, so there is no
+      // Measured 2026-11-07: macOS removes the /Volumes entry on eject, so there is no
       // lingering empty slot and the Windows explanation must NOT appear here.
       lingersAfterEject: false,
       volumeNoun: 'volume',

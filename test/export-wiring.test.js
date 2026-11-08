@@ -153,7 +153,7 @@ ok('the old refuse+warn pair is gone from every door',
   ok('the runner body was located', runner.length > 500,
      'anchor moved - re-find it before trusting the positions below');
   const raiseAt = runner.indexOf("_sfDeleteProgress.show('Checking the destination…'");
-  const planAt = runner.indexOf('await door.plan()');
+  const planAt = runner.indexOf('await door.plan(_check)');
   const preflightAt = runner.indexOf('_sfPreflightDestination({');
   ok('the runner raises its modal, plans, then preflights - in that order',
      raiseAt > -1 && planAt > -1 && preflightAt > -1

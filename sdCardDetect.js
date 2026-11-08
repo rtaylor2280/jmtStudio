@@ -141,23 +141,32 @@ function _healthFromDirtyBit(v) {
   } catch { return null; }
 }
 
+// macOS rows come from macDisks.js. A reader with no card in it has no mounted volume there, so
+// every row has hasMedia true.
+// TODO: Linux (lsblk -J + udisks2). It must set hasMedia false for an empty reader slot; scan()
+// drops those. udisks2 exposes HasMedia, and lsblk reports size 0 for an empty slot.
 async function enumerateRemovableVolumes() {
   if (os.platform() === 'win32') return enumerateVolumesWindows(true);
-  // TODO: macOS (diskutil list -plist external physical) / Linux (lsblk -J + udisks2).
-  //
-  // CONTRACT for whoever implements these: set hasMedia to false for a reader slot with no
-  // card in it, and true otherwise. scan() drops anything with hasMedia === false, because
-  // an empty slot is not a card and must never be reported as a damaged one. Answer it from
-  // whatever the platform states directly rather than re-deriving Windows-shaped nulls:
-  // udisks2 exposes a HasMedia property, and lsblk reports size 0 for an empty slot. macOS
-  // may never present the case at all, since it does not usually mount an empty slot; if so,
-  // returning true unconditionally is correct there. Neither has been tested.
+  if (os.platform() === 'darwin') return _withHealth(await require('./macDisks').enumerateVolumes(true));
   return [];
 }
 
 async function enumerateAllVolumes() {
   if (os.platform() === 'win32') return enumerateVolumesWindows(false);
+  if (os.platform() === 'darwin') return _withHealth(await require('./macDisks').enumerateVolumes(false));
   return [];
+}
+
+// macOS only. The flag lives on the card's raw device, which macOS opens for administrators
+// only, so on a Mac the answer is cannot-tell for every card. `healthReadable: false` tells the
+// card browser to leave the health line off, since a line that always says "unknown" carries no
+// information. If a read ever succeeds, the line returns with a real answer.
+// Windows rows never set it: there, a failed read is about one card, and "unknown" says so.
+function _withHealth(rows) {
+  return (rows || []).map((v) => {
+    const health = _healthFromDirtyBit(v);
+    return { ...v, health, healthReadable: health !== null };
+  });
 }
 
 // ONE LETTER, ONE ROW. [B-420] Use this wherever the question is "tell me about THIS drive".
@@ -170,6 +179,22 @@ async function volumeForLetter(letter) {
   if (os.platform() !== 'win32') return null;
   const vols = await enumerateVolumesWindows(false, letter);
   return (vols && vols[0]) || null;
+}
+
+// The volume a path sits on: its drive letter on Windows, its /Volumes mount on macOS.
+async function volumeForPath(p) {
+  if (os.platform() === 'win32') {
+    const m = /^([A-Za-z]):/.exec(String(p || ''));
+    return m ? volumeForLetter(m[1]) : null;
+  }
+  if (os.platform() === 'darwin') {
+    const mac = require('./macDisks');
+    const root = mac.mountRootOf(p);
+    if (!root) return null;
+    const rows = _withHealth(await mac.enumerateVolumes(false, root));
+    return rows[0] || null;
+  }
+  return null;
 }
 
 // ── Identity (VSN is a weak key; .jmt-sd-id sidecar is primary) ──
@@ -235,8 +260,11 @@ function looksLikeProffieFontDir(dirPath) {
   return fontShapeOf(ents) === 'proffie';   // the shared rule [B-461]
 }
 function classifyCard(vol) {
-  const rootEnts = safeReaddir(vol.mountPath);
-  if (rootEnts.__error) return { kind: 'unreadable', confidence: 'n/a', signals: { error: rootEnts.__error } };
+  const rawEnts = safeReaddir(vol.mountPath);
+  if (rawEnts.__error) return { kind: 'unreadable', confidence: 'n/a', signals: { error: rawEnts.__error } };
+  // What an operating system writes onto every card it mounts (macOS: .Spotlight-V100,
+  // .fseventsd, ._ files) is not card content.
+  const rootEnts = rawEnts.filter(e => !_isSdNoise(e.name));
   const dirs = rootEnts.filter(e => e.isDirectory());
   const files = rootEnts.filter(e => e.isFile());
   const dirNames = dirs.map(d => d.name);
@@ -467,6 +495,11 @@ async function assessPicked(pickedPath) {
     if (match && Number(match.driveType) === 2) return assessCard(match);
     return assessPath(norm + '\\');
   }
+  // A macOS volume root, e.g. /Volumes/PROFFIE.
+  if (os.platform() === 'darwin' && /^\/Volumes\/[^/]+$/.test(norm)) {
+    const match = await volumeForPath(norm);
+    if (match && Number(match.driveType) === 2) return assessCard(match);
+  }
   return assessPath(pickedPath);
 }
 
@@ -484,24 +517,9 @@ async function scan() {
 }
 
 // Read-only directory listing for drilling into a card/folder in the report UI.
-// OS-metadata noise that isn't real card content: macOS AppleDouble resource
-// forks (._name — tiny sidecars that aren't playable audio and fail to decode),
-// spotlight/trash dirs, Windows thumbnail/desktop files, the System Volume
-// Information folder. Hidden from the browser so they don't clutter or
+// OS-metadata noise (osNoise.js) is hidden from the browser so it doesn't clutter or
 // masquerade as playable wavs.
-function _isSdNoise(name) {
-  if (name.startsWith('._')) return true;
-  const lower = name.toLowerCase();
-  return lower === '.ds_store'
-    || lower === '.spotlight-v100'
-    || lower === '.trashes'
-    || lower === '.fseventsd'
-    || lower === '.documentrevisions-v100'
-    || lower === '.temporaryitems'
-    || lower === 'thumbs.db'
-    || lower === 'desktop.ini'
-    || lower === 'system volume information';
-}
+const _isSdNoise = (name) => require('./osNoise').isOsNoiseName(name);
 
 function listDir(dirPath) {
   const ents = safeReaddir(dirPath);
@@ -1182,4 +1200,4 @@ async function analyzeFonts(dirPath) {
   return { path: dirPath, fonts };
 }
 
-module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, volumeForLetter, checkWavHealth, checkWavBuffer, checkExecutableBuffer, checkExecutableFile, checkCarryable, checkCarryableFile, classifyFileBuffer, classifyFile, scanCardExecutables, looksExecutableName, subtreeHealthAsync, checkWavHealthAsync };
+module.exports = { scan, assessCard, assessPath, assessPicked, classifyCard, listDir, findConfigs, deriveFontName, nameFromReadmeText, docxToText, recoverNameFromDocx, analyzeFonts, resolveIdentity, isDegenerateVsn, formatVsn, enumerateAllVolumes, enumerateRemovableVolumes, volumeForLetter, volumeForPath, checkWavHealth, checkWavBuffer, checkExecutableBuffer, checkExecutableFile, checkCarryable, checkCarryableFile, classifyFileBuffer, classifyFile, scanCardExecutables, looksExecutableName, subtreeHealthAsync, checkWavHealthAsync };

@@ -62,6 +62,17 @@ const EXITS = [
    + 'everything, learned everything, and discarded it on every single run'],
 ];
 
+// THE FOURTH EXIT DELIBERATELY DOES NOT COMMIT. [B-638] It is taken when the card stopped
+// answering during the compare, so there is nowhere to write a manifest, and what was learned
+// before it vanished describes a card that may not come back the same.
+{
+  const block = blockOf('if (_scanDestUnreadable) {');
+  ok('the "card stopped answering" exit was located', block.length > 0,
+     're-anchor on if (_scanDestUnreadable) { - an empty slice passes everything');
+  ok('and it does not try to write to the card', !block.includes('syncManifestCommit'),
+     'the card could not be read; writing a manifest to it is not possible and not wanted');
+}
+
 for (const [label, anchor, why] of EXITS) {
   const block = blockOf(anchor);
   ok(`the "${label}" exit was located`, block.length > 0,
@@ -152,7 +163,7 @@ for (const [label, anchor, why] of EXITS) {
   ok('the region between the scan and the runner was located', win.length > 0,
      'without this slice the count below means nothing');
   const exits = (win.match(/return\s+false/g) || []).length;
-  ok(`the door still has exactly three early exits (${exits})`, exits === 3,
+  ok(`the door still has exactly four early exits (${exits})`, exits === 4,
      'a NEW way out of this door appeared. It is not automatically wrong - but it leaves after '
      + 'the compare has run, so it has to commit what the scan learned or it throws that work '
      + 'away. Add it to EXITS above once you have decided which it is.');

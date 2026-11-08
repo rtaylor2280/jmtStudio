@@ -41,24 +41,26 @@ function filesIn(dir) {
 }
 
 // The image in the source folder that holds `itemPath` (the item's path inside the source).
-// `listings` (optional) maps sourceUuid -> its listAll() promise, so a caller checking several items
-// of one source reads its listing once: ~300 ms each on a large bundle, nine times for nine fonts.
+// Reads only that one folder; listing the whole download instead cost most of a minute across a
+// 225-font export. [B-639] `listings` (optional) memoizes each folder's listing for one operation.
+// A path inside a zip nested in the download is never in the source's own listing, so nothing
+// beside it is found, as before.
 async function besideInSource(userData, sourceUuid, itemPath, listings) {
   if (!sourceUuid) return null;
   try {
-    let all = listings && listings.get(sourceUuid);
-    if (!all) {
-      const source = require('./soundFontSources').openSource(userData, sourceUuid);
-      if (!source) return null;
-      all = source.listAll();
-      if (listings) listings.set(sourceUuid, all);
-    }
     const sub = String(itemPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
     const prefix = sub.includes('/') ? sub.slice(0, sub.lastIndexOf('/') + 1) : '';
-    const names = (await all)
-      .filter((e) => !e.isDir && e.fileName.startsWith(prefix) && !e.fileName.slice(prefix.length).includes('/'))
-      .map((e) => e.fileName.slice(prefix.length));
-    const pick = pickPicture(names);
+    if (prefix.includes('!')) return null;
+    const key = `dir:${sourceUuid}:${prefix}`;
+    let files = listings && listings.get(key);
+    if (!files) {
+      const source = require('./soundFontSources').openSource(userData, sourceUuid);
+      if (!source) return null;
+      files = Promise.resolve(source.browse(prefix.replace(/\/$/, '')))
+        .then((items) => (items || []).filter((i) => !i.isDirectory).map((i) => i.name));
+      if (listings) listings.set(key, files);
+    }
+    const pick = pickPicture(await files);
     return pick ? { kind: 'source', id: sourceUuid, subPath: prefix + pick } : null;
   } catch { return null; }
 }
@@ -88,10 +90,15 @@ const _inherited = (pic) => pic && { ...pic, origin: 'source' };
 // A copy's image: another item built from the SAME folder of the same download (Temple_Guardian and
 // Temple_Guardian_2), first alphabetically, with an image in its own folder. Characters of a bundle
 // come from different folders, so they never lend to each other.
-function _copyPicture(userData, kind, id, sourceUuid, itemPath) {
+function _copyPicture(userData, kind, id, sourceUuid, itemPath, listings) {
   if (!sourceUuid || !itemPath) return null;
   const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '');
-  for (const it of sourceItems(userData, sourceUuid)) {
+  let items = listings && listings.get(`items:${sourceUuid}`);
+  if (!items) {
+    items = sourceItems(userData, sourceUuid, listings);
+    if (listings) listings.set(`items:${sourceUuid}`, items);
+  }
+  for (const it of items) {
     if (it.kind !== kind || it.id === id || norm(it.itemPath) !== norm(itemPath)) continue;
     const own = pickPicture(filesIn(it.ownDir));
     if (own) return { kind: it.kind, id: it.id, subPath: own, origin: 'copy' };
@@ -108,7 +115,7 @@ function _readMeta(dir) {
 async function _ownThenCopy(userData, kind, id, ownDir, sourceUuid, itemPath, listings) {
   const own = pickPicture(filesIn(ownDir));
   if (own) return { kind, id, subPath: own, origin: 'own' };
-  const copy = _copyPicture(userData, kind, id, sourceUuid, itemPath);
+  const copy = _copyPicture(userData, kind, id, sourceUuid, itemPath, listings);
   if (copy) return copy;
   const beside = await besideInSource(userData, sourceUuid, itemPath, listings);
   if (beside) return { ...beside, origin: 'creator' };
@@ -130,25 +137,33 @@ async function findEntryPicture(userData, name, listings) {
 }
 
 // Every item built from a source, common folders and fonts together, sorted by the name a person
-// sees. Reads each common's meta.json directly: listCommons also sizes every common's files, which
-// costs most of a second on a real library and none of it is needed here.
-function sourceItems(userData, sourceUuid) {
+// sees. Reads each common's and each font's meta.json directly: listCommons sizes every common's
+// files and listEntries projects source fields onto every font, and none of it is needed here.
+// [B-639] measured listEntries at ~9 s across a 225-font export, called once per source.
+// `listings` (optional) holds the metas read here for the rest of one operation.
+function _metasIn(root, listings, key) {
+  let all = listings && listings.get(key);
+  if (all) return all;
+  let ids = [];
+  try { ids = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); }
+  catch {}
+  all = ids.map((id) => ({ id, meta: _readMeta(path.join(root, id)) })).filter((x) => x.meta);
+  if (listings) listings.set(key, all);
+  return all;
+}
+function sourceItems(userData, sourceUuid, listings) {
   const items = [];
   const croot = require('./soundFontCommon').commonRoot(userData);
-  let uuids = [];
-  try { uuids = fs.readdirSync(croot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); }
-  catch {}
-  for (const uuid of uuids) {
-    const meta = _readMeta(path.join(croot, uuid));
-    if (!meta || meta.sourceUuid !== sourceUuid) continue;
+  for (const { id: uuid, meta } of _metasIn(croot, listings, 'metas:common')) {
+    if (meta.sourceUuid !== sourceUuid) continue;
     items.push({ label: String(meta.name || uuid), kind: 'common', id: uuid,
                  ownDir: path.join(croot, uuid, 'files'), itemPath: meta.sourceSubPath });
   }
-  const E = require('./soundFontEntries');
-  for (const e of E.listEntriesBySourceUuid(userData, sourceUuid)) {
-    const meta = _readMeta(path.join(E.entriesRoot(userData), e.name)) || {};
-    items.push({ label: String(e.name), kind: 'entry', id: e.name,
-                 ownDir: path.join(E.entriesRoot(userData), e.name), itemPath: meta.candidatePath });
+  const eroot = require('./soundFontEntries').entriesRoot(userData);
+  for (const { id: name, meta } of _metasIn(eroot, listings, 'metas:entry')) {
+    if (meta.sourceUuid !== sourceUuid) continue;
+    items.push({ label: String(name), kind: 'entry', id: name,
+                 ownDir: path.join(eroot, name), itemPath: meta.candidatePath });
   }
   items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
   return items;
@@ -200,9 +215,10 @@ function pictureFilePath(userData, pic) {
 // One more file record for the export, name kept, with `abs` where its bytes are (a download's file is
 // read out to a temp folder, `temp`, removed with dropPictureTemp). Null when the item has its own
 // image, shows none, or already holds a file of that name.
-async function shownPictureExtra(userData, kind, id) {
+// `listings` (optional) is shared across one operation's fonts, as in besideInSource.
+async function shownPictureExtra(userData, kind, id, listings) {
   try {
-    const pic = kind === 'common' ? await findCommonPicture(userData, id) : await findEntryPicture(userData, id);
+    const pic = kind === 'common' ? await findCommonPicture(userData, id, listings) : await findEntryPicture(userData, id, listings);
     if (!pic || pic.origin === 'own') return null;
     const relPath = path.basename(String(pic.subPath || ''));
     const ownDir = kind === 'common'

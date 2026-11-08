@@ -131,22 +131,15 @@ function _sanitizeEntryName(name) {
 // extract its contents to destDir. Used for the nested-zip candidate case
 // (Greyscale Proffie.zip, Power_Of_Many's per-character zips).
 // Filesystem-metadata noise that hitchhikes inside zips and should
-// never land on disk. Mirrors soundFontSources._isNoisePath which the
-// non-nested extractTo already applies; the nested extractor needs
-// its own copy because the source-side helper isn't exported.
+// never land on disk.
 //   __MACOSX/   — Mac Finder AppleDouble sidecar tree
 //   .DS_Store  — Mac Finder per-folder metadata
 //   ._<name>   — Mac AppleDouble companion files (flat alongside their real twin)
 //   Thumbs.db, desktop.ini — Windows Explorer leftovers
+// The list itself is shared: osNoise.js.
 function _isNoisePath(relPath) {
-  const parts = String(relPath || '').split('/').filter(Boolean);
-  for (const seg of parts) {
-    if (seg === '__MACOSX') return true;
-    if (seg === '.DS_Store') return true;
-    if (seg === 'Thumbs.db' || seg === 'desktop.ini') return true;
-    if (seg.startsWith('._')) return true;
-  }
-  return false;
+  const { isOsNoiseName } = require('./osNoise');
+  return String(relPath || '').split('/').filter(Boolean).some(isOsNoiseName);
 }
 // Composite-path separator matching soundFontCandidates.INNER_ZIP_SEP.
 // Detection writes paths like "Ahsoka.zip!Ahsoka/Proffie" — left of the
@@ -1458,8 +1451,20 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
   if (!name || !destDir) return { ok: false, error: 'Missing name or destDir' };
   const srcDir  = path.join(entriesRoot(userData), name);
   const destFont = path.join(destDir, name);
-  let destExists = false;
-  try { destExists = fs.existsSync(destFont) && fs.statSync(destFont).isDirectory(); } catch {}
+  // "Not there" only when the destination answered that it is not there. A destination that
+  // cannot be read at all (a card pulled mid-check) is not empty. [B-638, B-028]
+  let destExists = false, destUnreadable = false;
+  try { destExists = fs.statSync(destFont).isDirectory(); }
+  catch (e) {
+    if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) {
+      try { fs.statSync(destDir); } catch { destUnreadable = true; }
+    } else {
+      destUnreadable = true;
+    }
+  }
+  if (destUnreadable) {
+    return { ok: false, destUnreadable: true, error: `Cannot read the destination: ${destDir}` };
+  }
   if (!destExists) return { ok: true, exists: false, identical: false, reason: 'missing' };
   if (!fs.existsSync(srcDir)) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
 
@@ -3038,7 +3043,7 @@ async function planFolderWrite(userData, name, destDir, opts = {}) {
   let libRecords = _libRecordsFor(userData, name, srcDir);
   if (!libRecords) return { ok: false, error: `Cannot read the library copy of ${name}` };
   // The image the font shows is one of its files on the card. [B-534]
-  const _pic = await _shownPictureExtra(userData, 'entry', name);
+  const _pic = await _shownPictureExtra(userData, 'entry', name, opts.listings);
   _dropPictureTemp(_pic);
   if (_pic) libRecords = [...libRecords, { relPath: _pic.relPath, size: _pic.size, fileHash: _pic.fileHash }];
 

@@ -2938,17 +2938,34 @@ async function _withExportCancel(run, opts = {}) {
 // this saves nothing for a font with added or deleted files, and everything for one whose files
 // were edited in place. That is the same split the deferral was designed around, and it is why
 // this is a saving rather than a re-shuffle.
-ipcMain.handle('entries:planFolderWrites', async (_e, { names, destDir, known } = {}) => {
+// `reportProgress` sends each destination file it has to read, as "<font> · <file>", on the byte
+// progress channel, and the plan can be cancelled through the export gate. [B-640]
+ipcMain.handle('entries:planFolderWrites', (event, { names, destDir, known, reportProgress } = {}) =>
+  _withExportCancel(async (shouldStop) => {
   try {
     if (!Array.isArray(names) || !destDir) return { ok: false, error: 'Missing names or destDir' };
     const userData = app.getPath('userData');
     const plans = {};
     let workBytes = 0;
+    // One picture lookup per source for the whole selection, and a yield between fonts so a
+    // long plan cannot freeze the app. [B-639]
+    const listings = new Map();
+    const { breathe } = require('./soundFontFileHash');
+    const emit = reportProgress ? _sfByteProgressEmitter(event) : null;
     for (const name of names) {
+      await breathe();
+      if (shouldStop()) return { ok: false, cancelled: true };
       let p = null;
       const _k = (known && Array.isArray(known[name]) && known[name].length)
         ? new Map(known[name]) : null;
-      try { p = await soundFontEntries.planFolderWrite(userData, name, destDir, { known: _k }); } catch {}
+      const onBytes = emit
+        ? (b) => emit.onBytes({ ...b, name: b && b.name ? `${name} · ${b.name}` : name })
+        : null;
+      try {
+        p = await soundFontEntries.planFolderWrite(userData, name, destDir,
+          { known: _k, listings, shouldStop, onBytes });
+      } catch {}
+      if (shouldStop()) return { ok: false, cancelled: true };
       // A FONT THAT CANNOT BE PLANNED IS NOT AN ERROR HERE. It falls through to planning
       // itself inside the export, exactly as it did before any of this existed, and its bar
       // contribution stays the caller's whole-font estimate. Refusing the whole export because
@@ -2957,11 +2974,12 @@ ipcMain.handle('entries:planFolderWrites', async (_e, { names, destDir, known } 
       plans[name] = p;
       workBytes += (p.workBytes || 0);
     }
+    if (emit) emit.flush();
     return { ok: true, plans, workBytes };
   } catch (err) {
     return { ok: false, error: String(err && err.message || err) };
   }
-});
+  }));
 
 // [B-402] `priorObserved` carries what the conflict scan already hashed for THIS destination in
 // THIS operation, so the export can write the manifest once instead of the scan writing it and the
@@ -7235,8 +7253,10 @@ ipcMain.handle('board:restartAfterEject', async (_, { boardSerial, portPath: kno
   if (known) {
     try {
       const { SerialPort } = require('serialport');
-      const want = String(known).toUpperCase();
-      if ((await SerialPort.list()).some(p => String(p.path).toUpperCase() === want)) portPath = known;
+      // A Mac lists /dev/tty.* where the app holds /dev/cu.* for the same port (see ports:listRaw).
+      const norm = s => String(s).toUpperCase().replace(/^\/DEV\/TTY\./, '/DEV/CU.');
+      const want = norm(known);
+      if ((await SerialPort.list()).some(p => norm(p.path) === want)) portPath = known;
     } catch {}
   }
   if (!portPath) portPath = await _boardPortForSerial(sn);
@@ -7281,10 +7301,15 @@ ipcMain.handle('board:restartAfterEject', async (_, { boardSerial, portPath: kno
 // and nothing in the app reconnects to the port on its own.
 async function _boardPortCameBack(portPath) {
   const { SerialPort } = require('serialport');
-  const want = String(portPath).toUpperCase();
+  // A Mac lists every port as /dev/tty.* while the app holds the /dev/cu.* name for the same port,
+  // so a plain comparison never sees the board come back and the summary falls back to "turn the
+  // saber off and on" after a restart that worked (seen 2026-11-07). Same normalisation as
+  // ports:listRaw.
+  const norm = s => String(s).toUpperCase().replace(/^\/DEV\/TTY\./, '/DEV/CU.');
+  const want = norm(portPath);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const here = async () => {
-    try { return (await SerialPort.list()).some(p => String(p.path).toUpperCase() === want); }
+    try { return (await SerialPort.list()).some(p => norm(p.path) === want); }
     catch { return null; }
   };
   const opens = async () => {
@@ -8579,16 +8604,14 @@ ipcMain.handle('sdcard:listDir', (_, p) => sdCardDetect.listDir(p));
 // The volume a path sits on, for naming it on screen. A bare drive root reads as
 // "K:\\" in a sentence, which is the shortest and least identifiable thing we could
 // print about a card the user physically holds and has probably labelled. [B-403]
-// Read-only, and returns null rather than throwing on every platform but Windows.
+// Read-only. Windows and macOS answer; anything else returns null.
 ipcMain.handle('sdcard:volumeInfo', async (_, p) => {
   try {
-    const m = /^([A-Za-z]):/.exec(String(p || ''));
-    if (!m) return null;
     // [B-420] ONE ROW, NOT EVERY VOLUME. This enumerated the whole system to read a label
     // off a single drive - and an unfiltered enumeration includes mapped network drives, so a
     // share whose host was unreachable could block it for over a minute. Naming the card the
     // user is holding must never depend on a machine they are not using.
-    const v = await sdCardDetect.volumeForLetter(m[1]);
+    const v = await sdCardDetect.volumeForPath(p);
     return v ? { drive: v.drive, label: v.label || null, driveType: v.driveType } : null;
   } catch { return null; }
 });

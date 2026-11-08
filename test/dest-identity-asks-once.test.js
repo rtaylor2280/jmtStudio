@@ -105,6 +105,20 @@ function build() {
        + 'forget() exists for');
   }
 
+  // ── A macOS volume has no drive letter and is still asked about ───────────
+  // Keyed by letter alone, a /Volumes path was never looked up: no eject offer on a Mac card.
+  {
+    const id = build();
+    ok('a macOS card is identified as removable', (await id.removable('/Volumes/16kbTest/fonts')) === true);
+    ok('which asked the main process once', fastCalls === 1, `asked ${fastCalls} times`);
+    await id.isBoardCard('/Volumes/16kbTest');
+    await id.isBoardCard('/Volumes/16kbTest/common');
+    ok('two paths on one Mac volume share one classify', classifyCalls === 1, `ran ${classifyCalls} times`);
+    await id.isBoardCard('/Volumes/OtherCard');
+    ok('a different Mac volume asks again', classifyCalls === 2, `ran ${classifyCalls} times`);
+    ok('control: a path on no volume is still cannot-tell', (await id.removable('/Users/me/Desktop')) === null);
+  }
+
   // ── The consumer actually uses the conditional ─────────────────────────────
   ok('the slow-import warning branches on what is already known',
      /const _known = window\._sfDestIdentity\.knownIsBoardCard\(sourceDir\);/.test(src)
