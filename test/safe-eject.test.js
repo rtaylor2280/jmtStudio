@@ -82,9 +82,18 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
     ['linux', '/run/media/ryan/MYCARD/fonts', '/run/media/ryan/MYCARD'],
     ['linux', '/home/ryan/Desktop', null],
   ];
+  // Linux reads the kernel's mount table, so the cases run against a fixed one: two udisks
+  // shapes, the system disk, and a network share, which is not a card to eject.
+  const LD = require(path.join(__dirname, '..', 'linuxDisks.js'));
+  const realProc = LD.procMountOf;
+  const TABLE = ['/dev/sda2 / ext4 rw 0 0', '/dev/sdb1 /media/ryan/MYCARD vfat rw 0 0',
+    '/dev/sdc1 /run/media/ryan/MYCARD vfat rw 0 0', 'nas:/x /mnt/nas nfs4 rw 0 0'].join(String.fromCharCode(10));
+  LD.procMountOf = (p) => realProc(p, TABLE);
+  CASES.push(['linux', '/mnt/nas/fonts', null]);
   for (const [osKey, input, want] of CASES) {
     ok(`${osKey}: ${input} -> ${want}`, E._PLATFORMS[osKey].mountPathOf(input) === want);
   }
+  LD.procMountOf = realProc;
 }
 
 // ── The debounce, which is the part a single poll would have got wrong ──

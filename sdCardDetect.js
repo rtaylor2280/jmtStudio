@@ -143,17 +143,19 @@ function _healthFromDirtyBit(v) {
 
 // macOS rows come from macDisks.js. A reader with no card in it has no mounted volume there, so
 // every row has hasMedia true.
-// TODO: Linux (lsblk -J + udisks2). It must set hasMedia false for an empty reader slot; scan()
-// drops those. udisks2 exposes HasMedia, and lsblk reports size 0 for an empty slot.
+// Linux rows come from linuxDisks.js. Only mounted volumes are listed there, and an empty reader
+// slot has size 0, so it reads hasMedia false and scan() drops it.
 async function enumerateRemovableVolumes() {
   if (os.platform() === 'win32') return enumerateVolumesWindows(true);
   if (os.platform() === 'darwin') return _withHealth(await require('./macDisks').enumerateVolumes(true));
+  if (os.platform() === 'linux') return _withHealth(await require('./linuxDisks').enumerateVolumes(true));
   return [];
 }
 
 async function enumerateAllVolumes() {
   if (os.platform() === 'win32') return enumerateVolumesWindows(false);
   if (os.platform() === 'darwin') return _withHealth(await require('./macDisks').enumerateVolumes(false));
+  if (os.platform() === 'linux') return _withHealth(await require('./linuxDisks').enumerateVolumes(false));
   return [];
 }
 
@@ -192,6 +194,13 @@ async function volumeForPath(p) {
     const root = mac.mountRootOf(p);
     if (!root) return null;
     const rows = _withHealth(await mac.enumerateVolumes(false, root));
+    return rows[0] || null;
+  }
+  if (os.platform() === 'linux') {
+    const lin = require('./linuxDisks');
+    const m = await lin.mountOf(p);
+    if (!m) return null;
+    const rows = _withHealth(await lin.enumerateVolumes(false, m.root));
     return rows[0] || null;
   }
   return null;
@@ -499,6 +508,11 @@ async function assessPicked(pickedPath) {
   if (os.platform() === 'darwin' && /^\/Volumes\/[^/]+$/.test(norm)) {
     const match = await volumeForPath(norm);
     if (match && Number(match.driveType) === 2) return assessCard(match);
+  }
+  // A Linux mount root: the picked folder IS the mount point of a removable volume.
+  if (os.platform() === 'linux') {
+    const match = await volumeForPath(norm);
+    if (match && match.mountPath === norm && Number(match.driveType) === 2) return assessCard(match);
   }
   return assessPath(pickedPath);
 }

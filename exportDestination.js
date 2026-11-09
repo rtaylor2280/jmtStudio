@@ -279,6 +279,7 @@ function _classifyWindows(driveLetter) {
 // Windows only, and it degrades to null - never to an assumption. [B-028]
 function driveKind(destDir) {
   if (process.platform === 'darwin') return require('./macDisks').driveKind(destDir).catch(() => null);
+  if (process.platform === 'linux') return require('./linuxDisks').driveKind(destDir).catch(() => null);
   return new Promise((resolve) => {
     if (process.platform !== 'win32') { resolve(null); return; }
     const m = /^([A-Za-z]):/.exec(path.resolve(String(destDir || '')));
@@ -484,9 +485,11 @@ async function describe(destDir, opts = {}) {
   // the ~1,900 ms question. It changes exactly two behaviours - the slow-write warning and
   // the cancel-cleanup offer - and both are gated on the same size threshold, so below that
   // threshold the answer cannot alter anything and is not worth waiting for.
-  if (opts.classify && (process.platform === 'win32' || process.platform === 'darwin')) {
+  if (opts.classify && (process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux')) {
     const c = process.platform === 'darwin'
       ? await require('./macDisks').classify(destDir, classifyTransport).catch(() => null)
+      : process.platform === 'linux'
+      ? await require('./linuxDisks').classify(destDir, classifyTransport).catch(() => null)
       : await _classifyWindows(path.resolve(destDir).slice(0, 1).toUpperCase());
     if (c) {
       out.transport = c.transport;

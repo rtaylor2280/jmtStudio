@@ -9845,7 +9845,7 @@ function _sfFailureRoot(s) {
   if (!m) return null;
   const drive = /^([A-Za-z]:)/.exec(m[1]);
   if (drive) return drive[1].toUpperCase();
-  const vol = /^(\/Volumes\/[^/]+)/.exec(m[1]);
+  const vol = /^(\/Volumes\/[^/]+|(?:\/run)?\/media\/[^/]+\/[^/]+)/.exec(m[1]);
   return vol ? vol[1] : null;
 }
 
@@ -13863,7 +13863,7 @@ function _sfPrimeVolume(dir) {
 // the previous device's identity, and swapping hardware between exports is exactly what
 // testing does. `prime()` discards whatever was there, and an eject discards it too.
 const _sfDestIdentity = {
-  volume: null,     // the drive letter on Windows, the /Volumes/<name> root on macOS
+  volume: null,     // the drive letter on Windows, the /Volumes/<name> root on macOS, /media/<user>/<name> on Linux
   fast: null,       // Promise<{removable, kind}|null>
   board: null,      // Promise<describe result|null>, only created if someone asks
   // The SETTLED board verdict for `letter`: true, false, or null for "nobody has asked".
@@ -13876,7 +13876,7 @@ const _sfDestIdentity = {
     const s = String(dir || '');
     const m = /^([A-Za-z]):/.exec(s);
     if (m) return m[1].toUpperCase();
-    const mac = /^(\/Volumes\/[^/]+)/.exec(s);
+    const mac = /^(\/Volumes\/[^/]+|(?:\/run)?\/media\/[^/]+\/[^/]+)/.exec(s);
     return mac ? mac[1] : null;
   },
   // Called when a destination is chosen. Starts the cheap lookup immediately and discards

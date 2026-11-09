@@ -60,7 +60,8 @@ const { execFile } = require('child_process');
 
 const _exec = (cmd, args) => new Promise((resolve) => {
   execFile(cmd, args, { windowsHide: true, maxBuffer: 256 * 1024 }, (err, stdout, stderr) => {
-    resolve({ ok: !err, out: String(stdout || '').trim(), err: String(stderr || '').trim() });
+    resolve({ ok: !err, out: String(stdout || '').trim(), err: String(stderr || '').trim(),
+              missing: !!(err && err.code === 'ENOENT') });
   });
 });
 
@@ -234,29 +235,35 @@ const PLATFORMS = {
     },
   },
 
-  // ── Linux: WIREFRAMED, UNVALIDATED ──
+  // ── Linux ──
   linux: {
     osName: 'Linux',
-    // UNVERIFIED: removable media typically mounts under /media/<user>/<label> or
-    // /run/media/<user>/<label> depending on the distribution's udisks configuration. This
-    // matches both shapes and should be checked against `findmnt -no TARGET --target <path>`,
-    // which is the correct general answer and needs util-linux present.
+    // The mount point comes from the kernel's own table (/proc/mounts), not from the path's
+    // shape: udisks mounts under /media/<user>/<label> or /run/media/<user>/<label> depending on
+    // the distribution, and a hand-mounted card can be anywhere. Only a mount backed by a block
+    // device (/dev/...) is something to eject; a folder on the system disk is not.
     mountPathOf: (destDir) => {
-      const p = String(destDir || '');
-      const m = p.match(/^((?:\/run)?\/media\/[^/]+\/[^/]+)/);
-      return m ? m[1] : null;
+      const m = require('./linuxDisks').procMountOf(String(destDir || ''));
+      if (!m || !/^\/dev\//.test(m.source) || m.root === '/') return null;
+      return m.root;
     },
     label: (mountPath) => path.basename(String(mountPath || '')),
-    // UNVERIFIED: `udisksctl unmount` is the non-root path on any udisks2 desktop, which
-    // covers the distributions this app is likely to meet. `eject` is the older fallback and
-    // behaves differently (it targets the DEVICE, not the mount, so it has the sibling-volume
-    // hazard the Windows notes describe). Settle which one on the VM before trusting this.
+    // `udisksctl unmount -b <device>` needs no sudo from the desktop session, and it takes the
+    // DEVICE, never the mount path (passing the path was the old bug). Unmount only, deliberately
+    // no power-off: power-off asks the USB port to drop the whole device, which on a Proffieboard
+    // is the board's serial port as well, and Studio still needs that to send `sd 1`. Unmount is
+    // what makes the card safe to pull; the kernel flushes before it lets go.
+    // Measured 2026-11-08 over SSH on Ubuntu 26.04: unmount works as the user.
+    // `gio mount -u` is the fallback for a desktop without udisksctl on the PATH.
     invoke: async (mountPath) => {
-      const r = await _exec('udisksctl', ['unmount', '-b', String(mountPath || '')]);
+      const m = require('./linuxDisks').procMountOf(String(mountPath || ''));
+      const dev = m && /^\/dev\//.test(m.source) ? m.source : null;
+      let r = dev ? await _exec('udisksctl', ['unmount', '-b', dev]) : { ok: false, out: '', err: 'no device for ' + mountPath };
+      if (!r.ok && r.missing) r = await _exec('gio', ['mount', '-u', String(mountPath || '')]);
       return { ok: r.ok, raw: r.out || r.err };
     },
     vocab: {
-      // UNVERIFIED but expected: the mount point is removed on unmount.
+      // udisks removes the /media/<user>/<label> folder on unmount, so nothing lingers.
       lingersAfterEject: false,
       volumeNoun: 'volume',
       busyNote: (label) =>
