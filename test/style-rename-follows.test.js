@@ -112,49 +112,65 @@ console.log('3. the preset rewrite');
   check('nothing to rename, nothing edited', ctx2.f(cfg, new Map([['Nope', 'X']])).edits.length === 0);
 }
 
-console.log('3b. a config opened later: Update really updates [B-656]');
-const runOpenCheck = async (answer) => {
+console.log('3b. a config opened later: one review, fonts and styles, a decision per line [B-656]');
+// Runs the REAL config-open review (_sfCheckConfigFormerNames) with the modal stubbed: the stub
+// records the rows it was shown and answers with the given choice per kind. B-651 shipped a
+// wrong return-value test because its tests only read the code; this one runs it.
+const runOpenCheck = async (choiceFor, libEntries) => {
   const pp = require(path.join(ROOT, 'renderer', 'presetParser.js'));
   let text = [
     'Preset presets[] = {',
-    '  { "Astral;common", "",',
+    '  { "Astral-Projection;common", "",',
     '    StylePtr<AstralProjection>(),',
     '    "astral"},',
     '};',
     'BladeConfig blades[] = { { 0, WS281XBladePtr<144, bladePin, Color8::GRB, PowerPINS<bladePowerPin2> >(), CONFIGARRAY(presets) } };',
   ].join('\n');
-  const asked = [];
-  const ed = { getValue: () => text };
+  const shown = [];
+  const apply = (edits) => {
+    const lines = text.split('\n');
+    const starts = [0]; for (const l of lines) starts.push(starts[starts.length - 1] + l.length + 1);
+    const off = (ln, col) => starts[ln - 1] + col - 1;
+    for (const e of [...edits].sort((x, y) => off(y.range.startLineNumber, y.range.startColumn) - off(x.range.startLineNumber, x.range.startColumn))) {
+      text = text.slice(0, off(e.range.startLineNumber, e.range.startColumn)) + e.text + text.slice(off(e.range.endLineNumber, e.range.endColumn));
+    }
+  };
   const ctx3 = {
-    presetParser: pp, fileIsOpen: true, editor: ed, currentFilePath: 'bvmTest.h',
-    promptConfirm: async (o) => { asked.push(o); return answer; },
+    presetParser: pp, fileIsOpen: true, editor: { getValue: () => text }, currentFilePath: 'bvmTest.h',
+    _sfFontPathParts: (v) => String(v ?? '').split(';').map((x) => x.trim()),
+    _sfSharedDirs: (v) => String(v ?? '').split(';').map((x) => x.trim()).slice(1).filter(Boolean),
+    _sfPromptFormerNames: async (rows) => { shown.push(rows); return rows.map((row) => ({ row, choice: choiceFor(row.kind), owner: row.owners[0] })); },
+    _stylesEditorInstance: null,
     window: {
-      _libraryStyleEntries: () => [{ name: 'AstralProjectionBVM', meta: { formerNames: ['AstralProjection'] } }],
-      _atomicEdit: (e, src, edits) => {
-        // Apply the Monaco-style edits to the text, last first.
-        const lines = text.split('\n');
-        const starts = [0]; for (const l of lines) starts.push(starts[starts.length - 1] + l.length + 1);
-        const off = (ln, col) => starts[ln - 1] + col - 1;
-        for (const ed2 of [...edits].sort((a, b) => off(b.range.startLineNumber, b.range.startColumn) - off(a.range.startLineNumber, a.range.startColumn))) {
-          text = text.slice(0, off(ed2.range.startLineNumber, ed2.range.startColumn)) + ed2.text + text.slice(off(ed2.range.endLineNumber, ed2.range.endColumn));
-        }
+      _libraryStyleEntries: () => libEntries,
+      _atomicEdit: (e, src, edits) => apply(edits),
+      electronAPI: {
+        listEntries: async () => ({ ok: true, entries: [{ name: 'Astral-Projection2', meta: { formerNames: ['Astral-Projection'] } }] }),
+        sharedTracksListFiles: async () => ({ ok: true, files: [] }),
+        listCommons: async () => ({ ok: true, commons: [{ meta: { name: 'common' }, uuid: 'c1' }] }),
       },
     },
   };
-  vm.runInNewContext([
-    slice('const _styleRenameEdits = ', 'async function _styleConfigFollowRename('),
-    "const _sfConfigLabel = () => 'bvmTest.h'; const _sfPresetCount = (n) => (n === 1 ? '1 preset' : `${n} presets`);",
-    slice('let _styleFormerCheckBusy = false;', '// The style\'s `// formerly:` line'),
-  ].join('\n'), ctx3);
-  await ctx3.window._styleCheckConfigFormerNames();
-  return { text, asked };
+  vm.runInNewContext(slice('const _sfFontRenameEdits = ', '// An import met fonts already in the library'), ctx3);
+  await ctx3.window._sfCheckConfigFormerNames();
+  return { text, shown };
 };
+const LIB1 = [{ name: 'AstralProjectionBVM', meta: { formerNames: ['AstralProjection'] } }];
 const openCheckDone = (async () => {
-  const yes = await runOpenCheck(true);
-  check('it asks once', yes.asked.length === 1, JSON.stringify(yes.asked.map((a) => a.title)));
-  check('Update (the dialog answers true) rewrites the preset', /StylePtr<AstralProjectionBVM>\(\)/.test(yes.text) && !/StylePtr<AstralProjection>\(\)/.test(yes.text), yes.text);
-  const no = await runOpenCheck(false);
-  check('Keep old names (false) leaves it alone', /StylePtr<AstralProjection>\(\)/.test(no.text), no.text);
+  const both = await runOpenCheck(() => 'update', LIB1);
+  check('ONE review for a renamed font and a renamed style', both.shown.length === 1, String(both.shown.length));
+  const kinds = (both.shown[0] || []).map((r) => r.kind);
+  check('a row per thing: the font and the style', JSON.stringify(kinds) === '["font","style"]', JSON.stringify(kinds));
+  check('Update on both: the font folder and the style are both renamed, in one edit',
+    /"Astral-Projection2;common"/.test(both.text) && /StylePtr<AstralProjectionBVM>\(\)/.test(both.text) && !/StylePtr<AstralProjection>\(\)/.test(both.text), both.text);
+  const split = await runOpenCheck((k) => (k === 'style' ? 'ignore' : 'update'), LIB1);
+  check('a decision per line: font updated, style ignored',
+    /"Astral-Projection2;common"/.test(split.text) && /StylePtr<AstralProjection>\(\)/.test(split.text), split.text);
+  const twin = await runOpenCheck(() => 'update', [{ name: 'A1', meta: { formerNames: ['AstralProjection'] } }, { name: 'A2', meta: { formerNames: ['AstralProjection'] } }]);
+  const sRow = (twin.shown[0] || []).find((r) => r.kind === 'style');
+  check('a name two styles once had: one row, both offered to pick from', sRow && sRow.owners.map((o) => o.name).join() === 'A1,A2', JSON.stringify(sRow && sRow.owners));
+  const has = await runOpenCheck(() => 'update', [...LIB1, { name: 'AstralProjection', meta: {} }]);
+  check('a name the library has now is never offered', !(has.shown[0] || []).some((r) => r.kind === 'style'));
 })();
 
 console.log('4. wiring');
@@ -173,12 +189,14 @@ console.log('4. wiring');
     /linkedStyleLibraryEntry\) \|\| ''\) === from/.test(relink) && /updates: \{ linkedStyleLibraryEntry: to \}/.test(relink));
   const follow = slice('async function _styleConfigFollowRename(', '\n}\n');
   check('the config follow uses the font rename\'s remembered choice', /_jmtRememberedChoice\('fontRenameAlwaysUpdate'\)/.test(follow));
-  const open = slice('// Then a style it names that a library style had before a rename', '\n}\n');
-  check('at config open, the style check runs after the font check',
-    /await window\._sfCheckConfigFormerNames\?\.\(\);[\s\S]*window\._styleCheckConfigFormerNames\?\.\(\);/.test(open));
-  const chk = slice('window._styleCheckConfigFormerNames = async', '\n};\n');
-  check('a former name two styles had is never guessed', /filter\(\(\[, o\]\) => o\.length === 1\)/.test(chk));
-  check('a name the library has now is never offered', /if \(!f \|\| have\.has\(f\)\) continue;/.test(chk));
+  const open = slice('// The same review covers a style the Style Library renamed', '\n}\n');
+  check('config open runs the one review, never a separate style prompt',
+    /window\._sfCheckConfigFormerNames\?\.\(\)/.test(open) && !html.includes('_styleCheckConfigFormerNames'));
+  const prompt = slice('function _sfPromptFormerNames(rows)', 'function _sfFormerNamesAwait(');
+  check('both kinds: a Sound fonts section and a Styles section, each with its own sentence',
+    /_section\('Sound fonts', _soundDesc\)/.test(prompt) && /_section\('Styles', _styleDesc\)/.test(prompt));
+  check('the style sentence says the old name will not compile, and compile offers it again',
+    /will not compile until they are changed/.test(prompt) && /Compile offers the change again/.test(prompt));
   check('the setting names styles too', html.includes('Update the open config when a font or style it uses is renamed'));
   check('the library entries are exposed for the check', html.includes('window._libraryStyleEntries = _libraryEntries;'));
 }

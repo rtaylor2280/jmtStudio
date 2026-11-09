@@ -1384,6 +1384,118 @@
     },
   });
 
+  // ── A style the Style Library renamed ────────────────────────────────────
+  //
+  // [B-656]. A preset still naming a style by a name the Style Library has since renamed: the
+  // library writes `// formerly: Old` on the renamed style, and Old no longer exists, so the
+  // compile stops with "not declared in this scope" at the preset. The config-open review offers
+  // the new name, and a user may decline it (his rule, 2026-11-09: "we wouldn't force a user to
+  // make a decision here"); this is the second chance, "without closing and reopening".
+  //
+  // ALIASES ONLY (his call, 2026-11-09). A name is flagged only when the library itself records it
+  // as a former name AND no style, in the library or the config, carries it now. An unknown name
+  // that is not a former one could be defined somewhere this check cannot see, so it is left alone.
+  // A former name two styles once had is named without a fix button: picking one would be a guess.
+
+  // `// formerly: A, B` lines in the gap above each `using NAME =`, read the way the Style Library
+  // writes them. Returns { current: Set, owners: Map(former -> [current names]) }.
+  function _libraryFormerNames(libText) {
+    const current = new Set();
+    const owners = new Map();
+    let pending = [];
+    for (const line of String(libText || '').split('\n')) {
+      const f = line.match(/^\s*\/\/\s*formerly:\s*(.*)$/);
+      if (f) { pending = f[1].split(',').map(s => s.trim()).filter(Boolean); continue; }
+      const u = line.match(/^\s*using\s+([A-Za-z_]\w*)\s*=/);
+      if (u) {
+        current.add(u[1]);
+        for (const old of pending) {
+          if (!owners.has(old)) owners.set(old, []);
+          if (!owners.get(old).includes(u[1])) owners.get(old).push(u[1]);
+        }
+        pending = [];
+      }
+    }
+    return { current, owners };
+  }
+
+  preflight.register({
+    id: 'renamed-library-style',
+    severity: 'block',
+    title: 'A style was renamed in your Style Library',
+    async run(ctx) {
+      if (!ctx.parsed || typeof ctx.readStylesLibrary !== 'function') return null;
+      let lib = null;
+      try { lib = await ctx.readStylesLibrary(); } catch { lib = null; }
+      if (!lib) return null;
+      const { current, owners } = _libraryFormerNames(lib);
+      if (!owners.size) return null;
+      // A style the config defines itself is that style, whatever the library once called it.
+      for (const m of String(ctx.cleanText || '').matchAll(/^\s*using\s+([A-Za-z_]\w*)\s*=/gm)) current.add(m[1]);
+
+      const used = new Map();   // former name -> [preset labels]
+      for (const arr of (ctx.parsed.arrays || [])) {
+        for (const p of (arr.presets || [])) {
+          if (p.parseError || !p.raw) continue;
+          let slots = [];
+          try { slots = _parser().extractStyleSlots(p.raw); } catch { slots = []; }
+          for (const s of slots) {
+            const txt = p.raw.slice(s.startOffset, s.endOffset);
+            for (const m of txt.matchAll(/[A-Za-z_]\w*/g)) {
+              if (!owners.has(m[0]) || current.has(m[0])) continue;
+              const label = (p.displayName || '').trim() || `Preset ${p.index}`;
+              if (!used.has(m[0])) used.set(m[0], []);
+              if (!used.get(m[0]).includes(label)) used.get(m[0]).push(label);
+            }
+          }
+        }
+      }
+      if (!used.size) return null;
+
+      const findings = [];
+      for (const [old, presets] of used) {
+        const now = owners.get(old);
+        const one = presets.length === 1;
+        const single = now.length === 1 ? now[0] : null;
+        findings.push({
+          title: single
+            ? `There is no style called ${old}. Your Style Library renamed it to ${single}.`
+            : `There is no style called ${old}. Your Style Library renamed it, and ${now.length} styles once had that name: ${now.join(', ')}.`,
+          detail: `${one ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it.`
+            + (single ? '' : ' Change it to the one you meant.'),
+          items: presets,
+          ..._presetList(ctx, presets),
+          fix: single ? {
+            label: `Change to ${single}`,
+            // Every whole-word use of the old name inside a preset's style slots, wrappers
+            // included (PixelSwitchWrapper<Old> as well as StylePtr<Old>). Computed against the
+            // document as it is now and applied as one edit, like the factory fix above.
+            plan(c) {
+              const edits = [];
+              for (const arr of (c.parsed?.arrays || [])) {
+                for (const p of (arr.presets || [])) {
+                  if (p.parseError || !p.raw || !p.startLine) continue;
+                  let slots = [];
+                  try { slots = _parser().extractStyleSlots(p.raw); } catch { slots = []; }
+                  for (const s of slots) {
+                    const txt = p.raw.slice(s.startOffset, s.endOffset);
+                    for (const m of txt.matchAll(new RegExp(`\\b${old}\\b`, 'g'))) {
+                      const abs = _lineColOf(c.text, p, s.startOffset + m.index);
+                      if (!abs) continue;
+                      edits.push({ startLine: abs.line, startCol: abs.col, endLine: abs.line, endCol: abs.col + old.length, text: single });
+                    }
+                  }
+                }
+              }
+              return edits;
+            },
+          } : null,
+        });
+      }
+      return { findings };
+    },
+  });
+
   // ── Delimiters that do not balance ───────────────────────────────────────
   //
   // [B-030] lint 3. A missing comma or an unclosed brace in a preset, which the

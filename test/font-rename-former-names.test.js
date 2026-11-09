@@ -161,7 +161,8 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
   check('a config opening runs the former-names check', /setTimeout\(\(\) => \{ window\._sfCheckConfigFormerNames\?\.\(\); \}, 0\);\s*\}/.test(html));
   check('a library name is never questioned', /if \(have\.has\(lc\)\) continue;/.test(html));
   const pAt = html.indexOf('function _sfPromptFormerNames(');
-  const prompt = html.slice(pAt, html.indexOf('\n}\n', pAt));
+  // The prompt and its row builder (_sfFormerRow, split out when styles joined the review). [B-656]
+  const prompt = html.slice(pAt, html.indexOf('function _sfFormerNamesAwait(', pAt));
   check('the review is one list, a row per renamed font', pAt > 0 && prompt.length > 500
     && /_sfPromptFormerNames\(rows\)/.test(html) && /sf-save-conflict-row/.test(prompt));
   check('each row: Update (default), Ignore, Not this font / None of these',

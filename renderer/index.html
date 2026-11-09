@@ -10595,47 +10595,6 @@ window._styleAfterRename = async (from, to) => {
   await _styleConfigFollowRename(from, to);
 };
 
-// A config opened later: a style it names that the library has no style for now, but one style had
-// before. Exactly one owner is offered; a name two styles once had is left alone, never guessed.
-let _styleFormerCheckBusy = false;
-window._styleCheckConfigFormerNames = async () => {
-  if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
-  if (_styleFormerCheckBusy || typeof window._libraryStyleEntries !== 'function') return;
-  _styleFormerCheckBusy = true;
-  try {
-    const lib = window._libraryStyleEntries();
-    if (!lib.length) return;
-    const have = new Set(lib.map((e) => e.name));
-    const owners = new Map();   // former name -> [current names]
-    for (const e of lib) {
-      for (const f of ((e.meta && e.meta.formerNames) || [])) {
-        if (!f || have.has(f)) continue;
-        owners.set(f, [...(owners.get(f) || []), e.name]);
-      }
-    }
-    const map = new Map([...owners].filter(([, o]) => o.length === 1).map(([f, o]) => [f, o[0]]));
-    if (!map.size) return;
-    const { edits, presets: n } = _styleRenameEdits(editor.getValue(), map);
-    if (!edits.length) return;
-    const text = editor.getValue();
-    const used = [...map].filter(([f]) => new RegExp(`\\b${f}\\b`).test(text));
-    const one = used.length === 1 ? used[0] : null;
-    const choice = await promptConfirm({
-      title: 'Use the styles\' new names?',
-      message: one
-        ? `${_sfPresetCount(n)} in ${_sfConfigLabel()} ${n === 1 ? 'uses' : 'use'} ${one[0]}, which your Style Library now calls ${one[1]}. Update ${n === 1 ? 'it' : 'them'}?`
-        : `${_sfPresetCount(n)} in ${_sfConfigLabel()} use styles your Style Library has renamed (${used.map(([f, t]) => `${f} to ${t}`).join(', ')}). Update them to the new names?`,
-      cancelText: 'Keep old names',
-      confirmText: 'Update', confirmKind: 'primary',
-    });
-    // Two buttons, no controls: promptConfirm answers true / false, never 'confirm'. [B-656]
-    if (choice !== true) return;
-    window._atomicEdit(editor, 'style-rename', edits);
-  } finally {
-    _styleFormerCheckBusy = false;
-  }
-};
-
 // The style's `// formerly:` line, given the name it now has and every name it had. Located by its
 // `using NAME =` start, which a segment's Layers<> wrapping does not change.
 function _styleSetFormerNames(text, name, formerNames) {
@@ -10750,7 +10709,7 @@ async function _sfCheckConfigFormerNames() {
         if (t && !tracks.has(t.toLowerCase())) tracks.set(t.toLowerCase(), t);
       }
     }
-    if (!dirs.size && !tracks.size && !shared.size) return;
+    // No early return on an empty font list: a config can name renamed STYLES only. [B-656]
     const rows = [];
     if (dirs.size) {
       let entries = [];
@@ -10789,11 +10748,41 @@ async function _sfCheckConfigFormerNames() {
         rows.push({ kind: 'common', lc, d, owners, count });
       }
     }
+    // STYLES, in the same review: a preset's style the Style Library has no style for now, but a
+    // style had before (its `// formerly:` line). One review per config open, a decision per line,
+    // like the fonts; the old name of a style cannot compile, which its own section says. [B-656]
+    if (typeof window._libraryStyleEntries === 'function') {
+      let lib = [];
+      try { lib = window._libraryStyleEntries() || []; } catch { lib = []; }
+      const have = new Set(lib.map((e) => e.name));
+      const owners = new Map();   // former name -> [{ name, formerNames }]
+      for (const e of lib) {
+        for (const f of ((e.meta && e.meta.formerNames) || [])) {
+          if (!f || have.has(f)) continue;
+          if (!owners.has(f)) owners.set(f, []);
+          owners.get(f).push({ name: e.name, formerNames: (e.meta && e.meta.formerNames) || [] });
+        }
+      }
+      const text = editor.getValue();
+      for (const [f, o] of owners) {
+        const count = _styleRenameEdits(text, new Map([[f, o[0].name]])).presets;
+        if (count) rows.push({ kind: 'style', lc: f, d: f, owners: o, count });
+      }
+    }
     if (!rows.length) return;
     const picks = await _sfPromptFormerNames(rows);
     if (!picks) return;
-    const fontTo = new Map(), trackTo = new Map(), commonTo = new Map();
+    const fontTo = new Map(), trackTo = new Map(), commonTo = new Map(), styleTo = new Map();
+    let styleLibText = null;   // forgotten style aliases, written to the Style Library at once
     for (const p of picks) {
+      if (p.row.kind === 'style') {
+        if (p.choice === 'update') styleTo.set(p.row.d, p.owner.name);   // case matters: a C++ name
+        if (p.choice === 'forget' && typeof _stylesEditorInstance !== 'undefined' && _stylesEditorInstance) {
+          if (styleLibText === null) styleLibText = _stylesEditorInstance.getValue();
+          for (const e of p.row.owners) styleLibText = _styleSetFormerNames(styleLibText, e.name, e.formerNames.filter((n) => n !== p.row.d));
+        }
+        continue;
+      }
       if (p.choice === 'update') (p.row.kind === 'track' ? trackTo : p.row.kind === 'common' ? commonTo : fontTo).set(p.row.lc, p.owner.name);
       if (p.choice === 'forget') {
         for (const e of p.row.owners) {
@@ -10811,11 +10800,14 @@ async function _sfCheckConfigFormerNames() {
     if (fontTo.size || commonTo.size) {
       _fontEdits = _sfFontListEdits(editor.getValue(), fontTo, commonTo);
     }
+    // Style slots never overlap the font string or the track, so all three go in the one edit.
     const edits = [
       ..._fontEdits,
       ...(trackTo.size ? _sfTrackRenameEdits(editor.getValue(), (x) => trackTo.get(x.toLowerCase()) || null) : []),
+      ...(styleTo.size ? _styleRenameEdits(editor.getValue(), styleTo).edits : []),
     ];
     if (edits.length) _sfApplyFontRenameEdits(edits);
+    if (styleLibText !== null) _stylesWriteBulk(styleLibText, 'forget a former style name');
   } finally {
     _sfAliasCheckBusy = false;
   }
@@ -10853,9 +10845,9 @@ function _sfPromptFormerNames(rows) {
   const one = rows.length === 1;
   // Fonts, tracks or both, and a name the library knows as an alias whether it was renamed or came
   // in under another name, so the words claim neither. [B-643]
-  const _kinds = ['font', 'common', 'track'].filter((k) => rows.some((r) => (r.kind || 'font') === k));
-  const _plural = { font: 'Fonts', common: 'Common folders', track: 'Tracks' };
-  const _single = { font: 'A font', common: 'A common folder', track: 'A track' };
+  const _kinds = ['font', 'common', 'track', 'style'].filter((k) => rows.some((r) => (r.kind || 'font') === k));
+  const _plural = { font: 'Fonts', common: 'Common folders', track: 'Tracks', style: 'Styles' };
+  const _single = { font: 'A font', common: 'A common folder', track: 'A track', style: 'A style' };
   const what = _kinds.length > 1
     ? _kinds.map((k, i) => (i === 0 ? _plural[k] : _plural[k].toLowerCase())).join(_kinds.length > 2 ? ', ' : ' and ').replace(/, ([^,]+)$/, ' and $1')
     : (one ? _single[_kinds[0]] : _plural[_kinds[0]]);
@@ -10864,37 +10856,68 @@ function _sfPromptFormerNames(rows) {
   // The two choices people weigh, with what each means for the card in the saber: the presets name
   // folders and files on that card, so a config using the library's names needs a card that has
   // them. Said here, where the choice is made. Not this font/track explains itself on hover. [B-643]
-  desc.innerHTML = '<strong>Update</strong> uses your library\'s names in the presets. The card in your saber still has '
+  // Sound and styles are different things with different consequences, so each has its own
+  // section and its own sentence: a sound's old name can still be right (the card has it), a
+  // style's old name no longer exists, so keeping it means the preset will not compile. [B-656]
+  const _soundDesc = '<strong>Update</strong> uses your library\'s names in the presets. The card in your saber still has '
     + 'the old names, so after you flash, update the card from <strong>Sound Fonts &rarr; SD Export</strong>.<br>'
     + '<strong>Ignore</strong> keeps the card\'s names, and the card works as it is.';
+  const _styleDesc = '<strong>Update</strong> uses your Style Library\'s new names in the presets.<br>'
+    + '<strong>Ignore</strong> keeps the old names, and those presets will not compile until they are changed. '
+    + 'Compile offers the change again.';
+  const _hasSound = rows.some((r) => r.kind !== 'style');
+  const _hasStyle = rows.some((r) => r.kind === 'style');
+  // Both kinds: each section carries its own sentence, the save-conflict review's pattern [B-357];
+  // one kind: the sentence sits under the title as before.
+  const _both = _hasSound && _hasStyle;
+  desc.innerHTML = _both ? '' : (_hasSound ? _soundDesc : _styleDesc);
+  desc.style.display = _both ? 'none' : '';
+  const _section = (label, html) => `<div class="sf-save-conflict-section">`
+    + `<div class="sf-save-conflict-section-title">${label}</div>`
+    + `<div class="sf-save-conflict-section-intro">${html}</div></div>`;
   list.innerHTML = rows.map((r, i) => {
-    const presets = r.count === 1 ? '1 preset' : `${r.count} presets`;
-    const sub = r.owners.length === 1
-      ? `In your library: ${_preflightEsc(r.owners[0].name)} · ${presets}`
-      : `In your library: <select class="sf-former-pick" data-former-pick="${i}">`
-        + r.owners.map((e, j) => `<option value="${j}">${_preflightEsc(e.name)}</option>`).join('')
-        + `</select> · ${presets}`;
-    const radio = (v, label, checked, tip) =>
-      `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${checked ? ' checked' : ''}>${label}</label>`;
-    const many = r.owners.length > 1;
-    const noun = r.kind === 'track' ? 'track' : r.kind === 'common' ? 'common folder' : 'font';
-    const now = many ? `the ${noun} you pick` : r.owners[0].name;
-    const tips = {
-      update: `Change ${r.count === 1 ? 'the preset' : `the ${r.count} presets`} using ${r.d} to ${now}.`,
-      ignore: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}.\nYou are asked again the next time this config opens.`,
-      forget: many
-        ? `None of these ${noun}s is ${r.d}.\nThey stop being matched to that name, and no config asks about it again.`
-        : `${r.owners[0].name} is not ${r.d}.\nIt stops being matched to that name, and no config asks about it again.`,
-    };
-    return `<div class="sf-save-conflict-row">`
-      + `<span class="sf-save-conflict-name" title="${_preflightEsc(r.d)}">${_preflightEsc(r.d)}`
-      + `<span class="sf-save-conflict-sub">${sub}</span></span>`
-      + `<span class="sf-save-conflict-choices">`
-      + radio('update', 'Update', true, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
-      + radio('forget', many ? 'None of these' : `Not this ${noun}`, false, tips.forget)
-      + `</span></div>`;
+    const head = _both
+      ? (i === 0 ? _section('Sound fonts', _soundDesc) : (r.kind === 'style' && rows[i - 1].kind !== 'style' ? _section('Styles', _styleDesc) : ''))
+      : '';
+    return head + _sfFormerRow(r, i);
   }).join('');
   if (bulkRow) bulkRow.style.display = one ? 'none' : '';
+  return _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow);
+}
+
+// One row of the review: the old name, where the library has it now, and Update / Ignore / Not this.
+function _sfFormerRow(r, i) {
+  const presets = r.count === 1 ? '1 preset' : `${r.count} presets`;
+  const where = r.kind === 'style' ? 'In your Style Library' : 'In your library';
+  const sub = r.owners.length === 1
+    ? `${where}: ${_preflightEsc(r.owners[0].name)} · ${presets}`
+    : `${where}: <select class="sf-former-pick" data-former-pick="${i}">`
+      + r.owners.map((e, j) => `<option value="${j}">${_preflightEsc(e.name)}</option>`).join('')
+      + `</select> · ${presets}`;
+  const radio = (v, label, checked, tip) =>
+    `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${checked ? ' checked' : ''}>${label}</label>`;
+  const many = r.owners.length > 1;
+  const noun = r.kind === 'track' ? 'track' : r.kind === 'common' ? 'common folder' : r.kind === 'style' ? 'style' : 'font';
+  const now = many ? `the ${noun} you pick` : r.owners[0].name;
+  const tips = {
+    update: `Change ${r.count === 1 ? 'the preset' : `the ${r.count} presets`} using ${r.d} to ${now}.`,
+    ignore: r.kind === 'style'
+      ? `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}. ${r.d} no longer exists, so ${r.count === 1 ? 'it' : 'they'} will not compile until changed.\nCompile offers the change, and you are asked again the next time this config opens.`
+      : `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}.\nYou are asked again the next time this config opens.`,
+    forget: many
+      ? `None of these ${noun}s is ${r.d}.\nThey stop being matched to that name, and no config asks about it again.`
+      : `${r.owners[0].name} is not ${r.d}.\nIt stops being matched to that name, and no config asks about it again.`,
+  };
+  return `<div class="sf-save-conflict-row">`
+    + `<span class="sf-save-conflict-name" title="${_preflightEsc(r.d)}">${_preflightEsc(r.d)}`
+    + `<span class="sf-save-conflict-sub">${sub}</span></span>`
+    + `<span class="sf-save-conflict-choices">`
+    + radio('update', 'Update', true, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
+    + radio('forget', many ? 'None of these' : `Not this ${noun}`, false, tips.forget)
+    + `</span></div>`;
+}
+
+function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
   modal.classList.add('active');
   return new Promise((resolve) => {
     const onBulk = (e) => {
@@ -12754,12 +12777,8 @@ function loadContent(rawContent, filePath) {
   // done yet" rather than inheriting the prior terminal state.
   window.resetBuildStatusForFileLoad?.();
   // A font folder this config names that is a library font's former name. [B-561]
-  // Then a style it names that a library style had before a rename, after, so two prompts never
-  // open at once. [B-651]
-  setTimeout(async () => {
-    try { await window._sfCheckConfigFormerNames?.(); } catch {}
-    window._styleCheckConfigFormerNames?.();
-  }, 0);
+  // The same review covers a style the Style Library renamed: one review, never two. [B-656]
+  setTimeout(() => { window._sfCheckConfigFormerNames?.(); }, 0);
 }
 
 function clearMeta() {
