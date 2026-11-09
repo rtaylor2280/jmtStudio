@@ -46713,7 +46713,10 @@ require(['vs/editor/editor.main'], function () {
           if (bodyEl) { bodyEl.style.display = 'none'; bodyEl.classList.remove('loading'); }
           if (errEl) {
             errEl.style.display = '';
-            errEl.textContent = `Could not play: ${err && err.message || err}`;
+            // The browser's own error ("Failed to execute 'decodeAudioData'...") is engineering
+            // talk; it goes to the console, and the user gets the plain sentence. [B-650]
+            console.warn('[sf-audio] could not play:', err);
+            errEl.textContent = 'This file could not be played. It may be damaged, or not a real audio file.';
           }
         }
       };
