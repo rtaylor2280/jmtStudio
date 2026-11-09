@@ -841,15 +841,21 @@ async function ensureCore(onLog, requestedVersion = null, { activate = true } = 
       } else {
         _useIsolatedCore = true;
         onLog(`Proffieboard Plugin ${version} was chosen for this ProffieOS version. ` +
-              `Using JMT Studio's own copy so the build is against exactly that plugin; ` +
+              `Using the one in the JMT Studio folder so the build is against exactly that plugin; ` +
               `your other Arduino tools are left untouched.`, false);
       }
     } else {
       _useIsolatedCore = !(await _systemCoreCanBuild());
       if (_useIsolatedCore) {
-        onLog(`The Proffieboard Plugin on this system cannot build for this board ` +
-              `(no '${REQUIRED_FQBN_OPTION}' option). Using JMT Studio's own copy instead; ` +
-              `your other Arduino tools are left untouched.`, false);
+        // A machine with no plugin at all is not told its plugin is broken: on a first install
+        // that line was the first thing a new user read, about a plugin they never had. [B-648]
+        const systemHasOne = fs.existsSync(path.join(getSystemArduinoDataPath(),
+          'packages', 'proffieboard', 'hardware', 'stm32l4'));
+        onLog(systemHasOne
+          ? `The Proffieboard Plugin installed on this system cannot build for this board. ` +
+            `Downloading one into the JMT Studio folder instead; your other Arduino tools are left untouched.`
+          : `Downloading the Proffieboard Plugin into the JMT Studio folder. ` +
+            `Your other Arduino tools are left untouched.`, false);
       }
     }
   }
@@ -1265,8 +1271,8 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // one retry, and only for this signature, so a genuine config error is never
   // compiled twice.
   if (!result.ok && !_aborted && _looksLikeUnusableCore(result)) {
-    onLog('The Proffieboard Plugin on this system cannot build for this board. ' +
-          'Switching to JMT Studio\'s own copy...', false);
+    onLog('The Proffieboard Plugin installed on this system cannot build for this board. ' +
+          'Switching to the one in the JMT Studio folder.', false);
     _useIsolatedCore = null;
     const core = await ensureCore(onLog);
     if (core.ok && _useIsolatedCore) result = await runCli(args, onLog);
