@@ -10755,6 +10755,9 @@ async function _sfCheckConfigFormerNames() {
       let lib = [];
       try { lib = window._libraryStyleEntries() || []; } catch { lib = []; }
       const have = new Set(lib.map((e) => e.name));
+      // A style the config defines itself is that style, whatever the library once called it
+      // (the compile check reads it the same way).
+      for (const m of editor.getValue().matchAll(/^\s*using\s+([A-Za-z_]\w*)\s*=/gm)) have.add(m[1]);
       const owners = new Map();   // former name -> [{ name, formerNames }]
       for (const e of lib) {
         for (const f of ((e.meta && e.meta.formerNames) || [])) {
@@ -10773,16 +10776,9 @@ async function _sfCheckConfigFormerNames() {
     const picks = await _sfPromptFormerNames(rows);
     if (!picks) return;
     const fontTo = new Map(), trackTo = new Map(), commonTo = new Map(), styleTo = new Map();
-    let styleLibText = null;   // forgotten style aliases, written to the Style Library at once
     for (const p of picks) {
-      if (p.row.kind === 'style') {
-        if (p.choice === 'update') styleTo.set(p.row.d, p.owner.name);   // case matters: a C++ name
-        if (p.choice === 'forget' && typeof _stylesEditorInstance !== 'undefined' && _stylesEditorInstance) {
-          if (styleLibText === null) styleLibText = _stylesEditorInstance.getValue();
-          for (const e of p.row.owners) styleLibText = _styleSetFormerNames(styleLibText, e.name, e.formerNames.filter((n) => n !== p.row.d));
-        }
-        continue;
-      }
+      // A style: Update or Not now. Case matters: a C++ name. [B-656]
+      if (p.row.kind === 'style') { if (p.choice === 'update') styleTo.set(p.row.d, p.owner.name); continue; }
       if (p.choice === 'update') (p.row.kind === 'track' ? trackTo : p.row.kind === 'common' ? commonTo : fontTo).set(p.row.lc, p.owner.name);
       if (p.choice === 'forget') {
         for (const e of p.row.owners) {
@@ -10807,7 +10803,6 @@ async function _sfCheckConfigFormerNames() {
       ...(styleTo.size ? _styleRenameEdits(editor.getValue(), styleTo).edits : []),
     ];
     if (edits.length) _sfApplyFontRenameEdits(edits);
-    if (styleLibText !== null) _stylesWriteBulk(styleLibText, 'forget a former style name');
   } finally {
     _sfAliasCheckBusy = false;
   }
@@ -10859,12 +10854,14 @@ function _sfPromptFormerNames(rows) {
   // Sound and styles are different things with different consequences, so each has its own
   // section and its own sentence: a sound's old name can still be right (the card has it), a
   // style's old name no longer exists, so keeping it means the preset will not compile. [B-656]
-  const _soundDesc = '<strong>Update</strong> uses your library\'s names in the presets. The card in your saber still has '
-    + 'the old names, so after you flash, update the card from <strong>Sound Fonts &rarr; SD Export</strong>.<br>'
-    + '<strong>Ignore</strong> keeps the card\'s names, and the card works as it is.';
+  // Not "saber" (a board is not always in one), and not definite about the card: we cannot know
+  // what it holds. His words, 2026-11-09. [B-656]
+  const _soundDesc = '<strong>Update</strong> uses your library\'s names in the presets. If your card still has '
+    + 'the old names, update it from <strong>Sound Fonts &rarr; SD Export</strong> after you flash.<br>'
+    + '<strong>Ignore</strong> keeps the names the presets have now.';
+  // A style's old name is known to be invalid, so its only choices are Update and Not now. [B-656]
   const _styleDesc = '<strong>Update</strong> uses your Style Library\'s new names in the presets.<br>'
-    + '<strong>Ignore</strong> keeps the old names, and those presets will not compile until they are changed. '
-    + 'Compile offers the change again.';
+    + '<strong>Not now</strong> leaves the old names, and those presets will not compile until they are changed.';
   const _hasSound = rows.some((r) => r.kind !== 'style');
   const _hasStyle = rows.some((r) => r.kind === 'style');
   // Both kinds: each section carries its own sentence, the save-conflict review's pattern [B-357];
@@ -10881,7 +10878,8 @@ function _sfPromptFormerNames(rows) {
       : '';
     return head + _sfFormerRow(r, i);
   }).join('');
-  if (bulkRow) bulkRow.style.display = one ? 'none' : '';
+  // Set all only covers sound rows, so it shows only when there are two or more of them. [B-656]
+  if (bulkRow) bulkRow.style.display = rows.filter((r) => r.kind !== 'style').length > 1 ? '' : 'none';
   return _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow);
 }
 
@@ -10894,16 +10892,15 @@ function _sfFormerRow(r, i) {
     : `${where}: <select class="sf-former-pick" data-former-pick="${i}">`
       + r.owners.map((e, j) => `<option value="${j}">${_preflightEsc(e.name)}</option>`).join('')
       + `</select> · ${presets}`;
-  const radio = (v, label, checked, tip) =>
-    `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${checked ? ' checked' : ''}>${label}</label>`;
+  const radio = (v, label, checked, tip, style = false) =>
+    `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${style ? ' data-former-style' : ''}${checked ? ' checked' : ''}>${label}</label>`;
   const many = r.owners.length > 1;
   const noun = r.kind === 'track' ? 'track' : r.kind === 'common' ? 'common folder' : r.kind === 'style' ? 'style' : 'font';
   const now = many ? `the ${noun} you pick` : r.owners[0].name;
   const tips = {
     update: `Change ${r.count === 1 ? 'the preset' : `the ${r.count} presets`} using ${r.d} to ${now}.`,
-    ignore: r.kind === 'style'
-      ? `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}. ${r.d} no longer exists, so ${r.count === 1 ? 'it' : 'they'} will not compile until changed.\nCompile offers the change, and you are asked again the next time this config opens.`
-      : `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}.\nYou are asked again the next time this config opens.`,
+    ignore: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}.\nYou are asked again the next time this config opens.`,
+    later: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}. ${r.d} no longer exists, so ${r.count === 1 ? 'it' : 'they'} will not compile until changed.\nYou are asked again the next time this config opens.`,
     forget: many
       ? `None of these ${noun}s is ${r.d}.\nThey stop being matched to that name, and no config asks about it again.`
       : `${r.owners[0].name} is not ${r.d}.\nIt stops being matched to that name, and no config asks about it again.`,
@@ -10912,8 +10909,12 @@ function _sfFormerRow(r, i) {
     + `<span class="sf-save-conflict-name" title="${_preflightEsc(r.d)}">${_preflightEsc(r.d)}`
     + `<span class="sf-save-conflict-sub">${sub}</span></span>`
     + `<span class="sf-save-conflict-choices">`
-    + radio('update', 'Update', true, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
-    + radio('forget', many ? 'None of these' : `Not this ${noun}`, false, tips.forget)
+    // A style: Update or Not now, nothing else. Its old name cannot compile, so there is no
+    // "keep it" and no "not this style"; and the Set all buttons leave it alone. [B-656]
+    + (r.kind === 'style'
+      ? radio('update', 'Update', true, tips.update, true) + radio('later', 'Not now', false, tips.later, true)
+      : radio('update', 'Update', true, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
+        + radio('forget', many ? 'None of these' : `Not this ${noun}`, false, tips.forget))
     + `</span></div>`;
 }
 
@@ -10923,7 +10924,8 @@ function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
     const onBulk = (e) => {
       const btn = e.target.closest('[data-former-all]');
       if (!btn) return;
-      list.querySelectorAll(`input[type="radio"][value="${btn.getAttribute('data-former-all')}"]`).forEach((r) => { r.checked = true; });
+      // Sound rows only: a style's choice is its own, never part of Set all. [B-656]
+      list.querySelectorAll(`input[type="radio"][value="${btn.getAttribute('data-former-all')}"]:not([data-former-style])`).forEach((r) => { r.checked = true; });
     };
     const onApply = () => {
       const picks = rows.map((row, i) => {

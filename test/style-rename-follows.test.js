@@ -116,9 +116,9 @@ console.log('3b. a config opened later: one review, fonts and styles, a decision
 // Runs the REAL config-open review (_sfCheckConfigFormerNames) with the modal stubbed: the stub
 // records the rows it was shown and answers with the given choice per kind. B-651 shipped a
 // wrong return-value test because its tests only read the code; this one runs it.
-const runOpenCheck = async (choiceFor, libEntries) => {
+const runOpenCheck = async (choiceFor, libEntries, prefix = '') => {
   const pp = require(path.join(ROOT, 'renderer', 'presetParser.js'));
-  let text = [
+  let text = prefix + [
     'Preset presets[] = {',
     '  { "Astral-Projection;common", "",',
     '    StylePtr<AstralProjection>(),',
@@ -163,14 +163,16 @@ const openCheckDone = (async () => {
   check('a row per thing: the font and the style', JSON.stringify(kinds) === '["font","style"]', JSON.stringify(kinds));
   check('Update on both: the font folder and the style are both renamed, in one edit',
     /"Astral-Projection2;common"/.test(both.text) && /StylePtr<AstralProjectionBVM>\(\)/.test(both.text) && !/StylePtr<AstralProjection>\(\)/.test(both.text), both.text);
-  const split = await runOpenCheck((k) => (k === 'style' ? 'ignore' : 'update'), LIB1);
-  check('a decision per line: font updated, style ignored',
+  const split = await runOpenCheck((k) => (k === 'style' ? 'later' : 'update'), LIB1);
+  check('a decision per line: font updated, style Not now',
     /"Astral-Projection2;common"/.test(split.text) && /StylePtr<AstralProjection>\(\)/.test(split.text), split.text);
   const twin = await runOpenCheck(() => 'update', [{ name: 'A1', meta: { formerNames: ['AstralProjection'] } }, { name: 'A2', meta: { formerNames: ['AstralProjection'] } }]);
   const sRow = (twin.shown[0] || []).find((r) => r.kind === 'style');
   check('a name two styles once had: one row, both offered to pick from', sRow && sRow.owners.map((o) => o.name).join() === 'A1,A2', JSON.stringify(sRow && sRow.owners));
   const has = await runOpenCheck(() => 'update', [...LIB1, { name: 'AstralProjection', meta: {} }]);
-  check('a name the library has now is never offered', !(has.shown[0] || []).some((r) => r.kind === 'style'));
+  check('a name the library has now is never offered (AstralProjection AND AstralProjectionBVM)', !(has.shown[0] || []).some((r) => r.kind === 'style'));
+  const own = await runOpenCheck(() => 'update', LIB1, 'using AstralProjection = Layers<White>;\n');
+  check('a style the config defines itself is never offered', !(own.shown[0] || []).some((r) => r.kind === 'style'), JSON.stringify((own.shown[0] || []).map((r) => r.kind)));
 })();
 
 console.log('4. wiring');
@@ -195,8 +197,16 @@ console.log('4. wiring');
   const prompt = slice('function _sfPromptFormerNames(rows)', 'function _sfFormerNamesAwait(');
   check('both kinds: a Sound fonts section and a Styles section, each with its own sentence',
     /_section\('Sound fonts', _soundDesc\)/.test(prompt) && /_section\('Styles', _styleDesc\)/.test(prompt));
-  check('the style sentence says the old name will not compile, and compile offers it again',
-    /will not compile until they are changed/.test(prompt) && /Compile offers the change again/.test(prompt));
+  check('the style sentence says Not now leaves a preset that will not compile; no promise about compile',
+    /<strong>Not now<\/strong> leaves the old names, and those presets will not compile until they are changed\./.test(prompt)
+    && !/Compile offers/.test(html));
+  check('the sound sentence does not say saber, and is not definite about the card',
+    /If your card still has/.test(prompt) && !/card in your saber/.test(html) && /keeps the names the presets have now/.test(prompt));
+  check('a style row: Update or Not now, nothing else',
+    /radio\('update', 'Update', true, tips\.update, true\) \+ radio\('later', 'Not now', false, tips\.later, true\)/.test(prompt));
+  const awaitFn = slice('function _sfFormerNamesAwait(', '\n}\n');
+  check('Set all leaves style rows alone', /:not\(\[data-former-style\]\)/.test(awaitFn));
+  check('Set all shows only with two or more sound rows', /rows\.filter\(\(r\) => r\.kind !== 'style'\)\.length > 1/.test(prompt));
   check('the setting names styles too', html.includes('Update the open config when a font or style it uses is renamed'));
   check('the library entries are exposed for the check', html.includes('window._libraryStyleEntries = _libraryEntries;'));
 }
