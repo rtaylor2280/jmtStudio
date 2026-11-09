@@ -112,6 +112,51 @@ console.log('3. the preset rewrite');
   check('nothing to rename, nothing edited', ctx2.f(cfg, new Map([['Nope', 'X']])).edits.length === 0);
 }
 
+console.log('3b. a config opened later: Update really updates [B-656]');
+const runOpenCheck = async (answer) => {
+  const pp = require(path.join(ROOT, 'renderer', 'presetParser.js'));
+  let text = [
+    'Preset presets[] = {',
+    '  { "Astral;common", "",',
+    '    StylePtr<AstralProjection>(),',
+    '    "astral"},',
+    '};',
+    'BladeConfig blades[] = { { 0, WS281XBladePtr<144, bladePin, Color8::GRB, PowerPINS<bladePowerPin2> >(), CONFIGARRAY(presets) } };',
+  ].join('\n');
+  const asked = [];
+  const ed = { getValue: () => text };
+  const ctx3 = {
+    presetParser: pp, fileIsOpen: true, editor: ed, currentFilePath: 'bvmTest.h',
+    promptConfirm: async (o) => { asked.push(o); return answer; },
+    window: {
+      _libraryStyleEntries: () => [{ name: 'AstralProjectionBVM', meta: { formerNames: ['AstralProjection'] } }],
+      _atomicEdit: (e, src, edits) => {
+        // Apply the Monaco-style edits to the text, last first.
+        const lines = text.split('\n');
+        const starts = [0]; for (const l of lines) starts.push(starts[starts.length - 1] + l.length + 1);
+        const off = (ln, col) => starts[ln - 1] + col - 1;
+        for (const ed2 of [...edits].sort((a, b) => off(b.range.startLineNumber, b.range.startColumn) - off(a.range.startLineNumber, a.range.startColumn))) {
+          text = text.slice(0, off(ed2.range.startLineNumber, ed2.range.startColumn)) + ed2.text + text.slice(off(ed2.range.endLineNumber, ed2.range.endColumn));
+        }
+      },
+    },
+  };
+  vm.runInNewContext([
+    slice('const _styleRenameEdits = ', 'async function _styleConfigFollowRename('),
+    "const _sfConfigLabel = () => 'bvmTest.h'; const _sfPresetCount = (n) => (n === 1 ? '1 preset' : `${n} presets`);",
+    slice('let _styleFormerCheckBusy = false;', '// The style\'s `// formerly:` line'),
+  ].join('\n'), ctx3);
+  await ctx3.window._styleCheckConfigFormerNames();
+  return { text, asked };
+};
+const openCheckDone = (async () => {
+  const yes = await runOpenCheck(true);
+  check('it asks once', yes.asked.length === 1, JSON.stringify(yes.asked.map((a) => a.title)));
+  check('Update (the dialog answers true) rewrites the preset', /StylePtr<AstralProjectionBVM>\(\)/.test(yes.text) && !/StylePtr<AstralProjection>\(\)/.test(yes.text), yes.text);
+  const no = await runOpenCheck(false);
+  check('Keep old names (false) leaves it alone', /StylePtr<AstralProjection>\(\)/.test(no.text), no.text);
+})();
+
 console.log('4. wiring');
 {
   const detail = slice('const newUsingCode = `using ${newName} =', '_detailName         = newName;');
@@ -138,5 +183,7 @@ console.log('4. wiring');
   check('the library entries are exposed for the check', html.includes('window._libraryStyleEntries = _libraryEntries;'));
 }
 
-console.log(failures ? `\n${failures} failed` : '\nall passed');
-process.exit(failures ? 1 : 0);
+openCheckDone.catch((e) => { check('the config-open check ran', false, e && e.stack); }).then(() => {
+  console.log(failures ? `\n${failures} failed` : '\nall passed');
+  process.exit(failures ? 1 : 0);
+});

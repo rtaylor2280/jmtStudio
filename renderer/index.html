@@ -10628,7 +10628,8 @@ window._styleCheckConfigFormerNames = async () => {
       cancelText: 'Keep old names',
       confirmText: 'Update', confirmKind: 'primary',
     });
-    if (choice !== 'confirm') return;
+    // Two buttons, no controls: promptConfirm answers true / false, never 'confirm'. [B-656]
+    if (choice !== true) return;
     window._atomicEdit(editor, 'style-rename', edits);
   } finally {
     _styleFormerCheckBusy = false;
