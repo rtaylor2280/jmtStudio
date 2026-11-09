@@ -244,8 +244,12 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
     check('the eject surfaces try the monitor first and fall back to main',
       /r = window\._bpRestartBoardViaMonitor \? await window\._bpRestartBoardViaMonitor\(port\) : null;/.test(html)
       && /if \(!r\) \{ try \{ r = await window\.electronAPI\.restartBoardAfterEject\(/.test(html));
-    check('a restart that never happened says so, with what to do',
-      /st === 'not-restarted'\) return 'Ejected\. The board did not restart: type reset in the Serial Monitor, or turn the saber off and on\.'/.test(html));
+    // The short line, no Serial Monitor instructions: his call 2026-11-09. [B-653]
+    check('a restart that never happened gives the short power-cycle line',
+      /st === 'not-restarted'\) return SF_BOARD_POWER_CYCLE;/.test(html) && !html.includes('type reset in the Serial Monitor'));
+    check('a held port says so and gives the same instruction, no "send reset"',
+      html.includes("st === 'busy') return 'Ejected. Another program has the board’s serial port open. Turn the saber off and on before use.'")
+      && !html.includes('Send reset from that program'));
   }
 
   console.log(failures ? `\n${failures} failing` : '\nall passed');

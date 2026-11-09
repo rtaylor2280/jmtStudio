@@ -4220,7 +4220,7 @@
   .styles-view-switch { flex-shrink: 0; white-space: nowrap; }
   .styles-code-search-step { flex-shrink: 0; padding-left: 8px; padding-right: 8px; }
   .styles-empty { font-size: 0.82rem; color: var(--c-text-dim); padding: 32px 0; text-align: center; }
-  .style-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); grid-auto-rows: 1fr; gap: 10px; align-content: start; }
+  .style-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); grid-auto-rows: 1fr; gap: 10px; align-content: start; }
   .style-card { background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 5px; padding: 10px 12px; cursor: pointer; transition: border-color 0.15s, background 0.15s; display: flex; flex-direction: column; gap: 3px; position: relative; }
   .style-card:hover { border-color: var(--jmt-blue); background: var(--c-bg-hover); }
   @keyframes card-highlight-pulse { 0% { box-shadow: 0 0 0 0 rgba(255,160,0,0.9); } 40% { box-shadow: 0 0 0 6px rgba(255,160,0,0.5); } 100% { box-shadow: 0 0 0 10px rgba(255,160,0,0); } }
@@ -8106,8 +8106,8 @@ file holding only the styles that config uses. A readme says what they are and h
       </div>
     </div>
     <div class="settings-item"
-         title="Whether the open config's presets are updated when you rename a font they use.">
-      <span class="settings-item-label">Update the open config when a font it uses is renamed</span>
+         title="Whether the open config's presets are updated when you rename a font or style they use.">
+      <span class="settings-item-label">Update the open config when a font or style it uses is renamed</span>
       <div class="theme-selector" id="setting-font-rename-update">
         <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
       </div>
@@ -10512,6 +10512,138 @@ async function _sfConfigFollowRenames(renames) {
 }
 window._sfConfigFollowRenames = _sfConfigFollowRenames;
 
+// ── A renamed style, and what still names it [B-651] ──
+// Outside the Style Library a style is named in three places: a font's Last used style (stored by
+// name, linkedStyleLibraryEntry), the open config's presets, and every config opened later. A rename
+// re-points the fonts without asking, since it is the library's own data following its own rename;
+// offers the open config under the same Ask / Always / Never setting as a font rename; and keeps
+// the old name on the style (`// formerly:`) so a config opened later is offered the current one.
+// Style names are C++ identifiers, so they match with case and on word boundaries.
+const _styleRenameEdits = (text, map) => {
+  const out = { edits: [], presets: 0 };
+  if (!map || !map.size) return out;
+  let parsed;
+  try { parsed = presetParser.parsePresets(text); } catch { return out; }
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1);
+  const re = new RegExp(`\\b(${[...map.keys()].join('|')})\\b`, 'g');
+  for (const arr of (parsed?.arrays || [])) {
+    for (const p of (arr.presets || [])) {
+      let hit = false;
+      for (const s of (p?.styles || [])) {
+        if (!s || s.startLine == null || s.endLine == null) continue;
+        const a = starts[s.startLine - 1] + s.startCol, b = starts[s.endLine - 1] + s.endCol;
+        const was = text.slice(a, b);
+        const now = was.replace(re, (m) => map.get(m) || m);
+        if (now === was) continue;
+        hit = true;
+        out.edits.push({
+          range: { startLineNumber: s.startLine, startColumn: s.startCol + 1, endLineNumber: s.endLine, endColumn: s.endCol + 1 },
+          text: now,
+        });
+      }
+      if (hit) out.presets++;
+    }
+  }
+  return out;
+};
+
+async function _styleConfigFollowRename(from, to) {
+  if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
+  const { edits, presets: n } = _styleRenameEdits(editor.getValue(), new Map([[from, to]]));
+  if (!edits.length) return;
+  const remembered = await _jmtRememberedChoice('fontRenameAlwaysUpdate');
+  if (remembered === 'never') return;
+  const always = remembered === 'always';
+  if (!always) {
+    const choice = await promptConfirm({
+      title: 'Update the config too?',
+      message: `${_sfPresetCount(n)} in ${_sfConfigLabel()} ${n === 1 ? 'uses' : 'use'} ${from}. Update ${n === 1 ? 'it' : 'them'} to ${to}?`,
+      leadText: 'Never update',
+      cancelText: 'Keep old name',
+      middleText: 'Update',
+      confirmText: 'Always update', confirmKind: 'primary',
+      closeX: true,
+    });
+    if (choice === 'lead') { try { await window.electronAPI.setSetting('fontRenameAlwaysUpdate', 'never'); } catch {} }
+    if (choice !== 'middle' && choice !== 'confirm') return;
+    if (choice === 'confirm') { try { await window.electronAPI.setSetting('fontRenameAlwaysUpdate', 'always'); } catch {} }
+  }
+  window._atomicEdit(editor, 'style-rename', edits);
+  if (always) {
+    showToast(`Updated ${_sfPresetCount(n)} in ${_sfConfigLabel()} to ${to}.`,
+      { action: { label: 'Show', onClick: () => switchTab('config') } });
+  }
+}
+
+// Every font whose Last used style was the old name now names the new one.
+async function _styleRelinkFonts(from, to) {
+  let entries = [];
+  try { const r = await window.electronAPI.listEntries(); entries = (r && r.ok && r.entries) || []; } catch { return; }
+  const hit = entries.filter((e) => String((e.meta && e.meta.linkedStyleLibraryEntry) || '') === from);
+  if (!hit.length) return;
+  await Promise.allSettled(hit.map((e) => window.electronAPI.updateEntryMeta({
+    currentName: e.name, updates: { linkedStyleLibraryEntry: to },
+  }).catch(() => {})));
+  try { const r = await window.electronAPI.listEntries(); if (r && r.ok) window._sfEntriesCache = r.entries || []; } catch {}
+}
+
+// Called by both rename paths (the style's detail and the helper editor) once the library is written.
+window._styleAfterRename = async (from, to) => {
+  if (!from || !to || from === to) return;
+  await _styleRelinkFonts(from, to);
+  await _styleConfigFollowRename(from, to);
+};
+
+// A config opened later: a style it names that the library has no style for now, but one style had
+// before. Exactly one owner is offered; a name two styles once had is left alone, never guessed.
+let _styleFormerCheckBusy = false;
+window._styleCheckConfigFormerNames = async () => {
+  if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
+  if (_styleFormerCheckBusy || typeof window._libraryStyleEntries !== 'function') return;
+  _styleFormerCheckBusy = true;
+  try {
+    const lib = window._libraryStyleEntries();
+    if (!lib.length) return;
+    const have = new Set(lib.map((e) => e.name));
+    const owners = new Map();   // former name -> [current names]
+    for (const e of lib) {
+      for (const f of ((e.meta && e.meta.formerNames) || [])) {
+        if (!f || have.has(f)) continue;
+        owners.set(f, [...(owners.get(f) || []), e.name]);
+      }
+    }
+    const map = new Map([...owners].filter(([, o]) => o.length === 1).map(([f, o]) => [f, o[0]]));
+    if (!map.size) return;
+    const { edits, presets: n } = _styleRenameEdits(editor.getValue(), map);
+    if (!edits.length) return;
+    const text = editor.getValue();
+    const used = [...map].filter(([f]) => new RegExp(`\\b${f}\\b`).test(text));
+    const one = used.length === 1 ? used[0] : null;
+    const choice = await promptConfirm({
+      title: 'Use the styles\' new names?',
+      message: one
+        ? `${_sfPresetCount(n)} in ${_sfConfigLabel()} ${n === 1 ? 'uses' : 'use'} ${one[0]}, which your Style Library now calls ${one[1]}. Update ${n === 1 ? 'it' : 'them'}?`
+        : `${_sfPresetCount(n)} in ${_sfConfigLabel()} use styles your Style Library has renamed (${used.map(([f, t]) => `${f} to ${t}`).join(', ')}). Update them to the new names?`,
+      cancelText: 'Keep old names',
+      confirmText: 'Update', confirmKind: 'primary',
+    });
+    if (choice !== 'confirm') return;
+    window._atomicEdit(editor, 'style-rename', edits);
+  } finally {
+    _styleFormerCheckBusy = false;
+  }
+};
+
+// The style's `// formerly:` line, given the name it now has and every name it had. Located by its
+// `using NAME =` start, which a segment's Layers<> wrapping does not change.
+function _styleSetFormerNames(text, name, formerNames) {
+  const list = [...new Set((formerNames || []).filter((n) => n && n !== name))];
+  const m = new RegExp(`^using\\s+${name}\\s*=`, 'm').exec(text);
+  if (!m) return text;
+  return _setStyleMetaLine(text, { usingCode: m[0] }, 'formerly', list.join(', '));
+}
+
 // A preset's TRACK, renamed: the file name (the last part of the path) is swapped and the folder
 // it sits in is kept, so `tracks/moon_hati.wav` becomes `tracks/spectre_5.wav`. Matched without
 // case, as the saber's card does. [B-643]
@@ -12621,7 +12753,12 @@ function loadContent(rawContent, filePath) {
   // done yet" rather than inheriting the prior terminal state.
   window.resetBuildStatusForFileLoad?.();
   // A font folder this config names that is a library font's former name. [B-561]
-  setTimeout(() => { window._sfCheckConfigFormerNames?.(); }, 0);
+  // Then a style it names that a library style had before a rename, after, so two prompts never
+  // open at once. [B-651]
+  setTimeout(async () => {
+    try { await window._sfCheckConfigFormerNames?.(); } catch {}
+    window._styleCheckConfigFormerNames?.();
+  }, 0);
 }
 
 function clearMeta() {
@@ -22918,7 +23055,7 @@ function _parseStyleEntries(content) {
 
 // Extract structured metadata from the /*--- ... ---*/ header comment and gap lines
 function _parseStyleMeta(comment, gapText) {
-  const meta = { source: '', osVersion: '', url: '', userSource: '', userUrl: '', userTags: null, userNotes: '', templatePrefix: '', userCreator: '' };
+  const meta = { source: '', osVersion: '', url: '', userSource: '', userUrl: '', userTags: null, userNotes: '', templatePrefix: '', userCreator: '', formerNames: [] };
   if (!comment && !gapText) return meta;
 
   // Parse fett263 block comment
@@ -22971,6 +23108,8 @@ function _parseStyleMeta(comment, gapText) {
       else if (t.startsWith('source:')) { meta.userSource = t.slice('source:'.length).trim(); inNotes = false; }
       else if (t.startsWith('url:'))    { meta.userUrl = t.slice('url:'.length).trim(); inNotes = false; }
       else if (t.startsWith('tags:'))   { const raw = t.slice('tags:'.length).trim(); meta.userTags = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []; inNotes = false; }
+      // Names this style had before a rename: before the notes branch, so a notes block does not take it. [B-651]
+      else if (t.startsWith('formerly:')) { meta.formerNames = t.slice('formerly:'.length).split(',').map(x => x.trim()).filter(Boolean); inNotes = false; }
       else if (t.startsWith('notes:'))  { noteLines.push(t.slice('notes:'.length).trim()); inNotes = true; }
       else if (inNotes && line.startsWith('// ')) { noteLines.push(line.replace(/^\/\/\s?/, '')); }
     }
@@ -25448,6 +25587,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
 
   // Lookup by original name (in case target was renamed)
   const lookupName = _helperEditorOrigName || targetName;
+  const _renamedFrom = _helperEditorOrigName && _helperEditorOrigName !== targetName ? _helperEditorOrigName : null; // [B-651]
   const allEntries = _classifyStyleEntries(_parseStyleEntries(current));
   const target = allEntries.find(e => e.name === lookupName);
   if (!target) { promptError('Helper not found', `Cannot locate helper "${lookupName}" in the file.`); return; }
@@ -25473,6 +25613,8 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
         let newContent = preamble + segments.map(s => s === targetSeg ? newBlock.replace(/\s+$/, '') + s.tail : s.text).join('');
         // Replace all remaining uses of origName (the new block already has newName)
         newContent = newContent.replace(new RegExp(`\\b${_helperEditorOrigName}\\b`, 'g'), targetName);
+        // The block is rebuilt, so its old names are written again, with this one. [B-651]
+        newContent = _styleSetFormerNames(newContent, targetName, [...((target.meta && target.meta.formerNames) || []), _helperEditorOrigName]);
         _helperEditorOrigCode    = compacted;
         _helperEditorOrigDisplay = editorTmpl ? `${editorTmpl}\n${_formatStyleCode(compacted)}` : _formatStyleCode(compacted);
         _helperEditorOrigNotes   = notes;
@@ -25483,6 +25625,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
         _exitHelperPencilMode();
         document.getElementById('btn-helper-save').disabled = true;
         _updateHelperEditorButtons();
+        if (_renamedFrom) window._styleAfterRename?.(_renamedFrom, targetName); // [B-651]
         return;
       }
       // 'ignore': fall through to normal save with new name, references stay broken
@@ -25526,6 +25669,8 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
   }
   const newBlock = _buildHelperBlock(targetName, notes, editTmpl, editCode, keepHelperTag, target.isSegment);
   let newContent = preamble + segments.map(s => s === targetSeg ? newBlock.replace(/\s+$/, '') + s.tail : s.text).join('');
+  // The block is rebuilt, so its old names are written again, plus this one on a rename. [B-651]
+  newContent = _styleSetFormerNames(newContent, targetName, [...((target.meta && target.meta.formerNames) || []), ...(_renamedFrom ? [_renamedFrom] : [])]);
   if (restate) {
     const now = _classifyStyleEntries(_parseStyleEntries(newContent));
     for (const name of restate.users) {
@@ -25553,6 +25698,7 @@ document.getElementById('btn-helper-save').addEventListener('click', async () =>
   _exitHelperPencilMode();
   document.getElementById('btn-helper-save').disabled = true;
   _updateHelperEditorButtons();
+  if (_renamedFrom) window._styleAfterRename?.(_renamedFrom, targetName); // [B-651]
   // Now taking its colours from the style, it matches more of the library: offered, as for a new one.
   if (target.isSegment && editTmpl !== editorTmpl) await _useNewSegmentInLibrary(targetName, null);
 });
@@ -26565,6 +26711,8 @@ async function _saveDetail() {
     if (_detailEntry?.isHelper) {
       current = current.replace(new RegExp(`\\b${oldName}\\b`, 'g'), newName);
     }
+    // The old name stays with the style, for configs that still use it. [B-651]
+    current = _styleSetFormerNames(current, newName, [...((_detailEntry?.meta?.formerNames) || []), oldName]);
   }
 
   // Add divider for bare user styles that had no header comment
@@ -26580,6 +26728,8 @@ async function _saveDetail() {
   if (current !== _stylesEditorInstance.getValue()) _stylesUndoPush(`edit ${newName}`);
   _stylesEditorInstance.setValue(current);
   _stylesChanged();
+  // Fonts linked to it, and the open config, follow the rename. [B-651]
+  if (newName !== oldName) window._styleAfterRename?.(oldName, newName);
 
   _detailName         = newName;
   _detailOriginalCode = newUsingCode;
@@ -27486,7 +27636,7 @@ function _stylesSelectedEntries() {
 }
 // Sets one of a style's own "// key: value" lines (creator, tags) in `text`, in place: replaced where
 // it is, otherwise written in the order the style window writes them, taken out when empty.
-const _STYLE_META_KEYS = ['creator', 'source', 'url', 'tags', 'notes'];
+const _STYLE_META_KEYS = ['creator', 'source', 'url', 'tags', 'formerly', 'notes'];
 function _setStyleMetaLine(text, entry, key, value) {
   const at = text.indexOf(entry.usingCode);
   if (at < 0) return text;
@@ -27494,7 +27644,7 @@ function _setStyleMetaLine(text, entry, key, value) {
   const hEnd = before.lastIndexOf('*/');
   const gapStart = hEnd !== -1 ? hEnd + 2 : before.lastIndexOf('\n') + 1;
   const lines = text.slice(gapStart, at).split('\n');
-  const keyOf = (l) => (l.trim().match(/^\/\/\s*(creator|source|url|tags|notes):/) || [])[1];
+  const keyOf = (l) => (l.trim().match(/^\/\/\s*(creator|source|url|tags|formerly|notes):/) || [])[1];
   const line = value ? `// ${key}: ${value}` : null;
   const i = lines.findIndex(l => keyOf(l) === key);
   if (i >= 0) { if (line) lines[i] = line; else lines.splice(i, 1); }
@@ -51595,11 +51745,11 @@ require(['vs/editor/editor.main'], function () {
         try { r = window._bpRestartBoardViaMonitor ? await window._bpRestartBoardViaMonitor(port) : null; } catch { r = null; }
         if (!r) { try { r = await window.electronAPI.restartBoardAfterEject((d && d.boardSerial) || '', port); } catch {} }
         const st = r && r.status;
-        if (st === 'not-restarted') return 'Ejected. The board did not restart: type reset in the Serial Monitor, or turn the saber off and on.';
+        // The short line, as before B-646: no Serial Monitor instructions. [B-653]
+        if (st === 'not-restarted') return SF_BOARD_POWER_CYCLE;
         if (st === 'restarted' && r.ready) return 'Board restarted and ready to use.';
         if (st === 'restarted' && r.back) return 'Board restarted.';
-        if (st === 'busy') return 'Ejected. Another program has the board’s serial port open, so it was not restarted. '
-          + 'Send reset from that program, or turn the saber off and on.';
+        if (st === 'busy') return 'Ejected. Another program has the board’s serial port open. Turn the saber off and on before use.';
         return SF_BOARD_POWER_CYCLE;
       };
       window._sfBoardOfMount = _sfBoardOfMount;
@@ -68949,6 +69099,8 @@ function _getFreshFieldRange(fieldName) {
     // Monaco editor's current value on every call so live edits are
     // reflected without a cache invalidation step.
     if (typeof window !== 'undefined') window._getLibraryStyles = _getLibraryStyles;
+    // The parsed entries themselves, for the config-open check of renamed styles. [B-651]
+    if (typeof window !== 'undefined') window._libraryStyleEntries = _libraryEntries;
 
     function _openLibraryPickerForTextarea(anchorBtn, textarea) {
       const helpers = _getLibraryHelpers();

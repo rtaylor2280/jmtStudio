@@ -226,8 +226,9 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
     && /if \(choice === 'lead'\) \{ try \{ await window\.electronAPI\.setSetting\('imagesAlwaysRename', 'never'\)/.test(html)
     && /if \(_ans === 'lead'\) await window\._sfSdSetConfigChoice\('never'\);/.test(html));
   check('no dialog carries a "Don\'t ask again" box', !html.includes(`label: "Don't ask again"`));
-  // Font rename, image rename, and a font's style as its Last used style [B-569].
-  check('Never skips the question', (html.match(/if \(remembered === 'never'\) return;/g) || []).length === 3);
+  // Font rename, image rename, a font's style as its Last used style [B-569], and a style
+  // rename, which shares the font rename's setting [B-651].
+  check('Never skips the question', (html.match(/if \(remembered === 'never'\) return;/g) || []).length === 4);
   check('the Never button sits before Cancel and resolves lead',
     /id="modal-confirm-lead"[^>]*><\/button>\s*<button class="modal-btn-cancel" id="modal-confirm-cancel"/.test(html)
     && /leadBtn\.onclick\s*=\s*\(\) => cleanup\('lead'\)/.test(html));
