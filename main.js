@@ -7196,6 +7196,11 @@ function _closeSerialMonitor(done) {
 const _sdSharedInApp = new Map();
 ipcMain.handle('board:sdSharedInApp', (_, { portPath } = {}) =>
   ({ ok: true, shared: !!portPath && _sdSharedInApp.get(String(portPath).toUpperCase()) === true }));
+// A restart through the Serial Monitor (restartBoardViaMonitor) clears it the way the restart below does.
+ipcMain.handle('board:forgetSdShared', (_, { portPath } = {}) => {
+  if (portPath) _sdSharedInApp.delete(String(portPath).toUpperCase());
+  return { ok: true };
+});
 
 ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
   if (!port) return { ok: false, error: 'No port specified' };

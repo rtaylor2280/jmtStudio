@@ -225,6 +225,29 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
       JSON.stringify({ calls, shared }));
   }
 
+  console.log('4. through the Serial Monitor, as typed (2026-11-08)');
+  {
+    const bp = fs.readFileSync(path.join(ROOT, 'renderer', 'buildPanel.js'), 'utf8');
+    const a = bp.indexOf('async function restartBoardViaMonitor(');
+    const fn = a > -1 ? bp.slice(a, bp.indexOf('\nwindow._bpRestartBoardViaMonitor', a)) : '';
+    const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
+    check('CONTROL lifted restartBoardViaMonitor', fn.includes("writeSerial('reset\\n')"));
+    check('reset is echoed in the monitor log the way typed text is', /_serialAppend\('> reset\\n'\)/.test(fn));
+    check('one reset only: the fallback reconnects and never writes again',
+      (fn.match(/writeSerial\(/g) || []).length === 1 && /closeSerialMonitor\(\);\s*await openSerialMonitor\(\);\s*dropped = await dropsWithin/.test(fn));
+    check('a closed monitor is opened first, then given a moment before reset',
+      /if \(!_serialOpen\) \{ await openSerialMonitor\(\); if \(!_serialOpen\) return null; await sleep\(500\); \}/.test(fn));
+    check('only for the selected port and never during a build or flash',
+      /up\(selectedPort\) !== up\(portPath\) \|\| isBusy \|\| isDfuMode \|\| window\._isFlashing\) return null/.test(fn));
+    check('after the restart the monitor reconnects, and the shared-card proof is cleared',
+      /boardForgetSdShared/.test(fn) && /while \(!_serialOpen && Date\.now\(\) - t0 < 30000\)/.test(fn));
+    check('the eject surfaces try the monitor first and fall back to main',
+      /r = window\._bpRestartBoardViaMonitor \? await window\._bpRestartBoardViaMonitor\(port\) : null;/.test(html)
+      && /if \(!r\) \{ try \{ r = await window\.electronAPI\.restartBoardAfterEject\(/.test(html));
+    check('a restart that never happened says so, with what to do',
+      /st === 'not-restarted'\) return 'Ejected\. The board did not restart: type reset in the Serial Monitor, or turn the saber off and on\.'/.test(html));
+  }
+
   console.log(failures ? `\n${failures} failing` : '\nall passed');
   process.exit(failures ? 1 : 0);
 })();

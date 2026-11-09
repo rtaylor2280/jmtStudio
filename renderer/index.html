@@ -51587,8 +51587,12 @@ require(['vs/editor/editor.main'], function () {
         const d = await boardP;
         let r = null;
         const port = d && d.portP ? await d.portP : null;
-        try { r = await window.electronAPI.restartBoardAfterEject((d && d.boardSerial) || '', port); } catch {}
+        // Through the Serial Monitor first, as `reset` typed there (see restartBoardViaMonitor in
+        // buildPanel.js); main's own restart only when the monitor cannot be used for this port.
+        try { r = window._bpRestartBoardViaMonitor ? await window._bpRestartBoardViaMonitor(port) : null; } catch { r = null; }
+        if (!r) { try { r = await window.electronAPI.restartBoardAfterEject((d && d.boardSerial) || '', port); } catch {} }
         const st = r && r.status;
+        if (st === 'not-restarted') return 'Ejected. The board did not restart: type reset in the Serial Monitor, or turn the saber off and on.';
         if (st === 'restarted' && r.ready) return 'Board restarted and ready to use.';
         if (st === 'restarted' && r.back) return 'Board restarted.';
         if (st === 'busy') return 'Ejected. Another program has the board’s serial port open, so it was not restarted. '

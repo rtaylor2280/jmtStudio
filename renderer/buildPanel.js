@@ -3433,6 +3433,53 @@ function updateCompileButton() {
 window.updateCompileButton = updateCompileButton;
 window.getLastFlashedSN    = () => lastFlashedSN;
 
+// Restarts the board after its card was ejected the way a person does it: `reset` typed into this
+// Serial Monitor, echoed in the log like anything typed there. Tested by hand on the Yoga
+// 2026-11-08 with the monitor open, paused and closed: instant every time. The old route opened a
+// second connection, wrote and closed at once, and the `reset` sat on the board unrun until
+// something reconnected; the monitor's retry was what restarted it.
+// One `reset`, never two: a held one runs on the next connection, so the fallback reconnects
+// instead of sending again. Returns null when the monitor cannot be used for this port (another
+// port selected, a build running), and the caller falls back to main's own restart.
+async function restartBoardViaMonitor(portPath) {
+  const up = s => String(s || '').toUpperCase();
+  if (!portPath || up(selectedPort) !== up(portPath) || isBusy || isDfuMode || window._isFlashing) return null;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const listed = async () => {
+    try { return (await window.electronAPI.listPortsRaw()).some(p => up(p.path) === up(portPath)); }
+    catch { return null; }
+  };
+  const dropsWithin = async (ms) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { if ((await listed()) === false) return true; await sleep(100); }
+    return false;
+  };
+  if (!_serialOpen) { await openSerialMonitor(); if (!_serialOpen) return null; await sleep(500); }
+  _serialAppend('> reset\n');
+  const log = el('bp-serial-log');
+  if (log) log.scrollTop = log.scrollHeight;
+  const w = await window.electronAPI.writeSerial('reset\n');
+  if (!w || !w.ok) return null;
+  let dropped = await dropsWithin(2000);
+  for (let i = 0; !dropped && i < 2; i++) {
+    // The retry, as clicked by hand: reconnect, nothing sent.
+    await closeSerialMonitor();
+    await openSerialMonitor();
+    dropped = await dropsWithin(2500);
+  }
+  if (!dropped) return { ok: true, status: 'not-restarted', via: 'monitor' };
+  window.electronAPI.boardForgetSdShared?.(portPath);   // a restarted board boots with access off
+  // Back on USB, then the monitor reconnected so the board's welcome shows where `reset` was typed.
+  const t0 = Date.now();
+  let back = false;
+  while (!back && Date.now() - t0 < 8000) { back = (await listed()) === true; if (!back) await sleep(100); }
+  if (!back) return { ok: true, status: 'restarted', via: 'monitor', back: false, ready: false };
+  await closeSerialMonitor();
+  while (!_serialOpen && Date.now() - t0 < 30000) { await openSerialMonitor(); if (!_serialOpen) await sleep(500); }
+  return { ok: true, status: 'restarted', via: 'monitor', back: true, ready: _serialOpen };
+}
+window._bpRestartBoardViaMonitor = restartBoardViaMonitor;
+
 // Why Flash is unavailable, in plain terms. Deliberately does NOT restructure the
 // enable logic the way compileBlockedReason() does: setFlashEnabled() takes an
 // explicit `enabled` flag that ten call sites pass on purpose, and collapsing that
