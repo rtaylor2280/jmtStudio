@@ -721,6 +721,15 @@ async function hashFolder(folderPath, onProgress) {
   return { hash: hash.digest('hex'), totalBytes, fileCount: files.length };
 }
 
+// A source's name as the library shows it: its bundle name, else the name it arrived under, less
+// `.zip`. Null for a source with no meta. Names the source in an import's note. [B-643]
+function sourceDisplayName(userData, uuid) {
+  if (!userData || !uuid) return null;
+  const meta = readSourceMeta(path.join(sourcesRoot(userData), uuid));
+  const n = meta && (meta.bundleName || meta.originalName);
+  return n ? String(n).replace(/\.zip$/i, '') : null;
+}
+
 function readSourceMeta(uuidDir) {
   const metaPath = path.join(uuidDir, 'meta.json');
   try { return JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
@@ -3436,6 +3445,7 @@ async function dedupeSource(userData, uuid, onProgress) {
 }
 
 module.exports = {
+  sourceDisplayName,
   sourcesRoot,
   ensureSourcesRoot,
   ensureSourceManifest,

@@ -10512,47 +10512,199 @@ async function _sfConfigFollowRenames(renames) {
 }
 window._sfConfigFollowRenames = _sfConfigFollowRenames;
 
-// When a config opens: each font folder no library font has now is looked up in every font's
-// former names. One font had it: offer to update. Two or more: pick one, or ignore it. A name a
-// library font has now is always that font, so nothing is asked about it.
-async function _sfCheckConfigFormerNames() {
-  if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
+// A preset's TRACK, renamed: the file name (the last part of the path) is swapped and the folder
+// it sits in is kept, so `tracks/moon_hati.wav` becomes `tracks/spectre_5.wav`. Matched without
+// case, as the saber's card does. [B-643]
+const _sfTrackBase = (t) => String(t || '').split('/').pop();
+const _sfTrackRenameEdits = (text, renameOf) => {
   let parsed;
-  try { parsed = presetParser.parsePresets(editor.getValue()); } catch { return; }
-  const dirs = new Map();   // lower -> as written
+  try { parsed = presetParser.parsePresets(text); } catch { return []; }
+  const edits = [];
   for (const arr of (parsed?.arrays || [])) {
     for (const p of (arr.presets || [])) {
-      const d = p && _sfFontPathParts(p.font)[0];
-      if (d && !dirs.has(d.toLowerCase())) dirs.set(d.toLowerCase(), d);
+      if (!p || !p.trackRange || !p.track) continue;
+      const base = _sfTrackBase(p.track);
+      const to = base ? renameOf(base) : null;
+      if (!to) continue;
+      const dir = p.track.slice(0, p.track.length - base.length);
+      const r = p.trackRange;
+      edits.push({
+        range: { startLineNumber: r.startLine, startColumn: r.startCol + 1, endLineNumber: r.endLine, endColumn: r.endCol + 1 },
+        text: '"' + dir + to + '"',
+      });
     }
   }
-  if (!dirs.size) return;
-  let entries = [];
-  try { const r = await window.electronAPI.listEntries(); entries = (r && r.ok && r.entries) || []; } catch { return; }
-  const have = new Set(entries.map((e) => String(e.name).toLowerCase()));
-  const rows = [];
-  for (const [lc, d] of dirs) {
-    if (have.has(lc)) continue;
-    const owners = entries.filter((e) => ((e.meta && e.meta.formerNames) || []).some((n) => String(n).toLowerCase() === lc));
-    if (!owners.length) continue;
-    const count = _sfFontRenameEdits(editor.getValue(), (x) => (x.toLowerCase() === lc ? d : null)).length;
-    rows.push({ lc, d, owners, count });
+  return edits;
+};
+
+// A preset's COMMON FOLDER, renamed: a shared folder after the font in its list ("Nomad;common") is
+// swapped and the font and the other folders are kept. Matched without case. [B-643]
+const _sfCommonRenameEdits = (text, renameOf) => {
+  let parsed;
+  try { parsed = presetParser.parsePresets(text); } catch { return []; }
+  const edits = [];
+  for (const arr of (parsed?.arrays || [])) {
+    for (const p of (arr.presets || [])) {
+      if (!p || !p.fontRange) continue;
+      const parts = _sfFontPathParts(p.font);
+      let changed = false;
+      const next = parts.map((x, i) => {
+        if (i === 0 || !x) return x;
+        const to = renameOf(x);
+        if (to) { changed = true; return to; }
+        return x;
+      });
+      if (!changed) continue;
+      const r = p.fontRange;
+      edits.push({
+        range: { startLineNumber: r.startLine, startColumn: r.startCol + 1, endLineNumber: r.endLine, endColumn: r.endCol + 1 },
+        text: '"' + next.join(';') + '"',
+      });
+    }
   }
-  if (!rows.length) return;
-  const picks = await _sfPromptFormerNames(rows);
-  if (!picks) return;
-  const to = new Map();
-  for (const p of picks) {
-    if (p.choice === 'update') to.set(p.row.lc, p.owner.name);
-    if (p.choice === 'forget') {
-      for (const e of p.row.owners) {
-        try { await window.electronAPI.forgetFormerName({ entryName: e.name, oldName: p.row.d }); } catch {}
+  return edits;
+};
+
+// When a config opens, or after an import adds aliases: each FONT FOLDER, COMMON FOLDER and TRACK the library
+// has no item named for is looked up in the aliases - a font's (formerNames) and a shared track's.
+// One owner: offer to update. Two or more: pick one, or ignore it. A name the library has now is
+// always that item, so nothing is asked about it. Fonts and tracks share one review, the only two
+// things a config names exactly. [B-561, B-641, B-643]
+let _sfAliasCheckBusy = false;
+// Both kinds of font-list change in one edit per preset: the font folder (part 0) and any common
+// folder after it. Two separate edit lists over one string would overlap. [B-643]
+const _sfFontListEdits = (text, fontTo, commonTo) => {
+  let parsed;
+  try { parsed = presetParser.parsePresets(text); } catch { return []; }
+  const edits = [];
+  for (const arr of (parsed?.arrays || [])) {
+    for (const p of (arr.presets || [])) {
+      if (!p || !p.fontRange) continue;
+      const parts = _sfFontPathParts(p.font);
+      let changed = false;
+      const next = parts.map((x, i) => {
+        if (!x) return x;
+        const to = i === 0 ? fontTo.get(x.toLowerCase()) : commonTo.get(x.toLowerCase());
+        if (to) { changed = true; return to; }
+        return x;
+      });
+      if (!changed) continue;
+      const r = p.fontRange;
+      edits.push({
+        range: { startLineNumber: r.startLine, startColumn: r.startCol + 1, endLineNumber: r.endLine, endColumn: r.endCol + 1 },
+        text: '"' + next.join(';') + '"',
+      });
+    }
+  }
+  return edits;
+};
+async function _sfCheckConfigFormerNames() {
+  if (typeof fileIsOpen === 'undefined' || !fileIsOpen || typeof editor === 'undefined' || !editor) return;
+  if (_sfAliasCheckBusy) return;   // an import's recheck can land while one is already open
+  _sfAliasCheckBusy = true;
+  try {
+    let parsed;
+    try { parsed = presetParser.parsePresets(editor.getValue()); } catch { return; }
+    const dirs = new Map();     // lower -> as written
+    const tracks = new Map();   // lower file name -> as written
+    const shared = new Map();   // lower common folder name -> as written
+    for (const arr of (parsed?.arrays || [])) {
+      for (const p of (arr.presets || [])) {
+        const d = p && _sfFontPathParts(p.font)[0];
+        if (d && !dirs.has(d.toLowerCase())) dirs.set(d.toLowerCase(), d);
+        for (const c of (p ? _sfSharedDirs(p.font) : [])) if (!shared.has(c.toLowerCase())) shared.set(c.toLowerCase(), c);
+        const t = p && _sfTrackBase(p.track);
+        if (t && !tracks.has(t.toLowerCase())) tracks.set(t.toLowerCase(), t);
       }
     }
+    if (!dirs.size && !tracks.size && !shared.size) return;
+    const rows = [];
+    if (dirs.size) {
+      let entries = [];
+      try { const r = await window.electronAPI.listEntries(); entries = (r && r.ok && r.entries) || []; } catch {}
+      const have = new Set(entries.map((e) => String(e.name).toLowerCase()));
+      for (const [lc, d] of dirs) {
+        if (have.has(lc)) continue;
+        const owners = entries.filter((e) => ((e.meta && e.meta.formerNames) || []).some((n) => String(n).toLowerCase() === lc));
+        if (!owners.length) continue;
+        const count = _sfFontRenameEdits(editor.getValue(), (x) => (x.toLowerCase() === lc ? d : null)).length;
+        rows.push({ kind: 'font', lc, d, owners, count });
+      }
+    }
+    if (tracks.size) {
+      let files = [];
+      try { const r = await window.electronAPI.sharedTracksListFiles(); files = (r && r.ok && r.files) || []; } catch {}
+      const have = new Set(files.map((f) => String(f.name).toLowerCase()));
+      for (const [lc, d] of tracks) {
+        if (have.has(lc)) continue;
+        const owners = files.filter((f) => (f.aliases || []).some((n) => String(n).toLowerCase() === lc));
+        if (!owners.length) continue;
+        const count = _sfTrackRenameEdits(editor.getValue(), (x) => (x.toLowerCase() === lc ? d : null)).length;
+        rows.push({ kind: 'track', lc, d, owners, count });
+      }
+    }
+    if (shared.size) {
+      let commons = [];
+      try { const r = await window.electronAPI.listCommons(); commons = (r && r.ok && r.commons) || []; } catch {}
+      const have = new Set(commons.map((c) => String((c.meta && c.meta.name) || '').toLowerCase()));
+      for (const [lc, d] of shared) {
+        if (have.has(lc)) continue;
+        const owners = commons.filter((c) => ((c.meta && c.meta.aliases) || []).some((n) => String(n).toLowerCase() === lc))
+          .map((c) => ({ name: c.meta.name, uuid: c.uuid }));
+        if (!owners.length) continue;
+        const count = _sfCommonRenameEdits(editor.getValue(), (x) => (x.toLowerCase() === lc ? d : null)).length;
+        rows.push({ kind: 'common', lc, d, owners, count });
+      }
+    }
+    if (!rows.length) return;
+    const picks = await _sfPromptFormerNames(rows);
+    if (!picks) return;
+    const fontTo = new Map(), trackTo = new Map(), commonTo = new Map();
+    for (const p of picks) {
+      if (p.choice === 'update') (p.row.kind === 'track' ? trackTo : p.row.kind === 'common' ? commonTo : fontTo).set(p.row.lc, p.owner.name);
+      if (p.choice === 'forget') {
+        for (const e of p.row.owners) {
+          try {
+            if (p.row.kind === 'track') await window.electronAPI.sharedTracksForgetAlias({ name: e.name, alias: p.row.d });
+            else if (p.row.kind === 'common') await window.electronAPI.forgetCommonAlias({ uuid: e.uuid, alias: p.row.d });
+            else await window.electronAPI.forgetFormerName({ entryName: e.name, oldName: p.row.d });
+          } catch {}
+        }
+      }
+    }
+    // Font and common folder changes both rewrite the font list, so they are applied as ONE edit per
+    // preset (fonts first, then commons on the result); tracks are a separate field. One Ctrl+Z.
+    let _fontEdits = [];
+    if (fontTo.size || commonTo.size) {
+      _fontEdits = _sfFontListEdits(editor.getValue(), fontTo, commonTo);
+    }
+    const edits = [
+      ..._fontEdits,
+      ...(trackTo.size ? _sfTrackRenameEdits(editor.getValue(), (x) => trackTo.get(x.toLowerCase()) || null) : []),
+    ];
+    if (edits.length) _sfApplyFontRenameEdits(edits);
+  } finally {
+    _sfAliasCheckBusy = false;
   }
-  if (to.size) _sfApplyFontRenameEdits(_sfFontRenameEdits(editor.getValue(), (x) => to.get(x.toLowerCase()) || null));
 }
 window._sfCheckConfigFormerNames = _sfCheckConfigFormerNames;
+
+// An import met fonts already in the library and they were not imported: record each incoming
+// name on the font it matched. Pairs are { entryName | sourceUuid, incomingName }. When anything
+// new was recorded and a config is open, run the config-open lookup again: the usual order is
+// open the card's config, see its fonts missing, import the card's fonts - and this is the moment
+// the config can be offered the library's names. After a tick, so the import modal is closed
+// before the review opens. Fire and forget: a failure loses an alias, never an import. [B-641]
+// `recheck`: run the lookup even when no font name was recorded - an import that brought tracks in
+// may have given a shared track an alias (soundFontSharedTracks.addFiles), and this is the one
+// recheck, so a font recheck and a track recheck cannot race. [B-643]
+window._sfRecordImportAliases = async (pairs, { recheck = false } = {}) => {
+  const list = Array.isArray(pairs) ? pairs : [];
+  if (!list.length && !recheck) return;
+  let r = null;
+  if (list.length) { try { r = await window.electronAPI.addImportAliases({ pairs: list }); } catch {} }
+  if (recheck || (r && r.ok && r.added > 0)) setTimeout(() => { window._sfCheckConfigFormerNames?.(); }, 0);
+};
 
 // One row per renamed font folder: Update (default), Ignore, or Not this font. A row two or more
 // fonts once had picks the font from a dropdown, and its third choice is None of these. Resolves to
@@ -10566,26 +10718,39 @@ function _sfPromptFormerNames(rows) {
   const bulkRow = modal && modal.querySelector('.sf-save-conflict-bulk');
   if (!modal || !list) return Promise.resolve(null);
   const one = rows.length === 1;
+  // Fonts, tracks or both, and a name the library knows as an alias whether it was renamed or came
+  // in under another name, so the words claim neither. [B-643]
+  const _kinds = ['font', 'common', 'track'].filter((k) => rows.some((r) => (r.kind || 'font') === k));
+  const _plural = { font: 'Fonts', common: 'Common folders', track: 'Tracks' };
+  const _single = { font: 'A font', common: 'A common folder', track: 'A track' };
+  const what = _kinds.length > 1
+    ? _kinds.map((k, i) => (i === 0 ? _plural[k] : _plural[k].toLowerCase())).join(_kinds.length > 2 ? ', ' : ' and ').replace(/, ([^,]+)$/, ' and $1')
+    : (one ? _single[_kinds[0]] : _plural[_kinds[0]]);
   document.getElementById('sf-former-names-title').textContent =
-    one ? 'A font in this config was renamed' : 'Fonts in this config were renamed';
-  desc.textContent = `${_sfConfigLabel()} uses ${one ? 'a font name' : 'font names'} that your library no longer has. `
-    + 'Update changes the presets to the new name. Not this font stops the old name pointing at that font.';
+    `${what} in this config ${one ? 'has another name' : 'have other names'} in your library`;
+  // The two choices people weigh, with what each means for the card in the saber: the presets name
+  // folders and files on that card, so a config using the library's names needs a card that has
+  // them. Said here, where the choice is made. Not this font/track explains itself on hover. [B-643]
+  desc.innerHTML = '<strong>Update</strong> uses your library\'s names in the presets. The card in your saber still has '
+    + 'the old names, so after you flash, update the card from <strong>Sound Fonts &rarr; SD Export</strong>.<br>'
+    + '<strong>Ignore</strong> keeps the card\'s names, and the card works as it is.';
   list.innerHTML = rows.map((r, i) => {
     const presets = r.count === 1 ? '1 preset' : `${r.count} presets`;
     const sub = r.owners.length === 1
-      ? `Now ${_preflightEsc(r.owners[0].name)} · ${presets}`
-      : `Now <select class="sf-former-pick" data-former-pick="${i}">`
+      ? `In your library: ${_preflightEsc(r.owners[0].name)} · ${presets}`
+      : `In your library: <select class="sf-former-pick" data-former-pick="${i}">`
         + r.owners.map((e, j) => `<option value="${j}">${_preflightEsc(e.name)}</option>`).join('')
         + `</select> · ${presets}`;
     const radio = (v, label, checked, tip) =>
       `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${checked ? ' checked' : ''}>${label}</label>`;
     const many = r.owners.length > 1;
-    const now = many ? 'the font you pick' : r.owners[0].name;
+    const noun = r.kind === 'track' ? 'track' : r.kind === 'common' ? 'common folder' : 'font';
+    const now = many ? `the ${noun} you pick` : r.owners[0].name;
     const tips = {
       update: `Change ${r.count === 1 ? 'the preset' : `the ${r.count} presets`} using ${r.d} to ${now}.`,
       ignore: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}.\nYou are asked again the next time this config opens.`,
       forget: many
-        ? `None of these fonts is ${r.d}.\nThey stop being matched to that name, and no config asks about it again.`
+        ? `None of these ${noun}s is ${r.d}.\nThey stop being matched to that name, and no config asks about it again.`
         : `${r.owners[0].name} is not ${r.d}.\nIt stops being matched to that name, and no config asks about it again.`,
     };
     return `<div class="sf-save-conflict-row">`
@@ -10593,7 +10758,7 @@ function _sfPromptFormerNames(rows) {
       + `<span class="sf-save-conflict-sub">${sub}</span></span>`
       + `<span class="sf-save-conflict-choices">`
       + radio('update', 'Update', true, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
-      + radio('forget', many ? 'None of these' : 'Not this font', false, tips.forget)
+      + radio('forget', many ? 'None of these' : `Not this ${noun}`, false, tips.forget)
       + `</span></div>`;
   }).join('');
   if (bulkRow) bulkRow.style.display = one ? 'none' : '';
@@ -16563,6 +16728,73 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // Esc and any future dismissal rather than living in one button's handler.
     try { window.electronAPI.bulkImportCancel?.(); } catch {}
     try { window.electronAPI.bulkImportEnrichCancel?.(); } catch {}
+    // [B-641] THE CARD'S NAMES, RECORDED ON THE FONTS IT ALREADY HAD. Every font this import
+    // matched to the library (identical, a fuller copy, or a close match) that did NOT go in -
+    // left unticked, skipped by quick import, or the whole import cancelled - gives its folder
+    // name to the font it matched, so the card's config finds it by the config-open lookup. A
+    // row that was imported records nothing: it is its own font now. closeModal is the home for
+    // the same reason as the cancel above: it is every exit, Done included.
+    try {
+      if (currentPlan && Array.isArray(currentPlan.sources)) {
+        const pairs = [];
+        for (const s of currentPlan.sources) {
+          if (!s || s._willImport) continue;
+          const incoming = s.absPath ? String(s.absPath).split(/[\\/]/).filter(Boolean).pop() : null;
+          if (!incoming) continue;
+          // THE SAME FONT ONLY: have_it (nearly identical, or a copy that lost files) or version
+          // (most of the library font is in it). Recording a different font's name would point a
+          // config at the wrong font. An exact archive duplicate carries no verdict and is
+          // identical by definition. [B-641, B-643]
+          const _sameFont = s._duplicate || (s._match && (s._match.verdict === 'have_it' || s._match.verdict === 'version'));
+          if (!_sameFont) continue;
+          if (s._match && s._match.matchName) pairs.push({ entryName: s._match.matchName, incomingName: incoming });
+          else if (s._duplicate && s._existingUuid) pairs.push({ sourceUuid: s._existingUuid, incomingName: incoming });
+        }
+        // THE SAME FONT TWICE ON THE CARD: the copy left out gives its folder name to the copy that
+        // came in, under the name it came in as. A config on the card may use either. [B-643]
+        const _importedName = (s) => {
+          const gr = guidedRows.find((r) => r && r.src === s);
+          return (gr && gr.nameInput && gr.nameInput.value.trim()) || s.cleanedName || s.rawName || '';
+        };
+        for (const s of currentPlan.sources) {
+          if (!s || s._willImport || !s._sameInBatch || s._sameInBatch.idx == null) continue;
+          const partner = currentPlan.sources[s._sameInBatch.idx];
+          if (!partner || !partner._willImport || !s.absPath) continue;
+          const incoming = String(s.absPath).split(/[\\/]/).filter(Boolean).pop();
+          const target = _importedName(partner);
+          if (incoming && target && incoming.toLowerCase() !== target.toLowerCase()) pairs.push({ entryName: target, incomingName: incoming });
+        }
+        // TRACKS LEFT OUT BECAUSE THEY ARE THE SAME AUDIO: one already in the library (its name an
+        // alias of that track), or a second copy on this card (its name an alias of the first copy,
+        // under the name the first copy came in as). The review never sends these to the import,
+        // so the import cannot record them; this is where it is known. [B-643]
+        const _tk = currentPlan._analyzeStats && currentPlan._analyzeStats.tracks;
+        const _trackPairs = [];
+        if (_tk && Array.isArray(_tk.items) && _tk.items.length) {
+          const lc = (x) => String(x || '').toLowerCase();
+          const came = new Map();   // card name (lower) -> the name it came in as
+          if (_guidedTrackRows && _guidedTrackRows.length) {
+            const _on = !_guidedTracksCb || _guidedTracksCb.checked;
+            for (const r of _guidedTrackRows) if (_on && r.cb && r.cb.checked && !r.cb.disabled) came.set(lc(r.item.name), _trackFileName(r));
+          } else {
+            for (const it of _tk.items) if (!it.owned) came.set(lc(it.name), it.name);
+          }
+          for (const it of _tk.items) {
+            if (!it.owned || !it.name || came.has(lc(it.name))) continue;
+            const target = it.ownedIn === 'library' ? it.matchName : came.get(lc(it.matchName));
+            if (target && lc(target) !== lc(it.name)) _trackPairs.push({ name: target, alias: it.name });
+          }
+        }
+        // Recheck when this import brought anything in: a track it added may now be another
+        // name's alias, which no font pair would trigger.
+        const _ran = currentPlan.sources.some((s) => s && s._willImport)
+          || ((currentPlan.tracksFolders || []).length > 0);
+        (async () => {
+          for (const tp of _trackPairs) { try { await window.electronAPI.sharedTracksAddAlias(tp); } catch {} }
+          if (pairs.length || _ran || _trackPairs.length) window._sfRecordImportAliases?.(pairs, { recheck: _ran || _trackPairs.length > 0 });
+        })();
+      }
+    } catch {}
     // Discard any analyzed-but-not-imported prepared sources. Safe: the backend
     // only deletes ones that were never finalized (committed sources have meta
     // and are left alone), so we can hand it every prepared uuid.
@@ -17268,7 +17500,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         && !(currentPlan && currentPlan.commonFolders && currentPlan.commonFolders.length)) return;   // [B-351]
     const groups = new Map();
     for (const row of guidedRows) {
-      const v = String((row.enriched && row.enriched.vendor) || '').trim();
+      // A creator recorded as the word "Unknown" (a font already in the library, carried over) is the
+      // same as none detected; otherwise the two made two "Unknown" groups side by side. [B-643]
+      const _vRaw = String((row.enriched && row.enriched.vendor) || '').trim();
+      const v = /^unknown$/i.test(_vRaw) ? '' : _vRaw;
       const key = v ? v.toLowerCase() : '__none__';
       if (!groups.has(key)) {
         const e0 = row.enriched || {};
@@ -17662,10 +17897,20 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         nm.maxLength = 64;
         if (owned) nm.disabled = true;
         nmWrap.appendChild(nm);
-        const note = document.createElement('span');
-        note.style.opacity = '.6';
-        note.textContent = owned ? 'skipped' : '';
-        wrap.appendChild(cb); wrap.appendChild(nmWrap); wrap.appendChild(note);
+        // Owned: the same sentence a font row says, naming what you have it as when the card's
+        // name differs, in the same green. [B-643]
+        const note = document.createElement('div');
+        if (owned) {
+          const _as = (k && k.matchName && String(k.matchName).toLowerCase() !== String(c.name || 'common').toLowerCase())
+            ? ` (as ${k.matchName})` : '';
+          note.textContent = `Already in your library${_as}`;
+          note.style.color = 'var(--c-success-text)';
+          note.style.fontSize = '0.72rem';
+          note.style.marginTop = '3px';
+        }
+        // Under the name, not beside it, so it reads like a font row's note. [B-643]
+        if (owned) nmWrap.appendChild(note);
+        wrap.appendChild(cb); wrap.appendChild(nmWrap);
         cbody.appendChild(wrap);
         cb.addEventListener('change', _updateGuidedCount);
         _guidedCommonRows.push({ cb, nameInput: nm, absPath: c.absPath, name: c.name || 'common', owned });
@@ -17920,15 +18165,17 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
           row.el.classList.add('excluded');
           return;
         }
-        // Green + unchecked ONLY for fully-owned; a copy carrying sounds the library
-        // lacks stays checked in amber, because skipping it would lose them.
+        // Green + unchecked when nothing in it is new to the library; amber + checked when anything
+        // is, so skipping by default never loses a file from the card. [B-643]
         const gRowName = (row.nameInput?.value || '').trim();
         // "(as X)" only when the names differ, and "yours has more" only when it is
         // true — that clause is the whole reason this one escaped the archive-hash
         // test, and without it identical-looking rows claim the same thing for two
         // different reasons.
         let _txt = m.label;
-        if (m.fullyOwned && m.matchName
+        // [B-643] An owned-elsewhere label names its match and says where the extra files are; it
+        // takes neither the "(as X)" clause nor the identical/more-complete ending.
+        if (m.fullyOwned && !m.ownedElsewhere && m.matchName
             && gRowName.toLowerCase() !== String(m.matchName).toLowerCase()) {
           _txt = `${m.label} (as ${m.matchName})`;
         }
@@ -17940,12 +18187,15 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // complete" is worth knowing.
         // "more complete" is comparative on purpose: it says the card's copy is
         // lesser without implying it is damaged, which is the corrupted row's word.
-        if (m.fullyOwned) _txt += m.libHasMore
+        if (m.fullyOwned && !m.ownedElsewhere) _txt += m.libHasMore
           ? '; your copy is more complete.'
           : '; your copy is identical.';
         note.textContent = _txt;
         note.classList.toggle('have-it', !!m.fullyOwned);
         if (m.tip && row.checkbox) row.checkbox.title = m.tip;
+        // [B-643] Unticked when nothing on the card is new to the library (fullyOwned includes a
+        // copy whose extra files are all in the library); ticked when anything is, so nothing on
+        // the card is lost. The same flag quick import reads, so the two agree.
         if (m.fullyOwned && row.checkbox && row.checkbox.checked
             && row.el.dataset.touched !== 'true' && !row.el.classList.contains('g-corrupt')) {
           row.checkbox.checked = false;
@@ -18993,6 +19243,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
       // when there is genuinely no work in ANY bucket. [B-281]
       const _otherWork = ((runPlan.tracksFolders || []).length > 0)
                       || ((runPlan.commonFolders || []).length > 0);
+      // [B-641] Marked so closeModal records the card's name only on fonts that were NOT imported.
+      for (const s of fresh) s._willImport = true;
       if (!fresh.length && !_otherWork) { closeModal(); return; }
       runPlan = { ...runPlan, sources: fresh };
     }
@@ -19593,6 +19845,11 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   els.guidedImportBtn?.addEventListener('click', async () => {
     if (!currentPlan) return;
     const chosen = guidedRows.filter(r => r.checkbox.checked && !r.nameInput.classList.contains('invalid'));
+    // [B-641] The rows going in. closeModal records the card's name on every matched font that
+    // did not. (The early return below leaves them stamped; nothing was run, so nothing records
+    // for a row that is still ticked, which is right: ticking it said "import this one".)
+    for (const r of guidedRows) if (r.src) delete r.src._willImport;   // a second press re-decides
+    for (const r of chosen) if (r.src) r.src._willImport = true;
     // TRACKS COUNT AS A REASON TO IMPORT ([B-350]). This gate read only the
     // font rows, so on a tracks-only plan — zero guidedRows by construction —
     // the enabled Import button silently did nothing: the enable logic above
@@ -32199,7 +32456,9 @@ require(['vs/editor/editor.main'], function () {
       };
       // `givenPath` skips the picker: a zip the in-app browser already downloaded, with `linkUrl`
       // the page it came from.
-      const _sfImportCommon = async (mode, forceNewSource = false, givenPath = null, linkUrl = null) => {
+      // `besideOf`: the uuid of the common this pack matched, when the user imports it anyway. It comes
+      // in as a version of that common, on that common's source, not as a source of its own. [B-643]
+      const _sfImportCommon = async (mode, forceNewSource = false, givenPath = null, linkUrl = null, besideOf = null) => {
         let pick;
         if (givenPath) pick = { ok: true, filePath: givenPath };
         else {
@@ -32329,7 +32588,7 @@ require(['vs/editor/editor.main'], function () {
         })();
         let res;
         try {
-          const _impArgs = { name, forceNewSource, askOnDuplicate: !forceNewSource, bundle: _bundle };
+          const _impArgs = { name, forceNewSource, askOnDuplicate: !forceNewSource && !besideOf, bundle: _bundle, besideOf };
           if (mode === 'zip') res = await window.electronAPI.importCommonFromZip({ zipPath: pick.filePath, ..._impArgs, downloadUrl: linkUrl });
           else res = await window.electronAPI.importCommonFromFolder({ folderPath: pick.filePath, ..._impArgs });
         } catch (err) {
@@ -32365,6 +32624,12 @@ require(['vs/editor/editor.main'], function () {
             // to the archive's own name keeps the sentence true when the source is on file
             // with no common folder built from it yet.
             if (els.name) els.name.textContent = _names.join(', ') || name;
+            // The shared button says what Import anyway will do here: one matched common = a version
+            // of it on its source; otherwise a new source. [B-643]
+            {
+              const _oneC = (res.existingCommons || []).length === 1 ? res.existingCommons[0] : null;
+              if (els.reimportBtn) els.reimportBtn.textContent = _oneC ? `Add as a version of ${_oneC.name}` : 'Re-import as a new source';
+            }
             els.modal.classList.add('active');
             const cleanup = () => {
               els.modal.classList.remove('active');
@@ -32372,18 +32637,38 @@ require(['vs/editor/editor.main'], function () {
               els.reimportBtn?.removeEventListener('click', onReimport);
               els.cancelBtn?.removeEventListener('click', onCancel);
             };
+            // KEPT WHAT THEY HAVE: the name this pack came in under becomes an alias of the common it
+            // matched, so a config naming it that way finds it. One matched common only: with
+            // several there is no one to give the name to. [B-643]
+            const _recordAlias = () => {
+              const _one = (res.existingCommons || []).length === 1 ? res.existingCommons[0] : null;
+              const _in = String(res.incomingName || name || '').trim();
+              if (_one && _one.uuid && _in && _in.toLowerCase() !== String(_one.name || '').toLowerCase()) {
+                try { window.electronAPI.addCommonAlias({ uuid: _one.uuid, alias: _in }); } catch {}
+              }
+            };
             // Opens the SOURCE, which now lists every common folder built from it, so this
             // answers "which one do I already have" without the dialog picking one.
             const onKeep = async () => {
               cleanup();
+              _recordAlias();
               if (res.sourceUuid) await _sfOpenSourceDetail(res.sourceUuid);
               resolve();
             };
-            // A new source runs the curation payload, so this is also the answer that brings
-            // a customized copy back. The reuse path cannot: importSource returns before the
-            // payload is read.
-            const onReimport = async () => { cleanup(); await _sfImportCommon(mode, true, givenPath, linkUrl); resolve(); };
-            const onCancel = () => { cleanup(); resolve(); };
+            // IMPORT ANYWAY: one matched common means the pack comes in BESIDE it, as a version on
+            // that common's source. With none or several there is nothing single to attach to, so
+            // it imports as before, as its own source (which also brings a customized copy back:
+            // the reuse path cannot, importSource returns before the payload is read). [B-643]
+            // The file already picked, not a second trip through the picker.
+            const _again = givenPath || pick.filePath;
+            const onReimport = async () => {
+              cleanup();
+              const _one = (res.existingCommons || []).length === 1 ? res.existingCommons[0] : null;
+              if (_one && _one.uuid) await _sfImportCommon(mode, false, _again, linkUrl, _one.uuid);
+              else await _sfImportCommon(mode, true, _again, linkUrl);
+              resolve();
+            };
+            const onCancel = () => { cleanup(); _recordAlias(); resolve(); };
             els.keepBtn?.addEventListener('click', onKeep);
             els.reimportBtn?.addEventListener('click', onReimport);
             els.cancelBtn?.addEventListener('click', onCancel);
@@ -36316,6 +36601,9 @@ require(['vs/editor/editor.main'], function () {
         _sfSharedTracksSelected.add(res.newName || newName);
         _sfSharedTracksAnchor = res.newName || newName;
         await _sfRefreshSharedTracksModal();
+        // The old name is now the track's alias: an open config still asking for it is offered
+        // the new one, the same review a renamed font gets. [B-643]
+        setTimeout(() => { window._sfCheckConfigFormerNames?.(); }, 0);
       };
       const _sfDeleteSharedTracksPrompt = async () => {
         const names = [..._sfSharedTracksSelected];
@@ -36417,6 +36705,23 @@ require(['vs/editor/editor.main'], function () {
         if (_sfImportEls.modal) _sfImportEls.modal.classList.remove('active');
         try { window.electronAPI.linkCaptureClose(); } catch {}
         for (const f of Array.from(_sfReviewImages)) _sfDropReviewImage(f);
+        // [B-641] EVERY FONT THIS IMPORT MATCHED TO THE LIBRARY AND DID NOT IMPORT gives its name to
+        // the font it matched: identical, a fuller copy, or a close match, and whichever door ended
+        // it - Cancel, Open existing / Show in library from "already in your library", or a commit
+        // that left the row unticked. A candidate that was imported records nothing (it is its own
+        // font now). This is every exit of the single import, which is why it lives here.
+        try {
+          const mr = _sfImport && _sfImport._matchRes;
+          if (mr && mr.ok && Array.isArray(mr.results)) {
+            const done = _sfImport._importedPaths || null;
+            const pairs = mr.results
+              // Nearly identical and better only (verdict have_it): a close match is a guess, and a
+              // wrong one would point a config at a different font. [B-643]
+              .filter(x => x && x.matchName && x.name && (x.verdict === 'have_it' || x.verdict === 'version') && !(done && done.has(x.path || '')))
+              .map(x => ({ entryName: x.matchName, incomingName: x.name }));
+            if (pairs.length) window._sfRecordImportAliases?.(pairs);
+          }
+        } catch {}
         _sfImport = null;
         if (uuidToClean) {
           _sfDiscardSource(uuidToClean, 'an import cancel');
@@ -36751,7 +37056,8 @@ require(['vs/editor/editor.main'], function () {
           if (await _sfWarnSlowImport(_impEjSrc, { handoff: true })) return;
         }
         const myRun = Symbol('sfImportRun');
-        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink, downloadUrl: downloadUrl || null, linkUrl: linkUrl || null, picks: picks || null, startUrl: startUrl || null };
+        _sfImport = { sourcePath, uuid: null, vendor: null, candidates: [], runId: myRun, fromLink: !!fromLink, downloadUrl: downloadUrl || null, linkUrl: linkUrl || null, picks: picks || null, startUrl: startUrl || null,
+          reimport: !!forceNewSource };   // [B-643] they already said "import it again": matches arrive ticked
         _sfShowPhase('progress');
         // THE WIZARD APPEARS HERE, AFTER THE SOURCE CHECK, NOT BEFORE IT. [2026-10-04]
         // The rule, from watching export do it: the check comes *before* the window, not over it.
@@ -37080,6 +37386,21 @@ require(['vs/editor/editor.main'], function () {
           const match = r && r.ok && r.sources && r.sources.find(s => s.uuid === existingUuid);
           const displayName = (match && match.meta && match.meta.originalName) || existingUuid;
           if (_sfDupEls.name) _sfDupEls.name.textContent = displayName;
+          // WHAT "IMPORT AGAIN" WILL DO, DECIDED BEFORE THE DIALOG SHOWS, so the button says it: a
+          // folder that IS one font, of a source holding one font, comes in as a version of that font;
+          // anything else (a zip, a bundle, a release-shaped folder) as a new source. One decision
+          // feeds both the label and the click, so they cannot disagree. [B-643]
+          let _versionOf = null;
+          {
+            const _fonts = (_sfAllEntries || []).filter((e) => e && e.meta && e.meta.sourceUuid === existingUuid);
+            if (!/\.zip$/i.test(String(sourcePath || '')) && _fonts.length === 1) {
+              try {
+                const _ins = await window.electronAPI.inspectFontFolder({ folderPath: sourcePath });
+                if (_ins && _ins.ok && _ins.verdict !== 'contains' && _ins.verdict !== 'not-a-font') _versionOf = _fonts[0].name;
+              } catch {}
+            }
+          }
+          if (_sfDupEls.reimportBtn) _sfDupEls.reimportBtn.textContent = _versionOf ? `Add as a version of ${_versionOf}` : 'Re-import as a new source';
           // Stash the import modal so the dup prompt isn't stacked on top
           // of the 100%-progress import modal. Restored in cleanup; the
           // keep/cancel paths then close it via _sfCloseImport, and the
@@ -37104,7 +37425,16 @@ require(['vs/editor/editor.main'], function () {
               try { window.electronAPI.bulkImportDiscardPrepared({ uuids: [staged.uuid] }); } catch {}
             }
           };
+          // [B-641] The same download is already stored, and they kept that answer (Open existing or
+          // Cancel): its folder or archive name goes on the font that download became. Main resolves
+          // the source to its font and skips a bundle (several fonts, no one name to give). Re-import
+          // as new records nothing - that copy becomes its own font.
+          const recordAlias = () => {
+            const incoming = String(sourcePath || '').split(/[\\/]/).filter(Boolean).pop();
+            if (incoming) window._sfRecordImportAliases?.([{ sourceUuid: existingUuid, incomingName: incoming }]);
+          };
           const onKeep = async () => {
+            recordAlias();
             // Navigating to the matched source's detail view — NOT back to the
             // card browser. Clear the SD-return flag so _sfCloseImport doesn't
             // slam the card browser over the detail we're about to open.
@@ -37116,11 +37446,31 @@ require(['vs/editor/editor.main'], function () {
             await _sfOpenSourceDetail(existingUuid);
             resolve();
           };
-          const onCancel = () => { discardStaged(); cleanup(); _sfCloseImport(); resolve(); };
+          const onCancel = () => { recordAlias(); discardStaged(); cleanup(); _sfCloseImport(); resolve(); };
           // knownHash: the scan that raised this prompt already hashed the file —
           // hand it to the re-run so it skips straight to the copy stage. For
           // folders the staged zip goes further: finalize it, no re-zip at all.
-          const onReimport = async () => { cleanup(); await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, downloadUrl: _sfImport?.downloadUrl, linkUrl: _sfImport?.linkUrl, picks: _sfImport?.picks, startUrl: _sfImport?.startUrl, knownHash: scannedHash, finalizeStaged: staged }); resolve(); };
+          // RE-IMPORT, AND IT IS A FOLDER OF ONE FONT YOU HAVE: it comes in as a VERSION of that font,
+          // on its source, through Add from folder with this folder - same source, same creator and
+          // details, nothing stored twice. A zip, or a source with several fonts or none, imports as
+          // a new source as before. [B-643]
+          const onReimport = async () => {
+            cleanup();
+            // Decided above, with the label: a release-shaped folder (Proffie/, CFX/, Xeno3/ wrappers)
+            // or a zip takes the ordinary route; Add from folder would refuse a folder of variants.
+            if (_versionOf && window._sfAddFontFromFolder) {
+              discardStaged();
+              window._sfReturnToSdBrowser = false;
+              _sfCloseImport();
+              await window.refreshSoundFontsView();
+              await _sfOpenSourceDetail(existingUuid);
+              await window._sfAddFontFromFolder(_versionOf, sourcePath);
+              resolve();
+              return;
+            }
+            await _sfRunImport(sourcePath, { forceNewSource: true, fromLink: _sfImport?.fromLink, downloadUrl: _sfImport?.downloadUrl, linkUrl: _sfImport?.linkUrl, picks: _sfImport?.picks, startUrl: _sfImport?.startUrl, knownHash: scannedHash, finalizeStaged: staged });
+            resolve();
+          };
           _sfDupEls.keepBtn?.addEventListener('click', onKeep);
           _sfDupEls.reimportBtn?.addEventListener('click', onReimport);
           _sfDupEls.cancelBtn?.addEventListener('click', onCancel);
@@ -37889,13 +38239,13 @@ require(['vs/editor/editor.main'], function () {
                 note.className = 'cand-dup-note';
                 row.querySelector('.cand-main')?.appendChild(note);
               }
-              // Green + uncheck ONLY when the library truly holds every sound in
-              // this candidate. A near-match whose extra sounds the library
-              // LACKS stays checked in amber — skipping it would lose them.
+              // Green + uncheck when nothing in this candidate is new to the library (fullyOwned
+              // includes a copy whose extra files are all elsewhere in it); amber stays checked
+              // when anything is, so skipping by default never loses a file. [B-643]
               // Fully-owned label stays short; "(as X)" only when the row name
               // differs from the matched entry, so renames stay traceable.
               const rowName = (row.querySelector('.cand-name')?.value || '').trim();
-              note.textContent = (hit.fullyOwned && hit.matchName
+              note.textContent = (hit.fullyOwned && !hit.ownedElsewhere && hit.matchName
                   && rowName.toLowerCase() !== String(hit.matchName).toLowerCase())
                 ? `${hit.label} (as ${hit.matchName})`
                 : hit.label;
@@ -37903,7 +38253,9 @@ require(['vs/editor/editor.main'], function () {
               note.classList.toggle('variant', !hit.fullyOwned);
               const check = row.querySelector('.cand-check');
               if (check && hit.tip) check.title = hit.tip;
-              if (hit.fullyOwned && row.dataset.already !== '1'
+              // A RE-IMPORT KEEPS THEM TICKED: the user chose "Re-import as a new source" on the
+              // dialog that named this match, so unticking it again asks the same question twice. [B-643]
+              if (hit.fullyOwned && !_sfImport.reimport && row.dataset.already !== '1'
                   && !(_sidecarImported && _sidecarImported.has(String(c.path || '')))
                   && row.dataset.touched !== 'true' && row.dataset.edited !== 'true') {
                 if (check && check.checked) {
@@ -37935,8 +38287,8 @@ require(['vs/editor/editor.main'], function () {
                 // the name input above - surfaces the collision the moment it matters.
                 if (check) {
                   check.title = hit.matchName
-                    ? `Already in your library as ${hit.matchName}. Check it to import a second copy under a new name.`
-                    : 'Already in your library. Check it to import a second copy under a new name.';
+                      ? `Already in your library as ${hit.matchName}. Check it to import a second copy under a new name.`
+                      : 'Already in your library. Check it to import a second copy under a new name.';
                 }
               }
             });
@@ -38071,6 +38423,10 @@ require(['vs/editor/editor.main'], function () {
             image: row.dataset.image || '',
           });
         }
+        // [B-641] What is going in, by candidate path, so _sfCloseImport records the incoming name
+        // only on matched fonts that were NOT imported. Set before the early return: pressing
+        // Import with nothing ticked imports nothing, and every match is then a kept recommendation.
+        _sfImport._importedPaths = new Set(picks.map(p => (p.candidate && p.candidate.path) || ''));
         // A customized-only commit is a legitimate import — it is exactly the
         // customize-in-place round trip, where the stock row stays unchecked
         // by the user's own record.
@@ -43418,9 +43774,10 @@ require(['vs/editor/editor.main'], function () {
       // what is not one font, and disclose damaged sounds. One copy, so the two doors cannot drift on
       // what counts as a font or as damaged. `words` words the damage dialog: { sentence, button }.
       // Resolves { folderPath, r, damaged } or null when the user stopped or the folder was refused.
-      const _sfPickFontFolder = async (words) => {
-        let folderPath = null;
-        try { folderPath = await window.electronAPI.selectSoundFontSource({ mode: 'folder' }); } catch {}
+      // `givenPath`: a folder already chosen elsewhere (a re-import), so no second picker. [B-643]
+      const _sfPickFontFolder = async (words, givenPath = null) => {
+        let folderPath = givenPath || null;
+        if (!folderPath) { try { folderPath = await window.electronAPI.selectSoundFontSource({ mode: 'folder' }); } catch {} }
         if (!folderPath) return null;
         let r = null;
         try { r = await window.electronAPI.inspectFontFolder({ folderPath }); } catch (err) { r = { ok: false, error: String(err && err.message || err) }; }
@@ -43571,9 +43928,11 @@ require(['vs/editor/editor.main'], function () {
         try { await window.refreshSoundFontsView(); } catch {}
         if (_sfSourceOriginalUuid) await _sfRenderSourceEntries(_sfSourceOriginalUuid);
       };
-      const _sfAddFontFromFolder = async (anchorEntryName) => {
+      // `givenPath`: the folder, when the caller already has it (a re-import of a folder that is
+      // already in the library comes in here as a version beside its font). [B-643]
+      const _sfAddFontFromFolder = async (anchorEntryName, givenPath = null) => {
         if (!_sfSourceOriginalUuid) return;
-        const _picked = await _sfPickFontFolder({ sentence: 'Add this font', button: 'Add' });
+        const _picked = await _sfPickFontFolder({ sentence: 'Add this font', button: 'Add' }, givenPath);
         if (!_picked) return;
         const { folderPath, r } = _picked;
         const _damaged = _picked.damaged;
@@ -43770,6 +44129,7 @@ require(['vs/editor/editor.main'], function () {
         // lands them on an editable name. The folder's name is a starting point, not a decision.
         await _sfFinishEntryDuplicate(res.name || newName);
       };
+      window._sfAddFontFromFolder = (...a) => _sfAddFontFromFolder(...a);   // [B-643] the re-import door
       _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
         if (!_sfSourceOriginalUuid) return;
         await _sfSourceCommitChain;

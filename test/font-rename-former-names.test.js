@@ -29,8 +29,11 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
   const w = entries._withFormerName;
   check('first rename lists the old name', JSON.stringify(w(undefined, 'Terra', 'Terra_v2')) === '["Terra"]');
   check('newest first', JSON.stringify(w(['A'], 'B', 'C')) === '["B","A"]');
-  check('five at most, the oldest pushed out',
-    JSON.stringify(w(['E', 'D', 'C', 'B', 'A'], 'F', 'G')) === '["F","E","D","C","B"]');
+  const fifty = Array.from({ length: 50 }, (_, i) => `n${49 - i}`);   // n49 (newest) .. n0 (oldest)
+  const pushed = w(fifty, 'new', 'cur');
+  check('fifty at most (B-641, was five), the oldest pushed out',
+    entries.FORMER_NAMES_MAX === 50 && pushed.length === 50 && pushed[0] === 'new' && pushed[49] === 'n1' && !pushed.includes('n0'),
+    JSON.stringify({ max: entries.FORMER_NAMES_MAX, len: pushed.length, first: pushed[0], last: pushed[49] }));
   check('a repeat (any case) is listed once, at the front', JSON.stringify(w(['b', 'A'], 'A', 'C')) === '["A","b"]');
   check('renaming back to a former name un-lists it', JSON.stringify(w(['Terra'], 'Terra_v2', 'terra')) === '["Terra_v2"]');
   check('a case-only rename adds nothing', JSON.stringify(w([], 'terra', 'Terra')) === '[]');
@@ -73,6 +76,28 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
       && JSON.stringify(metaOf('Orb').formerNames) === '["Orb_v1","Sphere"]');
     entries.forgetFormerName(ud, 'Orb', 'Orb_v1'); entries.forgetFormerName(ud, 'Orb', 'Sphere');
     check('the last one removed leaves no list', !('formerNames' in metaOf('Orb')));
+
+    // addFormerName: an import met an IDENTICAL font under another name [B-641]
+    make('Kyber', { formerNames: ['Kyber_old'] });
+    r = entries.addFormerName(ud, 'Kyber', 'Kyber_Dawn');
+    check('addFormerName: the incoming name goes first',
+      r && r.ok && r.changed && JSON.stringify(metaOf('Kyber').formerNames) === '["Kyber_Dawn","Kyber_old"]', JSON.stringify({ r, m: metaOf('Kyber') }));
+    r = entries.addFormerName(ud, 'Kyber', 'kyber');
+    check('addFormerName: the font\'s own name (any case) is never added', r && r.ok && r.changed === false
+      && JSON.stringify(metaOf('Kyber').formerNames) === '["Kyber_Dawn","Kyber_old"]');
+    r = entries.addFormerName(ud, 'Kyber', 'kyber_dawn');
+    check('addFormerName: a name it already has (any case) at the front changes nothing', r && r.ok && r.changed === false);
+    r = entries.addFormerName(ud, 'Kyber', 'Kyber_old');
+    check('addFormerName: a name it already has further back moves to the front',
+      r && r.ok && r.changed && JSON.stringify(metaOf('Kyber').formerNames) === '["Kyber_old","Kyber_Dawn"]');
+    make('Plain');
+    r = entries.addFormerName(ud, 'Plain', '  CardName  ');
+    check('addFormerName: a font with no list gets one, the name trimmed',
+      r && r.ok && JSON.stringify(metaOf('Plain').formerNames) === '["CardName"]' && metaOf('Plain').name === 'Plain');
+    r = entries.addFormerName(ud, 'Plain', '   ');
+    check('addFormerName: a blank name is refused', r && r.ok === false);
+    r = entries.addFormerName(ud, 'NoSuchFont', 'X');
+    check('addFormerName: a missing font is an error, not a throw', r && r.ok === false);
   } finally {
     try { fs.rmSync(ud, { recursive: true, force: true }); } catch {}
   }
@@ -141,12 +166,12 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
     && /_sfPromptFormerNames\(rows\)/.test(html) && /sf-save-conflict-row/.test(prompt));
   check('each row: Update (default), Ignore, Not this font / None of these',
     /radio\('update', 'Update', true, tips\.update\) \+ radio\('ignore', 'Ignore', false, tips\.ignore\)/.test(prompt)
-    && /'None of these' : 'Not this font', false, tips\.forget\)/.test(prompt));
+    && /many \? 'None of these' : `Not this \$\{noun\}`, false, tips\.forget\)/.test(prompt));
   check('every choice has a hover saying what it does', /<label title="\$\{_preflightEsc\(tip\)\}">/.test(prompt)
     && /no config asks about it again\.`/.test(prompt));
   check('two or more owners: the row picks the font from a dropdown', /data-former-pick/.test(prompt));
   check('every Update is one edit; Not this font forgets the name on the font(s)',
-    /if \(to\.size\) _sfApplyFontRenameEdits\(/.test(html) && /forgetFormerName\(\{ entryName: e\.name, oldName: p\.row\.d \}\)/.test(html));
+    /if \(edits\.length\) _sfApplyFontRenameEdits\(edits\);/.test(html) && /forgetFormerName\(\{ entryName: e\.name, oldName: p\.row\.d \}\)/.test(html));
   const setAt = html.indexOf('function _sfSettleVisitRename(');
   const settle = html.slice(setAt, html.indexOf('\n      }\n', setAt));
   check('the font window asks once, on close, from the opening name to the final one', setAt > 0
@@ -225,6 +250,78 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
     && /confirmText: 'Always include',\s*confirmKind: 'primary',\s*closeX: true,/.test(html));
   check('the write uses this export\'s answer, not the setting again',
     /const _incl = _sdWantCfg;/.test(html) && /_sdWantCfg = _wantCfg;/.test(html));
+
+  // ── 6. [B-641] An import that matched a font you have, and did not import it, records the
+  // incoming name as a former name of that font.
+  console.log('6. import aliases');
+  const ud2 = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-alias-'));
+  const root2 = entries.entriesRoot(ud2);
+  const make2 = (name, extra = {}) => {
+    fs.mkdirSync(path.join(root2, name), { recursive: true });
+    fs.writeFileSync(path.join(root2, name, 'meta.json'), JSON.stringify({ schemaVersion: 1, name, ...extra }));
+  };
+  const meta2 = (name) => JSON.parse(fs.readFileSync(path.join(root2, name, 'meta.json'), 'utf8'));
+  try {
+    make2('Terra', { sourceUuid: 'src-one' });
+    make2('BundleA', { sourceUuid: 'src-bundle' }); make2('BundleB', { sourceUuid: 'src-bundle' });
+    const r = entries.addImportAliases(ud2, [
+      { entryName: 'Terra', incomingName: 'Kyber_Dawn' },          // matched by content
+      { sourceUuid: 'src-one', incomingName: 'Terra_Card.zip' },   // same download, one font
+      { sourceUuid: 'src-bundle', incomingName: 'Pack.zip' },      // a bundle: no one font to name
+      { entryName: 'Terra', incomingName: 'terra' },               // its own name: nothing
+      { entryName: 'Missing', incomingName: 'X' },                 // gone: skipped, no throw
+      null, { entryName: 'Terra' },
+    ]);
+    check('addImportAliases: by font, and by a one-font source; .zip dropped; newest first',
+      r && r.ok && r.added === 2 && JSON.stringify(meta2('Terra').formerNames) === '["Terra_Card","Kyber_Dawn"]',
+      JSON.stringify({ r, m: meta2('Terra') }));
+    check('addImportAliases: a bundle source names no font',
+      !('formerNames' in meta2('BundleA')) && !('formerNames' in meta2('BundleB')));
+    // One owner per name: an identical copy met again does not give the name to a second font.
+    make2('DarkAnakin', { formerNames: ['Card_DA'] }); make2('DarkAnakin_2');
+    const r1 = entries.addImportAliases(ud2, [{ entryName: 'DarkAnakin_2', incomingName: 'Card_DA' }]);
+    check('addImportAliases: a name another font already holds as an alias stays with it',
+      r1.added === 0 && !('formerNames' in meta2('DarkAnakin_2')), JSON.stringify({ r1, m: meta2('DarkAnakin_2') }));
+    const r2 = entries.addImportAliases(ud2, [{ entryName: 'DarkAnakin_2', incomingName: 'darkanakin' }]);
+    check('addImportAliases: a name that is another font\'s own name is not added', r2.added === 0);
+    const r3 = entries.addImportAliases(ud2, [{ entryName: 'Terra', incomingName: 'Dup' }, { entryName: 'DarkAnakin', incomingName: 'dup' }]);
+    check('addImportAliases: within one batch the first owner keeps it', r3.added === 1 && !(meta2('DarkAnakin').formerNames || []).includes('dup'), JSON.stringify(r3));
+  } finally {
+    try { fs.rmSync(ud2, { recursive: true, force: true }); } catch {}
+  }
+  const bulkSrc = fs.readFileSync(path.join(ROOT, 'soundFontBulkImport.js'), 'utf8');
+  check('a stored-download duplicate names its FONT (one entry from that source), not the source',
+    /listEntries\(userData\)\s*\.filter\(e => e && e\.meta && e\.meta\.sourceUuid === r\.existingUuid\)/.test(bulkSrc)
+    && /const nm = fonts\.length === 1 \? fonts\[0\]\.name : null;/.test(bulkSrc)
+    && !/existing\.name \|\| \(existing\.meta && existing\.meta\.name\)/.test(bulkSrc));
+  const mainSrc = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const preSrc = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
+  check('IPC: entries:addImportAliases handled in main and exposed in preload',
+    /ipcMain\.handle\('entries:addImportAliases'[\s\S]{0,200}soundFontEntries\.addImportAliases\(/.test(mainSrc)
+    && /addImportAliases:\s*\(params\)\s*=> ipcRenderer\.invoke\('entries:addImportAliases', params\)/.test(preSrc));
+  check('renderer helper records, then re-runs the open config\'s lookup only when something was added',
+    /window\._sfRecordImportAliases = async \(pairs, \{ recheck = false \} = \{\}\) => \{[\s\S]{0,400}addImportAliases\(\{ pairs: list \}\)[\s\S]{0,120}\(recheck \|\| \(r && r\.ok && r\.added > 0\)\) setTimeout\(\(\) => \{ window\._sfCheckConfigFormerNames\?\.\(\); \}, 0\)/.test(html));
+  check('card import: quick and guided mark what goes in; closeModal records the rest, matched or same download',
+    /for \(const s of fresh\) s\._willImport = true;/.test(html)
+    && /for \(const r of guidedRows\) if \(r\.src\) delete r\.src\._willImport;/.test(html)
+    && /for \(const r of chosen\) if \(r\.src\) r\.src\._willImport = true;/.test(html)
+    && /if \(!s \|\| s\._willImport\) continue;[\s\S]{0,900}const _sameFont = s\._duplicate \|\| \(s\._match && \(s\._match\.verdict === 'have_it' \|\| s\._match\.verdict === 'version'\)\);\s*if \(!_sameFont\) continue;\s*if \(s\._match && s\._match\.matchName\) pairs\.push\(\{ entryName: s\._match\.matchName, incomingName: incoming \}\)[\s\S]{0,200}s\._duplicate && s\._existingUuid\) pairs\.push\(\{ sourceUuid: s\._existingUuid/.test(html));
+  const closeAt = html.indexOf('const closeModal = () => {');
+  const closeBody = html.slice(closeAt, html.indexOf('currentPlan = null;', closeAt));
+  check('card import: the record happens BEFORE the plan is dropped',
+    closeAt > 0 && closeBody.includes('window._sfRecordImportAliases?.(pairs, { recheck: _ran || _trackPairs.length > 0 })'));   // slice ends at currentPlan = null
+  check('single import: the review marks what it commits, before its nothing-ticked return',
+    /_sfImport\._importedPaths = new Set\(picks\.map\(p => \(p\.candidate && p\.candidate\.path\) \|\| ''\)\);\s*(\/\/[^\n]*\n\s*)*if \(picks\.length === 0 && custPicks\.length === 0\) return;/.test(html));
+  const sfCloseAt = html.indexOf('const _sfCloseImport = () => {');
+  const sfClose = html.slice(sfCloseAt, html.indexOf('_sfImport = null;', sfCloseAt) + 20);
+  check('single import: every exit records unimported matches, before _sfImport is cleared',
+    /const mr = _sfImport && _sfImport\._matchRes;[\s\S]{0,500}\(x\.verdict === 'have_it' \|\| x\.verdict === 'version'\) && !\(done && done\.has\(x\.path \|\| ''\)\)[\s\S]{0,120}entryName: x\.matchName, incomingName: x\.name/.test(sfClose));
+  const dupAt2 = html.indexOf('const _sfHandleDuplicate = ');
+  const dupBody = html.slice(dupAt2, html.indexOf('const _sfPopulateReview', dupAt2));
+  check('same download: Open existing and Cancel record it; Re-import as new does not',
+    /const onKeep = async \(\) => \{\s*recordAlias\(\);/.test(dupBody)
+    && /const onCancel = \(\) => \{ recordAlias\(\);/.test(dupBody)
+    && !/const onReimport[^\n]*recordAlias/.test(dupBody));
 
   console.log(failures ? `\n${failures} failed` : '\nall passed');
   process.exit(failures ? 1 : 0);

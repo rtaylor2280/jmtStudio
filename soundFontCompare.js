@@ -38,6 +38,10 @@ const { EFFECT_DIR_EXCLUSIONS } = require('./soundFontCandidates');
 // quote/, tracks/ subfolders) and a flat-file stem (force1.wav, quote3.wav).
 const CUSTOMIZABLE_DIRS = new Set(['force', 'quote', 'quotes', 'track', 'tracks']);
 
+// Font files that are not sounds: settings (.ini) and OLED display files (.bmp, .scr). [B-643]
+const EXTRA_EXTS = ['.ini', '.bmp', '.scr'];
+const { isOsNoiseName } = require('./osNoise');
+
 // Non-effect wrapper / junk dirs that shouldn't count toward EITHER signal
 // (board-format folders, SD common/, mac zip noise, vendor bonus dirs). Derived
 // from the shared exclusion vocabulary minus the customizable buckets, which we
@@ -62,14 +66,24 @@ function classifyRelPath(relPath) {
   const dirs = segs.slice(0, -1);
   const base = segs[segs.length - 1];
 
-  // A customizable subfolder anywhere in the path wins first — a wav under
-  // quote/ or tracks/ is customizable no matter what it's named.
-  for (const d of dirs) if (CUSTOMIZABLE_DIRS.has(d)) return 'customizable';
-  // Wrapper / junk dirs → out of scope for both signals.
+  // Operating-system clutter is never font content, wherever it sits (a desktop.ini inside quote/
+  // is not a quote). The same list the card browser and import use.
+  if (segs.some((s) => isOsNoiseName(s))) return 'ignore';
+
+  // A customizable subfolder anywhere in the path wins first for AUDIO: a wav under quote/ or
+  // tracks/ is customizable no matter what it's named.
+  if (base.endsWith('.wav')) {
+    for (const d of dirs) if (CUSTOMIZABLE_DIRS.has(d)) return 'customizable';
+  }
+  // Wrapper / junk dirs → out of scope for every signal.
   for (const d of dirs) if (IGNORE_DIRS.has(d)) return 'ignore';
 
-  // Only audio contributes to the signals. Config (.ini), docs (.txt/.md/.rtf),
-  // and images are hashed by the manifest but not scored here.
+  // Settings and display files are part of a font as much as its sounds: config.ini and
+  // smoothsw.ini tune it, .bmp and .scr drive an OLED. They never decide identity (that is the
+  // character sounds), but a copy carrying one the library lacks has something new. [B-643]
+  if (EXTRA_EXTS.some((x) => base.endsWith(x))) return 'extra';
+
+  // Docs (.txt/.md/.rtf) and anything else are hashed by the manifest but not scored here.
   if (!base.endsWith('.wav')) return 'ignore';
 
   // Flat-layout customizable file (force2.wav, quote01.wav) with no subfolder.
@@ -90,15 +104,18 @@ function classifyRelPath(relPath) {
 function setsFromRecords(records) {
   const core = new Set();
   const customizable = new Set();
+  const extra = new Set();
   for (const r of records || []) {
     if (!r || r.fileHash === '<empty>') continue;
     const cls = classifyRelPath(r.relPath);
     if (cls === 'core') core.add(r.fileHash);
     else if (cls === 'customizable') customizable.add(r.fileHash);
+    else if (cls === 'extra') extra.add(r.fileHash);
   }
   return {
     core,
     customizable,
+    extra,
     coreCount: core.size,
     customizableCount: customizable.size,
     coreSignature: signatureOf(core),
@@ -131,6 +148,7 @@ function buildFontSetsFromDir(fontDir, opts = {}) {
 
   const core = new Set();
   const customizable = new Set();
+  const extra = new Set();
   let skippedLarge = 0;
   let hashedFiles = 0;
 
@@ -154,6 +172,7 @@ function buildFontSetsFromDir(fontDir, opts = {}) {
       try { h = hashFile(abs); } catch { continue; }
       hashedFiles++;
       if (cls === 'core') core.add(h);
+      else if (cls === 'extra') extra.add(h);   // [B-643]
       else customizable.add(h);
     }
   };
@@ -162,6 +181,7 @@ function buildFontSetsFromDir(fontDir, opts = {}) {
   return {
     core,
     customizable,
+    extra,
     coreCount: core.size,
     customizableCount: customizable.size,
     coreSignature: signatureOf(core),
@@ -205,9 +225,14 @@ function compareSets(card, lib) {
     ? custInter / card.customizable.size
     : null; // null = card has no customizable sounds to compare
 
+  // How much of the LIBRARY font is in this copy: the catalogue's measure (fontCatalogue.js), so
+  // sounds the copy ADDS never count against it. [B-643]
+  const libCoverage = lib.core.size ? coreInter / lib.core.size : 0;
+
   return {
     coreContainment,
     coreJaccard,
+    libCoverage,
     coreInter,
     cardCoreCount: card.core.size,
     libCoreCount: lib.core.size,
@@ -225,7 +250,10 @@ function compareSets(card, lib) {
 const DEFAULT_THRESHOLDS = {
   haveItContainment: 0.98,
   haveItJaccard: 0.90,
-  variantContainment: 0.50,
+  // At least this much of the library font in the copy = the same font, a version of it. The
+  // catalogue's line, measured on a 210-font library: different sources never above 53%, nothing
+  // from 54 to 69% but versions of one font, everything 70 to 99% versions of one font. [B-643]
+  versionCoverage: 0.70,
   // A font whose character set is smaller than this can't be classified
   // confidently (mostly quotes/tracks, or a fragment) — flag low-confidence.
   minCoreForConfidence: 3,
@@ -246,12 +274,20 @@ function classifyVerdict(cmp, thresholds = DEFAULT_THRESHOLDS) {
   // lowConfidence, which is why that is the condition here and not a lower bar:
   // moving the Jaccard bar tunes a number, this states the rule.
   const pureSuperset = cmp.coreContainment >= 1 && !lowConfidence;
+  // THE SAME FONT, TWO WAYS IN. [B-643]
+  //   have_it  this copy is (almost) entirely inside the library font: nearly identical, or a copy
+  //            that LOST files (trimmed to fit a card, or damaged). The Jaccard guard above keeps a
+  //            small set of shared stock sounds from passing.
+  //   version  most of the library font is in this copy: a version that ADDS sounds.
+  // There is no close-match tier: 50-97% containment paired stock-sound fonts with the wrong
+  // font (a card's Yoda with Depa_Bilaba), and a wrong pairing points a config at that font.
   let verdict;
   if (cmp.coreContainment >= thresholds.haveItContainment &&
       (pureSuperset || cmp.coreJaccard >= thresholds.haveItJaccard)) {
     verdict = 'have_it';
-  } else if (cmp.coreContainment >= thresholds.variantContainment) {
-    verdict = 'variant';
+  } else if (!lowConfidence && cmp.libCoreCount >= thresholds.minCoreForConfidence
+      && cmp.libCoverage >= thresholds.versionCoverage) {
+    verdict = 'version';
   } else {
     verdict = 'new';
   }
@@ -275,21 +311,27 @@ function matchAgainstLibrary(cardSets, library, thresholds = DEFAULT_THRESHOLDS)
           ...cmp,
           verdict: 'have_it',
           lowConfidence: cardSets.core.size < thresholds.minCoreForConfidence,
+          missing: _missingHashes(cardSets, lib.sets),
+          bestSourceUuid: lib.sourceUuid || null,
         };
       }
     }
   }
 
+  // Best = a font that IS the same font (have_it, then version) before one that merely shares
+  // more; within a rank, the most shared (containment plus coverage), Jaccard as the tie-break.
+  const RANK = { have_it: 2, version: 1, new: 0 };
   let best = null;
   let bestCmp = null;
+  let bestRank = -1, bestScore = -1;
   for (const lib of library) {
     if (!lib.sets || lib.sets.core.size === 0) continue;
     const cmp = compareSets(cardSets, lib.sets);
-    if (!bestCmp ||
-        cmp.coreContainment > bestCmp.coreContainment ||
-        (cmp.coreContainment === bestCmp.coreContainment && cmp.coreJaccard > bestCmp.coreJaccard)) {
-      best = lib;
-      bestCmp = cmp;
+    const rank = RANK[classifyVerdict(cmp, thresholds).verdict];
+    const score = cmp.coreContainment + cmp.libCoverage;
+    if (!bestCmp || rank > bestRank || (rank === bestRank && (score > bestScore
+        || (score === bestScore && cmp.coreJaccard > bestCmp.coreJaccard)))) {
+      best = lib; bestCmp = cmp; bestRank = rank; bestScore = score;
     }
   }
 
@@ -306,7 +348,65 @@ function matchAgainstLibrary(cardSets, library, thresholds = DEFAULT_THRESHOLDS)
   }
 
   const { verdict, lowConfidence } = classifyVerdict(bestCmp, thresholds);
-  return { bestMatch: best.name, exact: false, ...bestCmp, verdict, lowConfidence };
+  return { bestMatch: best.name, exact: false, ...bestCmp, verdict, lowConfidence,
+    missing: _missingHashes(cardSets, best.sets), bestSourceUuid: best.sourceUuid || null };
+}
+
+// The card's files the matched font does not have, by content: the hashes behind "this copy has
+// N files yours is missing", so a caller can ask whether each is anywhere else in the library.
+// [B-643]
+function _missingHashes(cardSets, libSets) {
+  const out = { core: [], customizable: [], extra: [] };
+  for (const b of ['core', 'customizable', 'extra']) {
+    const lib = (libSets && libSets[b]) || new Set();
+    for (const h of ((cardSets && cardSets[b]) || [])) if (!lib.has(h)) out[b].push(h);
+  }
+  return out;
+}
+
+// Splits a match's missing files into those the library already holds and those that are new,
+// and says WHERE the held ones are when one place holds them all: the matched font's own source
+// (`own`), another source by its library name (`sourceName`), or neither (spread across sources,
+// shared tracks, commons, the pool). `owned` is libraryHashes' map, hash -> Set of 'src:<uuid>' /
+// 'lib'; `sourceName(uuid)` names a source. Stamps m.missingSplit in place. A match whose missing
+// files are all held is owned: skipping it loses nothing. [B-643]
+function applyLibrarySplit(m, owned, { sourceName = null } = {}) {
+  if (!m || !m.bestMatch || !m.missing || !owned) return m;
+  let elsewhere = 0, fresh = 0;
+  let common = null;   // source uuids holding EVERY held file
+  for (const b of ['core', 'customizable', 'extra']) {
+    for (const h of (m.missing[b] || [])) {
+      if (!owned.has(h)) { fresh++; continue; }
+      elsewhere++;
+      const locs = owned.get(h);
+      const srcs = new Set();
+      if (locs && typeof locs.forEach === 'function') locs.forEach((k) => { if (String(k).startsWith('src:')) srcs.add(String(k).slice(4)); });
+      common = common === null ? srcs : new Set([...common].filter((u) => srcs.has(u)));
+    }
+  }
+  let own = false, place = null;
+  if (elsewhere && common && common.size) {
+    if (m.bestSourceUuid && common.has(m.bestSourceUuid)) own = true;
+    else if (typeof sourceName === 'function') {
+      for (const u of common) { const n = sourceName(u); if (n) { place = n; break; } }
+    }
+  }
+  m.missingSplit = { elsewhere, fresh, own, sourceName: place };
+  return m;
+}
+
+// "in its source files" / "in the X source files" / "in your library": where the held files are.
+function _whereHeld(s) {
+  if (s.own) return 'in its source files';
+  if (s.sourceName) return `in the ${s.sourceName} source files`;
+  return 'in your library';
+}
+
+// Owned by the split: it has files the matched font lacks, and every one is elsewhere in the
+// library. [B-643]
+function _ownedElsewhere(m) {
+  return !!(m && m.bestMatch && !m.lowConfidence && _sameFont(m) && m.missingSplit
+    && m.missingSplit.fresh === 0 && m.missingSplit.elsewhere > 0);
 }
 
 // ── Library-wide duplicate recognition (slice A, 2026-07-23) ────────────────
@@ -423,8 +523,17 @@ function matchCandidateAgainstLibrary(records, candidatePath, index, thresholds 
 // ownership claim must count it all: a core-identical copy carrying tracks or
 // quotes the library lacks is NOT fully owned — skipping it would lose them.
 // (m.exact only proves the CORE matched, so it can't shortcut this check.)
+// The same font by either way in. [B-643]
+function _sameFont(m) {
+  return !!m && (m.verdict === 'have_it' || m.verdict === 'version');
+}
+
 function isFullyOwned(m) {
-  if (!m || m.verdict !== 'have_it') return false;
+  if (!m) return false;
+  if (_ownedElsewhere(m)) return true;   // [B-643]
+  if (m.verdict !== 'have_it') return false;
+  // A settings or display file the font lacks is something new on the card. [B-643]
+  if (m.missing && m.missing.extra && m.missing.extra.length && !m.missingSplit) return false;
   const coreMissing = Math.max(0, (m.cardCoreCount || 0) - (m.coreInter || 0));
   const custMissing = Math.max(0, (m.cardCustCount || 0) - (m.custInter || 0));
   return coreMissing === 0 && custMissing === 0;
@@ -438,6 +547,9 @@ function _missingPhrase(m) {
   const parts = [];
   if (core) parts.push(`${core} sound${core === 1 ? '' : 's'}`);
   if (cust) parts.push(`${cust} quote or track file${cust === 1 ? '' : 's'}`);
+  const extra = (m && m.missing && m.missing.extra) ? m.missing.extra.length : 0;   // [B-643]
+  if (extra) parts.push(`${extra} settings or display file${extra === 1 ? '' : 's'}`);
+  if (parts.length > 2) return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
   return parts.join(' and ');
 }
 
@@ -446,6 +558,21 @@ function _missingPhrase(m) {
 // Returns null when there's nothing worth saying (new font / no match).
 function verdictLabel(m) {
   if (!m || !m.bestMatch || m.lowConfidence) return null;
+  // [B-643] THE SPLIT, WHEN THE CALLER HAD THE LIBRARY TO ASK: what this copy has that the
+  // matched font lacks is either elsewhere in the library or new, and the note says both.
+  // This version = the copy being imported; yours = the matched library font. [B-643]
+  if (_ownedElsewhere(m)) {
+    return `Already in your library as ${m.bestMatch}. This version has ${_missingPhrase(m)} yours doesn't, but all are ${_whereHeld(m.missingSplit)}`;
+  }
+  if (!_sameFont(m)) return null;   // a new font gets no note [B-643]
+  if (m.missingSplit && (m.missingSplit.elsewhere + m.missingSplit.fresh) > 0) {
+    const s = m.missingSplit;
+    const lead = `${m.verdict === 'have_it' ? `Nearly identical to ${m.bestMatch}` : `A version of ${m.bestMatch}`}. This version has ${_missingPhrase(m)} yours doesn't`;
+    if (!s.elsewhere) return `${lead}, and none are in your library`;
+    return (s.own || s.sourceName)
+      ? `${lead}. ${s.elsewhere} ${s.elsewhere === 1 ? 'is' : 'are'} ${_whereHeld(s)} but ${s.fresh} ${s.fresh === 1 ? 'is' : 'are'} not in your library`
+      : `${lead}. ${s.elsewhere} ${s.elsewhere === 1 ? 'is' : 'are'} in your library but ${s.fresh} ${s.fresh === 1 ? 'is' : 'are'} not`;
+  }
   if (m.verdict === 'have_it') {
     if (isFullyOwned(m)) {
       // Short on purpose: the row shows the verdict, the checkbox tooltip
@@ -478,6 +605,9 @@ function verdictLabel(m) {
 // checking the box actually does GIVEN this match. Null when the label is null.
 function verdictTip(m) {
   if (!m || !m.bestMatch || m.lowConfidence) return null;
+  if (_ownedElsewhere(m)) {
+    return `Every file in this font is already in your library. Check the box to import a second copy anyway.`;
+  }
   if (m.verdict === 'have_it') {
     if (isFullyOwned(m)) {
       return `Your library already has everything in this font (as ${m.bestMatch}). Check the box to import a second copy anyway. To customize ${m.bestMatch}, duplicating it in your library is the better path.`;
@@ -501,6 +631,7 @@ function verdictTip(m) {
 const VARIANT_DISPLAY_MIN = 0.75;
 
 module.exports = {
+  applyLibrarySplit,
   classifyRelPath,
   setsFromRecords,
   setsFromDir,

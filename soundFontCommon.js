@@ -417,7 +417,7 @@ function _descriptionFromReadme(filesDir) {
 // `bundle`: the caller found several packs before importing, so `name` names the SOURCE (each
 // common folder is named from its pack) and is not checked against common folder names.
 async function _importCommonAsSource(userData, sourcePath, name, onProgress, shouldStop,
-                                     { forceNewSource = false, askOnDuplicate = false, bundle = false } = {}) {
+                                     { forceNewSource = false, askOnDuplicate = false, bundle = false, besideOf = null } = {}) {
   if (!sourcePath || !fs.existsSync(sourcePath)) {
     return { ok: false, error: 'Source not found' };
   }
@@ -465,7 +465,7 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
         .filter((c) => c && c.meta && c.meta.sourceUuid === imp.uuid)
         .map((c) => ({ uuid: c.uuid, name: c.meta.name || c.uuid }));
     } catch {}
-    return { ok: true, isDuplicate: true, sourceUuid: imp.uuid, existingCommons };
+    return { ok: true, isDuplicate: true, sourceUuid: imp.uuid, existingCommons, incomingName: cleanName };   // name: the alias [B-643]
   }
   const sourceUuid = imp.uuid;
   // A duplicate archive is not an error here: the same zip may already be in
@@ -531,6 +531,44 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
         reusedSource: !!imp.isDuplicate,
       },
     };
+  }
+  // ── THE SAME PACK, BY CONTENT ─────────────────────────────────────────────── [B-643]
+  // The archive check above only knows a byte-identical ZIP. A fresh download of the same pack is
+  // a different zip with the same sounds, so it passed, and the library gained a second source and
+  // a second common for content it already held. Same two ways in as a font: the new pack almost
+  // entirely inside a common you have, or most of that common in the new pack. A match is asked
+  // about; this download is let go (its bytes are already held), so Cancel leaves nothing behind.
+  if (askOnDuplicate && !forceNewSource && !besideOf) {
+    const _same = samePackCommon(userData, contentDir);
+    if (_same) {
+      if (!imp.isDuplicate) { try { S.deleteSource(userData, sourceUuid); } catch {} }
+      return { ok: true, isDuplicate: true, sameContent: true, sourceUuid: _same.sourceUuid || null,
+        existingCommons: [{ uuid: _same.uuid, name: _same.name }], incomingName: cleanName };
+    }
+  }
+  // ── IMPORTED ANYWAY: A VERSION BESIDE THE ONE IT MATCHED ───────────────────── [B-643]
+  // Attached to the matched common's SOURCE, not a source of its own: a new common in that source,
+  // files read from this download's tree (linked, nothing written twice), then this download's
+  // source record goes, since the version now lives on the one already held.
+  if (besideOf) {
+    const _anchor = getCommon(userData, besideOf);
+    if (_anchor && _anchor.meta && _anchor.meta.sourceUuid) {
+      const _r = createCommonFromFolder(userData, {
+        folderPath: contentDir, name: cleanName,
+        sourceUuid: _anchor.meta.sourceUuid, sourceSubPath: _anchor.meta.sourceSubPath || '',
+        metadata: { importedFrom: path.basename(sourcePath), description: _anchor.meta.description || '',
+          ...(_anchor.meta.group ? { group: _anchor.meta.group } : {}) },
+      });
+      if (_r && _r.ok) {
+        if (!imp.isDuplicate && sourceUuid !== _anchor.meta.sourceUuid) { try { S.deleteSource(userData, sourceUuid); } catch {} }
+        const _bsig = _walkCommonContentSignals(path.join(commonRoot(userData), _r.uuid, 'files'));
+        return { ok: true, uuid: _r.uuid, name: _r.name, sourceUuid: _anchor.meta.sourceUuid, besideOf: _anchor.meta.name,
+          blockedFiles: imp.blockedFiles || [], notedFiles: imp.notedFiles || [],
+          savings: { archiveBytes: imp.archiveBytes || 0, contentBytes: _bsig.totalBytes || 0, crossLinked: null,
+            dedupSaved, reusedBytes: _bsig.totalBytes || 0, reusedSource: true } };
+      }
+    }
+    // An anchor that is gone or has no source falls through to the ordinary build.
   }
   ensureCommonRoot(userData);
   const uuid = crypto.randomUUID();
@@ -857,8 +895,14 @@ function classifyIncomingCommon(userData, folderPath) {
   const out = { ownedByContent: false, matchName: null, nameTaken: false, contentHash: null };
   if (!folderPath || !fs.existsSync(folderPath)) return out;
   const fh = require('./soundFontFileHash');
+  // OS CLUTTER NEVER DECIDES IT, ON EITHER SIDE. The import strips desktop.ini, Thumbs.db and the
+  // macOS leftovers on the way in, so a card's common carrying a desktop.ini Google Drive wrote never
+  // matched the copy it had already given the library: the one-number fingerprint differed by that
+  // file alone, and the card offered its common again. [B-643]
+  const { isOsNoiseName } = require('./osNoise');
+  const _clean = (rel) => !String(rel || '').split('/').some((seg) => isOsNoiseName(seg));
   const contentDir = _findCommonSubfolder(folderPath) || folderPath;
-  try { out.contentHash = fh.hashItemDir(contentDir); } catch { out.contentHash = null; }
+  try { out.contentHash = fh.hashItemDir(contentDir, _clean); } catch { out.contentHash = null; }
   if (!out.contentHash) return out;
   for (const c of listCommons(userData)) {
     let digest = null;
@@ -866,11 +910,14 @@ function classifyIncomingCommon(userData, folderPath) {
       try {
         const mf = fh.readFileHashManifest(
           path.join(userData, 'soundFonts', '.filehashes', 'commons', `${c.uuid}.json`));
-        digest = (mf && mf.contentHash) || null;
+        // The stored digest stands only when it covers no clutter; otherwise it is recomputed
+        // with the same filter as the incoming side.
+        const _noisy = mf && Array.isArray(mf.records) && mf.records.some((r) => r && !_clean(r.relPath));
+        digest = (mf && !_noisy && mf.contentHash) || null;
       } catch { digest = null; }
     }
     if (!digest) {
-      try { digest = fh.hashItemDir(path.join(commonRoot(userData), c.uuid, 'files')); } catch { digest = null; }
+      try { digest = fh.hashItemDir(path.join(commonRoot(userData), c.uuid, 'files'), _clean); } catch { digest = null; }
     }
     if (digest && digest === out.contentHash) {
       out.ownedByContent = true;
@@ -986,10 +1033,97 @@ function renameCommon(userData, uuid, newName) {
   const metaPath = path.join(dir, 'meta.json');
   const meta = _readMeta(dir);
   if (!meta) return { ok: false, error: 'Common folder not found' };
+  const _old = meta.name;
   meta.name = cleanName;
+  // The old name stays an alias, so a config whose font names this common by it finds it. [B-643]
+  if (_old && _old !== cleanName) {
+    const al = _withAlias(meta.aliases, _old, cleanName);
+    if (al.length) meta.aliases = al; else delete meta.aliases;
+  }
   try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
   catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
   return { ok: true };
+}
+
+// ── A COMMON FOLDER'S ALIASES ──────────────────────────────────────────────── [B-643]
+// A config names a common folder exactly, in a preset's font list ("Nomad;common"), so a common
+// the library holds under one name is missing to a preset that asks for another. Same rules as a
+// font's and a track's: newest first, fifty at most, no repeats in any case, never the current name.
+const COMMON_ALIASES_MAX = 50;
+function _withAlias(list, alias, current) {
+  const lc = (s) => String(s).toLowerCase();
+  const all = [alias, ...(Array.isArray(list) ? list : [])]
+    .filter((n) => typeof n === 'string' && n && lc(n) !== lc(current));
+  return all.filter((n, i) => all.findIndex((m) => lc(m) === lc(n)) === i).slice(0, COMMON_ALIASES_MAX);
+}
+function addCommonAlias(userData, uuid, alias) {
+  if (!uuid || typeof alias !== 'string' || !alias.trim()) return { ok: false, error: 'Missing argument' };
+  const dir = path.join(commonRoot(userData), uuid);
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  const before = Array.isArray(meta.aliases) ? meta.aliases : [];
+  const known = before.find((n) => String(n).toLowerCase() === alias.trim().toLowerCase());
+  const after = _withAlias(before, known || alias.trim(), meta.name);
+  if (after.length === before.length && after.every((n, i) => n === before[i])) return { ok: true, changed: false };
+  if (after.length) meta.aliases = after; else delete meta.aliases;
+  try { fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true, changed: true };
+}
+function forgetCommonAlias(userData, uuid, alias) {
+  if (!uuid || !alias) return { ok: false, error: 'Missing argument' };
+  const dir = path.join(commonRoot(userData), uuid);
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  const before = Array.isArray(meta.aliases) ? meta.aliases : [];
+  const after = before.filter((n) => String(n).toLowerCase() !== String(alias).toLowerCase());
+  if (after.length === before.length) return { ok: true, changed: false };
+  if (after.length) meta.aliases = after; else delete meta.aliases;
+  try { fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true, changed: true };
+}
+
+// THE SAME PACK, BY CONTENT: the common in the library that an incoming pack folder is a copy or a
+// version of, or null. The sounds (.wav) are compared by content against each common's own
+// fingerprints (.filehashes/commons). Two ways in, as for fonts: the pack almost entirely inside a
+// common (98%, with the overlap guard), or at least 70% of that common in the pack. [B-643]
+function samePackCommon(userData, packDir) {
+  const { isOsNoiseName } = require('./osNoise');
+  const incoming = new Set();
+  const walk = (d) => {
+    let es = [];
+    try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of es) {
+      if (isOsNoiseName(e.name)) continue;
+      const a = path.join(d, e.name);
+      if (e.isDirectory()) walk(a);
+      else if (/\.wav$/i.test(e.name)) {
+        try { incoming.add(crypto.createHash('sha256').update(fs.readFileSync(a)).digest('hex')); } catch {}
+      }
+    }
+  };
+  walk(packDir);
+  if (incoming.size < 3) return null;
+  const fhDir = path.join(userData, 'soundFonts', '.filehashes', 'commons');
+  let best = null, bestScore = -1;
+  for (const c of listCommons(userData)) {
+    if (!c || !c.uuid || !c.meta) continue;
+    let mf = null;
+    try { mf = JSON.parse(fs.readFileSync(path.join(fhDir, `${c.uuid}.json`), 'utf8')); } catch { continue; }
+    const have = new Set((mf && mf.records || []).filter((r) => r && /\.wav$/i.test(r.relPath || '')
+      && !String(r.relPath).split('/').some((s) => isOsNoiseName(s))).map((r) => r.fileHash));
+    if (have.size < 3) continue;
+    let inter = 0;
+    for (const h of incoming) if (have.has(h)) inter++;
+    const inside = inter / incoming.size, coverage = inter / have.size;
+    const jaccard = inter / (incoming.size + have.size - inter);
+    const same = (inside >= 0.98 && (inside >= 1 || jaccard >= 0.90)) || coverage >= 0.70;
+    if (!same) continue;
+    const score = inside + coverage;
+    if (score > bestScore) { best = { uuid: c.uuid, name: c.meta.name || c.uuid, sourceUuid: c.meta.sourceUuid || null }; bestScore = score; }
+  }
+  return best;
 }
 
 // Duplicate a common folder. New uuid, new name (validated unique), same
@@ -2525,6 +2659,9 @@ function getCommonContentHash(userData, uuid) {
 // [B-398] Measurement only: markAsync/mark return the ORIGINAL function when the probe is off.
 const _sp = require('./stallProbe');
 module.exports = {
+  addCommonAlias,
+  forgetCommonAlias,
+  samePackCommon,
   commonRoot,
   ensureCommonRoot,
   listCommons,

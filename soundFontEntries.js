@@ -263,6 +263,10 @@ async function _copyFolderIntoDir(folderPath, destDir, onProgress, contentIndex,
   const strippedIn = [];
   const walk = (dir, relBase) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      // OS CLUTTER NEVER COMES IN, same as every other import door: a card's folders carry a
+      // desktop.ini in each, which Add from folder copied, so a version made from a card read as
+      // Customized ("27 added") when every sound was the original's. [B-643]
+      if (require('./osNoise').isOsNoiseName(e.name)) continue;
       const rel = relBase ? `${relBase}/${e.name}` : e.name;
       const abs = path.join(dir, e.name);
       if (e.isDirectory()) {
@@ -914,14 +918,88 @@ const _ENTRY_META_IMMUTABLE = new Set([
 
 // A font's former names, newest first, so a config still naming it by an old name can be offered the
 // new one. Kept on the font itself: a delete takes them with it, a backup and an export carry them.
-// Five at most; a name equal to the new one (any case) is dropped, so renaming back un-lists it and a
-// case-only rename adds nothing. [B-561]
-const FORMER_NAMES_MAX = 5;
+// Fifty at most (five until B-641: an import now adds one per identical copy it meets, and each is a
+// few bytes); a name equal to the new one (any case) is dropped, so renaming back un-lists it and a
+// case-only rename adds nothing. [B-561, B-641]
+const FORMER_NAMES_MAX = 50;
 function _withFormerName(list, oldName, newName) {
   const lc = (s) => String(s).toLowerCase();
   const all = [oldName, ...(Array.isArray(list) ? list : [])]
     .filter((n) => typeof n === 'string' && n && lc(n) !== lc(newName));
   return all.filter((n, i) => all.findIndex((m) => lc(m) === lc(n)) === i).slice(0, FORMER_NAMES_MAX);
+}
+
+// An import met a font IDENTICAL to this one under another folder name: that name becomes one of
+// this font's former names, so a config naming it (the card's config, typically) is offered this
+// font by the config-open lookup. Same list and rules as a rename: newest first, no repeats in any
+// case, never the font's own current name. Exact matches only; a near match is a different font.
+// [B-641]
+function addFormerName(userData, entryName, incomingName) {
+  if (!userData || !entryName || typeof incomingName !== 'string' || !incomingName.trim()) {
+    return { ok: false, error: 'Missing argument' };
+  }
+  const name = incomingName.trim();
+  const metaPath = path.join(entriesRoot(userData), entryName, 'meta.json');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch (err) { return { ok: false, error: `Cannot read meta: ${err.message}` }; }
+  const current = meta.name || entryName;
+  const before = Array.isArray(meta.formerNames) ? meta.formerNames : [];
+  // A name already listed in another case keeps the spelling on record: the lookup is case-blind,
+  // so a second spelling would only churn the list.
+  const known = before.find((n) => String(n).toLowerCase() === name.toLowerCase());
+  const after = _withFormerName(before, known || name, current);
+  if (after.length === before.length && after.every((n, i) => n === before[i])) {
+    return { ok: true, changed: false };
+  }
+  if (after.length) meta.formerNames = after; else delete meta.formerNames;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true, changed: true };
+}
+
+// The import's door into addFormerName. Each pair names the incoming copy and the library font it
+// matched, by entry name, or by source uuid when the match was a whole stored download (a source
+// with exactly one font names it; a bundle cannot and is skipped). The incoming name is the folder
+// or archive it came from, so `.zip` is dropped: a config names the folder, never the archive.
+// Called only for matches the user went along with - left unticked, or the import cancelled or
+// closed with "Open existing" - never for a copy they imported. [B-641]
+function addImportAliases(userData, pairs) {
+  if (!userData || !Array.isArray(pairs)) return { ok: false, error: 'Missing argument' };
+  let added = 0;
+  let entries = null;
+  // ONE OWNER PER NAME. A name some library font already has - as its name or as an alias - stays
+  // where it is: an import that meets an identical copy again does not hand the name to a second
+  // font (two identical versions both claimed the card's name, and the config review had to ask
+  // which). Only a version brought in beside moves a name, and it does that itself. [B-643]
+  let owned = null;
+  const _ownedNames = () => {
+    if (owned) return owned;
+    owned = new Set();
+    if (!entries) { try { entries = listEntries(userData); } catch { entries = []; } }
+    for (const e of entries) {
+      if (!e) continue;
+      owned.add(String(e.name).toLowerCase());
+      for (const n of ((e.meta && e.meta.formerNames) || [])) owned.add(String(n).toLowerCase());
+    }
+    return owned;
+  };
+  for (const p of pairs) {
+    if (!p || typeof p.incomingName !== 'string') continue;
+    const incoming = p.incomingName.trim().replace(/\.zip$/i, '');
+    if (!incoming) continue;
+    if (_ownedNames().has(incoming.toLowerCase())) continue;
+    let target = typeof p.entryName === 'string' && p.entryName ? p.entryName : null;
+    if (!target && p.sourceUuid) {
+      if (!entries) { try { entries = listEntries(userData); } catch { entries = []; } }
+      const fonts = entries.filter((e) => e && e.meta && e.meta.sourceUuid === p.sourceUuid);
+      if (fonts.length === 1) target = fonts[0].name;
+    }
+    if (!target) continue;
+    const r = addFormerName(userData, target, incoming);
+    if (r && r.ok && r.changed) { added++; _ownedNames().add(incoming.toLowerCase()); }
+  }
+  return { ok: true, added };
 }
 
 // Removes one former name (any case) from one font. The font's name and its other former names
@@ -3188,6 +3266,8 @@ module.exports = {
   markEntryEffectsDirty,
   resolveEntryEffectsDirty,
   _withFormerName,
+  addFormerName,
+  addImportAliases,
   forgetFormerName,
   FORMER_NAMES_MAX,
 };

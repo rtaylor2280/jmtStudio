@@ -243,7 +243,7 @@ function recordAdd(userData, name) {
 // Insert a record with a known UUID + hash (used by backup restore so
 // identity survives the round-trip). Overwrites any record with the
 // same UUID or same name.
-function recordInsert(userData, { uuid, name, size, hash, addedAt }) {
+function recordInsert(userData, { uuid, name, size, hash, addedAt, aliases }) {
   if (!uuid || !name || !hash) return { ok: false, error: 'Missing fields' };
   const index = readIndex(userData);
   // Drop any prior record with this name to avoid stale duplicates.
@@ -255,17 +255,69 @@ function recordInsert(userData, { uuid, name, size, hash, addedAt }) {
     size: size || 0,
     hash,
     addedAt: addedAt || new Date().toISOString(),
+    // A backup carries a track's aliases back with its identity. [B-643]
+    ...(Array.isArray(aliases) && aliases.length ? { aliases: _withAlias(aliases.slice(1), aliases[0], name) } : {}),
   };
   writeIndex(userData, index);
   return { ok: true };
 }
 
+// A track's ALIASES: other names a config may use for this same file. A config names a track by
+// its exact file name, so a track the library holds under one name is missing to a preset that
+// asks for another. Two ways a track gets one: an import met this audio under a different name
+// (two names for one recording on one card, or a track already here), and a rename (the old name).
+// One file, one place, many names: never a second copy, not even a hardlink. Newest first, fifty
+// at most, no repeats in any case, never the track's own current name. [B-641, B-643]
+const ALIASES_MAX = 50;
+function _withAlias(list, alias, current) {
+  const lc = (s) => String(s).toLowerCase();
+  const all = [alias, ...(Array.isArray(list) ? list : [])]
+    .filter((n) => typeof n === 'string' && n && lc(n) !== lc(current));
+  return all.filter((n, i) => all.findIndex((m) => lc(m) === lc(n)) === i).slice(0, ALIASES_MAX);
+}
+
+// Record `alias` on the track named `trackName`. A name already listed in another case keeps the
+// spelling on record. Returns { ok, changed }.
+function addAlias(userData, trackName, alias) {
+  if (!trackName || typeof alias !== 'string' || !alias.trim()) return { ok: false, error: 'Missing argument' };
+  const index = readIndex(userData);
+  const uuid = Object.keys(index.tracks).find((u) => index.tracks[u].name === trackName);
+  if (!uuid) return { ok: false, error: 'Track not found' };
+  const rec = index.tracks[uuid];
+  const before = Array.isArray(rec.aliases) ? rec.aliases : [];
+  const known = before.find((n) => String(n).toLowerCase() === alias.trim().toLowerCase());
+  const after = _withAlias(before, known || alias.trim(), rec.name);
+  if (after.length === before.length && after.every((n, i) => n === before[i])) return { ok: true, changed: false };
+  if (after.length) rec.aliases = after; else delete rec.aliases;
+  writeIndex(userData, index);
+  return { ok: true, changed: true };
+}
+
+// Remove one alias (any case) from one track; its name and other aliases stay.
+function forgetAlias(userData, trackName, alias) {
+  if (!trackName || !alias) return { ok: false, error: 'Missing argument' };
+  const index = readIndex(userData);
+  const uuid = Object.keys(index.tracks).find((u) => index.tracks[u].name === trackName);
+  if (!uuid) return { ok: false, error: 'Track not found' };
+  const rec = index.tracks[uuid];
+  const before = Array.isArray(rec.aliases) ? rec.aliases : [];
+  const after = before.filter((n) => String(n).toLowerCase() !== String(alias).toLowerCase());
+  if (after.length === before.length) return { ok: true, changed: false };
+  if (after.length) rec.aliases = after; else delete rec.aliases;
+  writeIndex(userData, index);
+  return { ok: true, changed: true };
+}
+
+// A rename keeps the old name as an alias, so a config still asking for it finds the track.
 function recordRename(userData, oldName, newName) {
   const index = readIndex(userData);
   let mutated = false;
   for (const uuid of Object.keys(index.tracks)) {
     if (index.tracks[uuid].name === oldName) {
-      index.tracks[uuid].name = newName;
+      const rec = index.tracks[uuid];
+      rec.name = newName;
+      const al = _withAlias(rec.aliases, oldName, newName);
+      if (al.length) rec.aliases = al; else delete rec.aliases;
       mutated = true;
     }
   }
@@ -300,4 +352,7 @@ module.exports = {
   recordInsert,
   recordRename,
   recordDelete,
+  addAlias,
+  forgetAlias,
+  ALIASES_MAX,
 };

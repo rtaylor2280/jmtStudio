@@ -345,6 +345,39 @@ function buildIndex(userData) {
   return index;
 }
 
+// Every content hash the library holds, for a question of the form "is this file anywhere in the
+// library?" (the import's "N elsewhere in your library, M new" note). Built from the same index,
+// so it is reading manifests, not hashing. A SOURCE COUNTS ONLY WHEN COMMITTED (its meta.json
+// exists): an import stages the card it is analysing as a source before it decides anything, and
+// counting that copy would call every file on the card already owned. `excludeSourceUuids` drops
+// a committed source too: the single import's own, written before its review. [B-643]
+// Returns a Map: hash -> Set of where it is held, 'src:<uuid>' for a source and 'lib' for anything
+// else (a font, shared tracks, a common, the pool), so a caller can also say WHERE. [B-643]
+function libraryHashes(userData, { excludeSourceUuids = [] } = {}) {
+  const out = new Map();
+  let index;
+  try { index = buildIndex(userData); } catch { return out; }
+  const srcRoot = path.join(soundFontsRoot(userData), 'sources') + path.sep;
+  const excluded = new Set((excludeSourceUuids || []).filter(Boolean));
+  const committed = new Map();
+  const counts = (abs) => {
+    if (!abs.startsWith(srcRoot)) return true;
+    const uuid = abs.slice(srcRoot.length).split(path.sep)[0];
+    if (excluded.has(uuid)) return false;
+    if (!committed.has(uuid)) committed.set(uuid, fs.existsSync(path.join(srcRoot, uuid, 'meta.json')));
+    return committed.get(uuid);
+  };
+  for (const [hash, list] of index.byHash) {
+    const where = new Set();
+    for (const abs of list) {
+      if (!counts(abs)) continue;
+      where.add(abs.startsWith(srcRoot) ? `src:${abs.slice(srcRoot.length).split(path.sep)[0]}` : 'lib');
+    }
+    if (where.size) out.set(hash, where);
+  }
+  return out;
+}
+
 // findExisting(index, hash) -> absolute path we have PROVEN holds this content,
 // or null. This is the only function that may return a link target, and it
 // re-hashes before it does.
@@ -565,6 +598,7 @@ module.exports = {
   writePoolIndex,
   ensurePoolIndex,
   buildIndex,
+  libraryHashes,
   findExisting,
   recordContent,
   ingestFile,

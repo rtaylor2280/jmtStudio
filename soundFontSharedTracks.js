@@ -42,13 +42,23 @@ function listFiles(userData) {
   let entries;
   try { entries = fs.readdirSync(root, { withFileTypes: true }); }
   catch { return []; }
+  // Each track's aliases ride along, so the config check can match a preset's track by any of
+  // its names. [B-643]
+  const aliasesOf = new Map();
+  try {
+    const idx = hashIndex.readIndex(userData);
+    for (const u of Object.keys(idx.tracks || {})) {
+      const t = idx.tracks[u];
+      if (t && t.name && Array.isArray(t.aliases) && t.aliases.length) aliasesOf.set(t.name, t.aliases.slice());
+    }
+  } catch {}
   const out = [];
   for (const e of entries) {
     if (!e.isFile()) continue;
     if (!/\.wav$/i.test(e.name)) continue;
     let size = 0;
     try { size = fs.statSync(path.join(root, e.name)).size; } catch {}
-    out.push({ name: e.name, size });
+    out.push({ name: e.name, size, ...(aliasesOf.has(e.name) ? { aliases: aliasesOf.get(e.name) } : {}) });
   }
   out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   return out;
@@ -203,6 +213,10 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
     }
     const base = wanted || path.basename(src);
     const safe = _safeFileName(base);
+    // The name the file had on the card, kept apart from the one it lands under: when the user
+    // names a track in the review, theirs is the real name and the card's becomes an alias, since a
+    // config on that card asks for the card's name. [B-643]
+    const orig = _safeFileName(path.basename(src));
     if (!safe) { skipped.push({ src, reason: 'Invalid filename' }); continue; }
     // Content check BEFORE the copy, so an identical track is never written and
     // never renamed. A hashing failure falls through to copying: not being able to
@@ -269,7 +283,18 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       if (_hits && _hits.length) {
         // The copy we throw away: a local write and delete instead of a second open of the source.
         try { fs.rmSync(_tmpAbs, { force: true }); } catch {}
-        duplicates.push({ src, have: _hits[0].name || '' });
+        const _have = _hits[0].name || '';
+        // THE NAME IT CAME IN UNDER BECOMES AN ALIAS of the track that holds this audio, when it
+        // differs: a config asks for a track by exact name, and a card can use two names for one
+        // recording. Without it the second name simply vanished. [B-643]
+        // Both of its names when they differ: the one given in the review and the card's own.
+        const _aliases = [];
+        for (const n of [orig, safe]) {
+          if (!n || !_have || n.toLowerCase() === _have.toLowerCase()) continue;
+          if (_aliases.some((x) => x.toLowerCase() === n.toLowerCase())) continue;
+          try { const a = hashIndex.addAlias(userData, _have, n); if (a && a.changed) _aliases.push(n); } catch {}
+        }
+        duplicates.push({ src, have: _have, ...(_aliases.length ? { aliases: _aliases } : {}) });
         continue;
       }
       let _linked = false, _held = false;
@@ -287,6 +312,11 @@ async function addFiles(userData, sourceFilePaths, onFileProgress, onBytes, shou
       // Hash + record. Failure here doesn't abort the add — the file
       // is on disk and ensureIndex will backfill it on next read.
       try { hashIndex.recordAdd(userData, dest); } catch {}
+      // Renamed in the review: the card's own name is an alias of the track. Not when the name was
+      // only bumped (_2) past a different track that already has it, since that name is taken.
+      if (dest === safe && orig && orig.toLowerCase() !== dest.toLowerCase()) {
+        try { hashIndex.addAlias(userData, dest, orig); } catch {}
+      }
       // Keep the in-memory index current within this call, so adding a batch
       // that contains the same track twice writes it once.
       if (_index) { try { _index = hashIndex.ensureIndex(userData); } catch {} }

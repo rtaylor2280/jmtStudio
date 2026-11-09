@@ -467,6 +467,20 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
     const src = plan.sources[i];
     onProgress({ stage: 'source-start', sourceIdx: i, total, label: src.cleanedName || src.rawName });
     try {
+      // THE SAME FONT COMES IN BESIDE THE ONE IT MATCHED, not as a source of its own. [B-643]
+      // Null means it does not apply (not the same font, not a folder, no anchor); the row then
+      // imports as it always has, so nothing on the card is ever lost to this path.
+      const beside = await _importBesideMatch({ userData, src }, (subProgress) => {
+        onProgress({ stage: 'source-progress', sourceIdx: i, total, label: src.cleanedName || src.rawName, sub: subProgress });
+      });
+      if (beside && beside.ok) {
+        summary.imported.push({
+          src: src.relPath || src.absPath, sourceUuid: beside.sourceUuid, entries: [beside.name],
+          bundleName: null, multiCandidate: false, versionsSkipped: 0, variantsEmitted: 0,
+          strippedFiles: [], besideOf: beside.besideOf,
+        });
+        continue;
+      }
       const result = await importPlannedSource({
         userData, src, fromSdCard: !!plan.fromSdCard, learned,
         // [B-462] So the cancel lands inside the copy, not only at the next source boundary.
@@ -868,6 +882,10 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
     const compare = require('./soundFontCompare');
     const { index } = compare.buildLibraryIndex(userData);
     if (index.length) {
+      // Every hash the library holds, so a match's missing files split into "elsewhere in your
+      // library" and "new". Staged copies of this card are not committed and do not count. [B-643]
+      let _owned = null;
+      try { _owned = require('./soundFontContentIndex').libraryHashes(userData); } catch {}
       for (let i = 0; i < results.length; i++) {
         if (shouldCancel()) break;
         const r = results[i];
@@ -881,10 +899,14 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           // folder `Graflex8` displays as `Episode_8_Graflex_Font` from its readme,
           // so without this the one case that needs the clause most is the one case
           // that lacks it. Fully-owned rows have said "(as X)" all along.
+          // The name is the FONT's: the library entry whose sourceUuid is this source. A source
+          // meta has no `name` (it stores `originalName`), so reading the source gave nothing and
+          // the row could say neither "(as X)" nor which font to record the card's name on. A
+          // bundle (several fonts from one download) names none. [B-641]
           try {
-            const existing = soundFontSources.listSources(userData)
-              .find(x => x && x.uuid === r.existingUuid);
-            const nm = existing && (existing.name || (existing.meta && existing.meta.name));
+            const fonts = soundFontEntries.listEntries(userData)
+              .filter(e => e && e.meta && e.meta.sourceUuid === r.existingUuid);
+            const nm = fonts.length === 1 ? fonts[0].name : null;
             if (nm) r.match = { label: 'Already in your library', matchName: nm, fullyOwned: true, tip: '' };
           } catch {}
           continue;
@@ -907,6 +929,7 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           }
         } catch {}
         if (!m || !m.bestMatch) continue;
+        compare.applyLibrarySplit(m, _owned, { sourceName: (u) => soundFontSources.sourceDisplayName(userData, u) });
         const label = (m.verdict === 'variant' && m.coreContainment < compare.VARIANT_DISPLAY_MIN)
           ? null : compare.verdictLabel(m);
         if (!label) continue;
@@ -918,6 +941,8 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           // complete" on the row - a fact about the CARD, not about which of our
           // two tests happened to catch it.
           libHasMore: (m.libCoreCount > m.cardCoreCount) || (m.libCustCount > m.cardCustCount),
+          // The label already says where its extra files are; the row adds nothing to it. [B-643]
+          ownedElsewhere: !!(m.missingSplit && m.missingSplit.fresh === 0 && m.missingSplit.elsewhere > 0),
         };
         // Move it out of the bucket it was actually counted in. A corrupt font was
         // never added to newCount (the loop above counts it as corrupt), so
@@ -927,6 +952,10 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           r.owned = true; ownedCount++;
           if (r.corrupt) corruptCount--; else newCount--;
         }
+        // THE DEFAULT FOLLOWS WHETHER ANYTHING ON THE CARD IS NEW, not the match type. fullyOwned
+        // includes a copy whose extra files are all elsewhere in the library (applyLibrarySplit),
+        // so skipping it is lossless; a copy with any file the library lacks stays ticked, so
+        // nothing on the card is lost. [B-643]
       }
     }
   } catch {}
@@ -1212,6 +1241,60 @@ function _optimizeProgressForwarder(onSubProgress) {
 // `shouldStop` is threaded in rather than read from a module-level flag: this is the same
 // predicate the caller's loop uses, so the cancel the user clicked reaches both the gap between
 // sources AND the copy inside one. [B-462, 2026-10-05]
+// A row matched to a library font as THE SAME FONT (have_it or version) comes in as another version
+// of that font: a new library font in the matched font's source, at its place in that source, read
+// from the card's folder. The same call "Add from folder" makes (soundFontEntries.createEntry with
+// folderSource): files the library already holds are linked, only new ones are stored, and the new
+// font starts with the matched font's details. Its name is the row's, made free with _2, _3.
+// Returns null when it does not apply - not the same font, not a folder, or an anchor with no
+// source details - so the caller imports the row the ordinary way. [B-643]
+async function _importBesideMatch({ userData, src }, onSubProgress) {
+  const m = src && src._match;
+  // An identical download (the archive check) carries no verdict and is the same font by
+  // definition, so it qualifies as much as a have_it does. [B-643]
+  const _same = m && (m.verdict === 'have_it' || m.verdict === 'version' || src._duplicate);
+  if (!m || !m.matchName || !_same) return null;
+  try { if (!src.absPath || !fs.statSync(src.absPath).isDirectory()) return null; } catch { return null; }
+  const anchor = soundFontEntries.findEntryByName(userData, m.matchName);
+  const am = anchor && anchor.meta;
+  if (!am || !am.sourceUuid || am.candidatePath == null) return null;
+  const root = soundFontEntries.entriesRoot(userData);
+  const want = cleanFolderName(src.guidedName || src.cleanedName || src.rawName || m.matchName) || m.matchName;
+  let name = want;
+  for (let n = 2; fs.existsSync(path.join(root, name)); n++) name = `${want}_${n}`;
+  const tags = Array.from(new Set([...(Array.isArray(am.tags) ? am.tags : []),
+    ...(Array.isArray(src.guidedTags) ? src.guidedTags : []), ...(Array.isArray(src.guidedSharedTags) ? src.guidedSharedTags : [])]));
+  const res = await soundFontEntries.createEntry({
+    userData,
+    sourceUuid: am.sourceUuid,
+    candidate: { name, path: am.candidatePath || '', nested: !!am.nested },
+    name,
+    folderSource: { folderPath: src.absPath, stripDamagedWavs: !!src._corrupt },
+    metadata: {
+      description: am.description || '',
+      userNotes: src.guidedNotes || am.userNotes || '',
+      tags,
+      author: am.author || '',
+      acquisitionDate: src.guidedAcquisitionDate || am.acquisitionDate || '',
+      purchased: !!am.purchased,
+      demoUrl: am.demoUrl || '',
+      linkedStyleLibraryEntry: am.linkedStyleLibraryEntry || null,
+    },
+    onProgress: (p) => { try { if (typeof onSubProgress === 'function') onSubProgress(p); } catch {} },
+  });
+  if (!res || !res.ok) return null;
+  // THE CARD'S NAME BELONGS TO THIS VERSION. A config on that card names the folder the card had,
+  // and the user chose to bring that copy in, so its folder name is an alias of the version, not
+  // of the font it matched; an alias the matched font holds for that name is taken off it. [B-643]
+  const made = res.name || name;
+  const cardName = path.basename(src.absPath);
+  if (cardName && cardName.toLowerCase() !== made.toLowerCase()) {
+    try { soundFontEntries.addFormerName(userData, made, cardName); } catch {}
+    try { soundFontEntries.forgetFormerName(userData, anchor.name, cardName); } catch {}
+  }
+  return { ok: true, name: made, sourceUuid: am.sourceUuid, besideOf: anchor.name };
+}
+
 // Creators the user has already labelled. Harvested ONCE PER RUN by the
 // orchestrators below and threaded down, never per-source: it is a directory
 // walk over the whole source store, and a bulk run has hundreds of sources.
@@ -1763,7 +1846,9 @@ async function importPlannedSource({ userData, src, fromSdCard, shouldStop = nul
           if (compare.isFullyOwned(m)) {
             reason = 'already_in_library';
           // A font the catalogue knows is its own release, so sharing sounds with a sibling is no question.
-          } else if (m.coreContainment >= compare.VARIANT_DISPLAY_MIN && !(src._enrich && src._enrich.catalogueName)) {
+          // The same font by either way in (have_it or version), not a raw share of sounds: the old
+          // 75% containment bar flagged stock-sound fonts (a card's ObiWan4) as close matches. [B-643]
+          } else if ((m.verdict === 'have_it' || m.verdict === 'version') && !(src._enrich && src._enrich.catalogueName)) {
             reason = 'close_match';
             const gain = compare.missingPhrase(m);
             if (gain) updates.closeMatchGain = gain;
@@ -2031,6 +2116,7 @@ async function candidatePreviewRefs({ sourcePath, candidatePaths }) {
 }
 
 module.exports = {
+  _importBesideMatch,   // tests [B-643]
   scanForBulkImport,
   candidatePreviewRefs,
   runBulkImport,

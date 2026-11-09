@@ -2397,6 +2397,16 @@ ipcMain.handle('entries:forgetFormerName', (_, { entryName, oldName } = {}) => {
   }
 });
 
+// An import matched fonts the user already has and they did not import them: record each
+// incoming name on the font it matched, so that card's config finds it. [B-641]
+ipcMain.handle('entries:addImportAliases', (_, { pairs } = {}) => {
+  try {
+    return soundFontEntries.addImportAliases(app.getPath('userData'), pairs);
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+});
+
 ipcMain.handle('entries:renameMany', (_, { renames } = {}) => {
   try {
     return soundFontEntries.renameEntries(app.getPath('userData'), renames);
@@ -3073,15 +3083,26 @@ ipcMain.handle('common:nameInUse', (_, { name, excludeUuid } = {}) => {
 const _commonImportGate = require('./bulkImportGate').createGate({ exclusive: false });
 ipcMain.handle('common:importCancel', () => ({ ok: true, cancelled: _commonImportGate.cancelAll() }));
 
-ipcMain.handle('common:importFromFolder', async (_, { folderPath, name, forceNewSource, askOnDuplicate, bundle } = {}) => {
+ipcMain.handle('common:importFromFolder', async (_, { folderPath, name, forceNewSource, askOnDuplicate, bundle, besideOf } = {}) => {
   const token = _commonImportGate.begin();
   try {
     return await soundFontCommon.importCommonFromFolder(
       app.getPath('userData'), folderPath, name, undefined, () => token.cancelled,
-      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate, bundle: !!bundle });
+      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate, bundle: !!bundle, besideOf: besideOf || null });
   }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
   finally { _commonImportGate.end(token); }
+});
+
+// A common folder's aliases: a name a config uses for it. Recorded when an import met this pack
+// under another name and it was kept; forgotten by "Not this common folder". [B-643]
+ipcMain.handle('common:addAlias', (_, { uuid, alias } = {}) => {
+  try { return soundFontCommon.addCommonAlias(app.getPath('userData'), uuid, alias); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+ipcMain.handle('common:forgetAlias', (_, { uuid, alias } = {}) => {
+  try { return soundFontCommon.forgetCommonAlias(app.getPath('userData'), uuid, alias); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
 // A zip of zips is refused before the import's scan, which would open every inner zip.
@@ -3095,13 +3116,13 @@ ipcMain.handle('common:inspectIncomingFolder', (_, { folderPath } = {}) => {
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
-ipcMain.handle('common:importFromZip', async (_, { zipPath, name, forceNewSource, askOnDuplicate, downloadUrl, bundle } = {}) => {
+ipcMain.handle('common:importFromZip', async (_, { zipPath, name, forceNewSource, askOnDuplicate, downloadUrl, bundle, besideOf } = {}) => {
   const token = _commonImportGate.begin();
   try {
     const ud = app.getPath('userData');
     const r = await soundFontCommon.importCommonFromZip(
       ud, zipPath, name, undefined, () => token.cancelled,
-      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate, bundle: !!bundle });
+      { forceNewSource: !!forceNewSource, askOnDuplicate: !!askOnDuplicate, bundle: !!bundle, besideOf: besideOf || null });
     // The page the in-app browser downloaded from becomes the source's Download, when it has none.
     // [B-487] It was the Link until 2026-10-21; Link is the public "learn more or get it" field the
     // user fills, Download is where this copy is downloaded again.
@@ -3574,6 +3595,17 @@ ipcMain.handle('sharedTracks:addFiles', async (event, { sourceFilePaths } = {}) 
     emit.flush();
     return r;
   }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+// A track left out of an import as the same audio: its name becomes an alias of the track that
+// holds that audio. [B-643]
+ipcMain.handle('sharedTracks:addAlias', (_, { name, alias } = {}) => {
+  try { return require('./soundFontSharedTracksHash').addAlias(app.getPath('userData'), name, alias); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+// "Not this track" on the config check: that name stops pointing at this track. [B-643]
+ipcMain.handle('sharedTracks:forgetAlias', (_, { name, alias } = {}) => {
+  try { return require('./soundFontSharedTracksHash').forgetAlias(app.getPath('userData'), name, alias); }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 ipcMain.handle('sharedTracks:renameFile', (_, { oldName, newName } = {}) => {
@@ -6666,16 +6698,21 @@ ipcMain.handle('sources:matchCandidates', async (_event, { uuid, candidates } = 
     if (!mf || !Array.isArray(mf.records)) return { ok: true, results: [] };
     const { index } = compare.buildLibraryIndex(ud);
     if (!index.length) return { ok: true, results: [] };
+    // [B-643] Every hash the library holds, less this import's own source (written before review).
+    let owned = null;
+    try { owned = require('./soundFontContentIndex').libraryHashes(ud, { excludeSourceUuids: [uuid] }); } catch {}
     const results = [];
     for (const c of candidates) {
       if (!c || c.path == null) continue;
       const m = compare.matchCandidateAgainstLibrary(mf.records, c.path, index);
       if (!m || !m.bestMatch) continue;
+      compare.applyLibrarySplit(m, owned, { sourceName: (u) => soundFontSources.sourceDisplayName(ud, u) });
       const label = (m.verdict === 'variant' && m.coreContainment < compare.VARIANT_DISPLAY_MIN)
         ? null
         : compare.verdictLabel(m);
       if (!label) continue;
-      results.push({ name: c.name, path: c.path, verdict: m.verdict, exact: !!m.exact, label, tip: compare.verdictTip(m), fullyOwned: compare.isFullyOwned(m), matchName: m.bestMatch });
+      results.push({ name: c.name, path: c.path, verdict: m.verdict, exact: !!m.exact, label, tip: compare.verdictTip(m), fullyOwned: compare.isFullyOwned(m), matchName: m.bestMatch,
+        ownedElsewhere: !!(m.missingSplit && m.missingSplit.fresh === 0 && m.missingSplit.elsewhere > 0) });   // [B-643]
     }
     return { ok: true, results };
   } catch (err) {

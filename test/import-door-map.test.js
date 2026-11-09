@@ -116,6 +116,16 @@ const NOT_INWARD = [
   // Touches no file at all. Caught on its first run by this sweep, which is the
   // register doing its job. [B-473]
   'proffieOS:addonsVersionFor',
+  // `entries:addImportAliases` [B-641] writes, but brings nothing in: it adds a NAME to the
+  // formerNames list in an existing font's meta.json, the same kind of write as a rename
+  // (entries:update / entries:renameMany, which this sweep has never flagged). No file, no new
+  // font, no content crosses into the library. Caught by "import" in the name, on its first run.
+  'entries:addImportAliases',
+  // `common:addAlias` [B-643]: same kind of write as entries:addImportAliases - a name added to an
+  // existing common folder's meta.json, nothing brought in. Caught by "add" in the name.
+  'common:addAlias',
+  // `sharedTracks:addAlias` [B-643]: a name added to an existing track's record, nothing brought in.
+  'sharedTracks:addAlias',
 ];
 
 for (const h of INWARD) {

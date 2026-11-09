@@ -3876,6 +3876,7 @@ async function applyMerge({
                 size: backupRecord.size,
                 hash: backupRecord.hash,
                 addedAt: backupRecord.addedAt,
+                aliases: backupRecord.aliases,   // [B-643]
               });
               if (backupRecord.hash) localHashes.add(backupRecord.hash);
               localNames.add(fileName);
