@@ -21,15 +21,12 @@ function getCliPath() {
   return path.join(proffie.getResourcesPath(), 'arduino-cli', platform, bin);
 }
 
+// The toolchain's answer, never a path built here. Since cores live one per version
+// (arduino-data/4.6.0/), the folder root holds a core only on a machine that installed one
+// before 1.8; a first install has none there, and `board list` reading the root names no
+// board, so a connected board reads "No Proffieboard detected".
 function getArduinoDataPath() {
-  // Always use the prod userData path for arduino-data so installed packages are
-  // shared between dev and prod builds. In dev mode, app.getPath('userData') is
-  // overridden to 'jmt-studio-dev', which would be missing the board packages.
-  const { app } = require('electron');
-  const base = app.isPackaged
-    ? app.getPath('userData')
-    : path.join(app.getPath('appData'), 'jmt-studio');
-  return path.join(base, 'arduino-data');
+  return toolchain.getArduinoDataPath();
 }
 
 // ── Run arduino-cli board list ─────────────────────────

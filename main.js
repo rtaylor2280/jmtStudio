@@ -6893,12 +6893,11 @@ ipcMain.handle('sources:optimize', async (event, { uuid } = {}) => {
   }
 });
 
+// The core's own folder, from the toolchain (one folder per core version), for the Linux
+// udev-rules command; the user's ~/.arduino15 when Studio's own copy is not installed.
 ipcMain.handle('app:getArduinoDataPath', () => {
   const os   = require('os');
-  const base = app.isPackaged
-    ? app.getPath('userData')
-    : path.join(app.getPath('appData'), 'jmt-studio');
-  const appPath = path.join(base, 'arduino-data');
+  const appPath = toolchain.getArduinoDataPath();
   if (fs.existsSync(path.join(appPath, 'packages', 'proffieboard'))) return appPath;
   const systemPath = process.platform === 'darwin'
     ? path.join(os.homedir(), 'Library', 'Arduino15')
