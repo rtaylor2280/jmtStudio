@@ -10900,7 +10900,7 @@ function _sfFormerRow(r, i) {
   const tips = {
     update: `Change ${r.count === 1 ? 'the preset' : `the ${r.count} presets`} using ${r.d} to ${now}.`,
     ignore: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}.\nYou are asked again the next time this config opens.`,
-    later: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}. ${r.d} no longer exists, so ${r.count === 1 ? 'it' : 'they'} will not compile until changed.\nYou are asked again the next time this config opens.`,
+    later: `Leave ${r.count === 1 ? 'the preset' : 'the presets'} as ${r.count === 1 ? 'it is' : 'they are'}. ${r.d} no longer exists, so ${r.count === 1 ? 'it' : 'they'} will not compile until changed.`,
     forget: many
       ? `None of these ${noun}s is ${r.d}.\nThey stop being matched to that name, and no config asks about it again.`
       : `${r.owners[0].name} is not ${r.d}.\nIt stops being matched to that name, and no config asks about it again.`,
