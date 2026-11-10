@@ -11309,8 +11309,19 @@ window.runPreflight = async function () {
                 + `width:200px;flex:0 1 200px;background:var(--c-bg-inset);color:var(--c-text);`
                 + `border:1px solid var(--c-border-strong);border-radius:3px">`
               : '')
+            // A remedy whose value is ONE OF A LIST the user must choose (two styles once had the
+            // name): a dropdown that starts on its prompt, and the button stays off until a choice
+            // is made, so nothing is picked for them. The value reaches plan() like an input's. [B-656]
+            + (fx.choose
+              ? `<select class="preflight-fix-input preflight-fix-choose" data-fix="${i}" data-fix-n="${j}" `
+                + `style="padding:3px 6px;font-size:12px;background:var(--c-bg-inset);color:var(--c-text);`
+                + `border:1px solid var(--c-border-strong);border-radius:3px;max-width:260px">`
+                + `<option value="" selected>${_preflightEsc(fx.choose.prompt || 'Choose…')}</option>`
+                + (fx.choose.options || []).map(o => `<option value="${_preflightEsc(o)}">${_preflightEsc(o)}</option>`).join('')
+                + `</select>`
+              : '')
             + `<button type="button" class="modal-btn-save preflight-fix" data-fix="${i}" `
-            + `data-fix-n="${j}" style="padding:3px 10px;font-size:12px">`
+            + `data-fix-n="${j}" style="padding:3px 10px;font-size:12px"${fx.choose ? ' disabled' : ''}>`
             + `${_preflightEsc(fx.label)}</button>`).join('')
         + `</div>`
       : '';
@@ -11515,7 +11526,12 @@ window.runPreflight = async function () {
           ? finding.fixes : (finding.fix ? [finding.fix] : []));
     const chosen  = fixes[Number(btn.dataset.fixN || 0)] || fixes[0];
     if (!chosen) { busy = false; btn.disabled = false; return; }
-    await applyPlan(chosen.plan, null);
+    // The value beside the button, when the remedy declares one (a dropdown's choice). [B-656]
+    const field = chosen.choose
+      ? modal.querySelector(`.preflight-fix-choose[data-fix="${btn.dataset.fix}"][data-fix-n="${btn.dataset.fixN || 0}"]`)
+      : null;
+    if (chosen.choose && !(field && field.value)) { busy = false; btn.disabled = true; btn.textContent = chosen.label; return; }
+    await applyPlan(chosen.plan, field ? field.value : null);
   };
 
   // Enter commits, Escape reverts — the same keys the shared inline edit binds.
@@ -11532,8 +11548,16 @@ window.runPreflight = async function () {
   };
 
   paint();
+  // A dropdown remedy: its button turns on once a choice is made, off again on the prompt. [B-656]
+  const onChoose = (e) => {
+    const sel = e.target.closest('.preflight-fix-choose');
+    if (!sel) return;
+    const b = modal.querySelector(`.preflight-fix[data-fix="${sel.dataset.fix}"][data-fix-n="${sel.dataset.fixN}"]`);
+    if (b) b.disabled = !sel.value;
+  };
   modal.addEventListener('click', onFixClick);
   modal.addEventListener('keydown', onRenameKey);
+  modal.addEventListener('change', onChoose);
 
   // THIS DIALOG IS THE SUCCESSOR, SO IT CLOSES WHAT CAME BEFORE IT. The compile path raises a
   // busy overlay on the click and deliberately does not take it down when the checks answer;
@@ -11560,6 +11584,7 @@ window.runPreflight = async function () {
   } finally {
     modal.removeEventListener('click', onFixClick);
     modal.removeEventListener('keydown', onRenameKey);
+    modal.removeEventListener('change', onChoose);
     modal.querySelector('.modal')?.classList.remove('modal-preflight');
   }
 

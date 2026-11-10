@@ -61,7 +61,8 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
     const res = await preflight.run(ctx);
     const f = mine(res);
     ok('an old name is caught', f.length === 1, JSON.stringify(f.map(x => x.title)));
-    ok('it names the old and the new', /no style called AstralProjection\. Your Style Library renamed it to AstralProjectionBVM\./.test(f[0].title), f[0] && f[0].title);
+    ok('facts: the name is not found, the library renamed it, the compile will fail', f[0].title === 'There is no style called AstralProjection.' && /^Your Style Library renamed it to AstralProjectionBVM\. The compile will fail until these 2 presets are updated\.$/.test(f[0].detail), f[0] && `${f[0].title} | ${f[0].detail}`);
+    ok('no "old name", no "build will stop"', !/old name|build will stop/.test(f[0].title + f[0].detail));
     ok('it blocks: the old name cannot compile', f[0].severity === 'block');
     ok('it names both presets using it', f[0].items.includes('P1') && f[0].items.includes('P2') && !f[0].items.includes('P3'), JSON.stringify(f[0].items));
     ok('one owner: a fix is offered, worded like the review', f[0].fix && f[0].fix.label === 'Update to AstralProjectionBVM', f[0].fix && f[0].fix.label);
@@ -78,7 +79,7 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
     const f = mine(await preflight.run(ctx));
     ok('several renames: ONE card', f.length === 1, JSON.stringify(f.map(x => x.title)));
     ok('the card says how many, and names every old -> new',
-      /3 presets use 2 styles your Style Library renamed\./.test(f[0].title) && /AstralProjection is now AstralProjectionBVM and Celsius is now CelsiusBVM\./.test(f[0].detail),
+      f[0].title === '2 styles in 3 presets are not in your Style Library.' && /^Your Style Library renamed them: AstralProjection is now AstralProjectionBVM and Celsius is now CelsiusBVM\. The compile will fail until they are updated\.$/.test(f[0].detail),
       f[0] && `${f[0].title} | ${f[0].detail}`);
     ok('one button for all of them', f[0].fix && f[0].fix.label === 'Update to the new names', f[0].fix && f[0].fix.label);
     const after = apply(text, f[0].fix.plan(ctx));
@@ -86,22 +87,22 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<AstralProjection>()', 'StylePtr<Twin>()'))));
-    ok('a sure rename and a two-owner name: two cards, the second with a choice', f.length === 2 && f[0].fix && f[1].fix === null && (f[1].fixes || []).length === 2, JSON.stringify(f.map(x => [x.title, !!x.fix])));
+    ok('a sure rename and a two-owner name: two cards, the second with a choice', f.length === 2 && f[0].fix && f[1].fix && f[1].fix.choose, JSON.stringify(f.map(x => [x.title, !!x.fix])));
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<AstralOld>()'))));
-    ok('every listed former name counts', f.length === 1 && /AstralProjectionBVM/.test(f[0].title));
+    ok('every listed former name counts', f.length === 1 && /no style called AstralOld/.test(f[0].title) && /AstralProjectionBVM/.test(f[0].detail));
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<Twin>()'))));
-    ok('a name two styles once had: one card saying so', f.length === 1 && /no style called Twin\. 2 styles in your Style Library once had that name\./.test(f[0].title), f[0] && f[0].title);
-    ok('...the choice is on the card: one button per style, none picked for them',
-      f[0] && f[0].fix === null && (f[0].fixes || []).map(x => x.label).join('|') === 'Update to TwinA|Update to TwinB', JSON.stringify(f[0] && f[0].fixes && f[0].fixes.map(x => x.label)));
+    ok('a name two styles once had: one card, facts only', f.length === 1 && f[0].title === 'There is no style called Twin.' && /^More than one style in your Style Library had that name\. Choose the one this preset should use\. The compile will fail until it is updated\.$/.test(f[0].detail), f[0] && `${f[0].title} | ${f[0].detail}`);
+    ok('...a dropdown starting on its prompt, and ONE Update button', f[0].fix && f[0].fix.label === 'Update' && f[0].fix.choose && f[0].fix.choose.prompt === 'Choose a style' && f[0].fix.choose.options.join() === 'TwinA,TwinB', JSON.stringify(f[0] && f[0].fix && { l: f[0].fix.label, c: f[0].fix.choose }));
     const text = cfg('StylePtr<Twin>()');
     const ctx = ctxFor(text);
     const g = mine(await preflight.run(ctx));
-    const after = apply(text, g[0].fixes[1].plan(ctx));
-    ok('pressing the second applies the second', /StylePtr<TwinB>\(\)/.test(after) && !/Twin/.test(after), after);
+    ok('nothing chosen, nothing changed', g[0].fix.plan(ctx, '').length === 0 && g[0].fix.plan(ctx, 'NotAnOwner').length === 0);
+    const after = apply(text, g[0].fix.plan(ctx, 'TwinB'));
+    ok('choosing the second applies the second', /StylePtr<TwinB>\(\)/.test(after) && !/Twin/.test(after), after);
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<SomethingUnknown>()'))));
@@ -120,6 +121,18 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<AstralProjection>()'), null)));
     ok('no library, nothing said', f.length === 0);
+  }
+
+  {
+    // The dialog's side of a dropdown remedy: rendered on its prompt, the button off until a pick,
+    // the pick turning it on, and the value handed to plan(). [B-656]
+    const html = require('fs').readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+    ok('the dropdown starts on its prompt', html.includes("<option value=\"\" selected>${_preflightEsc(fx.choose.prompt || 'Choose…')}</option>"));
+    ok('its button starts off', html.includes("${fx.choose ? ' disabled' : ''}>"));
+    ok('choosing turns the button on, the prompt turns it off', html.includes('if (b) b.disabled = !sel.value;')
+      && html.includes("modal.addEventListener('change', onChoose);") && html.includes("modal.removeEventListener('change', onChoose);"));
+    ok('the choice reaches plan()', html.includes('await applyPlan(chosen.plan, field ? field.value : null);')
+      && html.includes('if (chosen.choose && !(field && field.value))'));
   }
 
   console.log(failures ? `\n${failures} failed` : '\nall passed');

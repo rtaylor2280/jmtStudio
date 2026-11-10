@@ -1478,7 +1478,7 @@
 
       // ONE CARD FOR EVERY RENAME WITH ONE ANSWER, like the other checks combine theirs (his
       // read, 2026-11-09): every old -> new, every preset, one button. A name two styles once had
-      // gets its own card and no button, since the answer is the user's.
+      // gets its own card with a choice, since the answer is the user's.
       const findings = [];
       const sure = [...used].filter(([old]) => owners.get(old).length === 1);
       if (sure.length) {
@@ -1488,13 +1488,16 @@
         const pairs = sure.map(([old]) => `${old} is now ${renames.get(old)}`);
         const list = pairs.length === 1 ? pairs[0]
           : `${pairs.slice(0, -1).join(', ')}${pairs.length > 2 ? ',' : ''} and ${pairs[pairs.length - 1]}`;
+        // FACTS, IN THE TYPO CHECK'S SHAPE (his, 2026-11-09): the name is not found, and the
+        // compile will fail. Not "the old name", and not "the build will stop on it".
+        const n = presets.length;
         findings.push({
           title: sure.length === 1
-            ? `There is no style called ${sure[0][0]}. Your Style Library renamed it to ${renames.get(sure[0][0])}.`
-            : `${onePreset ? 'This preset uses' : `${presets.length} presets use`} ${sure.length} styles your Style Library renamed.`,
+            ? `There is no style called ${sure[0][0]}.`
+            : `${sure.length} styles in ${onePreset ? 'this preset' : `${n} presets`} are not in your Style Library.`,
           detail: sure.length === 1
-            ? `${onePreset ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it.`
-            : `${list[0].toUpperCase()}${list.slice(1)}. The build will stop on the old names.`,
+            ? `Your Style Library renamed it to ${renames.get(sure[0][0])}. The compile will fail until ${onePreset ? 'this preset is' : `these ${n} presets are`} updated.`
+            : `Your Style Library renamed them: ${list}. The compile will fail until they are updated.`,
           items: presets,
           ..._presetList(ctx, presets),
           fix: {
@@ -1508,15 +1511,19 @@
         const now = owners.get(old);
         if (now.length === 1) continue;
         const one = presets.length === 1;
-        // The decision is the user's, so it is offered as one button per style - the
-        // one-button-per-remedy shape the card already has - and none is picked for them. [B-656]
+        // The choice is the user's: a dropdown that starts on its prompt and one Update button,
+        // which stays off until they pick (his shape, 2026-11-09: a button per style "could be
+        // dozens"). The chosen name arrives as plan()'s second argument.
         findings.push({
-          title: `There is no style called ${old}. ${now.length} styles in your Style Library once had that name.`,
-          detail: `${one ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it. Choose the style ${one ? 'it' : 'they'} should use.`,
+          title: `There is no style called ${old}.`,
+          detail: `More than one style in your Style Library had that name. Choose the one ${one ? 'this preset' : `these ${presets.length} presets`} should use. The compile will fail until ${one ? 'it is' : 'they are'} updated.`,
           items: presets,
           ..._presetList(ctx, presets),
-          fix: null,
-          fixes: now.map((name) => ({ label: `Update to ${name}`, plan: planFor(new Map([[old, name]])) })),
+          fix: {
+            label: 'Update',
+            choose: { prompt: 'Choose a style', options: now },
+            plan: (c, name) => (name && now.includes(name) ? planFor(new Map([[old, name]]))(c) : []),
+          },
         });
       }
       return { findings };
