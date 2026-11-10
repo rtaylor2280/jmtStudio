@@ -33,11 +33,18 @@ check('CONTROL lifted the handler from main.js', src.includes('_boardPortForSeri
 // A serial port stand-in that records what was written.
 // `presence` is what successive list() calls see of COM18: by default it drops and comes back.
 // `refusals` is how many opens after the reset fail first ("Unknown error code 433" on the bench).
-function makeSerial({ openError = null, presence = [true, false, false, true], refusals = 0, listPath = 'COM18' } = {}) {
+// `dropAfterWrites`: the port stays listed until that many resets were written, then drops and
+// comes back - a board that missed the first `reset` and got the second. [B-654]
+function makeSerial({ openError = null, presence = [true, false, false, true], refusals = 0, listPath = 'COM18', dropAfterWrites = 0 } = {}) {
   const written = [];
-  let n = 0, opened = 0;
+  let n = 0, opened = 0, m = 0;
   class FakePort {
     static async list() {
+      if (dropAfterWrites) {
+        if (written.length < dropAfterWrites) return [{ path: listPath }];
+        const seq = [false, false, true];
+        return seq[Math.min(m++, seq.length - 1)] ? [{ path: listPath }] : [];
+      }
       const h = presence[Math.min(n++, presence.length - 1)];
       return h ? [{ path: listPath }] : [];
     }
@@ -55,9 +62,10 @@ function makeSerial({ openError = null, presence = [true, false, false, true], r
   return { mod: { SerialPort: FakePort }, written };
 }
 // The port-came-back wait is lifted beside the handler.
+// From the BODY's brace: the signature has a destructured `{ resend }` whose brace comes first.
 const waitAt = main.indexOf('async function _boardPortCameBack(');
 let wEnd = -1; depth = 0;
-for (let j = main.indexOf('{', waitAt); j < main.length; j++) {
+for (let j = main.indexOf(') {', waitAt) + 2; j < main.length; j++) {
   if (main[j] === '{') depth++;
   else if (main[j] === '}') { depth--; if (!depth) { wEnd = j + 1; break; } }
 }
@@ -127,7 +135,17 @@ const PORTS = [{ path: 'COM4', serialNumber: '' }, { path: 'COM18', serialNumber
       monitor: { isOpen: true, path: 'COM18', write: (t, cb) => cb(null) } })(null, { boardSerial: '2078377E4130' })).ready === true);
 
     r = await build({ ports: PORTS, serial: makeSerial({ presence: [true] }) })(null, { boardSerial: '2078377E4130' });
+    s = makeSerial({ presence: [true] });
+    r = await build({ ports: PORTS, serial: s })(null, { boardSerial: '2078377E4130' });
     check('the port never dropped: sent, but neither back nor ready', r.status === 'restarted' && !r.back && !r.ready, JSON.stringify(r));
+    // [B-654] "like one last try": a port that has not dropped gets ONE more reset, never a third.
+    check('...after one last try: reset went out exactly twice', s.written.join('') === '\nreset\n\nreset\n' && r.resent === true, JSON.stringify({ w: s.written, r }));
+    s = makeSerial({ dropAfterWrites: 2 });
+    r = await build({ ports: PORTS, serial: s })(null, { boardSerial: '2078377E4130' });
+    check('the first reset lost, the second taken: restarted and ready', r.back === true && r.ready === true && r.resent === true && s.written.length === 2, JSON.stringify({ w: s.written, r }));
+    s = makeSerial();
+    r = await build({ ports: PORTS, serial: s })(null, { boardSerial: '2078377E4130' });
+    check('a board that took the first reset is never sent a second', s.written.length === 1 && r.resent === false && r.ready === true, JSON.stringify({ w: s.written, r }));
     r = await build({ ports: PORTS, serial: makeSerial({ presence: [true, false] }) })(null, { boardSerial: '2078377E4130' });
     check('the port never came back: not claimed ready', r.status === 'restarted' && !r.back && !r.ready, JSON.stringify(r));
 

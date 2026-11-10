@@ -7318,20 +7318,32 @@ ipcMain.handle('board:restartAfterEject', async (_, { boardSerial, portPath: kno
 
   await _abortVersionProbe?.();
   const { SerialPort } = require('serialport');
-  const sp = new SerialPort({ path: portPath, baudRate: 115200, autoOpen: false });
-  sp.on('error', () => {});   // the board drops the port as it restarts
-  const openErr = await new Promise(res => sp.open(e => res(e || null)));
-  if (openErr) {
-    const busy = /access denied|busy|EBUSY|EACCES|in use/i.test(openErr.message || '');
-    return { ok: true, status: busy ? 'busy' : 'failed', error: openErr.message, port: portPath };
+  // Open, write `reset`, close. Returns { openErr } or { writeErr } or {}.
+  const sendReset = async () => {
+    const sp = new SerialPort({ path: portPath, baudRate: 115200, autoOpen: false });
+    sp.on('error', () => {});   // the board drops the port as it restarts
+    const openErr = await new Promise(res => { try { sp.open(e => res(e || null)); } catch (e) { res(e); } });
+    if (openErr) return { openErr };
+    const writeErr = await new Promise(res => {
+      try { sp.write('\nreset\n', e => (e ? res(e) : sp.drain(() => res(null)))); }
+      catch (e) { res(e); }
+    });
+    await new Promise(res => { try { sp.isOpen ? sp.close(() => res()) : res(); } catch { res(); } });
+    return writeErr ? { writeErr } : {};
+  };
+  const first = await sendReset();
+  if (first.openErr) {
+    const busy = /access denied|busy|EBUSY|EACCES|in use/i.test(first.openErr.message || '');
+    return { ok: true, status: busy ? 'busy' : 'failed', error: first.openErr.message, port: portPath };
   }
-  const writeErr = await new Promise(res => {
-    try { sp.write('\nreset\n', e => (e ? res(e) : sp.drain(() => res(null)))); }
-    catch (e) { res(e); }
-  });
-  await new Promise(res => { try { sp.isOpen ? sp.close(() => res()) : res(); } catch { res(); } });
-  if (writeErr) return { ok: true, status: 'failed', error: writeErr.message, port: portPath };
-  return { ok: true, status: 'restarted', via: 'port', port: portPath, ...(await _boardPortCameBack(portPath)) };
+  if (first.writeErr) return { ok: true, status: 'failed', error: first.writeErr.message, port: portPath };
+  // ONE LAST TRY. [B-654, 2026-11-09] A `reset` can be lost on the way: run 6 on the laptop (a
+  // 13-minute write through the board) ended "turn the saber off and on", the board printed
+  // nothing for it, and the same `reset` typed again rebooted it. His: "like one last try". So a
+  // port that has not dropped by the time the check gives up gets `reset` once more. A board that
+  // got the first is already restarting and its port is gone, so it never receives two.
+  return { ok: true, status: 'restarted', via: 'port', port: portPath,
+           ...(await _boardPortCameBack(portPath, { resend: () => sendReset() })) };
 });
 
 // A restarting board drops its port and brings it back: `back` once both were seen. `ready` waits
@@ -7340,7 +7352,7 @@ ipcMain.handle('board:restartAfterEject', async (_, { boardSerial, portPath: kno
 // more in 2 of 5 restarts, and in use the listed-is-ready version always said ready
 // before Windows announced the device. Opening it is harmless: ProffieOS does not reset on open,
 // and nothing in the app reconnects to the port on its own.
-async function _boardPortCameBack(portPath) {
+async function _boardPortCameBack(portPath, { resend = null } = {}) {
   const { SerialPort } = require('serialport');
   // A Mac lists every port as /dev/tty.* while the app holds the /dev/cu.* name for the same port,
   // so a plain comparison never sees the board come back and the summary falls back to "turn the
@@ -7360,21 +7372,31 @@ async function _boardPortCameBack(portPath) {
     if (!e) await new Promise(r => { try { sp.close(() => r()); } catch { r(); } });
     return !e;
   };
-  const t0 = Date.now();
-  let left = false, back = false;
+  let t0 = Date.now();
+  let left = false, back = false, resent = false;
   while (!back && Date.now() - t0 < 8000) {
     const h = await here();
     if (h === false) left = true;
     else if (h === true && left) back = true;
-    else if (!left && Date.now() - t0 > 2000) break;   // never dropped: no restart seen
+    else if (!left && Date.now() - t0 > 2000) {
+      // Never dropped. With a `resend`, that is one more `reset` and the same watch again, from
+      // the top; without one (or after it), no restart was seen. [B-654]
+      if (resend && !resent) {
+        resent = true;
+        try { await resend(); } catch {}
+        t0 = Date.now();
+        continue;
+      }
+      break;
+    }
     if (!back) await sleep(50);
   }
-  if (!back) return { back: false, ready: false };
+  if (!back) return { back: false, ready: false, resent };
   while (Date.now() - t0 < 45000) {
-    if (await opens()) return { back: true, ready: true };
+    if (await opens()) return { back: true, ready: true, resent };
     await sleep(250);
   }
-  return { back: true, ready: false };
+  return { back: true, ready: false, resent };
 }
 
 ipcMain.handle('serial:isOpen', () => {
