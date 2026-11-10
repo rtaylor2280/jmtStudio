@@ -166,8 +166,8 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
   check('the review is one list, a row per renamed font', pAt > 0 && prompt.length > 500
     && /_sfPromptFormerNames\(rows\)/.test(html) && /sf-save-conflict-row/.test(prompt));
   check('each row: Update (default), Ignore, Not this font / None of these',
-    // Update is the default for one match; with more than one, Ignore until they choose. [B-656]
-    /radio\('update', 'Update', !many, tips\.update\) \+ radio\('ignore', 'Ignore', many, tips\.ignore\)/.test(prompt)
+    // Update is the default for one match; with more than one, nothing until they choose. [B-656]
+    /radio\('update', 'Update', !many, tips\.update\) \+ radio\('ignore', 'Ignore', false, tips\.ignore\)/.test(prompt)
     && /many \? 'None of these' : `Not this \$\{noun\}`, false, tips\.forget\)/.test(prompt));
   check('every choice has a hover saying what it does', /<label title="\$\{_preflightEsc\(tip\)\}">/.test(prompt)
     && /no config asks about it again\.`/.test(prompt));

@@ -3960,6 +3960,9 @@
   #modal-sf-former-names .modal { width: 680px; max-width: 96vw; max-height: min(88vh, 780px); display: flex; flex-direction: column; }
   #modal-sf-former-names .sf-former-pick { margin-left: 4px; padding: 1px 4px; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 3px; font-size: 0.74rem; font-weight: 400; }
   .sf-save-conflict-bulk { display: flex; gap: 8px; margin: 6px 0 10px; }
+  /* A line still waiting on a choice when Apply is pressed. [B-656] */
+  #modal-sf-former-names .sf-save-conflict-row.sf-former-undecided { border-color: #e44; background: rgba(238,68,68,0.08); }
+  #modal-sf-former-names .sf-former-undecided-msg { display: block; margin-top: 3px; font-size: 0.72rem; color: #e44; font-weight: 400; }
   /* The config-open review with sound AND styles: each section reads like SD Export's conflict
      review (his reference, 2026-11-09): the sentence in the dialog's own text, space above the Set all
      buttons, a little below them, then the rows. A section heading where that review has none, and
@@ -10907,8 +10910,9 @@ function _sfFormerRow(r, i) {
   const sub = r.owners.length === 1
     ? `${where}: ${_preflightEsc(r.owners[0].name)} · ${presets}`
     // More than one could be meant: nothing is picked for them. The dropdown starts on its prompt,
-    // the line starts on Ignore / Not now, and Update stays off until they choose (his, 2026-11-09:
-    // "they're not clicking through something and getting potentially a random choice"). [B-656]
+    // NO choice is selected (Apply asks for one), and Update stays off until they choose (his,
+    // 2026-11-09: "they're not clicking through something and getting potentially a random choice";
+    // and a default Not now is a decision too). [B-656]
     : `${where}: <select class="sf-former-pick" data-former-pick="${i}">`
       + `<option value="" selected>Choose a ${r.kind === 'track' ? 'track' : r.kind === 'common' ? 'common folder' : r.kind === 'style' ? 'style' : 'font'}</option>`
       + r.owners.map((e, j) => `<option value="${j}">${_preflightEsc(e.name)}</option>`).join('')
@@ -10934,8 +10938,8 @@ function _sfFormerRow(r, i) {
     // A style: Update or Not now, nothing else. Its old name cannot compile, so there is no
     // "keep it" and no "not this style"; and the Set all buttons leave it alone. [B-656]
     + (r.kind === 'style'
-      ? radio('update', 'Update', !many, tips.update, true) + radio('later', 'Not now', many, tips.later, true)
-      : radio('update', 'Update', !many, tips.update) + radio('ignore', 'Ignore', many, tips.ignore)
+      ? radio('update', 'Update', !many, tips.update, true) + radio('later', 'Not now', false, tips.later, true)
+      : radio('update', 'Update', !many, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
         + radio('forget', many ? 'None of these' : `Not this ${noun}`, false, tips.forget))
     + `</span></div>`;
 }
@@ -10947,9 +10951,39 @@ function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
       const btn = e.target.closest('[data-former-all]');
       if (!btn) return;
       // Sound rows only: a style's choice is its own, never part of Set all. [B-656]
-      list.querySelectorAll(`input[type="radio"][value="${btn.getAttribute('data-former-all')}"]:not([data-former-style]):not(:disabled)`).forEach((r) => { r.checked = true; });
+      list.querySelectorAll(`input[type="radio"][value="${btn.getAttribute('data-former-all')}"]:not([data-former-style]):not(:disabled)`).forEach((r) => {
+        r.checked = true;
+        const el = r.closest('.sf-save-conflict-row');   // decided now: its red mark goes [B-656]
+        if (el) { el.classList.remove('sf-former-undecided'); el.querySelector('.sf-former-undecided-msg')?.remove(); }
+      });
     };
+    // A line with more than one match starts UNDECIDED (no choice selected). Apply never decides it:
+    // it marks every undecided line red, says what is needed, scrolls to the first, and waits.
+    // Choosing in the dropdown or pressing Not now / Ignore clears it. (His design, 2026-11-09:
+    // defaulting to Not now "means that if I just click apply, I never make a decision".) [B-656]
+    const _undecided = () => rows.map((row, i) => i)
+      .filter((i) => !list.querySelector(`input[name="former-${i}"]:checked`));
+    const _rowEl = (i) => list.querySelector(`[data-former-pick="${i}"]`)?.closest('.sf-save-conflict-row')
+      || list.querySelector(`input[name="former-${i}"]`)?.closest('.sf-save-conflict-row');
     const onApply = () => {
+      const open = _undecided();
+      if (open.length) {
+        open.forEach((i) => {
+          const el = _rowEl(i);
+          if (!el) return;
+          el.classList.add('sf-former-undecided');
+          if (!el.querySelector('.sf-former-undecided-msg')) {
+            const sub = el.querySelector('.sf-save-conflict-name');
+            const noun = rows[i].kind === 'style' ? 'a style' : rows[i].kind === 'track' ? 'a track' : rows[i].kind === 'common' ? 'a common folder' : 'a font';
+            const msg = document.createElement('span');
+            msg.className = 'sf-former-undecided-msg';
+            msg.textContent = `Choose ${noun}, or ${rows[i].kind === 'style' ? 'Not now' : 'Ignore'}.`;
+            sub?.appendChild(msg);
+          }
+        });
+        _rowEl(open[0])?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        return;
+      }
       const picks = rows.map((row, i) => {
         let choice = list.querySelector(`input[name="former-${i}"]:checked`)?.value || 'update';
         const sel = list.querySelector(`[data-former-pick="${i}"]`);
@@ -10961,15 +10995,23 @@ function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
       resolve(picks);
     };
     // Choosing turns Update on and selects it; back to the prompt turns it off and leaves the line. [B-656]
+    const _clearMark = (el) => {
+      if (!el) return;
+      el.classList.remove('sf-former-undecided');
+      el.querySelector('.sf-former-undecided-msg')?.remove();
+    };
     const onPick = (e) => {
+      // Any choice on a line - a radio or the dropdown - takes its red mark away once it is decided.
+      const radio = e.target.closest('input[type="radio"]');
+      if (radio) { _clearMark(radio.closest('.sf-save-conflict-row')); return; }
       const sel = e.target.closest('.sf-former-pick');
       if (!sel) return;
       const i = sel.getAttribute('data-former-pick');
       const up = list.querySelector(`input[name="former-${i}"][value="update"]`);
       if (!up) return;
       up.disabled = sel.value === '';
-      if (sel.value !== '') up.checked = true;
-      else { const back = list.querySelector(`input[name="former-${i}"][value="later"], input[name="former-${i}"][value="ignore"]`); if (back) back.checked = true; }
+      if (sel.value !== '') { up.checked = true; _clearMark(sel.closest('.sf-save-conflict-row')); }
+      else if (up.checked) up.checked = false;   // back to the prompt: undecided again, never a quiet Not now
     };
     const onCancel = () => { cleanup(); resolve(null); };
     const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
