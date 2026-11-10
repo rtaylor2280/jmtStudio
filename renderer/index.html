@@ -56882,6 +56882,7 @@ require(['vs/editor/editor.main'], function () {
           const _plans = {};            // name -> write plan, used only for a replace
           const _modes = new Map();     // name -> rename | replace | skip | identical
           const _done = [];             // what each font actually did, for the summary
+          let _stopAsked = false;       // Cancel was pressed: no further font starts [B-657]
           // ── Will it fit? ──────────────────────────────────────────── [B-203]
           //
           // THIS DOOR WAS MISSED, AND TESTING FOUND IT IN ONE CLICK. The first pass guarded
@@ -56944,7 +56945,9 @@ require(['vs/editor/editor.main'], function () {
             // The export channel reports bytes WRITTEN as increments, and the font's size is
             // already on its meta, so the bar is determinate from the first frame.
             deltas: true,
-            onCancel: _sfExportCancelOpt.onCancel,
+            // The flag first, so the loop in `produce` will not start another font; then main,
+            // which stops the one in flight. Both halves, as the main SD Export door. [B-657]
+            onCancel: async () => { _stopAsked = true; await _sfExportCancelOpt.onCancel(); },
             // No work to do: the size is on the entry's own meta. A door that cannot size
             // itself returns 0, which the preflight reads as "cannot measure" - never as empty.
             //
@@ -57104,7 +57107,16 @@ require(['vs/editor/editor.main'], function () {
                 // ONE PASS OVER THE SELECTION, each font with the mode decided for IT. A font
                 // whose copy matched, or that the user chose to keep, is not written at all and
                 // is recorded so the summary can say so. [B-425]
+                // A CANCEL STOPS THE RUN, NOT JUST THE FONT IN FLIGHT. [B-657, 2026-11-09] This
+                // door had the [B-420] bug the main SD Export door lost on 09-24: Cancel reached
+                // main, which stopped the font being copied and took it back off the card, then
+                // this loop started the next font and the summary counted the stopped one as
+                // exported. Seen with two fonts: "Export complete... 2 fonts" after his Cancel,
+                // with one font on the card. Checked at the TOP of the loop, and `canceled` on a
+                // reply is read BEFORE the font is recorded.
+                let _stoppedReply = null;
                 for (const nm of _fonts) {
+                  if (_stopAsked) break;
                   const _mode = _modes.get(nm) || 'rename';
                   if (_mode === 'identical' || _mode === 'skip') {
                     _done.push({ name: nm, mode: _mode, ok: true, skipped: true });
@@ -57115,8 +57127,24 @@ require(['vs/editor/editor.main'], function () {
                     name: nm, destDir: pick.destDir, mode: _mode,
                     plan: _planArg, syncManifest: false, boardCard,
                   });
+                  if (_one && _one.canceled) { _stopAsked = true; _stoppedReply = _one; break; }
                   _done.push({ name: nm, mode: _mode, ..._one });
                   if (nm === fontName) r = _one;
+                }
+                // STOPPED: the runner's own stopped notice is the ending, so it gets the count of
+                // what LANDED in this door's unit (files) and main's word on the font it stopped.
+                if (_stopAsked) {
+                  const _fileCount = (nm) => Number(((((_sfAllEntries || []).find(x => x && x.name === nm) || {}).meta) || {}).contentFileCount) || 0;
+                  const _landed = _done.filter((x) => x && !x.skipped && x.ok !== false);
+                  return {
+                    ok: true, canceled: true,
+                    wroteCount: _landed.reduce((t, x) => t + _fileCount(x.name), 0),
+                    partialRemoved: !!(_stoppedReply && _stoppedReply.partialRemoved),
+                    restored: !!(_stoppedReply && _stoppedReply.restored),
+                    leftovers: (_stoppedReply && _stoppedReply.leftovers) || [],
+                    offerCleanup: (_stoppedReply && _stoppedReply.offerCleanup) || null,
+                    teardownIncomplete: !!(_stoppedReply && _stoppedReply.teardownIncomplete),
+                  };
                 }
                 // The runner wants one verdict. A single failure is a failed export, and its
                 // error is carried up rather than swallowed behind the ones that worked.

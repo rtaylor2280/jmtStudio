@@ -581,5 +581,68 @@ ok('but the filename and the clock keep moving',
 ok('the stopping state is reset with the handler',
    /clearCancel\(\) \{\s*\n\s*this\.cancelling = false;/.test(html));
 
-console.log(failures ? `\nexport-cancel: ${failures} failing` : '\nexport-cancel: all passing');
-process.exit(failures ? 1 : 0);
+// ── 11. The selection door ("Export font folder…" on several fonts) stops too ── [B-657]
+// Seen 2026-11-09: Cancel during a two-font export, then "Export complete... 2 fonts" with one
+// font on the card. The door's REAL produce() runs here against a stubbed export, because the
+// regex checks above are what let [B-651] ship a dead button: they see wiring, not behaviour.
+(async () => {
+  const start = html.indexOf('produce: async ({ decisions, boardCard }) => {\n              const mode = (decisions && decisions.mode) || \'rename\';\n              try {\n                // THE PLAN GOES ONLY ON REPLACE.');
+  const end = start < 0 ? -1 : html.indexOf('// ── The completion summary', start);
+  ok('the selection door\'s produce() is found', start >= 0 && end > start);
+  if (start < 0 || end < 0) return finish();
+  const body = html.slice(start + 'produce: '.length, end).replace(/,\s*$/, '');
+  const doorOnCancel = /onCancel: async \(\) => \{ _stopAsked = true; await _sfExportCancelOpt\.onCancel\(\); \}/.test(html);
+  ok('its onCancel sets the flag BEFORE asking main to stop', doorOnCancel);
+  const make = (replies, onCall) => new Function('window', '_sfAllEntries', 'onCall', `
+    let r = null; let _stopAsked = false;
+    const _fonts = ['A', 'B', 'C']; const _plans = {}; const _done = [];
+    const _modes = new Map([['A', 'rename'], ['B', 'rename'], ['C', 'rename']]);
+    const pick = { destDir: 'E:\\\\' }; const fontName = 'A';
+    const produce = ${body};
+    return { produce, cancel: () => { _stopAsked = true; }, done: _done };
+  `)({ electronAPI: { exportEntryToFolder: async (a) => { const x = replies.shift(); onCall && onCall(a.name); return x; } } },
+     [{ name: 'A', meta: { contentFileCount: 48 } }, { name: 'B', meta: { contentFileCount: 104 } }, { name: 'C', meta: { contentFileCount: 7 } }],
+     null);
+
+  // Main stops B partway (the cancel reached it mid-font) and took it back off.
+  {
+    const d = make([{ ok: true }, { ok: true, canceled: true, partialRemoved: true }, { ok: true }]);
+    const res = await d.produce({ decisions: null, boardCard: false });
+    ok('a font main stopped ends the run: canceled comes back', res && res.canceled === true && res.ok === true, JSON.stringify(res));
+    ok('only what landed is counted (A\'s 48 files, not B\'s)', res && res.wroteCount === 48, res && res.wroteCount);
+    ok('main\'s word on the stopped font is carried', res && res.partialRemoved === true);
+    ok('the stopped font is not recorded as exported', d.done.length === 1 && d.done[0].name === 'A', JSON.stringify(d.done.map(x => x.name)));
+  }
+  // Cancel pressed while A is copying, and A finishes anyway: B must NOT start.
+  {
+    const started = [];
+    const api = {};
+    // A stub that presses Cancel while A is copying, as his click did.
+    const d = new Function('window', '_sfAllEntries', `
+      let r = null; let _stopAsked = false;
+      const _fonts = ['A', 'B', 'C']; const _plans = {}; const _done = [];
+      const _modes = new Map([['A', 'rename'], ['B', 'rename'], ['C', 'rename']]);
+      const pick = { destDir: 'E:\\\\' }; const fontName = 'A';
+      const cancel = () => { _stopAsked = true; };
+      window.cancel = cancel;
+      const produce = ${body};
+      return { produce, done: _done };
+    `)(Object.assign(api, { electronAPI: { exportEntryToFolder: async (a) => { started.push(a.name); if (a.name === 'A') api.cancel(); return { ok: true }; } } }),
+       [{ name: 'A', meta: { contentFileCount: 48 } }]);
+    const res = await d.produce({ decisions: null, boardCard: false });
+    ok('Cancel during a font that then finishes: the next font never starts', started.join() === 'A', started.join());
+    ok('...and the run reports stopped, with the finished font counted', res && res.canceled === true && res.wroteCount === 48, JSON.stringify(res));
+  }
+  // No cancel: unchanged.
+  {
+    const d = make([{ ok: true }, { ok: true }, { ok: true }]);
+    const res = await d.produce({ decisions: null, boardCard: false });
+    ok('no cancel: every font is written and nothing claims a stop', res && res.ok === true && !res.canceled && d.done.length === 3, JSON.stringify(res));
+  }
+  finish();
+})();
+
+function finish() {
+  console.log(failures ? `\nexport-cancel: ${failures} failing` : '\nexport-cancel: all passing');
+  process.exit(failures ? 1 : 0);
+}
