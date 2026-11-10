@@ -3959,6 +3959,9 @@
   #modal-sf-former-names .modal { width: 680px; max-width: 96vw; max-height: min(80vh, 600px); display: flex; flex-direction: column; }
   #modal-sf-former-names .sf-former-pick { margin-left: 4px; padding: 1px 4px; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 3px; font-size: 0.74rem; font-weight: 400; }
   .sf-save-conflict-bulk { display: flex; gap: 8px; margin: 6px 0 10px; }
+  /* Inside a section the space goes above the buttons, between the sentence and them; the rows they
+     set follow right after. [B-656] */
+  .sf-save-conflict-section .sf-save-conflict-bulk { margin: 10px 0 0; }
   .sf-save-conflict-bulk-btn { font-size: 0.74rem; background: none; border: 1px solid var(--c-border-strong); border-radius: 3px; color: var(--c-text-sub); padding: 3px 9px; cursor: pointer; }
   .sf-save-conflict-bulk-btn:hover { color: var(--jmt-blue); border-color: var(--jmt-blue); }
   /* Second line under a conflict row's name. Exists because "common" is the
