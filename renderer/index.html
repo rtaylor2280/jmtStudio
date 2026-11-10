@@ -10906,12 +10906,17 @@ function _sfFormerRow(r, i) {
   const where = r.kind === 'style' ? 'In your Style Library' : 'In your library';
   const sub = r.owners.length === 1
     ? `${where}: ${_preflightEsc(r.owners[0].name)} · ${presets}`
+    // More than one could be meant: nothing is picked for them. The dropdown starts on its prompt,
+    // the line starts on Ignore / Not now, and Update stays off until they choose (his, 2026-11-09:
+    // "they're not clicking through something and getting potentially a random choice"). [B-656]
     : `${where}: <select class="sf-former-pick" data-former-pick="${i}">`
+      + `<option value="" selected>Choose a ${r.kind === 'track' ? 'track' : r.kind === 'common' ? 'common folder' : r.kind === 'style' ? 'style' : 'font'}</option>`
       + r.owners.map((e, j) => `<option value="${j}">${_preflightEsc(e.name)}</option>`).join('')
       + `</select> · ${presets}`;
-  const radio = (v, label, checked, tip, style = false) =>
-    `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${style ? ' data-former-style' : ''}${checked ? ' checked' : ''}>${label}</label>`;
   const many = r.owners.length > 1;
+  const radio = (v, label, checked, tip, style = false) =>
+    `<label title="${_preflightEsc(tip)}"><input type="radio" name="former-${i}" value="${v}"${style ? ' data-former-style' : ''}`
+    + `${checked ? ' checked' : ''}${many && v === 'update' ? ' disabled' : ''}>${label}</label>`;
   const noun = r.kind === 'track' ? 'track' : r.kind === 'common' ? 'common folder' : r.kind === 'style' ? 'style' : 'font';
   const now = many ? `the ${noun} you pick` : r.owners[0].name;
   const tips = {
@@ -10929,8 +10934,8 @@ function _sfFormerRow(r, i) {
     // A style: Update or Not now, nothing else. Its old name cannot compile, so there is no
     // "keep it" and no "not this style"; and the Set all buttons leave it alone. [B-656]
     + (r.kind === 'style'
-      ? radio('update', 'Update', true, tips.update, true) + radio('later', 'Not now', false, tips.later, true)
-      : radio('update', 'Update', true, tips.update) + radio('ignore', 'Ignore', false, tips.ignore)
+      ? radio('update', 'Update', !many, tips.update, true) + radio('later', 'Not now', many, tips.later, true)
+      : radio('update', 'Update', !many, tips.update) + radio('ignore', 'Ignore', many, tips.ignore)
         + radio('forget', many ? 'None of these' : `Not this ${noun}`, false, tips.forget))
     + `</span></div>`;
 }
@@ -10942,16 +10947,29 @@ function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
       const btn = e.target.closest('[data-former-all]');
       if (!btn) return;
       // Sound rows only: a style's choice is its own, never part of Set all. [B-656]
-      list.querySelectorAll(`input[type="radio"][value="${btn.getAttribute('data-former-all')}"]:not([data-former-style])`).forEach((r) => { r.checked = true; });
+      list.querySelectorAll(`input[type="radio"][value="${btn.getAttribute('data-former-all')}"]:not([data-former-style]):not(:disabled)`).forEach((r) => { r.checked = true; });
     };
     const onApply = () => {
       const picks = rows.map((row, i) => {
-        const choice = list.querySelector(`input[name="former-${i}"]:checked`)?.value || 'update';
+        let choice = list.querySelector(`input[name="former-${i}"]:checked`)?.value || 'update';
         const sel = list.querySelector(`[data-former-pick="${i}"]`);
-        return { row, choice, owner: row.owners[sel ? Number(sel.value) : 0] || row.owners[0] };
+        // Update with nothing chosen is never a pick of the first: the line is left. [B-656]
+        if (sel && sel.value === '' && choice === 'update') choice = row.kind === 'style' ? 'later' : 'ignore';
+        return { row, choice, owner: sel ? (sel.value === '' ? null : row.owners[Number(sel.value)]) : row.owners[0] };
       });
       cleanup();
       resolve(picks);
+    };
+    // Choosing turns Update on and selects it; back to the prompt turns it off and leaves the line. [B-656]
+    const onPick = (e) => {
+      const sel = e.target.closest('.sf-former-pick');
+      if (!sel) return;
+      const i = sel.getAttribute('data-former-pick');
+      const up = list.querySelector(`input[name="former-${i}"][value="update"]`);
+      if (!up) return;
+      up.disabled = sel.value === '';
+      if (sel.value !== '') up.checked = true;
+      else { const back = list.querySelector(`input[name="former-${i}"][value="later"], input[name="former-${i}"][value="ignore"]`); if (back) back.checked = true; }
     };
     const onCancel = () => { cleanup(); resolve(null); };
     const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
@@ -10964,13 +10982,15 @@ function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
       document.removeEventListener('keydown', onKey);
       bulkRow?.removeEventListener('click', onBulk);
       list.removeEventListener('click', onBulk);
+      list.removeEventListener('change', onPick);
     };
     applyBtn?.addEventListener('click', onApply);
     cancelBtn?.addEventListener('click', onCancel);
     modal.addEventListener('click', onBackdrop);
     document.addEventListener('keydown', onKey);
     bulkRow?.addEventListener('click', onBulk);
-    list.addEventListener('click', onBulk);   // the in-section Set all, when styles are below [B-656]
+    list.addEventListener('click', onBulk);
+    list.addEventListener('change', onPick);   // the in-section Set all, when styles are below [B-656]
   });
 }
 

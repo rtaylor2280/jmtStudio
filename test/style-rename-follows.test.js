@@ -203,9 +203,31 @@ console.log('4. wiring');
   check('the sound sentence does not say saber, and is not definite about the card',
     /If your card still has/.test(prompt) && !/card in your saber/.test(html) && /keeps the names the presets have now/.test(prompt));
   check('a style row: Update or Not now, nothing else',
-    /radio\('update', 'Update', true, tips\.update, true\) \+ radio\('later', 'Not now', false, tips\.later, true\)/.test(prompt));
+    /radio\('update', 'Update', !many, tips\.update, true\) \+ radio\('later', 'Not now', many, tips\.later, true\)/.test(prompt));
   const awaitFn = slice('function _sfFormerNamesAwait(', '\n}\n');
   check('Set all leaves style rows alone', /:not\(\[data-former-style\]\)/.test(awaitFn));
+  // Nothing is picked for them when more than one could be meant (his, 2026-11-09). Built by the
+  // real row builder, then read back.
+  {
+    const ctxRow = { _preflightEsc: (x) => String(x) };
+    vm.runInNewContext(slice('function _sfFormerRow(r, i) {', '\nfunction _sfFormerNamesAwait') + '\nthis.row = _sfFormerRow;', ctxRow);
+    const two = [{ name: 'CelsiusBVM' }, { name: 'CyberneticCerebrumBVM' }];
+    const sRow = ctxRow.row({ kind: 'style', d: 'Celsius', count: 1, owners: two }, 4);
+    check('a style line with two matches: the dropdown starts on "Choose a style"', /<option value="" selected>Choose a style<\/option>/.test(sRow), sRow);
+    check('...Update starts off and unchosen, Not now chosen',
+      /value="update" data-former-style disabled>Update/.test(sRow) && /value="later" data-former-style checked>Not now/.test(sRow), sRow);
+    const fRow = ctxRow.row({ kind: 'font', d: 'Celsius', count: 1, owners: [{ name: 'Celsius2' }, { name: 'Celsius3' }] }, 1);
+    check('a font line with two matches: "Choose a font", Ignore chosen, Update off',
+      /Choose a font<\/option>/.test(fRow) && /value="ignore" checked>Ignore/.test(fRow) && /value="update" disabled>Update/.test(fRow), fRow);
+    const one = ctxRow.row({ kind: 'style', d: 'Astral', count: 1, owners: [{ name: 'AstralBVM' }] }, 0);
+    check('one match: unchanged, Update chosen, no dropdown', /value="update" data-former-style checked>Update/.test(one) && !/<select/.test(one), one);
+  }
+  check('choosing turns Update on and selects it; the prompt turns it off again',
+    /up\.disabled = sel\.value === '';/.test(awaitFn) && /if \(sel\.value !== ''\) up\.checked = true;/.test(awaitFn)
+    && /list\.addEventListener\('change', onPick\)/.test(awaitFn) && /list\.removeEventListener\('change', onPick\)/.test(awaitFn));
+  check('Apply never takes the first by default: Update with nothing chosen leaves the line',
+    /if \(sel && sel\.value === '' && choice === 'update'\) choice = row\.kind === 'style' \? 'later' : 'ignore';/.test(awaitFn));
+  check('Set all skips a line that has no choice yet', /:not\(:disabled\)/.test(awaitFn));
   check('Set all shows only with two or more sound rows', /const _soundRows = rows\.filter\(\(r\) => r\.kind !== 'style'\)\.length;/.test(prompt) && /_soundRows > 1/.test(prompt));
   check('with styles below, Set all sits inside the Sound fonts section; the top one hides',
     /_section\('Sound fonts', _soundDesc, _soundRows > 1 \? _bulkHtml : ''\)/.test(prompt)
