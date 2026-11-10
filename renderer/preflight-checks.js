@@ -1452,44 +1452,68 @@
       }
       if (!used.size) return null;
 
+      // Every whole-word use of each old name inside the presets' style slots, wrappers included
+      // (PixelSwitchWrapper<Old> as well as StylePtr<Old>). Computed against the document as it is
+      // now and applied as one edit, like the factory fix above.
+      const planFor = (renames) => (c) => {
+        const re = new RegExp(`\\b(${[...renames.keys()].join('|')})\\b`, 'g');
+        const edits = [];
+        for (const arr of (c.parsed?.arrays || [])) {
+          for (const p of (arr.presets || [])) {
+            if (p.parseError || !p.raw || !p.startLine) continue;
+            let slots = [];
+            try { slots = _parser().extractStyleSlots(p.raw); } catch { slots = []; }
+            for (const s of slots) {
+              const txt = p.raw.slice(s.startOffset, s.endOffset);
+              for (const m of txt.matchAll(re)) {
+                const abs = _lineColOf(c.text, p, s.startOffset + m.index);
+                if (!abs) continue;
+                edits.push({ startLine: abs.line, startCol: abs.col, endLine: abs.line, endCol: abs.col + m[0].length, text: renames.get(m[0]) });
+              }
+            }
+          }
+        }
+        return edits;
+      };
+
+      // ONE CARD FOR EVERY RENAME WITH ONE ANSWER, like the other checks combine theirs (his
+      // read, 2026-11-09): every old -> new, every preset, one button. A name two styles once had
+      // gets its own card and no button, since the answer is the user's.
       const findings = [];
-      for (const [old, presets] of used) {
-        const now = owners.get(old);
-        const one = presets.length === 1;
-        const single = now.length === 1 ? now[0] : null;
+      const sure = [...used].filter(([old]) => owners.get(old).length === 1);
+      if (sure.length) {
+        const renames = new Map(sure.map(([old]) => [old, owners.get(old)[0]]));
+        const presets = [...new Set(sure.flatMap(([, ps]) => ps))];
+        const onePreset = presets.length === 1;
+        const pairs = sure.map(([old]) => `${old} is now ${renames.get(old)}`);
+        const list = pairs.length === 1 ? pairs[0]
+          : `${pairs.slice(0, -1).join(', ')}${pairs.length > 2 ? ',' : ''} and ${pairs[pairs.length - 1]}`;
         findings.push({
-          title: single
-            ? `There is no style called ${old}. Your Style Library renamed it to ${single}.`
-            : `There is no style called ${old}. Your Style Library renamed it, and ${now.length} styles once had that name: ${now.join(', ')}.`,
-          detail: `${one ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it.`
-            + (single ? '' : ' Change it to the one you meant.'),
+          title: sure.length === 1
+            ? `There is no style called ${sure[0][0]}. Your Style Library renamed it to ${renames.get(sure[0][0])}.`
+            : `${onePreset ? 'This preset uses' : `${presets.length} presets use`} ${sure.length} styles your Style Library renamed.`,
+          detail: sure.length === 1
+            ? `${onePreset ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it.`
+            : `${list[0].toUpperCase()}${list.slice(1)}. The build will stop on the old names.`,
           items: presets,
           ..._presetList(ctx, presets),
-          fix: single ? {
-            label: `Change to ${single}`,
-            // Every whole-word use of the old name inside a preset's style slots, wrappers
-            // included (PixelSwitchWrapper<Old> as well as StylePtr<Old>). Computed against the
-            // document as it is now and applied as one edit, like the factory fix above.
-            plan(c) {
-              const edits = [];
-              for (const arr of (c.parsed?.arrays || [])) {
-                for (const p of (arr.presets || [])) {
-                  if (p.parseError || !p.raw || !p.startLine) continue;
-                  let slots = [];
-                  try { slots = _parser().extractStyleSlots(p.raw); } catch { slots = []; }
-                  for (const s of slots) {
-                    const txt = p.raw.slice(s.startOffset, s.endOffset);
-                    for (const m of txt.matchAll(new RegExp(`\\b${old}\\b`, 'g'))) {
-                      const abs = _lineColOf(c.text, p, s.startOffset + m.index);
-                      if (!abs) continue;
-                      edits.push({ startLine: abs.line, startCol: abs.col, endLine: abs.line, endCol: abs.col + old.length, text: single });
-                    }
-                  }
-                }
-              }
-              return edits;
-            },
-          } : null,
+          fix: {
+            // "Update", the config-open review's word for the same act (his, 2026-11-09).
+            label: sure.length === 1 ? `Update to ${renames.get(sure[0][0])}` : 'Update to the new names',
+            plan: planFor(renames),
+          },
+        });
+      }
+      for (const [old, presets] of used) {
+        const now = owners.get(old);
+        if (now.length === 1) continue;
+        const one = presets.length === 1;
+        findings.push({
+          title: `There is no style called ${old}. Your Style Library renamed it, and ${now.length} styles once had that name: ${now.join(', ')}.`,
+          detail: `${one ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it. Change it to the one you meant.`,
+          items: presets,
+          ..._presetList(ctx, presets),
+          fix: null,
         });
       }
       return { findings };

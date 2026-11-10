@@ -64,12 +64,29 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
     ok('it names the old and the new', /no style called AstralProjection\. Your Style Library renamed it to AstralProjectionBVM\./.test(f[0].title), f[0] && f[0].title);
     ok('it blocks: the old name cannot compile', f[0].severity === 'block');
     ok('it names both presets using it', f[0].items.includes('P1') && f[0].items.includes('P2') && !f[0].items.includes('P3'), JSON.stringify(f[0].items));
-    ok('one owner: a fix is offered', f[0].fix && f[0].fix.label === 'Change to AstralProjectionBVM', f[0].fix && f[0].fix.label);
+    ok('one owner: a fix is offered, worded like the review', f[0].fix && f[0].fix.label === 'Update to AstralProjectionBVM', f[0].fix && f[0].fix.label);
     const after = apply(text, f[0].fix.plan(ctx));
     ok('the fix renames every use, wrappers too', /StylePtr<AstralProjectionBVM>\(\)/.test(after) && /PixelSwitchWrapper<AstralProjectionBVM>>\("0,1,0"\)/.test(after) && !/\bAstralProjection\b/.test(after), after);
     ok('nothing else is touched', /StylePtr<Plain>\(\)/.test(after) && /"P3"/.test(after));
     const again = mine(await preflight.run(ctxFor(after)));
     ok('after the fix the check is quiet', again.length === 0);
+  }
+  {
+    // His read 2026-11-09: other checks combine their findings; so does this one.
+    const text = cfg('StylePtr<AstralProjection>()', 'StylePtr<Celsius>()', 'StylePtr<PixelSwitchWrapper<Celsius>>("0,1,0")');
+    const ctx = ctxFor(text);
+    const f = mine(await preflight.run(ctx));
+    ok('several renames: ONE card', f.length === 1, JSON.stringify(f.map(x => x.title)));
+    ok('the card says how many, and names every old -> new',
+      /3 presets use 2 styles your Style Library renamed\./.test(f[0].title) && /AstralProjection is now AstralProjectionBVM and Celsius is now CelsiusBVM\./.test(f[0].detail),
+      f[0] && `${f[0].title} | ${f[0].detail}`);
+    ok('one button for all of them', f[0].fix && f[0].fix.label === 'Update to the new names', f[0].fix && f[0].fix.label);
+    const after = apply(text, f[0].fix.plan(ctx));
+    ok('the button updates every one', /StylePtr<AstralProjectionBVM>\(\)/.test(after) && /StylePtr<CelsiusBVM>\(\)/.test(after) && /PixelSwitchWrapper<CelsiusBVM>>/.test(after) && !/\b(AstralProjection|Celsius)\b/.test(after), after);
+  }
+  {
+    const f = mine(await preflight.run(ctxFor(cfg('StylePtr<AstralProjection>()', 'StylePtr<Twin>()'))));
+    ok('a sure rename and a two-owner name: two cards, the second with no button', f.length === 2 && f[0].fix && f[1].fix === null && /TwinA, TwinB/.test(f[1].title), JSON.stringify(f.map(x => [x.title, !!x.fix])));
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<AstralOld>()'))));
