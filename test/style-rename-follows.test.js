@@ -196,7 +196,7 @@ console.log('4. wiring');
     /window\._sfCheckConfigFormerNames\?\.\(\)/.test(open) && !html.includes('_styleCheckConfigFormerNames'));
   const prompt = slice('function _sfPromptFormerNames(rows)', 'function _sfFormerNamesAwait(');
   check('both kinds: a Sound fonts section and a Styles section, each with its own sentence',
-    /_section\('Sound fonts', _soundDesc\)/.test(prompt) && /_section\('Styles', _styleDesc\)/.test(prompt));
+    /_section\('Sound fonts', _soundDesc[,)]/.test(prompt) && /_section\('Styles', _styleDesc\)/.test(prompt));
   check('the style sentence says Not now leaves a preset that will not compile; no promise about compile',
     /<strong>Not now<\/strong> leaves the old names, and those presets will not compile until they are changed\./.test(prompt)
     && !/Compile offers/.test(html));
@@ -206,7 +206,11 @@ console.log('4. wiring');
     /radio\('update', 'Update', true, tips\.update, true\) \+ radio\('later', 'Not now', false, tips\.later, true\)/.test(prompt));
   const awaitFn = slice('function _sfFormerNamesAwait(', '\n}\n');
   check('Set all leaves style rows alone', /:not\(\[data-former-style\]\)/.test(awaitFn));
-  check('Set all shows only with two or more sound rows', /rows\.filter\(\(r\) => r\.kind !== 'style'\)\.length > 1/.test(prompt));
+  check('Set all shows only with two or more sound rows', /const _soundRows = rows\.filter\(\(r\) => r\.kind !== 'style'\)\.length;/.test(prompt) && /_soundRows > 1/.test(prompt));
+  check('with styles below, Set all sits inside the Sound fonts section; the top one hides',
+    /_section\('Sound fonts', _soundDesc, _soundRows > 1 \? _bulkHtml : ''\)/.test(prompt)
+    && /bulkRow\.style\.display = \(!_both && _soundRows > 1\) \? '' : 'none'/.test(prompt)
+    && /list\.addEventListener\('click', onBulk\)/.test(awaitFn) && /list\.removeEventListener\('click', onBulk\)/.test(awaitFn));
   check('the setting names styles too', html.includes('Update the open config when a font or style it uses is renamed'));
   check('the library entries are exposed for the check', html.includes('window._libraryStyleEntries = _libraryEntries;'));
 }

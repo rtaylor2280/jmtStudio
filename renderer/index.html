@@ -10869,17 +10869,24 @@ function _sfPromptFormerNames(rows) {
   const _both = _hasSound && _hasStyle;
   desc.innerHTML = _both ? '' : (_hasSound ? _soundDesc : _styleDesc);
   desc.style.display = _both ? 'none' : '';
-  const _section = (label, html) => `<div class="sf-save-conflict-section">`
+  // Set all covers sound rows only, so it shows only with two or more of them, and sits right above
+  // the rows it sets: at the top when the review is all sound (as SD Export's review has it), inside
+  // the Sound fonts section when styles are below, so it never reads as setting them. [B-656]
+  const _soundRows = rows.filter((r) => r.kind !== 'style').length;
+  const _bulkHtml = '<div class="sf-save-conflict-bulk">'
+    + '<button class="sf-save-conflict-bulk-btn" data-former-all="update">Set all to Update</button>'
+    + '<button class="sf-save-conflict-bulk-btn" data-former-all="ignore">Set all to Ignore</button></div>';
+  const _section = (label, html, extra = '') => `<div class="sf-save-conflict-section">`
     + `<div class="sf-save-conflict-section-title">${label}</div>`
-    + `<div class="sf-save-conflict-section-intro">${html}</div></div>`;
+    + `<div class="sf-save-conflict-section-intro">${html}</div>${extra}</div>`;
   list.innerHTML = rows.map((r, i) => {
     const head = _both
-      ? (i === 0 ? _section('Sound fonts', _soundDesc) : (r.kind === 'style' && rows[i - 1].kind !== 'style' ? _section('Styles', _styleDesc) : ''))
+      ? (i === 0 ? _section('Sound fonts', _soundDesc, _soundRows > 1 ? _bulkHtml : '')
+        : (r.kind === 'style' && rows[i - 1].kind !== 'style' ? _section('Styles', _styleDesc) : ''))
       : '';
     return head + _sfFormerRow(r, i);
   }).join('');
-  // Set all only covers sound rows, so it shows only when there are two or more of them. [B-656]
-  if (bulkRow) bulkRow.style.display = rows.filter((r) => r.kind !== 'style').length > 1 ? '' : 'none';
+  if (bulkRow) bulkRow.style.display = (!_both && _soundRows > 1) ? '' : 'none';
   return _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow);
 }
 
@@ -10946,12 +10953,14 @@ function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
       modal.removeEventListener('click', onBackdrop);
       document.removeEventListener('keydown', onKey);
       bulkRow?.removeEventListener('click', onBulk);
+      list.removeEventListener('click', onBulk);
     };
     applyBtn?.addEventListener('click', onApply);
     cancelBtn?.addEventListener('click', onCancel);
     modal.addEventListener('click', onBackdrop);
     document.addEventListener('keydown', onKey);
     bulkRow?.addEventListener('click', onBulk);
+    list.addEventListener('click', onBulk);   // the in-section Set all, when styles are below [B-656]
   });
 }
 
