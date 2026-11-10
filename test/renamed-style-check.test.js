@@ -86,7 +86,7 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<AstralProjection>()', 'StylePtr<Twin>()'))));
-    ok('a sure rename and a two-owner name: two cards, the second with no button', f.length === 2 && f[0].fix && f[1].fix === null && /TwinA, TwinB/.test(f[1].title), JSON.stringify(f.map(x => [x.title, !!x.fix])));
+    ok('a sure rename and a two-owner name: two cards, the second with a choice', f.length === 2 && f[0].fix && f[1].fix === null && (f[1].fixes || []).length === 2, JSON.stringify(f.map(x => [x.title, !!x.fix])));
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<AstralOld>()'))));
@@ -94,8 +94,14 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<Twin>()'))));
-    ok('a name two styles once had: named, both owners listed', f.length === 1 && /TwinA, TwinB/.test(f[0].title), f[0] && f[0].title);
-    ok('...and no fix button: picking one would be a guess', f[0] && f[0].fix === null);
+    ok('a name two styles once had: one card saying so', f.length === 1 && /no style called Twin\. 2 styles in your Style Library once had that name\./.test(f[0].title), f[0] && f[0].title);
+    ok('...the choice is on the card: one button per style, none picked for them',
+      f[0] && f[0].fix === null && (f[0].fixes || []).map(x => x.label).join('|') === 'Update to TwinA|Update to TwinB', JSON.stringify(f[0] && f[0].fixes && f[0].fixes.map(x => x.label)));
+    const text = cfg('StylePtr<Twin>()');
+    const ctx = ctxFor(text);
+    const g = mine(await preflight.run(ctx));
+    const after = apply(text, g[0].fixes[1].plan(ctx));
+    ok('pressing the second applies the second', /StylePtr<TwinB>\(\)/.test(after) && !/Twin/.test(after), after);
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<SomethingUnknown>()'))));

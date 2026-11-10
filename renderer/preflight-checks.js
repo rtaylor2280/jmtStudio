@@ -1508,12 +1508,15 @@
         const now = owners.get(old);
         if (now.length === 1) continue;
         const one = presets.length === 1;
+        // The decision is the user's, so it is offered as one button per style - the
+        // one-button-per-remedy shape the card already has - and none is picked for them. [B-656]
         findings.push({
-          title: `There is no style called ${old}. Your Style Library renamed it, and ${now.length} styles once had that name: ${now.join(', ')}.`,
-          detail: `${one ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it. Change it to the one you meant.`,
+          title: `There is no style called ${old}. ${now.length} styles in your Style Library once had that name.`,
+          detail: `${one ? 'This preset uses' : `${presets.length} presets use`} the old name, and the build will stop on it. Choose the style ${one ? 'it' : 'they'} should use.`,
           items: presets,
           ..._presetList(ctx, presets),
           fix: null,
+          fixes: now.map((name) => ({ label: `Update to ${name}`, plan: planFor(new Map([[old, name]])) })),
         });
       }
       return { findings };
