@@ -572,8 +572,20 @@ async function initBuildPanel() {
   const _initBoardOpt = _initBoardSel ? _initBoardSel.options[_initBoardSel.selectedIndex] : null;
   selectedFqbn = (_initBoardOpt && _initBoardOpt.dataset.fqbn) ? _initBoardOpt.dataset.fqbn : null;
   el('bp-usb-select').addEventListener('change', e => {
+    // [B-660] Some choices need words before they take effect. Put the select back on the
+    // current type, ask, and only a yes re-fires this handler through _applyUsbChoice.
+    if (!_usbChoiceApproved) {
+      const v = e.target.value;
+      if (v === '__advanced__' || _isAdvancedUsb(v) || v === 'cdc_msc_webusb') {
+        e.target.value = selectedUsb;
+        if (v === 'cdc_msc_webusb') _confirmRiskyUsb(v);
+        else _openAdvancedUsb();
+        return;
+      }
+    }
     const prevUsb = selectedUsb;
     selectedUsb = e.target.value;
+    _syncAdvancedUsbOptions(selectedUsb);
     updateUsbChangedIndicator();
     // USB mode is persisted per-config via the @jmt:usb marker, so a change is a
     // saveable config edit — mark dirty like the other meta fields do.
@@ -1318,7 +1330,106 @@ const USB_LABELS = {
   cdc_dap:     'Serial + CMSIS-DAP',
   cdc_msc_dap: 'Serial + Mass Storage + CMSIS-DAP',
   cdc_webusb:  'Serial + WebUSB',
+  cdc_msc_webusb: 'Serial + Mass Storage + WebUSB',
   none:        'No USB',
+};
+
+// ── USB type choices that need words first [B-660] ──
+// His spec (2026-11-10 00:51): the common types stay in the list; the rest sit behind
+// "Advanced…", and picking one shows what it is with a "know what you're doing" warning.
+// The RISKY common one (Mass Storage + WebUSB) stays in the list but warns strongly.
+const USB_ADVANCED = [
+  { value: 'cdc_hid',     what: 'The board also acts as a USB keyboard and mouse. Only useful with code written to use it.' },
+  { value: 'cdc_msc_hid', what: 'The same, plus the SD card shows up as a drive.' },
+  { value: 'cdc_dap',     what: 'The board also acts as a CMSIS-DAP debug probe for other chips. For electronics development, not sabers.' },
+  { value: 'cdc_msc_dap', what: 'The same, plus the SD card shows up as a drive.' },
+  { value: 'none',        what: 'The board does not show up on USB at all. JMT Studio cannot see it or flash it the normal way; to flash again, hold BOOT, tap RESET, and use Bootloader Mode.' },
+];
+const _isAdvancedUsb = (v) => USB_ADVANCED.some(a => a.value === v);
+let _usbChoiceApproved = false;   // set only while _applyUsbChoice re-fires the change
+
+function _escUsb(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// An advanced type shows in the list only while it is the one selected; once another type is
+// picked it goes back behind "Advanced…" (his call 2026-11-10 23:11).
+function _syncAdvancedUsbOptions(current) {
+  const sel = el('bp-usb-select');
+  if (!sel) return;
+  for (const a of USB_ADVANCED) {
+    const o = sel.querySelector(`option[value="${a.value}"]`);
+    if (o) o.hidden = a.value !== current;
+  }
+}
+
+// Make the select show `value` (un-hiding an advanced one) and run the normal change path.
+function _applyUsbChoice(value) {
+  const sel = el('bp-usb-select');
+  const opt = sel && sel.querySelector(`option[value="${value}"]`);
+  if (!opt) return;
+  opt.hidden = false;
+  sel.value = value;
+  _usbChoiceApproved = true;
+  try { sel.dispatchEvent(new Event('change')); } finally { _usbChoiceApproved = false; }
+}
+
+async function _openAdvancedUsb() {
+  const list = USB_ADVANCED.map(a =>
+    `<li><strong>${_escUsb(USB_LABELS[a.value])}</strong>: ${_escUsb(a.what)}</li>`).join('');
+  const res = await window.promptConfirm({
+    title: 'Advanced USB types',
+    messageHtml: `These are for special setups. <strong>Only pick one if you know you need it;</strong> `
+      + `if you are not sure, use a type from the main list.<ul style="margin:10px 0 0 18px;padding:0;line-height:1.5;">${list}</ul>`,
+    dropdown: { label: 'USB type', value: _isAdvancedUsb(selectedUsb) ? selectedUsb : USB_ADVANCED[0].value,
+                options: USB_ADVANCED.map(a => ({ value: a.value, label: USB_LABELS[a.value] })) },
+    confirmText: 'Use this type', confirmKind: 'primary', cancelText: 'Cancel',
+  });
+  if (res && res.confirmed && res.value) _applyUsbChoice(res.value);
+}
+
+async function _confirmRiskyUsb(value) {
+  const prevLabel = USB_LABELS[selectedUsb] || selectedUsb;
+  const ok = await window.promptConfirm({
+    title: 'Serial + Mass Storage + WebUSB',
+    messageHtml: `<strong>This combination often stalls the board's serial connection.</strong> `
+      + `Commands stop getting through, and the board can drop off USB. If that happens while the SD card is open as a drive, the card can be corrupted.<br><br>`
+      + `If you need the SD card as a drive, use Serial + Mass Storage. For browser tools like ProffieOS Workbench, use Serial + WebUSB.`,
+    confirmText: 'Use it anyway', confirmKind: 'danger', cancelText: `Keep ${prevLabel}`,
+  });
+  if (ok) _applyUsbChoice(value);
+}
+
+// Serials of every connected Proffieboard running Mass Storage + WebUSB. One USB listing,
+// milliseconds; used to decide whether the ~2 s board-card lookup is worth paying at all.
+window._boardsWithUsbRisk = async () => {
+  try {
+    if (!navigator.usb) return [];
+    const out = [];
+    for (const d of await navigator.usb.getDevices()) {
+      if (d.vendorId !== 0x1209 || !d.serialNumber) continue;
+      const b = await window._boardUsbBuild(d.serialNumber);
+      if (b && b.webusb && b.msc) out.push(String(d.serialNumber).toUpperCase());
+    }
+    return out;
+  } catch { return []; }
+};
+
+// Which USB build is this board running? Read from the board itself through Chromium's
+// WebUSB device list (listing only; never opened or claimed). Proven 2026-11-10: WebUSB is a
+// vendor (255) interface WITH endpoints, Mass Storage is a class-8 interface. Returns
+// { webusb, msc } or null when the board is not visible or the answer is unclear.
+window._boardUsbBuild = async (serial) => {
+  try {
+    if (!navigator.usb || !serial) return null;
+    const sn = String(serial).trim().toUpperCase();
+    const d = (await navigator.usb.getDevices()).find(x => x.vendorId === 0x1209 && String(x.serialNumber || '').toUpperCase() === sn);
+    if (!d) return null;
+    const ifs = (d.configuration || (d.configurations && d.configurations[0]) || { interfaces: [] }).interfaces;
+    const alts = ifs.map(i => i.alternate || i.alternates[0] || {});
+    return {
+      webusb: alts.some(a => a.interfaceClass === 255 && (a.endpoints || []).length > 0),
+      msc:    alts.some(a => a.interfaceClass === 8),
+    };
+  } catch { return null; }
 };
 
 // [B-385] THIS FIELD ANSWERS ONE QUESTION: does the current selection match the
@@ -4832,6 +4943,8 @@ window.setSelectedUsb      = (usb) => {
   if (!usb) return;
   selectedUsb = usb;
   const sel = el('bp-usb-select');
+  // [B-660] A config that uses an advanced type shows it; any other goes back behind Advanced….
+  _syncAdvancedUsbOptions(usb);
   if (sel) sel.value = usb;
   updateUsbChangedIndicator();
   window._resetMassStorageDecline?.(); // config load / mode set clears the SD decline state

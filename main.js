@@ -226,6 +226,21 @@ function createWindow() {
 let dataRail = null;
 
 app.whenReady().then(() => {
+  // [B-660] Studio's own page may LIST Proffieboards through Chromium's WebUSB, so it can tell
+  // which USB build a board is running (WebUSB = a vendor interface with endpoints; Mass
+  // Storage = class 8). Listing only: Studio never opens or claims the board this way.
+  // Narrow on purpose: the usb permission, Studio's own file:// page, and pid.codes vendor
+  // 0x1209 (the Proffieboard). Everything else keeps Chromium's default (denied).
+  try {
+    const { session } = require('electron');
+    const ownPage = (o) => typeof o === 'string' && o.startsWith('file://');
+    session.defaultSession.setPermissionCheckHandler((_wc, perm, origin, details) => {
+      if (perm === 'usb') return ownPage(origin || (details && details.requestingUrl));
+      return true;   // unchanged: Electron's default for every other permission
+    });
+    session.defaultSession.setDevicePermissionHandler((d) =>
+      d && d.deviceType === 'usb' && d.device && d.device.vendorId === 0x1209 && ownPage(d.origin));
+  } catch (e) { console.warn('[B-660] usb permission handlers not set:', e && e.message); }
   // [B-398] Arm the stall probe before any work can happen, so a freeze during the very first
   // import is still measured. Returns false and costs nothing when the flag file is absent.
   try {

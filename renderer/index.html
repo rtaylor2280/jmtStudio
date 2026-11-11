@@ -5942,15 +5942,19 @@
     </div>
     <label class="js-config-only" style="margin-left:8px">USB</label>
     <select id="bp-usb-select" class="js-config-only" style="background:var(--c-bg-raised);border:1px solid var(--c-border-input);border-radius:3px;color:var(--c-text);font-size:0.78rem;padding:4px 6px;outline:none;cursor:pointer;">
+      <!-- [B-660] The common types, then "Advanced…", which opens a dialog explaining the rest.
+           The advanced options stay in the list but HIDDEN, so a config that uses one still
+           shows it (setSelectedUsb un-hides the one in use). -->
       <option value="cdc">Serial</option>
       <option value="cdc_msc">Serial + Mass Storage</option>
-      <option value="cdc_hid">Serial + Keyboard + Mouse</option>
-      <option value="cdc_msc_hid">Serial + Mass Storage + Keyboard + Mouse</option>
-      <option value="cdc_dap">Serial + CMSIS-DAP</option>
-      <option value="cdc_msc_dap">Serial + Mass Storage + CMSIS-DAP</option>
       <option value="cdc_webusb" selected>Serial + WebUSB</option>
       <option value="cdc_msc_webusb">Serial + Mass Storage + WebUSB</option>
-      <option value="none">No USB</option>
+      <option value="cdc_hid" hidden>Serial + Keyboard + Mouse</option>
+      <option value="cdc_msc_hid" hidden>Serial + Mass Storage + Keyboard + Mouse</option>
+      <option value="cdc_dap" hidden>Serial + CMSIS-DAP</option>
+      <option value="cdc_msc_dap" hidden>Serial + Mass Storage + CMSIS-DAP</option>
+      <option value="none" hidden>No USB</option>
+      <option value="__advanced__" style="color:var(--jmt-blue);">▸ Advanced…</option><!-- an action, not a value: styled like OS Version's "＋ Import version…" and Prop's "＋ Import prop…" -->
     </select>
   </div>
 
@@ -9056,10 +9060,15 @@ async function _sfRefuseUnhealthyDestination(bad, { blockedDelete = false, destD
   let named = '';
   try { named = (await _sfDestDisplay(destDir || '')) || ''; } catch {}
   const label = named || (bad && bad.label) || 'this card';
+  // [B-660] The way forward is a repair in a card reader, so the card has to come out: the same
+  // Eject row as the 32 KB refusal above and the end of an export (his call 2026-11-11 00:35).
+  // Looked up BEFORE the close, with the other awaits, for the reason the next comment gives.
+  let ctx = {};
+  try { ctx = (await window._sfEjectContext?.(destDir)) || {}; } catch {}
   // LAST THING BEFORE THE DIALOG, after every await is done. Anything awaited below this
   // line reopens the hole this exists to close.
   try { if (closePrevious) closePrevious(); } catch {}
-  await promptConfirm({
+  const refused = promptConfirm({
     title: `There is a problem with ${label}`,
     // NOT "Windows", AND NO LONGER "Your computer" EITHER. [B-441, caught 2026-09-27]
     // "Your computer reports" was true while the verdict came from `Get-Volume`. It is not true
@@ -9075,8 +9084,23 @@ async function _sfRefuseUnhealthyDestination(bad, { blockedDelete = false, destD
     confirmKind: 'danger',
     hideCancel: true,
   });
+  _sfAddEjectRowToConfirm(ctx, false);
+  await refused;
 }
 window._sfRefuseUnhealthyDestination = _sfRefuseUnhealthyDestination;
+
+// The standard Eject row, placed in the open confirm dialog's buttons. The same three calls the
+// 32 KB refusal makes; one helper so the three dialogs that carry it cannot drift. `auto` presses
+// it straight away (the "Cancel and eject" note).
+function _sfAddEjectRowToConfirm(ctx, auto) {
+  if (!(ctx && ctx.ejectTarget && window._sfEjectRowHtml && window._sfPlaceEjectRowInButtons && window._sfWireEjectRow)) return;
+  const holder = document.createElement('div');
+  holder.innerHTML = window._sfEjectRowHtml(ctx.ejectTarget, ctx.ejectVocab);
+  if (!holder.firstElementChild) return;
+  document.getElementById('modal-confirm-msg').appendChild(holder.firstElementChild);
+  window._sfPlaceEjectRowInButtons();
+  window._sfWireEjectRow({ target: ctx.ejectTarget, vocab: ctx.ejectVocab, auto: !!auto });
+}
 
 // ONE SLOW-WRITE WARNING, FOR EVERY DOOR. [B-238]
 //
@@ -9640,7 +9664,8 @@ window._sfExportStoppedNotice = _sfExportStoppedNotice;
 // question, which is the behaviour every other call site has today.
 async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes = 0,
                                          fileCount = 0, dirCount = 0,
-                                         blockedDelete = false, slowWriteDecided = false } = {}) {
+                                         blockedDelete = false, slowWriteDecided = false,
+                                         usbRiskHandled = false } = {}) {
   // `info` is the raw preflight result - bytesFree, blockSize, transport, boardSerial. Doors
   // that only need a go/no-go ignore it; the primary export uses it for its free-space line,
   // and handing it back is what stops that door running a SECOND measurement of its own.
@@ -9792,6 +9817,38 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
       out.proceed = false;
       return out;
     }
+    // [B-660] A BOARD CARD ON A BOARD RUNNING MASS STORAGE + WEBUSB: the very strong warning
+    // (his spec point 3). Read from the board itself, so it is right whoever flashed it. Once per
+    // board per session: the risk does not change between exports, and repeating it on every
+    // write would teach people to click through it.
+    //
+    // SMALL WRITES TOO (his bench 23:16: an 18 MB export went through unwarned). The preflight
+    // only asks "is this a board card?" above the slow-write threshold, because that question
+    // costs ~2 s. So below it: list USB first (milliseconds). Only when a connected board IS
+    // running Mass Storage + WebUSB is the board-card question asked, and its answer is cached
+    // per volume, so everyone else keeps the fast path.
+    // The answer was started at destination pick and ran alongside the sizing; this collects it.
+    // A big export already classified the card above, so that answer is used rather than
+    // paying the board lookup a second time.
+    let riskSerial = null;
+    if (p.transport) {
+      if (p.boardCard && p.boardSerial) {
+        const usb = await window._boardUsbBuild?.(p.boardSerial);
+        if (usb && usb.webusb) riskSerial = String(p.boardSerial).toUpperCase();
+      }
+    } else {
+      riskSerial = await window._sfDestIdentity?.usbRisk(destDir);
+    }
+    if (!usbRiskHandled && riskSerial) {
+      {
+        dropBar();
+        const go = (await _sfUsbRiskDialog()) === 'confirm';
+        if (!go) { out.proceed = false; return out; }
+        if (out.hidForDialog && !(p.slowWrite && !slowWriteDecided)) {
+          try { window._sfDeleteProgress.show('Checking the destination…', 'Checking free space…'); } catch {}
+        }
+      }
+    }
     // `slowWriteDecided` lands HERE and nowhere earlier. The lookup still ran, `out.boardCard`
     // is still populated, and the caller still gets everything it needs - the only thing skipped
     // is putting the same question a second time. [B-420, 2026-09-24]
@@ -9825,6 +9882,51 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
   }
 }
 window._sfPreflightDestination = _sfPreflightDestination;
+// [B-660] NO MEMORY OF A "Write anyway". It answers ONE export; carrying it to the next one
+// answered a question nobody was asked (his catch 2026-11-10 23:51, on a 259-font export
+// that went through unwarned because a single font had been allowed earlier).
+
+// Resolves 'confirm' (Write anyway), 'middle' (Cancel and eject) or 'cancel'.
+function _sfUsbRiskDialog() {
+  return promptConfirm({
+    middleText: 'Cancel and eject',
+    title: 'Writing through this board is risky',
+    messageHtml: `<strong>This board is running Serial + Mass Storage + WebUSB.</strong> That combination `
+      + `often stalls the board's USB connection, and a stall in the middle of writing to the card can leave `
+      + `files on it damaged.<br><br>To avoid this, flash this board with Serial + Mass Storage before `
+      + `writing to its card, or use a card reader.`,
+    confirmText: 'Write anyway', confirmKind: 'danger', cancelText: 'Cancel',
+  });
+}
+
+// [B-660] HIS FLOW (2026-11-10 23:34): ask the moment it is known, while the export keeps sizing
+// underneath. Cancel ends the export there and then - nothing after it is shown. If the sizing
+// finishes first, the door waits here for the answer before anything else asks a question.
+// Resolves true (go on) or false (declined). The lookup itself started at destination pick.
+async function _sfUsbRiskGate(destDir, onDecline, opts = {}) {
+  const sn = await window._sfDestIdentity?.usbRisk(destDir, opts);
+  if (!sn) return true;
+  const ans = await _sfUsbRiskDialog();
+  if (ans === 'confirm') { try { opts.onApprove && opts.onApprove(); } catch {} return true; }
+  // `withEject`: the caller shows _sfUsbCancelledNote once the export has actually stopped.
+  try { onDecline && onDecline(ans === 'middle'); } catch {}
+  return false;
+}
+
+// "Cancel and eject": shown by the door AFTER its scan or sizing has stopped, so nothing is
+// still reading the card when it comes out. The Eject row presses itself; its statuses are the
+// same as the end of an export (and the board's restart, B-654).
+async function _sfUsbCancelledNote(destDir) {
+  let ctx = {};
+  try { ctx = (await window._sfEjectContext?.(destDir)) || {}; } catch {}
+  const done = promptConfirm({
+    title: 'Export cancelled',
+    message: 'Nothing was written to the card.',
+    confirmText: 'OK', confirmKind: 'primary', hideCancel: true,
+  });
+  _sfAddEjectRowToConfirm(ctx, true);
+  await done;
+}
 
 function _sfIsOutOfSpace(errOrList) {
   const has = (s) => /ENOSPC|no space left on device|disk is full|not enough space/i.test(String(s || ''));
@@ -14134,6 +14236,7 @@ const _sfDestIdentity = {
   volume: null,     // the drive letter on Windows, the /Volumes/<name> root on macOS, /media/<user>/<name> on Linux
   fast: null,       // Promise<{removable, kind}|null>
   board: null,      // Promise<describe result|null>, only created if someone asks
+  risk: null,       // [B-660] Promise<board serial|null>: a Mass Storage + WebUSB board's card?
   // The SETTLED board verdict for `letter`: true, false, or null for "nobody has asked".
   // Kept beside the promise rather than derived from it so a caller can ask "do we already know?"
   // without awaiting and without being able to start a lookup by accident. `knownIsBoardCard`
@@ -14153,11 +14256,19 @@ const _sfDestIdentity = {
   // refactor exists to remove.
   prime(dir) {
     const L = this._volumeOf(dir);
-    if (L !== this.volume) { this.volume = L; this.fast = null; this.board = null; this.boardKnown = null; }
+    if (L !== this.volume) { this.volume = L; this.fast = null; this.board = null; this.boardKnown = null; this.risk = null; }
+    // [B-660] A NEW EXPORT STARTS WITH NO BOARD ANSWER, as the note above this object always said.
+    // Kept only by drive letter, a card swapped behind the same letter (a reader card where the
+    // board card was) or a board reflashed between exports would wear the old answer.
+    this.board = null; this.boardKnown = null;
     if (!L) return;
     if (!this.fast) this.fast = this._startFast(dir);
+    // [B-660] Started HERE, beside the cheap lookup, so it runs while the export is being sized
+    // and is usually answered before the preflight asks. Always fresh: a board can be reflashed
+    // between two exports to the same card.
+    this.risk = this._startRisk(dir);
   },
-  forget() { this.volume = null; this.fast = null; this.board = null; this.boardKnown = null; },
+  forget() { this.volume = null; this.fast = null; this.board = null; this.boardKnown = null; this.risk = null; },
 
   // preflight-busy-exempt: nothing is blocked on the primed call, so an overlay would cover
   // an idle window and steal clicks from someone who is not waiting.
@@ -14179,7 +14290,7 @@ const _sfDestIdentity = {
     // threw the classify away, and the next `isBoardCard` paid the ~1,900 ms spawn a second time.
     // `_sfWarnSlowImport` asks in exactly that order. Whether a card sits behind a Proffieboard is
     // a property of the DRIVE, so only a different drive can invalidate it.
-    if (L !== this.volume) { this.volume = L; this.board = null; this.boardKnown = null; this.fast = null; }
+    if (L !== this.volume) { this.volume = L; this.board = null; this.boardKnown = null; this.fast = null; this.risk = null; }
     if (!this.fast) this.fast = this._startFast(dir);
     return await this.fast;
   },
@@ -14193,7 +14304,7 @@ const _sfDestIdentity = {
   async boardCard(dir) {
     const L = this._volumeOf(dir);
     if (!L) return null;
-    if (L !== this.volume) { this.volume = L; this.fast = null; this.board = null; this.boardKnown = null; }
+    if (L !== this.volume) { this.volume = L; this.fast = null; this.board = null; this.boardKnown = null; this.risk = null; }
     if (!this.board) {
       this.board = Promise.resolve()
         .then(() => _sfClassifyDest({ destDir: dir }))
@@ -14220,6 +14331,34 @@ const _sfDestIdentity = {
   // The memo makes a repeat call cheap; this makes NOT CALLING explicit. Those are different
   // guarantees, and tonight proved why both are wanted - the memo silently stopped holding when
   // `identity()` dropped `board` for the same drive, and nothing at the call site could show it.
+  // [B-660] "Is this destination the card of a board running Mass Storage + WebUSB?"
+  // Resolves to that board's serial, or null. His simplification (2026-11-10 23:31):
+  //   1. any Proffieboard with WebUSB AND Mass Storage connected?  USB listing, ~15 ms
+  //      no -> null. Nearly every export ends here.
+  //   2. is this destination that board's card?                    ~2 s, the cached boardCard()
+  //   3. yes -> its serial (the preflight warns).
+  usbRisk(dir, { fresh = false } = {}) {
+    const L = this._volumeOf(dir);
+    if (!L) return Promise.resolve(null);
+    if (L !== this.volume) { this.volume = L; this.fast = null; this.board = null; this.boardKnown = null; this.risk = null; }
+    // FRESH = once per export, for doors that do not prime: drop the board answer and ask again.
+    if (fresh) { this.board = null; this.boardKnown = null; this.risk = null; }
+    if (!this.risk) this.risk = this._startRisk(dir);
+    return this.risk;
+  },
+  // preflight-busy-exempt: started in the background at destination pick; the preflight awaits
+  // the same promise, so nothing waits twice and nothing is drawn over an idle window.
+  _startRisk(dir) {
+    return Promise.resolve()
+      .then(async () => {
+        const risky = (await window._boardsWithUsbRisk?.()) || [];
+        if (!risky.length) return null;
+        const d = await this.boardCard(dir);
+        const sn = d && d.transport === 'proffieboard' && d.boardSerial ? String(d.boardSerial).toUpperCase() : null;
+        return sn && risky.includes(sn) ? sn : null;
+      })
+      .catch(() => null);
+  },
   knownIsBoardCard(dir) {
     const L = this._volumeOf(dir);
     if (!L || L !== this.volume) return null;
@@ -50512,6 +50651,8 @@ require(['vs/editor/editor.main'], function () {
         };
         const ctx = {
           get cancelled() { return cancelled; },
+          // [B-660] The same stop as this phase's own Cancel, for a Cancel answered elsewhere.
+          cancel() { cancelled = true; try { _sfExportCancelOpt.onCancel(); } catch {} },
           start() { armed = true; },
           at(l, f, fontName) {
             label = l || ''; frac = (typeof f === 'number') ? f : null; prefix = fontName || ''; file = prefix;
@@ -50633,6 +50774,15 @@ require(['vs/editor/editor.main'], function () {
         };
         let plan = null;
         const _check = _sfCheckPhase();
+        // [B-660] HIS FLOW (2026-11-10 23:34), FOR EVERY DOOR ON THIS RUNNER: the Mass Storage +
+        // WebUSB question is asked the moment it is known, while the plan sizes the job underneath.
+        // Cancel stops the sizing through the check phase's own stop; nothing after it is shown.
+        let _usbEject = false;
+        const _usbGate = door.usbRiskHandled === true
+          ? Promise.resolve(true)   // the door asked already, alongside its own scan (SD Export)
+          : _sfUsbRiskGate(destDir, (withEject) => { _usbEject = !!withEject; _check.cancel(); }, { fresh: true });
+        // "Cancel and eject": once the sizing has stopped, nothing is reading the card.
+        const _usbEjectNote = async () => { if (_usbEject) await _sfUsbCancelledNote(destDir); };
         if (door.plan) _check.start();
         try { plan = door.plan ? await door.plan(_check) : null; }
         catch (e) {
@@ -50641,8 +50791,11 @@ require(['vs/editor/editor.main'], function () {
           return out;
         }
         finally { _check.done(); }
-        if (plan === null && door.plan) { await _dropRaised(); return out; }   // refused or cancelled
-        if (_check.cancelled) { await _dropRaised(); return out; }
+        if (plan === null && door.plan) { await _dropRaised(); await _usbEjectNote(); return out; }   // refused or cancelled
+        if (_check.cancelled) { await _dropRaised(); await _usbEjectNote(); return out; }
+        // [B-660] The sizing finished before they answered: wait here, before the destination
+        // check draws any dialog of its own (there is one shared dialog).
+        if (!(await _usbGate)) { await _dropRaised(); await _usbEjectNote(); return out; }
 
         // AN ARCHIVE WRITES ONE FILE TO THE CARD, WHATEVER IS INSIDE IT. The slow-write
         // threshold's file limb exists because the Proffieboard's USB bridge costs ~773 ms PER
@@ -50659,7 +50812,7 @@ require(['vs/editor/editor.main'], function () {
         // here, so only the per-file limb is neutralised.
         const _writesOneFile = ((door.endState && door.endState.kind) || kind) === 'archive';
         const pf = await _sfPreflightDestination({
-          destDir,
+          destDir, usbRiskHandled: true,   // [B-660] asked above, alongside the sizing
           totalBytes: (plan && plan.totalBytes) || 0,
           fileCount:  _writesOneFile ? 1 : ((plan && plan.fileCount) || 0),
           // Declared by the door, threaded because the REFUSAL is drawn in there. A door whose
@@ -53103,7 +53256,7 @@ require(['vs/editor/editor.main'], function () {
           } catch {}
           const _early = await _sfPreflightDestination({
             destDir, totalBytes: _upper, fileCount: _upperFiles,
-            slowWriteDecided: _manifestOk,
+            slowWriteDecided: _manifestOk, usbRiskHandled: true,
           });
           // Whether the question was ASKED, not whether they said yes - `proceed` already
           // carries the answer. If this destination is slow enough to warn about, this call has
@@ -53118,6 +53271,17 @@ require(['vs/editor/editor.main'], function () {
           // free space…". Retitle to what is actually happening next.
           _sfDeleteProgress.show('Checking the destination…', 'Identifying the destination…');
         }
+        // [B-660] The Mass Storage + WebUSB question runs alongside everything from here on. A
+        // Cancel stops the scan the same way its own Cancel does (the flag plus main's signal).
+        // `_scanCanceled` is declared further down: before then the assignment throws and is
+        // caught, and the declaration below picks the decline up instead.
+        let _usbDeclined = false, _usbApproved = false, _usbEjectAfter = false;
+        const _usbGate = _sfUsbRiskGate(destDir, (withEject) => {
+          _usbDeclined = true;
+          _usbEjectAfter = !!withEject;
+          try { _scanCanceled = true; } catch {}
+          try { _sfExportCancelOpt.onCancel(); } catch {}
+        }, { onApprove: () => { _usbApproved = true; } });
         // The one remaining ask, and only where there is real evidence to act
         // on: this destination already has a tracks/ folder while the setting
         // says don't include. That mismatch is evidence this person does use
@@ -53134,6 +53298,12 @@ require(['vs/editor/editor.main'], function () {
         // dialog. Only the untouched case is ambiguous enough to be worth a
         // prompt. [B-287]
         if (!includeTracks && hasTracksFolder && _sfBulkIncludeTracks !== false) {
+          // [B-660] One dialog at a time, and nothing after a Cancel.
+          if (!(await _usbGate)) {
+            try { await _sfDeleteProgress.hide(); } catch {}
+            if (_usbEjectAfter) await _sfUsbCancelledNote(destDir);
+            return false;
+          }
           try {
             // ASK FIRST, COMPARE ONLY IF THEY SAY YES. This used to hash every
             // wav in the library tracks folder AND every wav at the destination
@@ -53376,7 +53546,7 @@ require(['vs/editor/editor.main'], function () {
         // this is what reaches it.
         // Safe to cancel ALL live export tokens here: nothing has been written yet at scan
         // time, so there is no other export of ours in flight to disturb.
-        let _scanCanceled = false;
+        let _scanCanceled = _usbDeclined;   // [B-660] a Cancel before the scan began
         let _scanDestUnreadable = false;
         _sfDeleteProgress.offerCancel(async () => {
           _scanCanceled = true;
@@ -53563,6 +53733,8 @@ require(['vs/editor/editor.main'], function () {
         // was invisible only because `offerCancelNow` had already hidden it on the click. Swapping
         // to the acknowledging cancel exposes the missing hide, so the two changes belong
         // together. [B-420, 2026-09-24]
+        // [B-660] The scan finished before they answered: wait for it here, before the review.
+        if (!_scanCanceled && !(await _usbGate)) _scanCanceled = true;
         if (_scanCanceled) {
           // KEEP WHAT THE ABANDONED SCAN ALREADY HASHED. [B-173, 2026-09-25]
           //
@@ -53582,7 +53754,18 @@ require(['vs/editor/editor.main'], function () {
           // a compare that stops mid-item returns { ok, canceled } with NO `observed`, and the
           // loop above only records a non-empty `observed`. So a half-hashed font contributes
           // nothing and cannot be recorded as known.
-          if (_scanObserved.size) {
+          // [B-660] NOT THROUGH A RISKY BOARD (his rule, 2026-11-10 23:44: "if it's one of the
+          // risky situations we cannot write updates to the manifest on the card"). The manifest is
+          // a write like any other. Skipped when they declined the warning, and when they pressed the
+          // scan's own Cancel on a risky board before the warning was answered.
+          let _riskyUnanswered = _usbDeclined;
+          if (!_riskyUnanswered) {
+            try {
+              const _sn = await window._sfDestIdentity?.usbRisk(destDir);
+              _riskyUnanswered = !!(_sn && !_usbApproved);
+            } catch {}
+          }
+          if (_scanObserved.size && !_riskyUnanswered) {
             try {
               await window.electronAPI.syncManifestCommit({
                 destDir, items: Object.fromEntries(_scanObserved), complete: [..._scanComplete],
@@ -53590,6 +53773,7 @@ require(['vs/editor/editor.main'], function () {
             } catch {}
           }
           try { await _sfDeleteProgress.hide(); } catch {}
+          if (_usbEjectAfter) await _sfUsbCancelledNote(destDir);   // [B-660] the scan has stopped
           return false;
         }
         // RETIRE THE OFFER WITH THE PHASE THAT OWNED IT. [B-420, 2026-09-24] `show()` does
@@ -54391,6 +54575,7 @@ require(['vs/editor/editor.main'], function () {
         // the runner's preflight does not ask again. With a manifest the runner asks, from the plan.
         return await _sfRunExport({
           label: 'export',
+          usbRiskHandled: true,   // [B-660] asked alongside this door's scan; do not ask (or look up) again
           // Otherwise the runner titles this "Exporting export" off the label.
           title: 'Exporting',
           // The surface is ALREADY UP by here - the recording phase or the scan left it open -
