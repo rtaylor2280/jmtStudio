@@ -32081,6 +32081,8 @@ require(['vs/editor/editor.main'], function () {
         // Deferred: this runs inside the select's own change handler and rendering
         // replaces that select. Let the event finish first.
         setTimeout(() => { try { _sfRenderConfigCommonField(); } catch {} }, 0);
+        // The sidebar outline follows the assignment, so it redraws too.
+        setTimeout(() => { try { _sfRenderCommonList(); } catch {} }, 0);
       };
 
       // "common" already means something to makers; a name like "MC" does not, so the
@@ -32096,6 +32098,33 @@ require(['vs/editor/editor.main'], function () {
         const declared = _sfConfigSlotNames();
         if (declared.length) return declared;
         return _sfPropNeedsCommon ? ['common'] : [];
+      };
+
+      // WHICH COMMON FOLDERS ARE OUTLINED IN BLUE. [his rule, 2026-11-11 13:50]
+      // "shouldn't the blue outline on the common be indicating the one that's actively selected by
+      // the config? or if config is closed it goes to the starred one?" It used to outline the
+      // STARRED folder whenever the config used one, so a config assigned English_A still outlined a
+      // starred English_C - and SD Export, which reads the real assignment, wrote English_A.
+      // Now the same rule SD Export follows: each slot's assigned pack; a slot with no assignment
+      // takes the starred one; a slot naming a pack that is not in the library outlines nothing.
+      // No config open: the starred one. A config open that uses no common folder: none, since
+      // nothing would go on the card (his question left open; my recommendation, stated 14:36).
+      const _sfOutlinedCommonUuids = () => {
+        const out = new Set();
+        const open = typeof fileIsOpen !== 'undefined' && !!fileIsOpen;
+        if (!open) {
+          if (_sfStarredCommonUuid) out.add(_sfStarredCommonUuid);
+          return out;
+        }
+        let slots = [];
+        try { slots = _sfActiveSlots(); } catch {}
+        for (const slot of slots) {
+          const name = (window._sfSlotPacks && window._sfSlotPacks[slot]) || '';
+          const pack = name ? _sfCommons.find(c => (c.meta && c.meta.name) === name) : null;
+          if (pack) out.add(pack.uuid);
+          else if (!name && _sfStarredCommonUuid) out.add(_sfStarredCommonUuid);
+        }
+        return out;
       };
 
       // Rename every occurrence of one shared folder to another, in ONE edit.
@@ -32591,12 +32620,11 @@ require(['vs/editor/editor.main'], function () {
           list.innerHTML = `<div class="sf-common-empty">No common folder yet.<br>Import a voicepack zip or a folder of wav files to get started.</div>`;
           return;
         }
-        // Selection (the "this is the one being used" affordance) is driven
-        // off the open config. When the config references ";common", the
-        // default common is the selected one; otherwise nothing is selected
-        // and every card is de-emphasized. Click-to-expand is purely a file
-        // browsing affordance and intentionally does not look like selection.
-        const wantsCommon = _sfConfigWantsCommon();
+        // Selection (the "this is the one being used" affordance): the packs the open
+        // config assigns, or the starred one with no config open. See _sfOutlinedCommonUuids.
+        // Click-to-expand is purely a file browsing affordance and intentionally does not
+        // look like selection.
+        const _outlined = _sfOutlinedCommonUuids();
         const showStars = _sfCommons.length > 1;
 
         // Render one common's card. Used by both ungrouped and grouped
@@ -32605,7 +32633,7 @@ require(['vs/editor/editor.main'], function () {
           const isExpanded = c.uuid === _sfSelectedCommonUuid;
           const isStarred = c.uuid === _sfStarredCommonUuid;
           const isMultiSelected = _sfMultiSelectedCommonUuids.has(c.uuid);
-          const isConfigSelected = wantsCommon && isStarred;
+          const isConfigSelected = _outlined.has(c.uuid);
           const isDimmed = !isConfigSelected;
           const starBtn = showStars
             ? `<button class="sf-common-row-star${isStarred ? ' is-starred' : ''}" data-star-uuid="${_sfEscape(c.uuid)}" title="${isStarred ? 'Default common folder' : 'Set as default'}">${isStarred ? '&#9733;' : '&#9734;'}</button>`
