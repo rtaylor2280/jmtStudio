@@ -1388,7 +1388,10 @@
                     background: #1a2a3a; color: #4af; border: 1px solid #2a4a6a; }
   #bm-abort       { background: var(--c-danger-bg);  color: var(--c-danger-text);  border: 1px solid var(--c-danger-border); }
   #bm-close       { background: var(--c-success-bg); color: var(--c-success-text); border: 1px solid var(--c-success-border); }
-  #bm-dfu-setup      { background: var(--jmt-blue); color: #fff; border: 1px solid #0a6abf; }
+  /* A FIX the user opts into (driver install, WebUSB repair): JMT blue, the modal's one action colour. */
+  #bm-dfu-setup, #bm-webusb-fix { background: var(--jmt-blue); color: #fff; border: 1px solid #0a6abf; }
+  /* Working, not unavailable: keep it readable; the busy dots say what is happening. [B-660] */
+  #bm-webusb-fix:disabled { opacity: 1; cursor: progress; }
   #bm-retry       { background: #1a2a3a; color: #4af;  border: 1px solid #2a4a6a; }
   html.light-mode #bm-board-flash,
   html.light-mode #bm-retry       { background: #e8f0fe; color: #1a4a9a; border-color: #b0c8f0; }
@@ -70920,6 +70923,7 @@ function _getFreshFieldRange(fieldName) {
         <button id="bm-abort"          class="bm-btn">⊘ Abort</button>
         <button id="bm-dfu-setup"      class="bm-btn" style="display:none;">▶ Install DFU Driver</button>
         <button id="bm-retry"          class="bm-btn" style="display:none;">↺ Retry Flash</button>
+        <button id="bm-webusb-fix"     class="bm-btn" style="display:none;">Fix WebUSB</button>
         <button id="bm-close"          class="bm-btn" style="display:none;">Close</button>
       </div>
     </div>

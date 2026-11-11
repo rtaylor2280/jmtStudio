@@ -2156,6 +2156,70 @@ function ensureDfuDriver(onLog) {
   });
 }
 
+// ── WebUSB on Windows: is the board reachable by browser tools? [B-660] ──
+// Windows reads the WebUSB interface's GUID once per board and caches that, and a
+// build without WebUSB wipes it while the "already read" flag stays set, so every
+// later WebUSB build is unreachable (Workbench: "Unable to claim interface", no
+// reason given). The CHECK is a plain registry read and needs no admin.
+// Returns { status: 'ok' | 'missing' | 'unknown', detail }.
+function checkWebUsbWindows(serial) {
+  if (process.platform !== 'win32') return Promise.resolve({ status: 'ok', detail: 'not-windows' });
+  if (!_isBoardSerial(serial)) return Promise.resolve({ status: 'unknown', detail: 'no board serial' });
+  const { execFile } = require('child_process');
+  const reg = (key, value) => new Promise((resolve) => {
+    execFile('reg', ['query', key, '/v', value], { windowsHide: true, timeout: 5000 },
+      (err, stdout) => resolve(err ? null : String(stdout || '')));
+  });
+  const base = 'HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB\\';
+  return (async () => {
+    const parent = await reg(`${base}VID_1209&PID_6668\\${serial.trim()}`, 'ParentIdPrefix');
+    const m = parent && parent.match(/ParentIdPrefix\s+REG_SZ\s+(\S+)/i);
+    if (!m) return { status: 'unknown', detail: 'board not in the registry' };
+    const params = await reg(`${base}VID_1209&PID_6668&MI_02\\${m[1]}&0002\\Device Parameters`, 'DeviceInterfaceGUIDs');
+    if (params && /\{[0-9A-Fa-f-]{36}\}/.test(params)) return { status: 'ok', detail: 'guid present' };
+    return { status: 'missing', detail: 'WebUSB interface has no GUID' };
+  })();
+}
+
+// The FIX: one elevated helper (UAC prompt; its console window hidden) that
+// removes Windows' saved node for interface 2 plus the descriptor cache, then
+// rescans. Proven 2026-11-10: no replug, serial port untouched, ~7 s.
+// Same elevation and result-file pattern as ensureDfuDriver, for the same reasons.
+// Returns { ok, status, detail }.
+function fixWebUsbWindows(serial) {
+  if (process.platform !== 'win32') return Promise.resolve({ ok: true, status: 'not-needed' });
+  if (!_isBoardSerial(serial)) return Promise.resolve({ ok: false, status: 'error', detail: 'No board serial.' });
+  const os = require('os');
+  const { execFile } = require('child_process');
+  const helper     = path.join(proffie.getResourcesPath(), 'webusb-fix', 'fix-webusb-guid.ps1');
+  const resultPath = path.join(os.tmpdir(), `jmt-webusb-fix-${Date.now()}.json`);
+  if (!fs.existsSync(helper)) {
+    return Promise.resolve({ ok: false, status: 'error', detail: 'The WebUSB fix is missing from this build.' });
+  }
+  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+  const psCmd =
+    `$a=@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',${q(helper)},` +
+    `'-Serial',${q(serial.trim())},'-ResultPath',${q(resultPath)});` +
+    `try { Start-Process -FilePath 'powershell' -ArgumentList $a -Verb RunAs -WindowStyle Hidden | Out-Null; exit 0 } catch { exit 3 }`;
+  return new Promise((resolve) => {
+    execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', psCmd],
+      { timeout: 120000, windowsHide: true }, async (error) => {
+        if (error) return resolve({ ok: false, status: 'cancelled', detail: 'The Windows permission prompt was declined.' });
+        const deadline = Date.now() + 60000;
+        let result = null;
+        while (Date.now() < deadline) {
+          let raw = null;
+          try { raw = fs.readFileSync(resultPath, 'utf8'); } catch {}
+          if (raw) { try { result = JSON.parse(raw); break; } catch {} }
+          await new Promise(r => setTimeout(r, 400));
+        }
+        try { fs.unlinkSync(resultPath); } catch {}
+        if (!result) return resolve({ ok: false, status: 'timeout', detail: 'The fix did not finish. Unplug the board and plug it back in.' });
+        resolve({ ok: result.status === 'ok', status: result.status, detail: result.detail });
+      });
+  });
+}
+
 // ── Flash ──────────────────────────────────────────────
 /**
  * Uploads compiled firmware via 1200-bps touch reset → DFU → dfu-util.
@@ -2505,6 +2569,8 @@ module.exports = {
   flashDFU,
   detectDFU,
   ensureDfuDriver,
+  checkWebUsbWindows,
+  fixWebUsbWindows,
   abort,
   getStatus,
   checkCacheOnly,

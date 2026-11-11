@@ -8777,7 +8777,11 @@ ipcMain.handle('dfu:ensureDriver', async () => {
   return await toolchain.ensureDfuDriver(onLog);
 });
 
-ipcMain.handle('dfu:flash', async () => {
+// [B-660] WebUSB on Windows: check (no admin) and fix (one UAC prompt).
+ipcMain.handle('webusb:check', async (_e, serial) => toolchain.checkWebUsbWindows(serial));
+ipcMain.handle('webusb:fix',   async (_e, serial) => toolchain.fixWebUsbWindows(serial));
+
+ipcMain.handle('dfu:flash', async (_e, { sourceDir } = {}) => {
   const log = makeLogger();
   await _abortVersionProbe?.();  // never let a version probe hold the port a flash needs
 
@@ -8785,7 +8789,10 @@ ipcMain.handle('dfu:flash', async () => {
     win.webContents.send('build:status', { type: 'flash', ok: null, message: 'Flashing via DFU...' });
   }
 
-  const result = await toolchain.flashDFU(log);
+  // [B-661] WHERE THE BUILD IS, same as toolchain:flash (B-216). Without it a bootloader flash
+  // read the fresh-compile folder: 'No .elf file found' after a cache restore, or worse, an
+  // older build that happened to be sitting there, flashed and reported as success.
+  const result = await toolchain.flashDFU(log, sourceDir);
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', {

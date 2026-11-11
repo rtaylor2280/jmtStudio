@@ -702,6 +702,7 @@ async function initBuildPanel() {
     document.getElementById('bm-abort').textContent = 'Aborting...';
     await window.electronAPI.abortCompile();
   });
+  document.getElementById('bm-webusb-fix').addEventListener('click', () => _onWebUsbFixClick());
   document.getElementById('bm-retry').addEventListener('click', (e) => {
     document.getElementById('build-modal').style.display = 'none';
     // [B-289] After an interrupted flash the button is the step the message names.
@@ -2086,7 +2087,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       _flashTargetPort = null;
       _flashTargetSN   = null;
       updatePortChangedIndicator();
-      finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true });
+      _finishFlashWithWebUsbCheck(flashedSN);
     }
   }
 }
@@ -2102,6 +2103,7 @@ function showBuildModal(title) {
   document.getElementById('bm-close').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-retry').textContent = '↺ Retry Flash';
+  document.getElementById('bm-webusb-fix').style.display = 'none';
   const _dfuSetupBtn = document.getElementById('bm-dfu-setup');
   _dfuSetupBtn.style.display = 'none';
   _dfuSetupBtn.textContent = '▶ Install DFU Driver';
@@ -4228,9 +4230,158 @@ async function doFlashDFU() {
   setStatus('flash', 'pending', 'Flashing via DFU...');
   _typeFlashHint(_sdFlash);
 
-  await window.electronAPI.flashDFU();
+  await window.electronAPI.flashDFU(_currentBuildDir);   // [B-661] the build's real folder, as the normal flash does
   setBusy(false);
   // onBuildDone handles success/failure via IPC
+}
+
+// ── WebUSB on Windows, checked before "Flash Complete" [B-660] ──
+// Windows reads the WebUSB interface's GUID once per board and caches it, and any build
+// without WebUSB wipes it while the "already read" flag stays set. So after a WebUSB build
+// goes on, browser tools (ProffieOS Workbench) can fail with only "Unable to claim
+// interface" and no reason. Proven on a real board 2026-11-10, including that it re-breaks
+// on every switch. His spec (22:08): check after the board comes back, BEFORE saying done,
+// and offer the fix inside this modal. The check needs no admin; the fix is one Windows
+// permission prompt, never run without the user's click.
+// Status text for this step: a bold lead (what happened), a plain detail line, and an optional
+// bold tail inside the detail (the one thing the user must not miss). Built as nodes, not
+// innerHTML, and not through _setStatusTiered, which bolds the whole first line.
+function _setWebUsbStatus(lead, detail = '', boldTail = '', { busy = false } = {}) {
+  const st = document.getElementById('bm-status');
+  st.textContent = '';
+  const l = document.createElement('span');
+  l.className = 'bm-status-lead' + (busy ? ' busy-dots' : '');
+  l.textContent = lead;
+  st.appendChild(l);
+  if (detail || boldTail) {
+    const d = document.createElement('span');
+    d.className = 'bm-status-detail';
+    if (detail) d.appendChild(document.createTextNode(detail + (boldTail ? ' ' : '')));
+    if (boldTail) { const b = document.createElement('strong'); b.textContent = boldTail; d.appendChild(b); }
+    st.appendChild(d);
+  }
+}
+
+// Does this flash need the check at all? Windows only, a build that includes WebUSB, and a
+// real board serial to look the setting up by.
+function _webUsbCheckApplies(sn) {
+  const usb = (window.getCompiledUsb && window.getCompiledUsb()) || selectedUsb || '';
+  return window.electronAPI.platform === 'win32' && /webusb/i.test(usb)
+      && /^[0-9A-Fa-f]{12}$/.test((sn || '').trim()) && !!window.electronAPI.checkWebUsb;
+}
+
+// Normal (touch-reset) flash: the check runs before "Flash Complete" is ever shown.
+async function _finishFlashWithWebUsbCheck(flashedSN) {
+  const done = () => finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true });
+  const sn   = (flashedSN || '').trim();
+  if (!_webUsbCheckApplies(sn)) { done(); return; }
+
+  _setWebUsbStatus('Checking that WebUSB tools can reach the board', '', '', { busy: true });
+  const verdict = await _webUsbVerdictAfterFlash(sn);
+  if (verdict !== 'missing') { done(); return; }
+
+  finishBuildModal(true, '✓ Flashed, one more step for WebUSB', '', { isFlash: true });
+  _showWebUsbOffer(sn);
+}
+
+// Bootloader (DFU) flash: watchForSerialAfterDfu has just seen the board come back, so the
+// same check runs there, and the same offer replaces "Board is back online." when needed.
+async function _webUsbCheckAfterDfu(sn) {
+  sn = (sn || '').trim();
+  if (!_webUsbCheckApplies(sn)) return;
+  const closeBtn = document.getElementById('bm-close');
+  closeBtn.style.display = 'none';   // same as the normal path: no Close mid-check
+  _setWebUsbStatus('Checking that WebUSB tools can reach the board', '', '', { busy: true });
+  const verdict = await _webUsbVerdictAfterFlash(sn);
+  closeBtn.style.display = 'inline-block';
+  if (verdict !== 'missing') {
+    _setWebUsbStatus('Firmware flashed successfully.', 'Board is back online.');
+    return;
+  }
+  setBuildTitle('✓ Flashed, one more step for WebUSB', { color: 'var(--c-success-text)' });
+  _showWebUsbOffer(sn);
+}
+
+function _showWebUsbOffer(sn) {
+  _setWebUsbStatus('Firmware flashed successfully.',
+    'Windows has an old setting for this board that will stop browser tools like ProffieOS Workbench '
+    + 'from connecting. Fix it now?', 'Windows will ask for permission.');
+  appendModalLog('WebUSB: Windows has no setting for this board\'s WebUSB interface.', false);
+  const btn = document.getElementById('bm-webusb-fix');
+  btn.dataset.sn = sn;
+  btn.disabled = false;
+  btn.textContent = 'Fix WebUSB';
+  btn.style.display = 'inline-block';
+}
+
+// Wait for THIS board to come back (it restarts after the flash), then read the setting.
+// A brand-new board's interface is still being installed for a moment, so a "missing" has
+// to hold across a few reads before it counts. Anything unclear says nothing: an offer
+// based on a guess would be worse than none.
+async function _webUsbVerdictAfterFlash(sn) {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const backBy = Date.now() + 15000;
+  let back = false;
+  while (Date.now() < backBy) {
+    await sleep(500);
+    try {
+      const r = await window.electronAPI.getRecommendedPort();
+      if (r.ok && (r.proffieports || []).some(p => (p.serialNumber || '').toUpperCase() === sn.toUpperCase())) { back = true; break; }
+    } catch {}
+  }
+  if (!back) return 'unknown';
+  let missing = 0;
+  for (let i = 0; i < 8; i++) {
+    let res = null;
+    try { res = await window.electronAPI.checkWebUsb(sn); } catch {}
+    if (res && res.status === 'ok') return 'ok';
+    if (res && res.status === 'missing') { if (++missing >= 4) return 'missing'; }
+    else return 'unknown';
+    await sleep(750);
+  }
+  return 'unknown';
+}
+
+async function _onWebUsbFixClick() {
+  const btn = document.getElementById('bm-webusb-fix');
+  const closeBtn = document.getElementById('bm-close');
+  const sn = btn.dataset.sn;
+  btn.disabled = true;
+  btn.textContent = 'Fixing';
+  btn.classList.add('busy-dots');
+  // Nothing to close while Windows is mid-change: the fix finishes on its own either way.
+  closeBtn.style.display = 'none';
+  _setWebUsbStatus('Fixing the WebUSB setting', 'A Windows permission window will come up.', 'Click Yes to continue.');
+  let res = null;
+  try { res = await window.electronAPI.fixWebUsb(sn); } catch (e) { res = { ok: false, status: 'error', detail: String(e && e.message || e) }; }
+  if (res && res.ok) {
+    // The helper already judged by outcome; read it again from here so "fixed" is
+    // something this window saw, not something it was told.
+    _setWebUsbStatus('Checking the fix', '', '', { busy: true });
+    let again = null;
+    try { again = await window.electronAPI.checkWebUsb(sn); } catch {}
+    if (again && again.status === 'ok') {
+      btn.style.display = 'none';
+      btn.classList.remove('busy-dots');
+      closeBtn.style.display = 'inline-block';
+      setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
+      _setWebUsbStatus('Firmware flashed successfully.', 'WebUSB is fixed and ready for browser tools like ProffieOS Workbench.');
+      appendModalLog('✓ WebUSB setting repaired.', false);
+      return;
+    }
+    res = { ok: false, status: 'still-missing', detail: 'Windows did not pick up the WebUSB setting. Unplug the board and plug it back in.' };
+  }
+  btn.disabled = false;
+  btn.classList.remove('busy-dots');
+  btn.textContent = 'Fix WebUSB';
+  closeBtn.style.display = 'inline-block';
+  if (res && res.status === 'cancelled') {
+    _setWebUsbStatus('Firmware flashed successfully.',
+      'WebUSB was not fixed, so browser tools like ProffieOS Workbench will not connect until it is.');
+  } else {
+    _setWebUsbStatus('Firmware flashed successfully.', `WebUSB could not be fixed: ${(res && res.detail) || 'unknown error'}`);
+  }
+  appendModalLog(`WebUSB fix: ${(res && res.detail) || 'failed'}`, true);
 }
 
 async function watchForSerialAfterDfu() {
@@ -4259,6 +4410,7 @@ async function watchForSerialAfterDfu() {
       appendModalLog(`✓ Board restarted on ${newPort.path}.`, false);
       document.getElementById('bm-status').textContent = 'Board is back online.';
       setTimeout(() => exitDfuMode(), 1500);
+      _webUsbCheckAfterDfu(lastFlashedSN);   // [B-660]
       return;
     }
   }

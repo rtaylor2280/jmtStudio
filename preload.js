@@ -216,8 +216,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── DFU ──────────────────────────────────────────────
   detectDFU:    () => ipcRenderer.invoke('dfu:detect'),
-  flashDFU:     () => ipcRenderer.invoke('dfu:flash'),
+  flashDFU:     (sourceDir) => ipcRenderer.invoke('dfu:flash', { sourceDir }),
   ensureDfuDriver:   () => ipcRenderer.invoke('dfu:ensureDriver'),
+  checkWebUsb:       (serial) => ipcRenderer.invoke('webusb:check', serial),
+  fixWebUsb:         (serial) => ipcRenderer.invoke('webusb:fix', serial),
   onDfuSetupStatus: (cb) => {
     const handler = (_, msg) => cb(msg);
     ipcRenderer.on('dfu:setupStatus', handler);
