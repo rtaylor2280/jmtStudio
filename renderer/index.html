@@ -5342,10 +5342,6 @@
              "include" is dropped - a checkbox already means include. [B-287] -->
         <span id="sf-export-group" class="sf-export-group btn-neutral" style="display:none">
           <button id="btn-sf-bulk-save" class="sf-export-btn" title="Export the selected fonts to an SD card as Proffie-shaped folders, with the config's common folders and shared tracks">&#8599; SD Export</button>
-          <label id="sf-bulk-tracks-wrap" class="sf-export-tracks">
-            <span id="sf-bulk-tracks-label">tracks</span>
-            <input type="checkbox" id="sf-bulk-tracks-include">
-          </label>
         </span>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
         <div class="ui-divider"></div>
@@ -7076,10 +7072,6 @@
           <span>Tracks</span>
           <span id="sf-shared-tracks-contents" style="font-weight:400;color:var(--c-text-muted)"></span>
           <span class="sf-entry-files-head-actions">
-            <label class="sf-tracks-include sf-tracks-include-inline" data-tracks-include-wrap="1" title="Include the shared tracks folder every time you export fonts. A saved setting, not a one time choice. The same control appears on the tracks card once you have fonts selected, and changes it in the same way.&#10;&#10;Off by default: a tracks folder at the card root is read by the ProffieOS 8 Edit Track menu, but Fett263's Track Player looks in each font's own tracks folder instead.&#10;&#10;To put tracks on one card without changing this, use Export.">
-              <input type="checkbox" data-tracks-include="1">
-              <span>Always include with exports</span>
-            </label>
             <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-shared-tracks-export" title="Copy these tracks to a folder or SD card. Nothing at the destination is deleted: new tracks are added, and a file that differs asks before it is replaced.">&#8599; Export</button>
             <span class="styles-tag-filter-wrap" style="position:relative">
               <button class="btn-neutral sf-entry-files-head-btn" id="btn-sf-shared-tracks-add" title="Add files to the Shared Tracks folder">+ Add</button>
@@ -8110,14 +8102,6 @@
       <button class="settings-disclosure" id="btn-settings-remembered" aria-expanded="false">&#9654; Show</button>
     </div>
     <div id="settings-remembered-body" class="settings-remembered-body" style="display:none">
-    <div class="settings-item" id="setting-sd-config-item"
-         title="Writes the open config to the card as my_config.h, next to the fonts, plus a styles
-file holding only the styles that config uses. A readme says what they are and how to build them.">
-      <span class="settings-item-label">Include the config with SD Export</span>
-      <div class="theme-selector" id="setting-sd-include-config">
-        <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
-      </div>
-    </div>
     <div class="settings-item"
          title="Whether an image added to a font or a common folder is renamed after it.">
       <span class="settings-item-label">Name added images after their font</span>
@@ -9028,6 +9012,26 @@ window._sfRefuseNotEnoughRoom = _sfRefuseNotEnoughRoom;
 // `_sfRefuseNotEnoughRoom` gets away with the caller closing first only because it reaches
 // `promptConfirm` with no await in front of it. That is luck, not design - it is the same shape
 // and it would flash the moment anything async were added ahead of its dialog.
+// THE REFUSAL WORDING, ONCE. [B-664] SD Export's card dialog greys out a card the export would
+// refuse, and that door never shows these dialogs, so it shows this same text instead (his 11:27:
+// "hover has to give the details we get in the reasons modals since this door won't see it").
+// One source, so the two cannot drift.
+const SF_REFUSAL_TEXT = {
+  cluster32: {
+    short: 'has 32 KB clusters, which are not safe to write through the board',
+    why: 'This card has 32 KB clusters, and writing to it through a Proffieboard over USB mass '
+       + 'storage on Windows corrupts it.',
+    fix: 'Use a card reader instead. The card works fine in the Proffieboard afterward. '
+       + 'Or reformat it at 16 KB, which erases it.',
+  },
+  repair: {
+    short: 'needs repair',
+    why: 'This card is flagged as needing repair, which usually means it is '
+       + 'corrupted. Its contents may be incomplete, including files that appear normal.',
+    fix: '',
+  },
+};
+window.SF_REFUSAL_TEXT = SF_REFUSAL_TEXT;
 async function _sfRefuseUnhealthyDestination(bad, { blockedDelete = false, destDir = null, closePrevious = null } = {}) {
   if (bad && bad.saberUnsafeCluster) {
     // The way forward is a card reader, so the card has to come out. The same Eject row as the end
@@ -9037,10 +9041,9 @@ async function _sfRefuseUnhealthyDestination(bad, { blockedDelete = false, destD
     try { if (closePrevious) closePrevious(); } catch {}
     const refused = promptConfirm({
       title: 'Not safe to write to this card over Proffieboard mass storage',
-      message: 'This card has 32 KB clusters, and writing to it through a Proffieboard over USB mass '
-        + `storage on Windows corrupts it. Nothing was exported.${blockedDelete ? ' Nothing was deleted.' : ''}\n\n`
-        + 'Use a card reader instead. The card works fine in the Proffieboard afterward. '
-        + 'Or reformat it at 16 KB, which erases it.',
+      message: SF_REFUSAL_TEXT.cluster32.why
+        + ` Nothing was exported.${blockedDelete ? ' Nothing was deleted.' : ''}\n\n`
+        + SF_REFUSAL_TEXT.cluster32.fix,
       confirmText: 'OK',
       confirmKind: 'danger',
       hideCancel: true,
@@ -9076,8 +9079,7 @@ async function _sfRefuseUnhealthyDestination(bad, { blockedDelete = false, destD
     // it to the machine names a source that no longer produces it.
     // The accurate wording is also the portable one - a flag that travels with the card is
     // true of it on any machine, so this sentence needs no rework when mac and Linux arrive.
-    message: 'This card is flagged as needing repair, which usually means it is '
-      + 'corrupted. Its contents may be incomplete, including files that appear normal.\n\n'
+    message: SF_REFUSAL_TEXT.repair.why + '\n\n'
       + 'Nothing was exported.'
       + (blockedDelete ? ' Nothing was deleted.' : ''),
     confirmText: 'OK',
@@ -29813,6 +29815,7 @@ async function switchTab(name) {
   }
 
   if (name === 'soundfonts') {
+    window._sfRecheckCards?.();   // [B-664] the SD Export button's card list, his 13:28
     // Re-evaluate which empty-state layer to show whenever the user lands here.
     // Library can be created or fonts added from outside the renderer too (the
     // disk is source of truth), so we re-derive rather than cache. What is already loaded is drawn
@@ -34600,6 +34603,7 @@ require(['vs/editor/editor.main'], function () {
             saveBtn.textContent = `↗ SD Export (${n})`;
             const grp = document.getElementById('sf-export-group');
             if (grp) grp.style.display = '';   // the button is nested now [B-287]
+            window._sfSyncSdExportBtn?.();     // [B-664] disabled until a card is there
           }
           // Per-run tracks toggle: seeded from the standing preference, reset on
           // every fresh selection, and FORCED when the open config references the
@@ -35810,7 +35814,6 @@ require(['vs/editor/editor.main'], function () {
       // Remembered choices [B-561]: Ask / Always / Never for each. A dialog's Always or Never can
       // change one at any time, so they are read again each time the section opens.
       const _rememberedChoices = [
-        ['setting-sd-include-config', 'sdExportIncludeConfig', 'never'],
         ['setting-images-always-rename', 'imagesAlwaysRename', 'ask'],
         ['setting-font-rename-update', 'fontRenameAlwaysUpdate', 'ask'],
         ['setting-font-style-use', 'fontStyleAlwaysUse', 'ask'],
@@ -52854,102 +52857,31 @@ require(['vs/editor/editor.main'], function () {
         const names = Array.from(_sfSelectedNames);
         if (names.length === 0) return false;
 
-        // ── Is the config ready to go on the card? ─────────────────── [B-229]
+        // ── WHAT THIS EXPORT WILL WRITE, DECIDED IN ONE DIALOG ────────────── [B-664]
         //
-        // ASKED HERE, BEFORE ANY WORK, NOT AT THE WRITE. The config is written after the fonts,
-        // minutes later on a real card, and the useful answer to either question below is to go
-        // and do something in the editor, which is only possible before. So the decision is taken
-        // up front and carried down to the write.
-        // IT DOES NOT BLOCK THE EXPORT. Declining removes the CONFIG, not the fonts. The fonts are
-        // the job; this file is a courtesy riding along with it.
-        //
-        // COMPILE FIRST, THEN SAVE. Someone who goes back to compile never needed the save
-        // question, and a save after a compile changes only the header comments, so the saved file
-        // builds exactly what was compiled. A save writes the header to disk without touching the
-        // editor, so it does not undo the compile.
-        // `compileSuccess` covers a cache HIT as well as a fresh compile, so a config that built
-        // last week and has not been touched since is not asked about. It goes false the moment the
-        // content changes.
-        // Whether the fonts it uses are on the card is decided at the write, when the card can be
-        // looked at.
+        // This used to be a run of popups before the card was chosen: put the config on the card,
+        // the uncompiled config, the common folder (missing, under two names, or optional), the
+        // tracks folder. They are all in the SD Export dialog now (his design, 2026-11-11). This
+        // section only GATHERS the facts, with no questions; the dialog asks; the code after it
+        // applies the answers. The rules each popup applied are unchanged and noted where they
+        // still decide something.
         let _provSkipConfig = false, _provSkipReason = '', _cfgNote = '';
-        // Whether this export writes the config: the answer given here, or the remembered setting.
         let _sdWantCfg = false;
-        try {
-          // ASK: every SD Export with a config open asks. Skip and Include are this export
-          // only; Never and Always are remembered, and can be set back to Ask in Settings.
-          // The dialog's ✕ cancels the export.
-          let _thisTime = null;
-          if (window._sfSdConfigChoice && window._sfSdConfigChoice() === 'ask'
-              && typeof fileIsOpen !== 'undefined' && fileIsOpen) {
-            const _ans = await promptConfirm({
-              title: 'Put your config on the card?',
-              message: 'SD Export can put the open config on the card with the fonts, as my_config.h, '
-                + 'with the styles it uses and a readme saying how to build it. The card and the '
-                + 'config then stay together.',
-              leadText: 'Never include',
-              cancelText: 'Skip',
-              middleText: 'Include',
-              confirmText: 'Always include',
-              confirmKind: 'primary',
-              closeX: true,
-            });
-            if (_ans === 'close') return false;
-            if (_ans === 'lead') await window._sfSdSetConfigChoice('never');
-            if (_ans === 'confirm') await window._sfSdSetConfigChoice('always');
-            _thisTime = _ans === 'middle' || _ans === 'confirm';
-          }
-          const _wantCfg = _thisTime !== null ? _thisTime
-            : (window._sfSdConfigChoice ? window._sfSdConfigChoice() === 'always' : false);
-          _sdWantCfg = _wantCfg;
-          const _built   = window.getCompileSuccess ? window.getCompileSuccess() : true;
-          const _open    = typeof fileIsOpen !== 'undefined' && fileIsOpen;
-          const _label   = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'This config';
-          if (_wantCfg && _open) {
-            if (!_built) {
-              const _choice = await promptConfirm({
-                title: 'Include an uncompiled config?',
-                message: `${_label} has changes that have not been compiled. `
-                  + 'Compile it first to be sure it builds, or put it on the card as it is.',
-                confirmText: 'Include',
-                confirmKind: 'primary',
-                middleText: 'Skip',
-                cancelText: 'Cancel',
-              });
-              if (_choice === 'cancel' || _choice === 'close') return false;
-              if (_choice === 'middle') { _provSkipConfig = true; _provSkipReason = 'declined'; }
-            }
-            // The app's own unsaved-changes question: Cancel / Save. No Save As here: a file dialog in
-            // the middle of an export confuses which file the card gets; Cancel and save it as
-            // something else first. CANCEL MEANS CANCEL at every step: Cancel here, or cancelling the
-            // name for a first save, stops the export. So does a save that fails, which says why.
-            if (!_provSkipConfig && (isDirty || !currentFilePath)) {
-              const _choice = await promptUnsaved(
-                currentFilePath
-                  ? `Unsaved changes in "${_label}". Save before exporting?`
-                  : 'This config has not been saved yet. Give it a name before exporting.',
-                { saveAs: false, discard: false });
-              if (_choice === 'cancel') return false;
-              if (!(await doSave())) return false;
-            }
-          }
-        } catch (err) {
-          // A failure to ASK must not silently change what gets written. Left false, so the
-          // config still goes on the card and the export behaves as the setting says.
-          console.warn('[B-229] config check failed; including the config as configured', err);
-        }
-        // Common inclusion logic:
+        // ── Config [B-229]
+        // Last state, his call 11:43: the box opens as it was left. The remembered value is the
+        // old setting's key: 'always' = ticked, anything else = unticked.
+        const _cfgOpen  = typeof fileIsOpen !== 'undefined' && !!fileIsOpen;
+        const _cfgLabel = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'This config';
+        const _cfgBuilt = window.getCompileSuccess ? window.getCompileSuccess() : true;
+        const _cfgLast  = window._sfSdConfigChoice ? window._sfSdConfigChoice() === 'always' : false;
+        // ── Common folder. The inclusion rules, unchanged:
         //   config refs ;common AND config-selected common is in library → use THAT one
-        //   config refs ;common AND config named a common that's missing  → ask (default / fonts-only / cancel)
-        //   config refs ;common AND no config selection AND starred exists → include starred silently
-        //   config refs ;common AND no config selection AND no starred     → warn (only fonts ship)
-        //   config DOESN'T ref ;common AND 1 common  → 3-button ask (default uuid)
-        //   config DOESN'T ref ;common AND 2+ commons → dropdown forces an explicit pick
-        //   config DOESN'T ref ;common AND no commons → don't include, no ask
-        //   prop REQUIRES a voicepack (OS8 + fett263 / BC) → treated exactly like a
-        //     ";common" reference, because the folder is not optional there.
-        //     2026-07-30: "auto included when required by prop in addition to what it
-        //     already does." Same determination the compile-time preflight makes.
+        //   config refs ;common AND config named a common that's missing  → choose: default / fonts only
+        //   config refs ;common AND no config selection AND starred exists → include starred
+        //   config refs ;common AND no common in library                  → say so (only fonts ship)
+        //   config DOESN'T ref ;common AND commons exist  → optional box (which one, if several)
+        //   prop REQUIRES a voicepack (OS8 + fett263 / BC) → treated exactly like a ";common"
+        //     reference, because the folder is not optional there.
         // By position, not by name — an `MC` config wants the folder just as much. [B-326]
         let wantsCommon = false;
         try {
@@ -52957,9 +52889,6 @@ require(['vs/editor/editor.main'], function () {
             (typeof editor !== 'undefined' && editor) ? editor.getValue() : ''
           ).sharedNames.length > 0;
         } catch {}
-        // A config can need the folder without any preset naming it yet — that is the
-        // day-one shape, and asking "include it?" as a courtesy would be the wrong
-        // question when the answer is compulsory.
         let propRequiresCommon = false;
         try {
           if (typeof window.__vpkRequiresVoicepack === 'function' &&
@@ -52968,69 +52897,35 @@ require(['vs/editor/editor.main'], function () {
           }
         } catch {}
         const needsCommon = wantsCommon || propRequiresCommon;
-        // Why the common folder is in play, carried through to the summary so a
-        // folder that shipped without the user asking for it says why it did.
         const commonReason = wantsCommon ? 'config' : (propRequiresCommon ? 'prop' : null);
-        // Set when a common folder was WANTED but the library has none. Not a
-        // question — there is nothing to choose from — but worth saying once at
-        // the end, because the destination will need one.
         let commonMissing = null;
         const hasStarred = !!_sfStarredCommonUuid;
-        // Every shared folder this export will write: { slot, uuid }. Replaces the
-        // single include/override pair, which could only ever describe one folder.
-        // `includeCommon` below is kept as a derived boolean so the ~20 downstream
-        // sites that only ask "is there one at all" need no change. [B-014]
         const commonSlots = [];
         let includeCommon = false;
+        const _commonBytes = (uuid) => {
+          const c = _sfCommons.find(x => x.uuid === uuid);
+          return (c && (c.totalBytes || (c.meta && c.meta.contentTotalBytes))) || 0;
+        };
+        const _commonName = (uuid) => {
+          const c = _sfCommons.find(x => x.uuid === uuid);
+          return (c && c.meta && c.meta.name) || 'common';
+        };
+        const _unresolved = [];
+        let _dupesNote = '';
         if (needsCommon) {
-          // The config names the slots; each one ships the pack assigned to it, into a
-          // folder of its own name. Shipping the starred default when the config asked
-          // for something else puts the wrong sounds on the card.
           const _slots = (typeof _sfActiveSlots === 'function') ? _sfActiveSlots() : ['common'];
-          const _unresolved = [];
           for (const _slot of _slots) {
             const _name = (window._sfSlotPacks && window._sfSlotPacks[_slot]) || '';
             const _pack = _name ? _sfCommons.find(c => (c.meta && c.meta.name) === _name) : null;
             if (_pack) { commonSlots.push({ slot: _slot, uuid: _pack.uuid }); continue; }
-            // Named a pack that is not in the library: do not silently substitute a
-            // different one. Collected and asked about once, below.
-            if (_name) { _unresolved.push({ slot: _slot, name: _name }); continue; }
-            // Declared but never assigned: the starred default is the right pick.
+            // Named a pack that is not in the library: never silently substitute; the dialog asks.
+            if (_name) { if (hasStarred) _unresolved.push({ slot: _slot, name: _name }); continue; }
             if (hasStarred) commonSlots.push({ slot: _slot, uuid: _sfStarredCommonUuid });
           }
-          if (_unresolved.length && hasStarred) {
-            // ONE dialog however many are unresolved. Asking per slot would be the same
-            // question repeated, which is what teaches people to click through.
-            const _list = _unresolved
-              .map(u => `"${u.name}" (for ${u.slot})`)
-              .join('\n');
-            const _one = _unresolved.length === 1;
-            const choice = await promptConfirm({
-              title: _one ? 'Config common folder not found' : 'Config common folders not found',
-              message: `The open config asks for ${_one ? 'a common folder' : 'common folders'} that ${_one ? "isn't" : "aren't"} in your library:\n${_list}\n\nInclude your default common folder instead, or save only the selected fonts?`,
-              confirmText: 'Use default',
-              confirmKind: 'primary',
-              middleText: 'Fonts only',
-              cancelText: 'Cancel',
-            });
-            if (choice === 'cancel') return false;
-            if (choice === 'confirm') {
-              for (const u of _unresolved) commonSlots.push({ slot: u.slot, uuid: _sfStarredCommonUuid });
-            }
-          }
-          if (!commonSlots.length && !hasStarred) {
-            // Wanted, but the library has none. Recorded for the summary.
-            commonMissing = wantsCommon ? 'config' : 'prop';
-          }
-          // TWO SLOTS, ONE PACK. The card would get two folders with identical
-          // contents, which usually means the config drifted rather than that someone
-          // wanted a duplicate.
-          //
-          // WE WARN AND OFFER CANCEL, WE DO NOT MERGE. The Sound Font Library never
-          // edits a config: by the time sounds are being written to a card the config
-          // has usually already been compiled and flashed, so changing it here would
-          // put the file and the board out of step. The merge lives in Config Manager,
-          // where editing the config is the point. (2026-09-06.)
+          if (!commonSlots.length && !hasStarred) commonMissing = wantsCommon ? 'config' : 'prop';
+          // TWO SLOTS, ONE PACK: identical folders under each name. WE SAY SO, WE DO NOT MERGE:
+          // the Sound Font Library never edits a config (2026-09-06). It used to be a Continue /
+          // Cancel popup; now it is a line in the dialog, and Cancel is right there.
           const _byPack = new Map();
           for (const cs of commonSlots) {
             if (!_byPack.has(cs.uuid)) _byPack.set(cs.uuid, []);
@@ -53038,131 +52933,111 @@ require(['vs/editor/editor.main'], function () {
           }
           const _dupes = [..._byPack.values()].filter(v => v.length > 1);
           if (_dupes.length) {
-            // "A", "B" and "C" - not "A" and "B" and "C". The last pair takes the
-            // conjunction, everything before it takes commas.
             const _list = (arr) => arr.length <= 1 ? (arr[0] || '')
               : arr.slice(0, -1).join(', ') + ' and ' + arr[arr.length - 1];
             const _names = _dupes.map(g => _list(g.map(n => `"${n}"`))).join('; ');
-            // "All" of two is wrong. The button counts what the message just listed.
             const _two = _dupes.reduce((a, g) => a + g.length, 0) === 2;
-            const ok = await promptConfirm({
-              title: _two ? 'The same common folder under two names'
-                          : 'The same common folder under several names',
-              message: `This config uses ${_names} for the same common folder, so the card would get identical copies under each name.\n\nContinue and write ${_two ? 'both' : 'them all'}, or cancel and merge the names in Config Manager first.`,
-              confirmText: _two ? 'Write both' : 'Write them all',
-              confirmKind: 'primary',
-              cancelText: 'Cancel',
-            });
-            if (!ok) return false;
-          }
-          // No ASK. The library has no common folder, so there is nothing to
-          // choose from and therefore no question to put — this used to block
-          // the export to announce it. Managing the common folder here is
-          // OPTIONAL: plenty of people keep one on the card by hand and never
-          // import it, and for them nothing is missing. (2026-07-31:
-          // "why would we ask if there's none to choose from?")
-          //
-          // Not the same concern as the compile preflight, which is about the
-          // CONFIG naming a shared folder and is unaffected by any of this.
-        } else if (hasStarred) {
-          // Config doesn't ask for it — but the user has one available.
-          // Single-common case: simple 3-button (Cancel / Skip / Include).
-          // Multi-common case: dropdown forces an explicit pick so we
-          // don't silently assume the default in a courtesy ask. The
-          // dropdown overrides the starred default into a per-Save
-          // selection captured as this export's single `common` slot.
-          if (_sfCommons.length === 1) {
-            const choice = await promptConfirm({
-              title: 'Include common folder?',
-              // Name-neutral: this fires when the config declares NO shared folder at
-              // all, so asserting it does not reference "common" specifically was only
-              // ever accidentally true. [B-014]
-              message: 'The open config does not use a shared folder, but you have a default common folder in your library. Include it in the export?',
-              confirmText: 'Include',
-              confirmKind: 'primary',
-              middleText: 'Skip',
-              cancelText: 'Cancel',
-            });
-            if (choice === 'cancel') return false;
-            // Courtesy include: the config declares no shared folder, so there is no
-            // slot name to use and the convention name is the only honest answer.
-            if (choice === 'confirm') commonSlots.push({ slot: 'common', uuid: _sfStarredCommonUuid });
-          } else {
-            const result = await _sfPromptIncludeCommonChoice();
-            if (result.action === 'cancel') return false;
-            if (result.action === 'include') {
-              commonSlots.push({ slot: 'common', uuid: result.uuid || _sfStarredCommonUuid });
-            }
+            _dupesNote = `This config uses ${_names} for the same common folder, so the card gets identical copies under ${_two ? 'both names' : 'each name'}. To avoid that, cancel and merge the names in Config Manager.`;
           }
         }
-        if (commonSlots.length) await _sfOfferJmtSoundsForExport(commonSlots);   // [B-167]
-        // Derived, so every downstream site that only asks "is any shared folder being
-        // written" keeps working unchanged.
-        includeCommon = commonSlots.length > 0;
-        // Shared Tracks inclusion logic — same shape as common, simpler
-        // since the folder is singleton (no star, no dropdown).
-        //   config refs tracks/ AND folder exists       → include silently
-        //   config refs tracks/ AND no folder            → warn (only fonts ship)
-        //   config DOESN'T ref tracks/ AND folder exists → 3-button ask
-        //   config DOESN'T ref tracks/ AND no folder      → don't include, no ask
+        // Optional: the config declares no shared folder but the library has one or more.
+        const _commonOptional = !needsCommon && hasStarred;
+        let _commonLast = { on: false, uuid: _sfStarredCommonUuid };
+        try {
+          const _r = JSON.parse(localStorage.getItem('jmt.sdExport.common') || 'null');
+          if (_r && typeof _r.on === 'boolean') _commonLast = { on: _r.on, uuid: _sfCommons.some(c => c.uuid === _r.uuid) ? _r.uuid : _sfStarredCommonUuid };
+        } catch {}
+        // ── Tracks. The config is the authority: if it references tracks/, they go, and the box
+        // is locked on without touching the remembered choice.
         const wantsTracks = _sfIsSharedTracksInUse();
-        // Re-check existence via IPC rather than trusting the window
-        // cache. The cache only refreshes on tab switch / modal close,
-        // so a user who creates + populates the folder and exports
-        // without a tab-switch-induced refresh could otherwise see the
-        // tracks branch silently skipped.
         let hasTracksFolder = false;
         try {
           const stRes = await window.electronAPI.sharedTracksExists();
           hasTracksFolder = !!(stRes && stRes.ok && stRes.exists);
-          // Keep the window cache in sync so subsequent renders see
-          // the same truth this branch did.
           window._sfSharedTracksExists = hasTracksFolder;
         } catch { hasTracksFolder = !!window._sfSharedTracksExists; }
-        // THE PRECEDENCE LADDER (2026-07-31). It used to ask on every
-        // single export, which is a question with a stable answer asked over
-        // and over — and repeated asks are what teach people to click through
-        // the dialog that actually mattered.
-        //   0. The config references tracks/  -> include, silently, always.
-        //      The config is the authority on what the saber will go looking
-        //      for; a preference cannot overrule a file it asks for by name.
-        //   1. Otherwise the persisted setting decides, with no ask.
-        //   2. Except the destination-mismatch case, handled after the folder
-        //      picker below, which asks at most once.
-        // `tracksReason` is carried so the export summary can say WHY tracks
-        // shipped when the user did not tick the box themselves.
+        let _trFiles = 0, _trBytes = 0;
+        if (hasTracksFolder) {
+          try {
+            const r = await window.electronAPI.sharedTracksListFiles();
+            for (const f of ((r && r.ok && r.files) || [])) { _trFiles++; _trBytes += f.size || 0; }
+          } catch {}
+        }
+        const _tracksLast = await _sfGetIncludeTracksPref();
+        // ── Fonts
+        let _fontBytes = 0;
+        for (const nm of names) {
+          const _e = (_sfAllEntries || []).find(x => x && x.name === nm);
+          _fontBytes += (_e && _e.meta && _e.meta.contentTotalBytes) || 0;
+        }
+        // ── The dialog
+        const _dlg = await window._sfSdExportDialog({
+          fonts: { count: names.length, bytes: _fontBytes },
+          common: {
+            auto: commonSlots.map(cs => ({ slot: cs.slot, name: _commonName(cs.uuid), bytes: _commonBytes(cs.uuid) })),
+            reason: commonReason,
+            unresolved: _unresolved,
+            defaultBytes: _commonBytes(_sfStarredCommonUuid),
+            dupes: _dupesNote,
+            missing: commonMissing,
+            optional: _commonOptional,
+            optionalOn: _commonLast.on,
+            optionalUuid: _commonLast.uuid,
+            choices: _sfCommons.map(c => ({ uuid: c.uuid, name: (c.meta && c.meta.name) || 'common', bytes: _commonBytes(c.uuid) })),
+          },
+          tracks: {
+            forced: wantsTracks && hasTracksFolder,
+            missing: wantsTracks && !hasTracksFolder,
+            available: hasTracksFolder,
+            checked: _tracksLast,
+            files: _trFiles, bytes: _trBytes,
+          },
+          cfg: {
+            open: _cfgOpen, label: _cfgLabel, checked: _cfgLast,
+            uncompiled: !_cfgBuilt,
+            unsaved: _cfgOpen && (isDirty || !currentFilePath),
+            neverSaved: !currentFilePath,
+          },
+        });
+        if (!_dlg) return false;
+        // ── Apply the answers. Last state is saved only for a box the user could change.
+        if (_cfgOpen) { try { await window._sfSdSetConfigChoice(_dlg.cfg ? 'always' : 'never'); } catch {} }
+        _sdWantCfg = _cfgOpen && _dlg.cfg;
+        if (_sdWantCfg && (isDirty || !currentFilePath)) {
+          // The app's own unsaved-changes question: Cancel / Save. No Save As here: a file dialog in
+          // the middle of an export confuses which file the card gets. CANCEL MEANS CANCEL: Cancel
+          // here, or cancelling the name for a first save, stops the export. So does a failed save.
+          const _choice = await promptUnsaved(
+            currentFilePath
+              ? `Unsaved changes in "${_cfgLabel}". Save before exporting?`
+              : 'This config has not been saved yet. Give it a name before exporting.',
+            { saveAs: false, discard: false });
+          if (_choice === 'cancel') return false;
+          if (!(await doSave())) return false;
+        }
+        if (_unresolved.length && _dlg.unresolvedUseDefault) {
+          for (const u of _unresolved) commonSlots.push({ slot: u.slot, uuid: _sfStarredCommonUuid });
+        }
+        if (_commonOptional) {
+          try { localStorage.setItem('jmt.sdExport.common', JSON.stringify({ on: !!_dlg.commonOn, uuid: _dlg.commonUuid })); } catch {}
+          // Courtesy include: no slot name exists, so the convention name is the only honest one.
+          if (_dlg.commonOn) commonSlots.push({ slot: 'common', uuid: _dlg.commonUuid || _sfStarredCommonUuid });
+        }
+        if (commonSlots.length) await _sfOfferJmtSoundsForExport(commonSlots);   // [B-167]
+        includeCommon = commonSlots.length > 0;
+        // `tracksReason` is carried so the export summary can say WHY tracks shipped.
         let includeTracks = false;
         let tracksReason = null;
         if (wantsTracks && hasTracksFolder) {
           includeTracks = true;
           tracksReason = 'config';
-        } else if (wantsTracks && !hasTracksFolder) {
-          const ok = await promptConfirm({
-            title: 'No shared tracks folder',
-            message: 'The open config references the shared "tracks/" folder at the SD card root, but no shared tracks folder exists in your library.\nThe export will only include the selected fonts. Continue?',
-            confirmText: 'Continue',
-            confirmKind: 'primary',
-            cancelText: 'Cancel',
-          });
-          if (!ok) return false;
         } else if (hasTracksFolder) {
-          // The per-run toggle beside Export wins over the standing preference
-          // when the user has touched it; untouched, the preference still speaks.
-          // 'run' joins the existing reasons rather than replacing them, so the
-          // summary can still say WHY tracks shipped. [B-287]
-          if (_sfBulkIncludeTracks != null) {
-            includeTracks = _sfBulkIncludeTracks;
-            if (includeTracks) tracksReason = 'run';
-          } else {
-            includeTracks = await _sfGetIncludeTracksPref();
-            if (includeTracks) tracksReason = 'setting';
-          }
+          includeTracks = !!_dlg.tracks;
+          try { await _sfSetIncludeTracksPref(includeTracks); } catch {}
+          if (includeTracks) tracksReason = 'run';
         }
-        let pick;
-        try { pick = await window.electronAPI.selectSaveDestination(); }
-        catch (err) { promptError('Could not open folder picker', err && err.message || err); return false; }
-        if (!pick || !pick.ok) return false;
-        const destDir = pick.dirPath;
+        const destDir = _dlg.card;
+        if (!destDir) return false;
         // CLAIMED THE MOMENT THE DESTINATION IS KNOWN, AND HELD THROUGH THE SCAN. [B-420,
         // 2026-09-24] The comparison is minutes of reading before a byte is written, and that is
         // precisely the window the user started a second export in. Claiming at the copy instead would
@@ -53282,95 +53157,6 @@ require(['vs/editor/editor.main'], function () {
           try { _scanCanceled = true; } catch {}
           try { _sfExportCancelOpt.onCancel(); } catch {}
         }, { onApprove: () => { _usbApproved = true; } });
-        // The one remaining ask, and only where there is real evidence to act
-        // on: this destination already has a tracks/ folder while the setting
-        // says don't include. That mismatch is evidence this person does use
-        // one, so ask once rather than silently leaving it stale. Byte-identical
-        // means there is nothing to say at all, so we do not say it.
-        //
-        // This also carries anyone who used to answer "Include" to the old
-        // per-export prompt: their card already has the folder, so they get
-        // asked once here instead of quietly losing it to the new default.
-        // NOT AFTER A DELIBERATE UNTICK. This prompt exists to catch a stale
-        // SETTING - a card that already has tracks while the preference says no.
-        // Someone who just unticked the toggle for this export has answered the
-        // question already, and asking again overrides an explicit choice with a
-        // dialog. Only the untouched case is ambiguous enough to be worth a
-        // prompt. [B-287]
-        if (!includeTracks && hasTracksFolder && _sfBulkIncludeTracks !== false) {
-          // [B-660] One dialog at a time, and nothing after a Cancel.
-          if (!(await _usbGate)) {
-            try { await _sfDeleteProgress.hide(); } catch {}
-            if (_usbEjectAfter) await _sfUsbCancelledNote(destDir);
-            return false;
-          }
-          try {
-            // ASK FIRST, COMPARE ONLY IF THEY SAY YES. This used to hash every
-            // wav in the library tracks folder AND every wav at the destination
-            // purely to decide whether this dialog was worth showing - seconds of
-            // silence on every export, forever, to avoid one dismissable prompt.
-            // Backwards, because the answer can make the work unnecessary: say
-            // "leave it" and the folder is skipped entirely, nothing read.
-            // Say "update" and it takes the same path as if the setting had been
-            // on all along, where planExport does the real per-file comparison
-            // inside the progress phase off the sync manifest.
-            // (the user's design, 2026-08-01, after hitting the wait on a real card.)
-            //
-            // The check itself is one stat, but it still gets a bar: a destination
-            // on slow or sleeping storage can stall even on existsSync, and a
-            // silent pause right after the folder picker is the one we just fixed.
-            //
-            // \u2b50 DOES NOT NAME TRACKS. [B-005 item 4, 2026-09-21] It said "Looking for a
-            // tracks folder\u2026", and the objection was not that the sentence was wrong - it
-            // is exactly what the step does - but that NAMING it invents a question in the
-            // user's head. They did not select tracks, so being told we are hunting for a
-            // tracks folder reads as "why is it doing that?" seconds before we may never
-            // mention tracks again. "since the user didn't select it they would potentially
-            // be confused why it's checking."
-            // \u26a0\ufe0f A RETITLE, NOT A NEW WINDOW - the modal is already up and stays up. An
-            // empty subtitle was the first cut and read as the text vanishing, which is its
-            // own glitch; a true line that stays at the destination's level is better.
-            // \u26a0\ufe0f This is about the SUB-STEP only. The dialog below, on a destination that
-            // really does have one, is a genuine question and its wording is unchanged.
-            const _tBar = _sfDeleteProgress.barEl();
-            _sfDeleteProgress.show('Checking the destination\u2026', 'Checking what is already there\u2026');
-            if (_tBar) _tBar.classList.add('indeterminate');
-            let m = null;
-            try {
-              m = await window.electronAPI.sharedTracksExistsAt({ destDir });
-            } finally {
-              // Same reason as the phase above: the modal stays up for what follows, so
-              // stripping the animation here leaves a dead bar. One wait, one live bar.
-              // [B-005 item 4]
-            }
-            // Deliberately NOT hidden here. The font scan below re-titles this
-            // same modal, so leaving it up makes the whole destination check one
-            // continuous progress rather than two identical-looking modals
-            // flashing in sequence. It only comes down if we have to ask.
-            if (m && m.ok && m.exists) {
-              await _sfDeleteProgress.hide();
-              const choice = await promptConfirm({
-                title: 'Update the tracks folder at this destination?',
-                message: 'Tracks are not included in your exports, so this folder would normally be left alone.\n\nUpdating adds anything new from your library. Nothing is deleted, and a file that differs is kept as it is.',
-                confirmText: 'Update',
-                confirmKind: 'primary',
-                middleText: 'Leave it',
-                cancelText: 'Cancel',
-              });
-              if (choice === 'cancel') return false;
-              if (choice === 'confirm') { includeTracks = true; tracksReason = 'destination'; }
-              // PUT THE WAIT BACK. [B-005 item 4, 2026-09-21] Answering this dialog
-              // leaves the destination check with no modal, and the next step - the early
-              // fit preflight - falls back to its own small busy overlay. Different shape,
-              // different position, same words: the user reads it as a SECOND check rather
-              // than the one they were already watching. The screenshot caught exactly
-              // that. Restoring the door's own modal keeps `_alreadyExplained()` true, so
-              // the preflight stays quiet and the font scan below takes this same bar over
-              // as a determinate one.
-              _sfDeleteProgress.show('Checking the destination…', 'Checking what is already there…');
-            }
-          } catch {}
-        }
         // VOICE PACK VERSION GATE. Runs BEFORE the destination scan starts, not
         // inside it: it is a decision about WHICH common to export and needs
         // nothing from the destination. Placed mid-scan it opened underneath the
@@ -60445,10 +60231,311 @@ require(['vs/editor/editor.main'], function () {
           .map(en => en.name);
         await _sfMarkSeenBulk(names, 'as seen');
       });
+      // ── SD Export is for a card ──────────────────────────────────────── [B-664]
+      // His design, 2026-11-11: "the purpose of it is exporting to an sd card. There's no reason to
+      // use it for a plain export which you still have access to on right click." And no folder
+      // destination: a folder copy on the computer is a second copy of the library ("It goes
+      // against the concept of keeping a single copy on the computer without duplicates").
+      // DISABLED, NOT HIDDEN, so the tooltip can say why. Main pushes the card list on every change.
+      let _sfCardState = { cards: [], boardConnected: false, known: false };
+      let _sfSdExportRunning = false;
+      window._sfSyncSdExportBtn = _sfSyncSdExportBtn;
+      function _sfSyncSdExportBtn() {
+        const b = document.getElementById('btn-sf-bulk-save');
+        if (!b) return;
+        const cards = _sfCardState.cards || [];
+        // HELD WHILE AN SD EXPORT IS RUNNING, from the instant of the click: a card arriving
+        // mid-export must not re-enable it. [his 11:25: "Must change button to not be clickable
+        // again while opening."]
+        if (_sfSdExportRunning) { b.disabled = true; b.title = 'SD Export is running'; return; }
+        b.disabled = cards.length === 0;
+        if (cards.length === 1) {
+          b.title = `Export the selected fonts to ${window._sfCardName(cards[0])}, with the config's common folders and shared tracks`;
+        } else if (cards.length > 1) {
+          b.title = "Export the selected fonts to an SD card, with the config's common folders and shared tracks. You choose which card.";
+        } else if (_sfCardState.boardConnected) {
+          // A board whose card is not shared is not a drive. Saying "No SD card found" beside a
+          // plugged-in board reads as wrong, so the tooltip says what is actually missing.
+          b.title = "No SD card found. The board is connected, but its SD card isn't showing as a drive.";
+        } else {
+          b.title = 'No SD card found';
+        }
+      }
+      // Asked again on demand: on arriving at the Sound Fonts tab and when the SD Export dialog closes
+      // (his 13:28). Every eject asks too, in main, so it covers every door that ejects.
+      window._sfRecheckCards = () => {
+        window.electronAPI?.getCardPresence?.({ fresh: true })
+          .then((s) => { if (s) { _sfCardState = s; _sfSyncSdExportBtn(); } }).catch(() => {});
+      };
+      if (window.electronAPI?.onCardsChanged) {
+        window.electronAPI.onCardsChanged((s) => { _sfCardState = s || _sfCardState; _sfSyncSdExportBtn(); });
+        window.electronAPI.getCardPresence().then((s) => { if (s) { _sfCardState = s; _sfSyncSdExportBtn(); } }).catch(() => {});
+      }
+      // The card for this export, in one small dialog. [B-664, his design 11:25]
+      // "a smaller modal that shows what we're going to do and the card ... with an export, cancel",
+      // a dropdown starting with a prompt when there is more than one card, and a card we already
+      // know the export would refuse is not offered: "no point trying if we already know we're
+      // about to say no."
+      // IT OPENS AT ONCE from the card list main keeps current, so there is no wait at the click
+      // ("there is a delay where things are still clickable"). The refusal checks run inside the
+      // open dialog with Export held until they answer.
+      // THE SAME CHECKS THE EXPORT RUNS (exportDest:preflight with no size: repair needed, 32 KB
+      // through a board), so this dialog and the export cannot disagree about a card. The board
+      // warning stays where it is: that one is allowed with Write anyway, so it is not a refusal.
+      // Names come from _sdDriveLabel, the one builder for how a drive is named on screen.
+      const _sfCardName = (c) => _sdDriveLabel({
+        drive: /^[A-Za-z]:/.test(c.mountPath) ? c.mountPath.replace(/[\\/]+$/, '') : null,
+        label: c.label,
+      });
+      window._sfCardName = _sfCardName;
+      const _sfCardRefusal = async (mountPath) => {
+        try {
+          const r = await window.electronAPI.preflightExportDest({ destDir: mountPath, totalBytes: 0 });
+          const bad = r && r.ok && r.result && r.result.unhealthy;
+          if (!bad) return null;
+          const t = SF_REFUSAL_TEXT[bad.saberUnsafeCluster ? 'cluster32' : 'repair'];
+          return { short: t.short, detail: [t.why, t.fix].filter(Boolean).join(' ') };
+        } catch { return null; }   // a failed check is not a refusal [B-028]; the export re-checks
+      };
+      // ── THE SD EXPORT DIALOG ───────────────────────────────────────────── [B-664]
+      // His design, 2026-11-11 11:25-11:43: one dialog titled SD Export that says what is going
+      // ("export 4 font folders and size and tracks if applicable and config") and holds every
+      // question that used to be its own popup before the card was chosen: config, common folder,
+      // tracks. The toolbar tracks toggle folded in here too ("cleaner button").
+      // The card is chosen at the bottom: one card is named, several are a dropdown that starts on
+      // "Choose a card", and a card the export would refuse is greyed with the refusal's own words.
+      // LAST STATE, his call 11:43: config and tracks open as they were last time, "as long as forced
+      // tracks since referenced in config doesn't change the last state". The same holds for a
+      // config box greyed because no config is open: a box the user could not touch saves nothing.
+      // IT OPENS AT ONCE, from facts the caller already holds and the card list main keeps current.
+      // The card checks run inside it with Export held until they answer.
+      window._sfSdExportDialog = async (o) => {
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+        const fmt = (n) => (typeof _sfFmtBytes === 'function' ? _sfFmtBytes(n || 0) : `${Math.round((n || 0) / 1e6)} MB`);
+        hideBusy();   // the click's "Preparing SD Export…" hands over to this dialog
+        const cards = (_sfCardState.cards || []).slice();
+        if (cards.length === 0) {
+          await promptConfirm({
+            title: 'No SD card found',
+            message: _sfCardState.boardConnected
+              ? "The board is connected, but its SD card isn't showing as a drive."
+              : 'Put the SD card in a card reader, or connect the board with its card showing as a drive, then try again.',
+            confirmText: 'OK', confirmKind: 'primary', hideCancel: true,
+          });
+          return null;
+        }
+        const st = {
+          cfg: !!o.cfg.checked, commonOn: !!o.common.optionalOn, commonUuid: o.common.optionalUuid || null,
+          unresolvedUseDefault: true, tracks: !!o.tracks.checked, card: cards.length === 1 ? cards[0].mountPath : '',
+        };
+        // HIS LAYOUT, 12:49: "a paragraph of what is happening then the options with shorter
+        // wording." The paragraph is rebuilt on every change, so it always says what Export will do,
+        // including WHY anything is forced and the total. The options are one short line each.
+        const cm = o.common, tr = o.tracks, cf = o.cfg;
+        // HOVER CARRIES THE LONG FORM (his 12:54), drawn from the dialogs these options replaced, so
+        // nothing they used to explain is lost by the shorter lines. On the LABEL, not the input: a
+        // disabled input shows no tooltip, and the locked options are the ones most worth explaining.
+        const opt = (id, on, disabled, label, tip) =>
+          `<label${tip ? ` title="${esc(tip)}"` : ''} style="display:flex;gap:8px;align-items:center;margin-top:6px;${disabled ? 'opacity:.6;' : 'cursor:pointer;'}">`
+          + `<input type="checkbox" id="${id}"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}><span>${label}</span></label>`;
+        const dim = (t) => `<span style="opacity:.7;">${t}</span>`;
+        const TIP = {
+          commonOptional: "The open config doesn't use a shared folder, but you have a common folder in your library. "
+            + 'Tick it to put it on the card as common/.',
+          commonConfig: 'The open config uses a shared folder, so the common folder assigned to it goes on the card, '
+            + 'in a folder named the way the config names it. Assign a different one in Config Manager.',
+          commonProp: 'The prop in the open config needs a voicepack, so a common folder goes on the card even though '
+            + 'no preset names it yet.',
+          commonMissing: "The open config asks for a common folder that isn't in your library. Use your default common "
+            + 'folder in its place, or send only the selected fonts.',
+          tracks: 'The shared tracks folder, copied to the card root as tracks/. A tracks folder at the card root is '
+            + "read by the ProffieOS 8 Edit Track menu, but Fett263's Track Player looks in each font's own tracks "
+            + 'folder instead.',
+          tracksForced: 'The open config references the shared tracks/ folder at the card root, so the tracks go with it.',
+          cfg: 'Writes the open config to the card as my_config.h, next to the fonts, plus a styles file holding only '
+            + 'the styles that config uses, and a readme saying how to build it. The card and the config then stay together.',
+          cfgNone: 'Open a config in the editor to put it on the card with the fonts.',
+        };
+        let html = `<div id="sf-sdx-what" style="line-height:1.5;"></div><div style="margin-top:10px;">`;
+        if (cm.optional) {
+          const pick = cm.choices.length > 1
+            ? ` <select id="sf-sdx-common-pick">${cm.choices.map(c => `<option value="${esc(c.uuid)}"${c.uuid === st.commonUuid ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`
+            : ` ${esc(cm.choices[0].name)}`;
+          html += opt('sf-sdx-common', st.commonOn, false, `Common folder${pick} ${dim(`<span id="sf-sdx-common-size"></span>`)}`, TIP.commonOptional);
+        } else if (cm.auto.length) {
+          html += opt('sf-sdx-common-auto', true, true, `Common folder ${dim(fmt(cm.auto.reduce((a, s) => a + (s.bytes || 0), 0)))}`,
+            cm.reason === 'prop' ? TIP.commonProp : TIP.commonConfig);
+        }
+        if (cm.unresolved.length) {
+          html += `<div title="${esc(TIP.commonMissing)}" style="margin-top:6px;">Missing common folder: <select id="sf-sdx-unresolved"><option value="default">use the default instead</option><option value="none">fonts only</option></select></div>`;
+        }
+        if (tr.forced || tr.available) {
+          html += opt('sf-sdx-tracks', tr.forced || st.tracks, tr.forced, `Tracks ${dim(`${tr.files}, ${fmt(tr.bytes)}`)}`,
+            tr.forced ? TIP.tracksForced : TIP.tracks);
+        }
+        html += cf.open
+          ? opt('sf-sdx-cfg', st.cfg, false, `Config ${dim(esc(cf.label))}`, TIP.cfg)
+          : opt('sf-sdx-cfg', false, true, `Config ${dim('none open')}`, TIP.cfgNone);
+        html += `</div>`;
+        // The card. Drawn by renderCards() below, because the list can change while the dialog is open.
+        html += `<div id="sf-sdx-cardsec" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border,#333);"></div>`;
+        const p = promptConfirm({ title: 'SD Export', messageHtml: html, confirmText: 'Export', confirmKind: 'primary', cancelText: 'Cancel' });
+        // promptConfirm builds its DOM synchronously, so its controls are ours from here.
+        const $ = (id) => document.getElementById(id);
+        const okBtn = $('modal-confirm-ok');
+        const verdict = new Map();   // mountPath -> null (fine) | { short, detail }
+        let open = true;
+        p.then(() => { open = false; });
+        const commonBytes = () => (cm.choices.find(c => c.uuid === st.commonUuid) || cm.choices[0] || {}).bytes || 0;
+        const andList = (a) => a.length <= 1 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+        const total = () => {
+          let b = o.fonts.bytes;
+          const parts = [];
+          const why = [];
+          // Common folder
+          if (cm.auto.length) {
+            b += cm.auto.reduce((a, s) => a + (s.bytes || 0), 0);
+            parts.push(cm.auto.map(s => `the common folder <strong>${esc(s.name)}</strong>${s.slot !== s.name ? ` as ${esc(s.slot)}/` : ''}`).join(', '));
+            why.push(cm.reason === 'prop' ? "Your prop needs the common folder, so it's included." : "Your config uses the common folder, so it's included.");
+          }
+          if (cm.unresolved.length) {
+            const list = cm.unresolved.map(u => `"${esc(u.name)}"`).join(', ');
+            why.push(`Your config asks for ${list}, which ${cm.unresolved.length === 1 ? "isn't" : "aren't"} in your library.`);
+            if (st.unresolvedUseDefault) { b += cm.defaultBytes * cm.unresolved.length; parts.push('your default common folder in its place'); }
+          }
+          if (cm.optional && st.commonOn) {
+            b += commonBytes();
+            parts.push(`the common folder <strong>${esc((cm.choices.find(c => c.uuid === st.commonUuid) || cm.choices[0]).name)}</strong>`);
+          }
+          if (cm.dupes) why.push(esc(cm.dupes));
+          if (cm.missing) why.push(`Your ${cm.missing === 'prop' ? 'prop' : 'config'} needs a common folder, but your library has none.`);
+          // Tracks
+          if (tr.forced || (tr.available && st.tracks)) {
+            b += tr.bytes;
+            parts.push(`the ${tr.files} track${tr.files === 1 ? '' : 's'}`);
+            if (tr.forced) why.push("Your config uses the tracks folder, so it's included.");
+          }
+          if (tr.missing) why.push('Your config uses the tracks folder, but your library has none.');
+          // Config
+          if (cf.open && st.cfg) {
+            parts.push(`the config <strong>${esc(cf.label)}</strong> as my_config.h, with the styles it uses and a readme`);
+            if (cf.uncompiled) why.push("The config has changes that haven't been compiled, so it goes as it is.");
+            if (cf.unsaved) why.push(cf.neverSaved ? "The config hasn't been saved yet; you'll be asked to name it." : "The config has unsaved changes; you'll be asked to save them.");
+          }
+          const fonts = `<strong>${o.fonts.count} font folder${o.fonts.count === 1 ? '' : 's'}</strong>`;
+          const what = $('sf-sdx-what');
+          if (what) {
+            what.innerHTML = `Copies ${andList([fonts].concat(parts))} to the card, ${fmt(b)} in all.`
+              + (why.length ? `<div style="margin-top:6px;opacity:.75;font-size:12px;">${why.join(' ')}</div>` : '');
+          }
+          const cs = $('sf-sdx-common-size'); if (cs && cm.optional) cs.textContent = fmt(commonBytes());
+        };
+        const sync = () => {
+          okBtn.disabled = !(st.card && verdict.has(st.card) && verdict.get(st.card) === null);
+          total();
+        };
+        $('sf-sdx-cfg')?.addEventListener('change', (e) => { st.cfg = e.target.checked; });
+        $('sf-sdx-common')?.addEventListener('change', (e) => { st.commonOn = e.target.checked; sync(); });
+        $('sf-sdx-common-pick')?.addEventListener('change', (e) => { st.commonUuid = e.target.value; sync(); });
+        $('sf-sdx-unresolved')?.addEventListener('change', (e) => { st.unresolvedUseDefault = e.target.value === 'default'; sync(); });
+        $('sf-sdx-tracks')?.addEventListener('change', (e) => { if (!tr.forced) st.tracks = e.target.checked; sync(); });
+        okBtn.disabled = true;
+        // THE CARD LIST IS CHECKED AGAIN AS THE DIALOG OPENS, and the card part redrawn if it changed.
+        // Found 2026-11-11 13:19: the dialog offered "Removable Disk (F:)" after F: had been ejected,
+        // because the pushed list had missed the change. Opening from the pushed list keeps the click
+        // instant; this keeps a card that has gone from being offered.
+        let renderSeq = 0;
+        const renderCards = (list) => {
+          const seq = ++renderSeq;
+          const sec = $('sf-sdx-cardsec');
+          if (!sec) return;
+          st.card = list.length === 1 ? list[0].mountPath : (list.some(c => c.mountPath === st.card) ? st.card : '');
+          if (list.length === 0) {
+            sec.innerHTML = `<div style="opacity:.85;">${esc(_sfCardState.boardConnected
+              ? "No SD card found. The board is connected, but its SD card isn't showing as a drive."
+              : 'No SD card found.')}</div>`;
+          } else if (list.length === 1) {
+            sec.innerHTML = `To <strong>${esc(_sfCardName(list[0]))}</strong><div id="sf-sdx-status" style="margin-top:6px;opacity:.8;">Checking the card…</div>`;
+          } else {
+            sec.innerHTML = `To <select id="sf-sdx-card" style="min-width:55%;">`
+              + `<option value="" disabled${st.card ? '' : ' selected'}>Choose a card</option>`
+              + list.map(c => `<option value="${esc(c.mountPath)}"${c.mountPath === st.card ? ' selected' : ''}>${esc(_sfCardName(c))}: checking…</option>`).join('')
+              + `</select><div id="sf-sdx-status" style="margin-top:8px;display:none;"></div>`;
+            $('sf-sdx-card')?.addEventListener('change', (e) => { st.card = e.target.value; sync(); });
+          }
+          sync();
+          list.forEach(c => checkCard(c, seq));
+        };
+        const checkCard = (c, seq) => {
+          _sfCardRefusal(c.mountPath).then(async (reason) => {
+            verdict.set(c.mountPath, reason);
+            if (!open || seq !== renderSeq) return;
+            const status = $('sf-sdx-status');
+            const sel = $('sf-sdx-card');
+            if (sel) {
+              const opt = Array.from(sel.options).find(x => x.value === c.mountPath);
+              if (opt) {
+                opt.textContent = reason ? `${_sfCardName(c)}: ${reason.short}` : _sfCardName(c);
+                opt.title = reason ? reason.detail : '';
+                opt.disabled = !!reason;
+                if (reason && sel.value === c.mountPath) { sel.value = ''; st.card = ''; }
+              }
+              // A tooltip on a dropdown entry is not reliable everywhere, so the refusal's own words
+              // are also written under the dropdown, one paragraph per card that cannot be used.
+              if (status && reason) {
+                const para = document.createElement('div');
+                para.style.marginTop = '6px';
+                const b = document.createElement('strong');
+                b.textContent = _sfCardName(c) + ': ';
+                para.appendChild(b);
+                para.appendChild(document.createTextNode(reason.detail));
+                status.appendChild(para);
+                status.style.display = '';
+              }
+            } else if (status) {
+              status.textContent = reason ? reason.detail : '';
+              status.style.display = reason ? '' : 'none';
+              if (reason) {
+                // The same Eject row the export's own refusals carry.
+                let ctx = {};
+                try { ctx = (await window._sfEjectContext?.(c.mountPath)) || {}; } catch {}
+                if (open && seq === renderSeq) _sfAddEjectRowToConfirm(ctx, false);
+              }
+            }
+            sync();
+          });
+        };
+        renderCards(cards);
+        const _key = (l) => (l || []).map(c => c.mountPath + '|' + c.label).join(',');
+        window.electronAPI.getCardPresence({ fresh: true }).then((s) => {
+          if (!s || !open) return;
+          _sfCardState = s; _sfSyncSdExportBtn();
+          if (_key(s.cards) !== _key(cards)) {
+            // Anything a previous render put in the footer (the Eject row) belongs to a card that
+            // may be gone now.
+            try { if (window._sfRemoveEjectRow) window._sfRemoveEjectRow(); } catch {}
+            verdict.clear();
+            renderCards(s.cards || []);
+          }
+        }).catch(() => {});
+        const ok = await p;
+        okBtn.disabled = false;   // the dialog is shared: never hand the next caller a dead button
+        if (ok !== true) window._sfRecheckCards();   // closed without exporting: refresh the button
+        if (ok !== true || !st.card) return null;
+        return st;
+      };
       const _sfBulkSaveOnce = jmtOneAtATime(_sfBulkSave);
       document.getElementById('btn-sf-bulk-save')?.addEventListener('click', async (e) => {
         e.stopPropagation();
-        await _sfBulkSaveOnce();
+        if (_sfSdExportRunning) return;
+        _sfSdExportRunning = true; _sfSyncSdExportBtn();   // [B-664] greyed at the click itself
+        // SOMETHING APPEARS AT THE CLICK. ("A click always acts instantly", ui-conventions.md.) The
+        // dialog needs a moment of reading first (tracks, the config's common folders, the prop), and
+        // a greyed button alone read as a click that did nothing (his 13:48). The dialog takes this
+        // down as it opens.
+        showBusy('Preparing SD Export…');
+        try { await _sfBulkSaveOnce(); }
+        finally { _sfSdExportRunning = false; _sfSyncSdExportBtn(); hideBusy(); }
       });
       // Bulk duplicate — the only surface that duplicates the whole selection
       // (the card right-click stays single). Each copy shares its original's

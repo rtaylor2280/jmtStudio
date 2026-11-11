@@ -80,6 +80,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listPortsRaw:       () => ipcRenderer.invoke('ports:listRaw'),
   getRecommendedPort: () => ipcRenderer.invoke('ports:getRecommended'),
   setPortPolling: (enabled) => ipcRenderer.send('ports:setPolling', enabled),
+  // [B-664] Is there a card SD Export can write to? Pushed on change; asked fresh at a click.
+  getCardPresence: (opts) => ipcRenderer.invoke('cards:presence', opts || {}),
+  onCardsChanged: (cb) => {
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on('cards:changed', handler);
+    return () => ipcRenderer.removeListener('cards:changed', handler);
+  },
   onPortsChanged: (cb) => {
     const handler = () => cb();
     ipcRenderer.on('ports:changed', handler);

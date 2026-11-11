@@ -206,6 +206,7 @@ function createWindow() {
 
   win.on('blur',  () => stopPortPolling());
   win.on('focus', () => { if (_portPollingWanted) { startPortPolling(); _pollPortsNow(); } });
+  _watchCardPresence(win);   // [B-664] the SD Export button's card check
 
   // ── Close handler ──
   win.on('close', (e) => {
@@ -3818,6 +3819,7 @@ ipcMain.handle('media:eject', async (_, { destDir, timeoutMs, stableMs } = {}) =
     // Only ever SHORTER than the default watch; see ejectVolume.
     const st = Number.isFinite(stableMs) ? Math.max(0, Math.min(stableMs, se.STABLE_MS)) : undefined;
     const r = await se.ejectVolume(destDir, { timeoutMs, ...(st === undefined ? {} : { stableMs: st }) });
+    _scheduleCardPresence(300);   // [B-664] every eject refreshes SD Export's card list (his 13:28)
     return { ok: true, result: r };
   } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
@@ -7117,6 +7119,7 @@ async function _pollPortsNow() {
     }
     if (sig !== _lastPortPaths) {
       _lastPortPaths = sig;
+      _scheduleCardPresence();   // [B-664] a board arriving or leaving changes the button's tooltip
       if (win && !win.isDestroyed()) win.webContents.send('ports:changed');
     }
   } catch {}
@@ -7134,6 +7137,87 @@ function stopPortPolling() {
     _portPollTimer = null;
   }
 }
+
+// ── Card presence for the SD Export button ─────────────────────────── [B-664]
+//
+// SD Export is disabled until a card is there. This keeps the answer current WITHOUT a timer:
+// it is re-asked when Windows says a device or volume changed (WM_DEVICECHANGE, which also
+// fires when a card goes into or comes out of a reader), when the board's ports change, when
+// the window gets focus, and on macOS / Linux when the mount folder changes. Focus is the
+// backstop for any change that slipped past the others.
+// Debounced, because one card insertion is several device messages in a row.
+let _cardPresence = { cards: [], boardConnected: false, known: false };
+let _cardPresenceTimer = null, _cardPresenceFollowUp = null;
+let _cardPresenceBusy = false, _cardPresenceAgain = false;
+function _cardPresenceKey(s) {
+  return JSON.stringify([(s.cards || []).map(c => c.mountPath + '|' + c.label), !!s.boardConnected]);
+}
+async function _refreshCardPresence() {
+  if (_cardPresenceBusy) { _cardPresenceAgain = true; return; }
+  _cardPresenceBusy = true;
+  try {
+    const r = await require('./cardPresence').check();
+    // Unknown keeps the last answer ([B-028]): a failed check is not evidence of no card.
+    const next = {
+      cards: r.cards === null ? _cardPresence.cards : r.cards,
+      boardConnected: r.boardConnected === null ? _cardPresence.boardConnected : r.boardConnected,
+      known: _cardPresence.known || r.cards !== null,
+    };
+    const changed = _cardPresenceKey(next) !== _cardPresenceKey(_cardPresence) || next.known !== _cardPresence.known;
+    _cardPresence = next;
+    if (changed && win && !win.isDestroyed()) win.webContents.send('cards:changed', _cardPresence);
+  } catch {}
+  finally {
+    _cardPresenceBusy = false;
+    if (_cardPresenceAgain) { _cardPresenceAgain = false; _scheduleCardPresence(); }
+  }
+}
+function _scheduleCardPresence(ms = 600) {
+  clearTimeout(_cardPresenceTimer);
+  _cardPresenceTimer = setTimeout(_refreshCardPresence, ms);
+}
+function _watchCardPresence(w) {
+  if (process.platform === 'win32') {
+    // PROVEN 2026-11-11: the message arrives on a card going in and coming out, and the button
+    // followed within a second ("super quick... within moments the SD export was available").
+    try { w.hookWindowMessage(0x0219 /* WM_DEVICECHANGE */, () => {
+      _scheduleCardPresence();
+      // AND ONCE MORE A FEW SECONDS LATER. The message can arrive while a volume is still on its
+      // way in or out, so the first check sees the old state; nothing would then look again.
+      // Suspected 2026-11-11 13:19, when the dialog still offered an ejected F:.
+      clearTimeout(_cardPresenceFollowUp);
+      _cardPresenceFollowUp = setTimeout(() => _scheduleCardPresence(0), 3000);
+    }); } catch {}
+  } else {
+    // macOS mounts every volume as a folder in /Volumes, so watching that one folder sees every
+    // card arrive and leave. Linux mounts under /media/<user> or /run/media/<user>, and that
+    // per-user folder may not EXIST until the first card is mounted - so a watch that could not be
+    // set at startup is retried whenever anything else fires, and the parent folders are watched
+    // too, so the per-user folder appearing is itself a trigger.
+    const user = require('os').userInfo().username;
+    const dirs = process.platform === 'darwin' ? ['/Volumes']
+      : ['/media/' + user, '/run/media/' + user, '/run/media', '/media', '/mnt'];
+    const watched = new Set();
+    const watchAll = () => {
+      for (const d of dirs) {
+        if (watched.has(d)) continue;
+        try {
+          if (!fs.existsSync(d)) continue;
+          fs.watch(d, () => { watchAll(); _scheduleCardPresence(); })
+            .on('error', () => { watched.delete(d); });
+          watched.add(d);
+        } catch {}
+      }
+    };
+    watchAll();
+  }
+  w.on('focus', () => _scheduleCardPresence(200));
+  _scheduleCardPresence(0);
+}
+ipcMain.handle('cards:presence', async (_e, { fresh = false } = {}) => {
+  if (fresh) await _refreshCardPresence();
+  return _cardPresence;
+});
 
 // ── IPC: Port detection ────────────────────────────────
 ipcMain.handle('ports:list', async () => {
