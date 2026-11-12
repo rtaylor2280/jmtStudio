@@ -1248,6 +1248,16 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // context, then gcc stops.
   cppExtra.push('-fmax-errors=5');
   cExtra.push('-fmax-errors=5');
+  // -g0: no debug info. The platform builds with -g, which only feeds a hardware
+  // debugger on the SWD pins. It lives in the .elf, is dropped when the .dfu is
+  // made, and nothing in Studio reads it. On gcc 14 (core 4.6) producing it IS the
+  // compile: ProffieOS styles are deeply nested templates, each one a type the
+  // debug info describes, so the cost grows with the config. Measured on the Mac
+  // 2026-11-12 [B-666]: Ezra 84 s -> 15 s, a large config 1250 s -> 40 s, and the
+  // flashed bytes identical apart from the __DATE__/__TIME__ build stamp.
+  // ProffieOS's own serial debugging is firmware code and is untouched.
+  cppExtra.push('-g0');
+  cExtra.push('-g0');
   if (!lto) {
     // `-fno-lto` after the platform's `-flto` wins, so objects are built
     // without LTO bytecode; the link's `-flto` then no-ops and the expensive
