@@ -20804,20 +20804,31 @@ let _stylesLinked       = false; // true when config contains #include for the l
 // library by its full path on this computer is the older form: it still counts as linked, and the
 // next compile updates it, with a notice (window.updateStylesIncludeAndSave).
 const STYLES_INCLUDE = '#include "my_styles.h"';
+// The older form is recognised by its tail, not by this computer's full path: a link written by
+// either build (jmt-studio, jmt-studio-dev) on any computer, any user, either slash, is the app's
+// own library. His call 2026-11-12: "no matter what computer it comes from or what old link it was,
+// we just fix it." Matching only this machine's path missed a config from the other machine, from
+// the other build, or from a customer. [B-667]
+const _OWN_STYLES_FULL_PATH = /(?:^|[\\/])jmt-studio(?:-dev)?[\\/]my_styles\.h$/i;
+function _isOwnStylesFullPath(p) {
+  return _OWN_STYLES_FULL_PATH.test(String(p)) || (!!_stylesFilePath && p === _stylesFilePath);
+}
 function _isOwnStylesInclude(line) {
   const m = String(line).match(/#\s*include\s+"([^"]*)"/);
   if (!m) return false;
-  return m[1] === 'my_styles.h' || (!!_stylesFilePath && m[1] === _stylesFilePath);
+  return m[1] === 'my_styles.h' || _isOwnStylesFullPath(m[1]);
 }
 
 // The live lines of `text` that include the app's own library by its full path: line number
 // (1-based), and where the path starts and ends. A commented-out one is not built, so not counted.
 function _ownStylesFullPathLines(text, stylesPath) {
-  if (!stylesPath) return [];
   const hits = [];
   String(text).split('\n').forEach((l, i) => {
     const m = l.match(/^(\s*#\s*include\s+")([^"]*)("\s*)$/);
-    if (m && m[2] === stylesPath) hits.push({ line: i + 1, col: m[1].length, len: m[2].length });
+    if (m && m[2] !== 'my_styles.h'
+        && (_OWN_STYLES_FULL_PATH.test(m[2]) || (!!stylesPath && m[2] === stylesPath))) {
+      hits.push({ line: i + 1, col: m[1].length, len: m[2].length });
+    }
   });
   return hits;
 }
