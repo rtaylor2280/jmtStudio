@@ -1,0 +1,26 @@
+{
+  "_about": "B-668: the 4 GiB USB Mass Storage fix. Each library replaces the stock one of the same name in system/STM32L4xx/Lib, ONLY if the stock file's sha256 matches 'stock'. Built and verified 2026-11-12 (local/b668-jmt-plugin).",
+  "revision": 1,
+  "bases": {
+    "4.6.0": {
+      "libstm32l433.a": {
+        "stock": "0339476c9acbca2672ccaf3001c91f6786803871a2667eb1f4e83d80e14553f0",
+        "jmt": "db9ad96c93381c456b54d4f2510efdca7310502d2048f212aa28b2cc792d3ea8"
+      },
+      "libstm32l452.a": {
+        "stock": "b144161d9633256adc7fd3c509d3913a4dab24b49ec905e029675ef64ca55155",
+        "jmt": "ac4b34e37ca0202c1b5136c1db639e4b305ac9d6c7d2c6ec7beb0cc8240b64df"
+      }
+    },
+    "3.6.0": {
+      "libstm32l433.a": {
+        "stock": "0614175a77bfe39f820e6bb1976450d2cb84e39b00bd9b62521946f7b6514267",
+        "jmt": "470865566a3a8fc852f1b865bd2892be2c08eca49281117123144f57ad636f0f"
+      },
+      "libstm32l452.a": {
+        "stock": "4f2e7bd675a0f1e5cf22be765fa24ed284f9feef935e9d462f49bee65e983af3",
+        "jmt": "4d369d0bd2ed1374bf3335d70a49066640f3743b59ce4b2858f88f2d87f12b6a"
+      }
+    }
+  }
+}

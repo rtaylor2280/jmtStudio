@@ -13,6 +13,8 @@ const compileErrorData = require('./compileErrorData');
 const fontCatalogue = require('./fontCatalogue');
 const cacheManager = require('./cacheManager');
 const coreVersions = require('./coreVersions');
+const jmtPlugin    = require('./jmtPlugin');
+const JMT_PLUGIN_NOTE = jmtPlugin.NOTE;   // beside a JMT entry in the selector [B-668]
 const soundFontSources = require('./soundFontSources');
 const soundFontPicture = require('./soundFontPicture');
 const soundFontVendors = require('./soundFontVendors');
@@ -1432,6 +1434,10 @@ async function _referencedCores() {
   }
   // The core in play right now, even if version enumeration missed it.
   refs.add(coreVersions.normalizeVersion(toolchain.getActiveCoreVersion()));
+  // THE TWIN RULE [B-668]: a plugin and its JMT twin are one for what to keep. Once every version
+  // moves to 4.6.0 JMT nothing names stock 4.6.0, but the JMT plugin builds with its compiler and
+  // stock stays so the fix can be tested against it.
+  for (const v of Array.from(refs)) refs.add(coreVersions.twinVersion(v));
   return refs;
 }
 
@@ -7907,7 +7913,17 @@ ipcMain.handle('core:listAvailable', async () => {
     // below the floor predates ProffieOS 7, so listing it would put eight traps
     // in a dropdown. Anything present on the machine is always included even
     // below the floor, so the list can never hide a core the user actually has.
-    versions:  coreVersions.offeredVersions(res.versions, Object.keys(byVersion)),
+    // Each offered stock version that has a JMT fix gets its JMT entry right above it [B-668]. Made on
+    // demand from the stock files, so it is offered whether or not it has been made yet.
+    versions:  (() => {
+      const offered = coreVersions.offeredVersions(res.versions, Object.keys(byVersion));
+      const jmt = jmtPlugin.supportedBases(proffie.getResourcesPath())
+        .filter(b => offered.includes(b)).map(coreVersions.jmtVersionOf);
+      return coreVersions.offeredVersions([], [...offered, ...jmt]);
+    })(),
+    // The always-visible line beside a JMT entry; the label itself stays "4.6.0 JMT".
+    notes:     Object.fromEntries(jmtPlugin.supportedBases(proffie.getResourcesPath())
+                 .map(b => [coreVersions.jmtVersionOf(b), JMT_PLUGIN_NOTE])),
     latest:    res.latest,
     // Where each one lives. 'system' means the user's own Arduino tree: usable,
     // and never ours to remove. 'jmt' means we downloaded it, so a reset can
@@ -7941,10 +7957,71 @@ ipcMain.handle('core:getForVersion', async (_, name) => {
   };
 });
 
+// THE JMT UPGRADE [B-668]. Accepting it makes "<base> JMT" beside <base> and moves every
+// ProffieOS version set to <base> onto it, so someone with many versions does it once. Going back is
+// just picking <base> again in the selector, where it stays. Nothing else moves: a version pinned to
+// another plugin keeps it.
+ipcMain.handle('core:upgradeToJmt', async (_, { base }) => {
+  base = coreVersions.baseVersion(base);
+  if (!jmtPlugin.isSupported(proffie.getResourcesPath(), base)) {
+    return { ok: false, error: `There is no JMT version of Proffieboard Plugin ${base}.` };
+  }
+  const jmt = coreVersions.jmtVersionOf(base);
+  const log = _installPhaseLogger(makeLogger());
+  let made;
+  try { made = await toolchain.ensureCore(log, jmt, { activate: false }); }
+  finally { _clearInstallPhase(); }
+  if (!made.ok) return made;
+  const moved = [];
+  for (const name of proffie.listVersions()) {
+    const pin = proffie.getVersionCore(name);
+    if (pin && coreVersions.normalizeVersion(pin) === base) {
+      const r = proffie.setVersionCore(name, jmt);
+      if (r && r.ok !== false) moved.push(name);
+    }
+  }
+  const selected = proffie.getSelectedVersion();
+  if (selected && moved.includes(selected)) await _applyCoreForVersion(selected);
+  _jmtOfferRecord(base);
+  // Accepted once = the default from now on: see _preferJmt and core:jmtOfferState.
+  Store.set('settings.jmtPluginChoice', 'always');
+  return { ok: true, version: jmt, moved, appliedToActive: !!(selected && moved.includes(selected)) };
+});
+
+// The offer is made once per plugin version, then lives on the button [B-668]. Recorded when it is
+// answered either way, so declining is respected.
+function _jmtOfferRecord(base) {
+  const rec = Store.get('jmtPluginOffered') || {};
+  rec[coreVersions.baseVersion(base)] = new Date().toISOString();
+  Store.set('jmtPluginOffered', rec);
+}
+ipcMain.handle('core:jmtOfferState', async () => {
+  const supported = jmtPlugin.supportedBases(proffie.getResourcesPath());
+  const offered   = Store.get('jmtPluginOffered') || {};
+  const available = toolchain.listAvailableCores().map(c => c.version);
+  return {
+    ok: true,
+    supported,
+    note: jmtPlugin.NOTE,
+    // Stock versions on this machine with a JMT fix that has not been made. Not yet accepted: only
+    // those never offered, and the renderer asks. Accepted: all of them, and the renderer just makes
+    // them, because the answer is already known.
+    choice:   _jmtChoice(),
+    accepted: _jmtChoice() === 'always',
+    // Never: nothing is offered and nothing is made.
+    due: _jmtChoice() === 'never' ? [] : supported.filter(b => available.includes(b) && !available.includes(coreVersions.jmtVersionOf(b))
+                            && (_jmtChoice() === 'always' || !offered[b])),
+    made: supported.filter(b => available.includes(coreVersions.jmtVersionOf(b))),
+  };
+});
+ipcMain.handle('core:jmtOfferAnswered', async (_, { base }) => { _jmtOfferRecord(base); return { ok: true }; });
+
 // coreVersion is required. There is no "unset" any more - a version is always
 // pinned, so clearing would just mean picking a different pin.
 ipcMain.handle('core:setForVersion', async (_, { name, coreVersion }) => {
   if (!coreVersion) return { ok: false, error: 'A Proffieboard Plugin version is required.' };
+  // Stored normalised, so "4.6 JMT" from anywhere is the one pin "4.6.0-jmt" [B-668].
+  coreVersion = coreVersions.normalizeVersion(coreVersion);
   const res = proffie.setVersionCore(name, coreVersion);
   if (!res.ok) return res;
   // Only re-point the toolchain if this is the version currently selected;
@@ -8128,13 +8205,32 @@ ipcMain.handle('proffieOS:validateSource', (_, sourcePath) => {
 async function _coreToStamp() {
   // Across every tree of ours, not one of them. Reading a single path made the
   // offline answer depend on which core happened to be active at the time.
+  // Stock versions only: a JMT tree sorts above its base, and "newest installed" must not pick it
+  // for someone who never accepted the fix [B-668].
   const installedBest = () =>
-    coreVersions.pickLatest(toolchain.listCoreTrees().map(t => t.version)) ||
+    coreVersions.pickLatest(toolchain.listCoreTrees().map(t => t.version).filter(v => !coreVersions.isJmtVersion(v))) ||
     coreVersions.FALLBACK_VERSION;
+  let base;
   try {
     const res = await coreVersions.resolveLatest(app.getPath('userData'));
-    return res.stale ? installedBest() : res.latest;
-  } catch { return installedBest(); }
+    base = res.stale ? installedBest() : res.latest;
+  } catch { base = installedBest(); }
+  return _preferJmt(base);
+}
+
+// Once the JMT plugin has been accepted, it is the default from then on: a
+// new ProffieOS version, or a plugin version added later, gets "<base> JMT" without being asked
+// again. Only where a JMT version exists for that base. [B-668]
+// The answer lives in Settings > Remembered choices as Ask / Always / Never:
+// Always once accepted, so it stays the default and can be undone there; Never for someone who
+// declined and does not want to see it again.
+function _jmtChoice() {
+  const v = Store.get('settings.jmtPluginChoice');
+  return v === 'always' || v === 'never' ? v : 'ask';
+}
+function _preferJmt(base) {
+  if (!base || _jmtChoice() !== 'always') return base;
+  return jmtPlugin.isSupported(proffie.getResourcesPath(), base) ? coreVersions.jmtVersionOf(base) : base;
 }
 
 // ── Version import: cancellable, and the window stays alive ──── [B-488]

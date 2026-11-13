@@ -76,7 +76,8 @@
           "arduino-cli/**/*",
           "tools/**/*",
           "dfu-driver/**/*",
-          "webusb-fix/**/*"
+          "webusb-fix/**/*",
+          "jmt-plugin/**/*"
         ]
       }
     ]

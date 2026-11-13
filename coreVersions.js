@@ -79,24 +79,61 @@ const FETCH_TIMEOUT_MS = 8000;
 
 // ── Version arithmetic ─────────────────────────────────
 
+// ── The JMT plugin [B-668] ─────────────────────────────
+//
+// A JMT plugin is a stock plugin with the 4 GiB Mass Storage fix, living in its own tree beside the
+// stock one. It is the SAME version with a mark, never a new number: "4.6.0-jmt" is 4.6.0 plus the
+// fix, and 4.6.1 stays upstream's next release.
+//
+// The mark has to survive normalising. Parsing each part with parseInt alone turns "4.6.0-jmt"
+// into "4.6.0" with no error, and nearly every path in the app normalises first: a JMT pin would
+// read as stock everywhere, and cancelling a JMT install would delete the stock 4.6.0 tree. So the mark is split off, the number normalised, and the mark put
+// back; every spelling ("4.6-jmt", "4.6.0-jmt.1", "4.6.0 JMT") lands on one form.
+const JMT_SUFFIX = '-jmt';
+const _JMT_RE    = /[\s-]+jmt(?:\.\d+)?\s*$/i;
+
+function isJmtVersion(v) { return _JMT_RE.test(String(v || '').trim()); }
+
+/** The stock version a JMT plugin is built on; a stock version returns itself. */
+function baseVersion(v) {
+  return normalizeVersion(String(v || '').trim().replace(_JMT_RE, ''));
+}
+
+/** The JMT version built on this one. */
+function jmtVersionOf(v) { return baseVersion(v) + JMT_SUFFIX; }
+
+/**
+ * A plugin and its JMT twin are ONE for anything that decides what to keep: if either is in use,
+ * neither is removed. The JMT tree's compiler is the stock one's, and stock stays so anyone can
+ * test the fix against it.
+ */
+function twinVersion(v) { return isJmtVersion(v) ? baseVersion(v) : jmtVersionOf(v); }
+
 /**
  * "4.6" and "4.6.0" are the same version wearing different clothes. Returns a
  * three-part string so equality checks and directory lookups can be literal.
+ * A JMT mark is kept: "4.6-jmt" -> "4.6.0-jmt".
  */
 function normalizeVersion(v) {
-  const parts = String(v || '').trim().split('.');
+  const s   = String(v || '').trim();
+  const jmt = _JMT_RE.test(s);
+  const parts = s.replace(_JMT_RE, '').split('.');
   while (parts.length < 3) parts.push('0');
-  return parts.slice(0, 3).map(p => String(parseInt(p, 10) || 0)).join('.');
+  const n = parts.slice(0, 3).map(p => String(parseInt(p, 10) || 0)).join('.');
+  return jmt ? n + JMT_SUFFIX : n;
 }
 
-/** Negative if a < b, zero if equal, positive if a > b. */
+/**
+ * Negative if a < b, zero if equal, positive if a > b. A JMT plugin sorts just
+ * above its own stock version and below the next release: 4.6.0 < 4.6.0-jmt < 4.7.0.
+ */
 function compareVersions(a, b) {
-  const pa = normalizeVersion(a).split('.').map(Number);
-  const pb = normalizeVersion(b).split('.').map(Number);
+  const pa = baseVersion(a).split('.').map(Number);
+  const pb = baseVersion(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) {
     if (pa[i] !== pb[i]) return pa[i] - pb[i];
   }
-  return 0;
+  return (isJmtVersion(a) ? 1 : 0) - (isJmtVersion(b) ? 1 : 0);
 }
 
 /** Highest version in the list, or null for an empty list. */
@@ -223,7 +260,8 @@ function unusedToolDirs(dataPath, keepCores, toolDeps) {
   const needed = new Set();
   for (const c of keepCores || []) {
     if (!inThisTree.has(normalizeVersion(c))) continue;
-    for (const dep of toolDeps[normalizeVersion(c)] || []) needed.add(dep);
+    // A JMT plugin needs exactly its stock version's tools; the index only knows the stock one.
+    for (const dep of toolDeps[baseVersion(c)] || []) needed.add(dep);
   }
 
   const toolsRoot = path.join(dataPath, 'packages', PACKAGE_NAME, 'tools');
@@ -339,6 +377,19 @@ function getHardwarePath(dataPath) {
 }
 
 /**
+ * The version a platform directory holds, as we track it. The directory name says the stock number
+ * (a JMT tree keeps arduino-cli's own layout, "4.6"), so a JMT plugin is recognised by its
+ * platform.txt, where it is stamped "4.6.0-jmt.1" [B-668]. Anything else is its directory name.
+ */
+function _dirVersion(hw, d) {
+  try {
+    const m = fs.readFileSync(path.join(hw, d, 'platform.txt'), 'utf8').match(/^version=(.*)$/m);
+    if (m && isJmtVersion(m[1])) return normalizeVersion(m[1]);
+  } catch { /* no platform.txt: the name is all there is */ }
+  return normalizeVersion(d);
+}
+
+/**
  * The version string arduino-cli itself uses for an installed core, given the
  * normalised version we track internally. Returns null when it is not present.
  *
@@ -359,7 +410,7 @@ function installedVersionString(dataPath, version) {
   if (!fs.existsSync(hw)) return null;
   try {
     for (const d of fs.readdirSync(hw)) {
-      if (normalizeVersion(d) === want &&
+      if (_dirVersion(hw, d) === want &&
           fs.existsSync(path.join(hw, d, 'boards.txt'))) return d;
     }
   } catch { /* fall through */ }
@@ -377,7 +428,7 @@ function listInstalled(dataPath) {
   try {
     return fs.readdirSync(hw)
       .filter(d => fs.existsSync(path.join(hw, d, 'boards.txt')))
-      .map(normalizeVersion)
+      .map(d => _dirVersion(hw, d))
       .sort(compareVersions);
   } catch { return []; }
 }
@@ -396,7 +447,7 @@ function isVersionInstalled(dataPath, version) {
   if (!fs.existsSync(hw)) return false;
   try {
     return fs.readdirSync(hw).some(d =>
-      normalizeVersion(d) === want &&
+      _dirVersion(hw, d) === want &&
       fs.existsSync(path.join(hw, d, 'boards.txt'))
     );
   } catch { return false; }
@@ -419,7 +470,7 @@ function coreSupportsOption(dataPath, version, option) {
   const hw   = getHardwarePath(dataPath);
   if (!fs.existsSync(hw)) return false;
   try {
-    const dir = fs.readdirSync(hw).find(d => normalizeVersion(d) === want);
+    const dir = fs.readdirSync(hw).find(d => _dirVersion(hw, d) === want);
     if (!dir) return false;
     const boards = fs.readFileSync(path.join(hw, dir, 'boards.txt'), 'utf8');
     return boards.includes(`menu.${option}=`);
@@ -450,6 +501,8 @@ function coreSupportsOption(dataPath, version, option) {
  */
 function protectedCoreSet({ available = [], pinned = [], expected = [], active = null } = {}) {
   const out = new Set();
+  // Twins last: whatever is protected protects its twin too [B-668].
+  const withTwins = () => { for (const v of Array.from(out)) out.add(twinVersion(v)); return out; };
   for (const v of available) if (v) out.add(normalizeVersion(v));
   for (const v of pinned)    if (v) out.add(normalizeVersion(v));
   // `expected` - plugins the app recorded installing or adopting, which are not
@@ -467,7 +520,7 @@ function protectedCoreSet({ available = [], pinned = [], expected = [], active =
   // already warns about the builds it strands. (2026-08-15)
   for (const v of expected)  if (v) out.add(normalizeVersion(v));
   if (active) out.add(normalizeVersion(active));
-  return out;
+  return withTwins();
 }
 
 module.exports = {
@@ -481,6 +534,11 @@ module.exports = {
 
   normalizeVersion,
   compareVersions,
+  JMT_SUFFIX,
+  isJmtVersion,
+  baseVersion,
+  jmtVersionOf,
+  twinVersion,
   pickLatest,
   offeredVersions,
   newerThan,

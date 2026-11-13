@@ -353,8 +353,19 @@ check('the active plugin is protected even if both lists missed it',
   P({ available: [], pinned: [], active: '4.6.0' }).has('4.6.0'), true);
 check('unpinned AND uninstalled is the only unprotected case',
   P({ available: ['4.6.0'], pinned: ['4.6.0'], active: '4.6.0' }).has('3.6.0'), false);
-check('index form and directory form collapse to one entry',
-  P({ available: ['3.6'], pinned: ['3.6.0'], active: null }).size, 1);
+// Two entries, not one: the version and its JMT twin [B-668]. The point of this check is that "3.6"
+// and "3.6.0" do not become two stock entries.
+check('index form and directory form collapse to one entry (plus its JMT twin)',
+  [...P({ available: ['3.6'], pinned: ['3.6.0'], active: null })].sort().join(','), '3.6.0,3.6.0-jmt');
+// [B-668] THE TWIN RULE: a plugin and its JMT twin are one for what to keep.
+check('a JMT pin protects its stock base (its compiler lives there)',
+  P({ available: [], pinned: ['4.6.0-jmt'], active: null }).has('4.6.0'), true);
+check('a stock pin protects its JMT twin',
+  P({ available: [], pinned: ['4.6.0'], active: null }).has('4.6.0-jmt'), true);
+check('an active JMT plugin protects its base',
+  P({ available: [], pinned: [], active: '4.6-jmt' }).has('4.6.0'), true);
+check('the twin rule does not reach another version',
+  P({ available: [], pinned: ['4.6.0-jmt'], active: null }).has('3.6.0'), false);
 check('a pin written as 3.6 protects builds recorded as 3.6.0',
   P({ available: [], pinned: ['3.6'], active: null }).has('3.6.0'), true);
 check('null and empty pins never become entries',

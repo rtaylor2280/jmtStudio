@@ -189,6 +189,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCoreForVersion:   (name)                  => ipcRenderer.invoke('core:getForVersion', name),
   // Pass null as coreVersion to clear the choice and follow latest again.
   setCoreForVersion:   (name, coreVersion)     => ipcRenderer.invoke('core:setForVersion', { name, coreVersion }),
+  // The JMT plugin [B-668]: make it beside its stock version and move that version's pins onto it.
+  upgradeToJmtPlugin:  (base)                  => ipcRenderer.invoke('core:upgradeToJmt', { base }),
+  jmtPluginOfferState: ()                      => ipcRenderer.invoke('core:jmtOfferState'),
+  jmtPluginOfferAnswered: (base)               => ipcRenderer.invoke('core:jmtOfferAnswered', { base }),
   installCoreVersion:  (coreVersion)           => ipcRenderer.invoke('core:install', { coreVersion }),
   // Stop an install in flight and delete what it had written. The dropdown is
   // locked while one runs, so this is the only way out of a long download.

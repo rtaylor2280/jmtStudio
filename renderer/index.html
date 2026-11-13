@@ -8123,6 +8123,15 @@
         <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
       </div>
     </div>
+    <!-- [B-668] Always: every plugin version gets its JMT version (the 4 GB SD card fix) as the
+         default, with no question. Never: it is not offered. The selector still lists both. -->
+    <div class="settings-item"
+         title="Whether each Proffieboard Plugin version gets its JMT version, with the 4 GB SD card fix, as the default. The original stays in the plugin list either way.">
+      <span class="settings-item-label">Use the JMT plugin (4 GB SD card fix)</span>
+      <div class="theme-selector" id="setting-jmt-plugin">
+        <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
+      </div>
+    </div>
     </div>
 
     <div class="about-section-heading">About</div>
@@ -10305,6 +10314,16 @@ async function _offerProtectSd({ title, intro }) {
 // Touchpoint 1: fired the moment a Mass Storage mode is picked in the dropdown
 // (the first, best chance to fix it). OS8 offers add-or-remove; below OS8 the
 // only fix is removing Mass Storage. Buttons only, never a checkbox.
+// [B-668] The live offer, on picking a Mass Storage USB type: only when this config's ProffieOS
+// version builds with a stock plugin that has a JMT version.
+window.offerJmtPluginForUsb = async function () {
+  const pin = _normPlugin(_statPluginVersion);
+  if (!pin || /-jmt$/.test(pin)) return;
+  let st; try { st = await window.electronAPI.jmtPluginOfferState(); } catch { return; }
+  if (!st || st.choice === 'never' || !(st.supported || []).includes(pin)) return;
+  await window.offerJmtPlugin?.({ base: pin, reason: 'usb' });
+};
+
 window.offerMountSdSettingOnSelect = async function (usbMode) {
   if (!usbMode || !/msc/i.test(usbMode)) return;
   const text = editor ? editor.getValue() : '';
@@ -11820,8 +11839,13 @@ let _statPluginVersion = null;
 // the compile, the pin from .jmt_meta.json - so a raw string compare reports a
 // change where none happened. normalizeVersion lives in the main process; this
 // is its renderer twin, kept to the one rule it needs.
-const _normPlugin = v => String(v || '').trim().split('.').slice(0, 3)
-                           .concat(['0', '0', '0']).slice(0, 3).join('.');
+// Keeps a JMT mark, as the main process does: "4.6-jmt" -> "4.6.0-jmt" [B-668].
+const _normPlugin = v => {
+  const s = String(v || '').trim(), jmt = /[\s-]+jmt(?:\.\d+)?\s*$/i.test(s);
+  const n = s.replace(/[\s-]+jmt(?:\.\d+)?\s*$/i, '').split('.').slice(0, 3)
+              .concat(['0', '0', '0']).slice(0, 3).join('.');
+  return jmt ? n + '-jmt' : n;
+};
 
 /**
  * Is the last build's plugin different from the one this config would use now?
@@ -11937,7 +11961,7 @@ function updateStatusMeta() {
   // resolved a pin for this version yet, and printing the default would be a
   // guess about the one thing this label exists to state.
   const pluginEl = document.getElementById('stat-plugin');
-  pluginEl.textContent = _statPluginVersion ? `Plugin ${_statPluginVersion}` : '';
+  pluginEl.textContent = _statPluginVersion ? `Plugin ${String(_statPluginVersion).replace(/-jmt$/i, ' JMT')}` : '';
 
   // Red when the binary this config last produced came from a DIFFERENT plugin
   // than the one it would build with now.
@@ -35856,6 +35880,7 @@ require(['vs/editor/editor.main'], function () {
         ['setting-images-always-rename', 'imagesAlwaysRename', 'ask'],
         ['setting-font-rename-update', 'fontRenameAlwaysUpdate', 'ask'],
         ['setting-font-style-use', 'fontStyleAlwaysUse', 'ask'],
+        ['setting-jmt-plugin', 'jmtPluginChoice', 'ask'],
       ];
       const _showRemembered = (el, v) => {
         el.querySelectorAll('.choice-btn').forEach((b) => b.classList.toggle('active', b.dataset.choice === v));

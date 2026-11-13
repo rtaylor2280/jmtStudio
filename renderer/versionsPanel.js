@@ -484,8 +484,15 @@ function _vpRenderDetail(v) {
 // the same labels and the same moving bar. (2026-08-15)
 // Local three-part normaliser. The panel cannot require coreVersions, and
 // `3.6` vs `3.6.0` from two different senders would otherwise never match.
-const coreVersions_normalize = v => String(v || '').trim().split('.').slice(0, 3)
-  .concat(['0', '0', '0']).slice(0, 3).join('.');
+// Keeps a JMT mark, as the main process does: "4.6-jmt" -> "4.6.0-jmt" [B-668].
+const coreVersions_normalize = v => {
+  const s = String(v || '').trim(), jmt = /[\s-]+jmt(?:\.\d+)?\s*$/i.test(s);
+  const n = s.replace(/[\s-]+jmt(?:\.\d+)?\s*$/i, '').split('.').slice(0, 3)
+    .concat(['0', '0', '0']).slice(0, 3).join('.');
+  return jmt ? n + '-jmt' : n;
+};
+// How a plugin version reads to a person: "4.6.0-jmt" is "4.6.0 JMT".
+const _vpPluginLabel = v => String(v || '').replace(/-jmt$/i, ' JMT');
 
 const _VP_PHASE = {
   index:       'Checking for plugin',
@@ -530,12 +537,16 @@ async function _vpRenderCoreSection(v, opts = {}) {
   // "system" and "installed" are different facts and the user should see which.
   // A system core lives in their own Arduino tree - usable, but never ours to
   // remove - while an installed one we downloaded and a reset can reclaim.
+  const notes   = avail.notes || {};
   const options = (avail.versions || []).map(ver => {
     const src   = sources[ver];
     const badge = src === 'system' ? ' · system' : src === 'jmt' ? ' · installed' : '';
+    // A JMT entry carries its explanation beside it in the list, always [B-668].
+    const note  = notes[ver] ? ' · 4 GB card fix' : '';
     return `<option value="${_vpEsc(ver)}"${current.pinned === ver ? ' selected' : ''}>` +
-           `${_vpEsc(ver)}${badge}</option>`;
+           `${_vpEsc(_vpPluginLabel(ver))}${note}${badge}</option>`;
   }).join('');
+  const noteFor = ver => notes[ver] || '';
 
   // Explanation lives in a tooltip, not inline. An inline paragraph is height
   // every user pays on every visit, including everyone who already knows.
@@ -548,7 +559,11 @@ async function _vpRenderCoreSection(v, opts = {}) {
 
   body.innerHTML = `
     <div title="${_vpEsc(sectionTitle)}" style="display:flex;flex-direction:column;gap:8px;">
-      <select id="vp-core-select" style="${_VP_SELECT_CSS}">${options}</select>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <select id="vp-core-select" style="${_VP_SELECT_CSS}">${options}</select>
+        ${notes[(current.pinned || '') + '-jmt'] ? `<button id="vp-core-jmt" class="btn btn-secondary" title="${_vpEsc(notes[current.pinned + '-jmt'])}">Get ${_vpEsc(current.pinned)} JMT</button>` : ''}
+      </div>
+      <div id="vp-core-note" style="font-size:12px;color:var(--c-text-sub);${noteFor(current.pinned) ? '' : 'display:none;'}">${_vpEsc(noteFor(current.pinned))}</div>
       <div id="vp-core-status" style="display:flex;align-items:center;gap:10px;min-height:24px;"></div>
     </div>
   `;
@@ -558,6 +573,10 @@ async function _vpRenderCoreSection(v, opts = {}) {
 
   const sel    = document.getElementById('vp-core-select');
   const status = document.getElementById('vp-core-status');
+  document.getElementById('vp-core-jmt')?.addEventListener('click', async () => {
+    const done = await window.offerJmtPlugin?.({ base: current.pinned, reason: 'button' });
+    if (done) _vpRenderCoreSection(v);
+  });
 
   // A render can land WHILE an install is running - this function re-renders
   // itself on success, and a refresh can come from elsewhere - and each one
@@ -647,7 +666,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
     // ...and the status bar must not still read "Toolchain ready" while it arrives. That indicator
     // is written at startup and never revisited, so without this the app disabled Compile for a
     // reason its own status line contradicted. (2026-08-14)
-    window.setToolchainBusy?.(`Installing Proffieboard Plugin ${pinned}...`);
+    window.setToolchainBusy?.(`Installing Proffieboard Plugin ${_vpPluginLabel(pinned)}...`);
     let res = null;
     try {
       res = await window.electronAPI.installCoreVersion(pinned);
@@ -664,7 +683,12 @@ async function _vpRenderCoreSection(v, opts = {}) {
       const live = document.getElementById('vp-core-select');
       if (live) live.disabled = false;
     }
-    if (res && res.ok) { _vpRenderCoreSection(v); return; }
+    if (res && res.ok) {
+      _vpRenderCoreSection(v);
+      // A plugin just arrived: its JMT version is offered now, once [B-668].
+      window.checkJmtPluginOffer?.();
+      return;
+    }
     // A cancelled install is not a failure and must not be reported as one. The
     // killed CLI returns not-ok exactly like a real error would, so without this
     // the user's own deliberate stop came back as "Could not get the plugin."
@@ -759,9 +783,9 @@ async function _vpRenderCoreSection(v, opts = {}) {
       // an event we cannot know - hand deletion today, a backup restore that
       // omitted it tomorrow, or something else entirely. (2026-08-15)
       const absence = dormant
-        ? `Proffieboard Plugin ${_vpEsc(pinned)} is expected but is not on this computer. ` +
+        ? `Proffieboard Plugin ${_vpEsc(_vpPluginLabel(pinned))} is expected but is not on this computer. ` +
           `Saved builds made with it are kept.`
-        : `Proffieboard Plugin ${_vpEsc(pinned)} is not installed.`;
+        : `Proffieboard Plugin ${_vpEsc(_vpPluginLabel(pinned))} is not installed.`;
       bits.push(
         failure
           ? `<span style="color:var(--c-text-dim);">${absence}</span>` +
@@ -770,7 +794,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
           : `<span style="color:var(--c-text-dim);">${absence}</span>`
       );
     } else {
-      bits.push(`<span style="color:var(--c-text-dim);">Building with ${_vpEsc(pinned)}.</span>`);
+      bits.push(`<span style="color:var(--c-text-dim);">Building with ${_vpEsc(_vpPluginLabel(pinned))}.</span>`);
     }
     // A fact, not a nudge. Someone pinned to 3.6 because 4.6 overflows their
     // board needs to know a newer release exists without being pushed toward a
@@ -845,12 +869,12 @@ async function _vpRenderCoreSection(v, opts = {}) {
         `<p>${builds} for <strong>${_vpEsc(v.name)}</strong> ` +
         `${one ? 'was' : 'were'} compiled with plugin ` +
         `<strong>${_vpEsc(impact.fromCore)}</strong> and cannot be reused with ` +
-        `<strong>${_vpEsc(impact.toCore)}</strong>. The first compile of each config ` +
+        `<strong>${_vpEsc(_vpPluginLabel(impact.toCore))}</strong>. The first compile of each config ` +
         `with the new plugin runs from scratch.</p>`,
         // The reassurance is the important half. Nothing is deleted, so this is
         // a reversible choice and nobody needs to copy anything to keep it.
         `<p style="color:var(--c-text-dim);">${one ? 'It is' : 'They are'} not deleted. ` +
-        `Switch back to ${_vpEsc(impact.fromCore)} later and ${one ? 'it' : 'they'} ` +
+        `Switch back to ${_vpEsc(_vpPluginLabel(impact.fromCore))} later and ${one ? 'it' : 'they'} ` +
         `will be reused again.</p>`,
       ];
       // Only claim a duration when one was actually recorded.
@@ -900,7 +924,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
     // Drop it the same way a board or USB change does, or Flash stays armed
     // over a binary made by the previous tools.
     if (res.appliedToActive && window.onCoreVersionChanged) {
-      window.onCoreVersionChanged(`Proffieboard Plugin changed to ${res.pinned}, recompile needed`);
+      window.onCoreVersionChanged(`Proffieboard Plugin changed to ${_vpPluginLabel(res.pinned)}, recompile needed`);
     }
   });
 }
@@ -2023,3 +2047,80 @@ window.vpSelectVersion   = (name) => {
 window.vpSelectedName    = () => _vpSelected?.name || null;
 window.vpHasUnsavedNotes = () => _vpNotesDirty;
 window.vpSaveCurrentNotes = _vpDoSaveNotes;
+
+
+// ── The JMT plugin offer [B-668] ───────────────────────
+// One dialog for every way in: once per plugin version the first time Studio has it, the button
+// beside the selector, and live when a Mass Storage USB type is picked. Accepting makes "<base> JMT"
+// beside <base> and moves every ProffieOS version set to <base> onto it; <base> stays selectable.
+// Answering either way is recorded, so the once-per-version offer never repeats; the button stays.
+// Resolves true when the upgrade was made.
+window.offerJmtPlugin = async function offerJmtPlugin({ base, reason = 'button', others = null } = {}) {
+  base = coreVersions_normalize(base).replace(/-jmt$/, '');
+  const jmt = `${base} JMT`;
+  const lead = reason === 'usb'
+    ? `<p>This USB type includes Mass Storage, which is where the problem below happens.</p>` : '';
+  const go = await window.promptConfirm({
+    title: `Proffieboard Plugin ${jmt}`,
+    messageHtml: lead +
+      `<p>With plugin ${_vpEsc(base)}, an SD card larger than 4 GB can be damaged when the board is ` +
+      `used as a USB drive: anything read or written past the first 4 GB lands at the start of the ` +
+      `card instead.</p>` +
+      `<p><strong>${_vpEsc(jmt)}</strong> is the same plugin with that fixed, the way ST, who wrote ` +
+      `the USB code, fixed it in their own library.</p>` +
+      `<p style="color:var(--c-text-dim);">It is added beside ${_vpEsc(base)}, which is not changed. ` +
+      `Every ProffieOS version set to ${_vpEsc(base)} moves to ${_vpEsc(jmt)}, and any of them can ` +
+      `go back to ${_vpEsc(base)} in OS Versions.</p>` +
+      ((others && others.length)
+        ? `<p style="color:var(--c-text-dim);">Plugin ${others.map(_vpEsc).join(' and ')} on this computer ` +
+          `${others.length === 1 ? 'gets' : 'get'} the same fix, and any plugin version added later ` +
+          `gets it too.</p>`
+        : `<p style="color:var(--c-text-dim);">Any plugin version added later gets the same fix.</p>`),
+    confirmText: `Use ${jmt}`,
+    confirmKind: 'primary',
+    cancelText:  'Not now',
+    // Never is remembered in Settings > Remembered choices, where it can be set back [B-561 pattern].
+    middleText:  reason === 'button' ? null : "Don't offer again",
+  });
+  if (go === 'middle') {
+    try { await window.electronAPI.setSetting('jmtPluginChoice', 'never'); } catch {}
+    try { await window.electronAPI.jmtPluginOfferAnswered(base); } catch {}
+    return false;
+  }
+  if (!go || go === 'cancel') { try { await window.electronAPI.jmtPluginOfferAnswered(base); } catch {} return false; }
+  const res = await window.electronAPI.upgradeToJmtPlugin(base);
+  if (!res || !res.ok) {
+    await window.promptConfirm({ title: `Proffieboard Plugin ${jmt}`, message: (res && res.error) || `Could not make ${jmt}.`,
+                                 confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+    return false;
+  }
+  const n = (res.moved || []).length;
+  window.showToast?.(`${jmt} is ready${n ? `, and ${n} ProffieOS version${n === 1 ? '' : 's'} moved to it` : ''}.`);
+  if (res.appliedToActive && window.onCoreVersionChanged) {
+    window.onCoreVersionChanged(`Proffieboard Plugin changed to ${jmt}, recompile needed`);
+  }
+  // Accepted now, so every other plugin version on this computer gets fixed too, without asking.
+  await window.checkJmtPluginOffer?.();
+  return true;
+};
+
+// The once-per-version offer: any stock plugin on this machine with a JMT fix not yet offered.
+window.checkJmtPluginOffer = async function checkJmtPluginOffer() {
+  let st; try { st = await window.electronAPI.jmtPluginOfferState(); } catch { return; }
+  for (const base of (st && st.due) || []) {
+    if (st.accepted) {
+      // Already said yes once: a plugin added since gets its JMT version as the default, no question.
+      const res = await window.electronAPI.upgradeToJmtPlugin(base);
+      if (res && res.ok) {
+        window.showToast?.(`${base} JMT added and set as the default for ${base}.`);
+        if (res.appliedToActive) window.onCoreVersionChanged?.(`Proffieboard Plugin changed to ${base} JMT, recompile needed`);
+      }
+    } else {
+      // ONE question covers every plugin version on this computer: a yes
+      // fixes them all (offerJmtPlugin comes back here as accepted), a no is recorded for all.
+      const yes = await window.offerJmtPlugin({ base, reason: 'first', others: st.due.filter(b => b !== base) });
+      if (!yes) for (const b of st.due) { try { await window.electronAPI.jmtPluginOfferAnswered(b); } catch {} }
+      return;
+    }
+  }
+};

@@ -595,7 +595,12 @@ async function initBuildPanel() {
     // fire this handler, so loads never trigger it; they warn at compile instead.
     if (/msc/i.test(selectedUsb) && !/msc/i.test(prevUsb || '')) {
       window._notePreMassStorageMode?.(prevUsb); // remember what to revert to
-      window.offerMountSdSettingOnSelect?.(selectedUsb);
+      // [B-668] Then, live: the plugin's 4 GB Mass Storage bug is exactly this mode's risk, so a
+      // version still on a stock plugin with a JMT fix is offered it here. After the SD guard's own
+      // question, never stacked on it.
+      Promise.resolve(window.offerMountSdSettingOnSelect?.(selectedUsb))
+        .then(() => window.offerJmtPluginForUsb?.())
+        .catch(() => {});
     }
     // [B-170] The mirror, and the point of the whole entry: leaving Mass Storage
     // makes MOUNT_SD_SETTING dead, and a dead define reads to its owner as SD
@@ -745,6 +750,11 @@ async function initBuildPanel() {
 
   // Initial port scan
   await refreshPorts();
+
+  // Once per plugin version: offer its JMT version, the first time Studio has it [B-668]. After
+  // the toolchain is up, so a first install has already landed. Not awaited: a dialog must not
+  // hold up startup.
+  setTimeout(() => { window.checkJmtPluginOffer?.(); }, 1500);
 }
 
 // ── Gate phase ─────────────────────────────────────────

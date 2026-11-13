@@ -11,6 +11,7 @@ const { spawn } = require('child_process');
 const proffie      = require('./proffieos');
 const cache        = require('./cacheManager');
 const coreVersions = require('./coreVersions');
+const jmtPlugin    = require('./jmtPlugin');
 
 // ── Abort state ───────────────────────────────────────
 let _currentProc = null;
@@ -284,7 +285,7 @@ function listCoreTreePaths() {
       if (!d.isDirectory()) continue;
       // Same rule as listCoreTrees: `staging` and `tmp` live here too and are
       // never trees.
-      if (!/^\d+\.\d+(\.\d+)?$/.test(d.name)) continue;
+      if (!/^\d+\.\d+(\.\d+)?(-jmt)?$/.test(d.name)) continue;  // "4.6.0-jmt" is a JMT plugin's tree [B-668]
       out.add(path.join(root, d.name));
     }
   } catch { /* no root yet: nothing installed */ }
@@ -311,7 +312,7 @@ function listCoreTrees() {
       if (!d.isDirectory()) continue;
       // Only version-shaped subdirectories are trees. `staging` and `tmp` live
       // here too and must never be mistaken for one.
-      if (!/^\d+\.\d+(\.\d+)?$/.test(d.name)) continue;
+      if (!/^\d+\.\d+(\.\d+)?(-jmt)?$/.test(d.name)) continue;  // "4.6.0-jmt" is a JMT plugin's tree [B-668]
       add(path.join(root, d.name));
     }
   } catch { /* no root yet: nothing installed */ }
@@ -776,6 +777,45 @@ async function _installCoreInto(onLog, version, dataPath, sentinelPath) {
 }
 
 /**
+ * A JMT plugin is never downloaded: it is MADE, beside its stock version, from that version's files
+ * plus the fixed libraries Studio ships [B-668]. So "ensure" here means: make sure the stock base is
+ * on this machine (adopting the user's own copy, or installing ours, exactly as for any plugin),
+ * then build the JMT tree from it. The JMT tree is always ours, so a JMT plugin always builds
+ * isolated - never against whatever another tool installed.
+ */
+async function _ensureJmtCore(onLog, version, dataPath, sentinelPath) {
+  if (coreVersions.isVersionInstalled(dataPath, version)) {
+    try { fs.writeFileSync(sentinelPath, version, 'utf8'); } catch {}
+    try { _recordPlugin?.(version, 'jmt'); } catch {}
+    return { ok: true, version, isolated: true };
+  }
+  const base = coreVersions.baseVersion(version);
+  if (!jmtPlugin.isSupported(proffie.getResourcesPath(), version)) {
+    return { ok: false, error: `There is no JMT version of Proffieboard Plugin ${base}.` };
+  }
+  // The base, wherever it is: one of our trees, else the user's own Arduino tree, else install ours.
+  let baseTree = findOurCoreTree(base)?.path || null;
+  if (!baseTree && coreVersions.isVersionInstalled(getSystemArduinoDataPath(), base)) baseTree = getSystemArduinoDataPath();
+  if (!baseTree) {
+    const got = await ensureCore(onLog, base, { activate: false });
+    if (!got.ok) return got;
+    baseTree = findOurCoreTree(base)?.path
+      || (coreVersions.isVersionInstalled(getSystemArduinoDataPath(), base) ? getSystemArduinoDataPath() : null);
+    if (!baseTree) return { ok: false, error: `Proffieboard Plugin ${base} could not be found after installing it.` };
+  }
+  try { _beginInstall?.(version); } catch {}
+  const made = jmtPlugin.createJmtTree({ base, baseTree, jmtTree: dataPath, resourcesPath: proffie.getResourcesPath(), onLog });
+  if (!made.ok) return made;
+  await ensureCliConfig(onLog, dataPath);
+  try { fs.writeFileSync(sentinelPath, version, 'utf8'); } catch {}
+  _ensureLinuxDfuSuffix(onLog);
+  _ensureMacDfuSuffix(onLog);
+  try { _recordPlugin?.(version, 'jmt'); } catch {}
+  try { _endInstall?.(version); } catch {}
+  return { ok: true, version, isolated: true };
+}
+
+/**
  * @param opts.activate  false = fetch this plugin WITHOUT making it the session's
  *                       active one and without touching the shared isolation
  *                       flag. For installs that serve something other than the
@@ -803,6 +843,9 @@ async function ensureCore(onLog, requestedVersion = null, { activate = true } = 
 
   // Self-contained path. Decides isolation for THIS version only, from the disk,
   // and writes none of it back to module state.
+  if (!activate && coreVersions.isJmtVersion(version)) {
+    return await _ensureJmtCore(onLog, version, dataPath, sentinelPath);
+  }
   if (!activate) {
     if (coreVersions.isVersionInstalled(getSystemArduinoDataPath(), version)) {
       onLog(`Proffieboard Plugin ${version} is already on this system.`, false);
@@ -831,6 +874,12 @@ async function ensureCore(onLog, requestedVersion = null, { activate = true } = 
   // flash-tight board still gets 3.6, they just do not re-download a copy of it
   // they already have. Always-isolate cost every user roughly 1.5 GB even when
   // their machine was already correct. (2026-08-12)
+  // A JMT plugin lives only in its own tree, so it is always isolated [B-668].
+  if (coreVersions.isJmtVersion(version)) {
+    _useIsolatedCore = true;
+    return await _ensureJmtCore(onLog, version, dataPath, sentinelPath);
+  }
+
   if (_useIsolatedCore === null) {
     if (_coreVersionIsExplicit) {
       if (coreVersions.isVersionInstalled(getSystemArduinoDataPath(), version)) {
@@ -907,6 +956,11 @@ async function uninstallCore(onLog, version) {
   if (target === getActiveCoreVersion()) {
     return { ok: false, error: `Proffieboard Plugin ${target} is in use and was not removed.` };
   }
+  // The twin rule [B-668]: the plugin in use keeps its twin. A JMT plugin builds with its stock
+  // version's compiler, and the stock version stays so the fix can be tested against it.
+  if (coreVersions.twinVersion(target) === getActiveCoreVersion()) {
+    return { ok: false, error: `Proffieboard Plugin ${target} goes with ${getActiveCoreVersion()}, which is in use, and was not removed.` };
+  }
 
   // Find the tree that holds THIS version, among ours only. The system tree is
   // never searched, so it can never be the thing removed.
@@ -971,8 +1025,11 @@ async function uninstallCore(onLog, version) {
  * (2026-08-15)
  */
 async function cancelCoreInstall(version) {
+  // A JMT plugin's tree is "4.6.0-jmt", its own directory: cancelling one removes THAT tree and
+  // never the stock tree beside it. Before B-668 the mark was normalised away and this would have
+  // targeted arduino-data/4.6.0.
   const target = coreVersions.normalizeVersion(version);
-  if (!/^\d+\.\d+\.\d+$/.test(target)) {
+  if (!/^\d+\.\d+\.\d+(-jmt)?$/.test(target)) {
     return { ok: false, error: 'Not a plugin version.' };
   }
 
@@ -1191,8 +1248,10 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // Isolation is resolved above, so this reports the real answer. (2026-08-15)
   onLog(`Board:               ${fqbn}`, false);
   onLog(`ProffieOS:           ${proffie.getSelectedVersion() || 'unknown'}`, false);
-  onLog(`Proffieboard Plugin: ${getActiveCoreVersion()} ` +
+  onLog(`Proffieboard Plugin: ${getActiveCoreVersion().replace(/-jmt$/, ' JMT')} ` +
         `(${_useIsolatedCore ? 'JMT Studio' : 'system'})`, false);
+  // Credit where the build carries our fix, the way ProffieOS credits its contributors [B-668].
+  if (coreVersions.isJmtVersion(getActiveCoreVersion())) onLog(`                     ${jmtPlugin.NOTE}`, false);
   onLog(`USB:                 ${usb}`, false);
 
   // The workspace is re-checked against the installed tree on every compile, not only at
