@@ -22,5 +22,73 @@
         "jmt": "4d369d0bd2ed1374bf3335d70a49066640f3743b59ce4b2858f88f2d87f12b6a"
       }
     }
+  },
+  "tools": {
+    "arm-none-eabi-gcc@14-2-rel1-xpack": {
+      "i686-mingw32": {
+        "digest": "683d163bf276f6f79749485ee2520ca443708c7f5a9201ffce2ee35cf4bde4ac",
+        "files": 5692,
+        "archive": "xpack-arm-none-eabi-gcc-14.2.1-1.1-win32-x64.zip",
+        "archiveSha256": "0b2d496b383ba578182eb57b3f7d35ff510e36eda56257883b902fa07c3bba55"
+      },
+      "arm64-apple-darwin": {
+        "digest": "d6c8032d8adf45af899da5e1440dd61a1b9517cdd647387789ca5556e0d08b95",
+        "files": 7496,
+        "archive": "xpack-arm-none-eabi-gcc-14.2.1-1.1-darwin-arm64.tar.gz",
+        "archiveSha256": "f52ea3760c53b25d726a7345be60a210736293db85f92daa39d1d22d34e2c995"
+      },
+      "x86_64-apple-darwin": {
+        "digest": "78e6fa18bac1763391335594e11b408aaf586b2226f3b3817c122e8a8939e21c",
+        "files": 7482,
+        "archive": "xpack-arm-none-eabi-gcc-14.2.1-1.1-darwin-x64.tar.gz",
+        "archiveSha256": "b5bf8d5af099fd464d1543e5b8901308fb64116fa7a244426cacf4ff1b882fc7"
+      },
+      "aarch64-linux-gnu": {
+        "digest": "3393169eebb6e01a8d51394531b66cb0668ae69806f586ba46fe43434916e257",
+        "files": 7477,
+        "archive": "xpack-arm-none-eabi-gcc-14.2.1-1.1-linux-arm64.tar.gz",
+        "archiveSha256": "a1ac95c8d9347020d61e387e644a2c1806556b77162958a494d2f5f3d5fe7053"
+      },
+      "x86_64-linux-gnu": {
+        "digest": "e74c7013f89f9b69f8bd63d10d4bf505fd335e81fc286074774edb3748f7f012",
+        "files": 7477,
+        "archive": "xpack-arm-none-eabi-gcc-14.2.1-1.1-linux-x64.tar.gz",
+        "archiveSha256": "ed8c7d207a85d00da22b90cf80ab3b0b2c7600509afadf6b7149644e9d4790a6"
+      }
+    },
+    "arm-none-eabi-gcc@9-2020-q2-update": {
+      "i686-mingw32": {
+        "digest": "82cdbd61251edb2b6b5f620cb2c6e99e4656170d6f814d6ad6a80c902526f428",
+        "files": 6295,
+        "archive": "gcc-arm-none-eabi-9-2020-q2-update-win32.zip",
+        "archiveSha256": "46cd2e7caeb73daa09acfb9a69df059cf4a27bb45434125afe533ffbace0dc0f"
+      },
+      "aarch64-linux-gnu": {
+        "digest": "c2e14a9b7b14b5ae7365f829d5158e0583ae91b5cf457108a55786af8779eade",
+        "files": 6783,
+        "archive": "gcc-arm-none-eabi-9-2020-q2-update-aarch64-linux.tar.bz2",
+        "archiveSha256": "1f4165c25e2cff80e29870f409862487ba470afd436e245ba3c743108e17b8ac"
+      },
+      "x86_64-apple-darwin": {
+        "digest": "941d37174b2a9c8e0b6eb15b494ee19051dbc5b661933cfe1aea4faa8201daca",
+        "files": 6622,
+        "archive": "gcc-arm-none-eabi-9-2020-q2-update-mac.tar.bz2",
+        "archiveSha256": "bbb9b87e442b426eca3148fa74705c66b49a63f148902a0ea46f676ec24f9ac6"
+      },
+      "x86_64-pc-linux-gnu": {
+        "digest": "8983a1f0ac0861c6ca7d0ce7cec41f529177db7942c79b64ceec9882d1db248f",
+        "files": 6781,
+        "archive": "gcc-arm-none-eabi-9-2020-q2-update-x86_64-linux.tar.bz2",
+        "archiveSha256": "5adc2ee03904571c2de79d5cfc0f7fe2a5c5f54f44da5b645c17ee57b217f11f"
+      }
+    }
+  },
+  "baseTools": {
+    "4.6.0": [
+      "arm-none-eabi-gcc@14-2-rel1-xpack"
+    ],
+    "3.6.0": [
+      "arm-none-eabi-gcc@9-2020-q2-update"
+    ]
   }
 }

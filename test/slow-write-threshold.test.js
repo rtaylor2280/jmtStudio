@@ -32,7 +32,7 @@ const ok = (name, cond) => {
 const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
 
 // ── The module is the definition ─────────────────────────────────────
-eq('SLOW_WRITE_MIN_BYTES is 60 MB', D.SLOW_WRITE_MIN_BYTES, 60 * 1024 * 1024);
+eq('SLOW_WRITE_MIN_BYTES is 100 MB', D.SLOW_WRITE_MIN_BYTES, 100 * 1024 * 1024);
 // THE FILE-COUNT THRESHOLD IS GONE (2026-10-04) AND THIS ASSERTS ITS ABSENCE.
 // Removed on measurement: an 18 MB set of 200+ files is not slow on a board card. A
 // constant left exported would be re-wired by the next person who reads the old argument
@@ -110,8 +110,9 @@ ok('main.js no longer runs its own transport test',
 // would pass whether the limb was removed or not.
 ok('under the limit is not slow',            !D.isSlowWriteJob(10, 1024));
 ok('a huge file count alone does NOT trip it', !D.isSlowWriteJob(10000, 0));
-ok('bytes alone trip it',                     D.isSlowWriteJob(1, 60 * 1024 * 1024));
-ok('one byte under does not',                !D.isSlowWriteJob(0, 60 * 1024 * 1024 - 1));
+ok('bytes alone trip it',                     D.isSlowWriteJob(1, 100 * 1024 * 1024));
+ok('one byte under does not',                !D.isSlowWriteJob(0, 100 * 1024 * 1024 - 1));
+ok('a 90 MB font does not (2026-11-13: size alone, and that is minutes, not a wait)', !D.isSlowWriteJob(1, 90 * 1024 * 1024));
 // The measured case, asserted as itself so the regression has a name rather than a number:
 // 18 MB across 200+ files is not slow, and 100 MB is.
 ok('18 MB / 220 files is not slow',       !D.isSlowWriteJob(220, 18 * 1024 * 1024));
@@ -128,7 +129,7 @@ ok('garbage reads as not slow',              !D.isSlowWriteJob(null, undefined))
 // rule, and the delete cost has never actually been measured (see exportDestination.js).
 eq('SLOW_CLEANUP_MIN_FILES is 150', D.SLOW_CLEANUP_MIN_FILES, 150);
 ok('cleanup still trips on count alone',   D.isSlowCleanupJob(150, 0));
-ok('cleanup trips on bytes alone',            D.isSlowCleanupJob(1, 60 * 1024 * 1024));
+ok('cleanup trips on bytes alone',            D.isSlowCleanupJob(1, 100 * 1024 * 1024));
 ok('one under the cleanup count does not',   !D.isSlowCleanupJob(149, 0));
 ok('cleanup garbage reads as not slow',      !D.isSlowCleanupJob(null, undefined));
 // THE PAIR THAT PROVES THEY ARE DIFFERENT QUESTIONS. Same job, opposite answers: a

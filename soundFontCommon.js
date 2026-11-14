@@ -1901,7 +1901,8 @@ async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', s
     const valid = sync.entryValid(ent, st.size, mtime);
     // AWAITED STREAM HASH — see the twin in soundFontEntries. [B-398]
     // [B-173] - see the twin in soundFontEntries.
-    const destHash = valid ? ent[2] : (sync.countHash(), await hashFileAsync(abs));
+    const destHash = valid ? ent[2] : (sync.countHash(), await hashFileAsync(abs, { shouldStop }));
+    if (shouldStop && shouldStop()) return { ok: true, canceled: true };   // stopped mid-file
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
     await breathe();

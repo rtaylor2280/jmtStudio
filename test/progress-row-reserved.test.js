@@ -50,7 +50,7 @@ function bodyOf(sig, end = '\n        },') {
 }
 
 {
-  const block = bodyOf('        offerCancel(onCancel) {', '\n          b.onclick');
+  const block = bodyOf("        offerCancel(onCancel, { stoppingNote = 'Stopping… (finishing the current file)' } = {}) {", '\n          b.onclick');
   ok('offerCancel was located', block.length > 0, 're-anchor if it is renamed');
   ok('it makes the button visible again',
      /b\.style\.visibility\s*=\s*''/.test(block),

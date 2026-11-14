@@ -19,7 +19,7 @@ const S = fs.readFileSync(path.join(__dirname, '..', 'sdCardDetect.js'), 'utf8')
 const H = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
 
 const wh = S.slice(S.indexOf('function _withHealth('), S.indexOf('function _withHealth(') + 300);
-ok('the Mac rows say whether health could be read', /healthReadable: health !== null/.test(wh));
+ok('the Mac rows say whether health could be read', /healthReadable: (h\.)?health !== null/.test(wh));
 ok('Windows rows do not set it, so a failed read there still says "unknown"',
   !/healthReadable/.test(S.slice(S.indexOf('function enumerateVolumesWindows'), S.indexOf('function _healthFromDirtyBit'))));
 

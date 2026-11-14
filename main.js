@@ -60,6 +60,8 @@ const Store = {
     data[key] = val;
     fs.writeFileSync(this._path, JSON.stringify(data), 'utf8');
   },
+  // True only on the first run of JMT Studio on this computer: read before anything is saved [B-668].
+  freshInstall: false,
   // [B-299] THIS WAS MISSING, AND TWO CALLERS USED IT. Both threw. The one in
   // the plugin `end:` hook meant the pending-install marker was never taken down
   // after a SUCCESSFUL install — so a standing marker stopped meaning "interrupted"
@@ -80,6 +82,7 @@ const Store = {
     fs.writeFileSync(this._path, JSON.stringify(data), 'utf8');
   }
 };
+Store.freshInstall = !fs.existsSync(Store._path);
 
 function addRecentFile(filePath) {
   let files = Store.get('recentFiles') || [];
@@ -229,21 +232,6 @@ function createWindow() {
 let dataRail = null;
 
 app.whenReady().then(() => {
-  // [B-660] Studio's own page may LIST Proffieboards through Chromium's WebUSB, so it can tell
-  // which USB build a board is running (WebUSB = a vendor interface with endpoints; Mass
-  // Storage = class 8). Listing only: Studio never opens or claims the board this way.
-  // Narrow on purpose: the usb permission, Studio's own file:// page, and pid.codes vendor
-  // 0x1209 (the Proffieboard). Everything else keeps Chromium's default (denied).
-  try {
-    const { session } = require('electron');
-    const ownPage = (o) => typeof o === 'string' && o.startsWith('file://');
-    session.defaultSession.setPermissionCheckHandler((_wc, perm, origin, details) => {
-      if (perm === 'usb') return ownPage(origin || (details && details.requestingUrl));
-      return true;   // unchanged: Electron's default for every other permission
-    });
-    session.defaultSession.setDevicePermissionHandler((d) =>
-      d && d.deviceType === 'usb' && d.device && d.device.vendorId === 0x1209 && ownPage(d.origin));
-  } catch (e) { console.warn('[B-660] usb permission handlers not set:', e && e.message); }
   // [B-398] Arm the stall probe before any work can happen, so a freeze during the very first
   // import is still measured. Returns false and costs nothing when the flag file is absent.
   try {
@@ -259,6 +247,12 @@ app.whenReady().then(() => {
       });
     }
   } catch {}
+  // [B-670] Per-version plugin trees move to the short root before anything resolves one.
+  try {
+    const m = toolchain.migrateCoreTrees(msg => console.warn('[B-670]', msg));
+    if (m.moved.length || m.left.length) console.log('[B-670] plugin trees moved:', m.moved, 'left:', m.left);
+  } catch (e) { console.warn('[B-670] plugin tree move failed:', e && e.message); }
+
   // Evict stale cache entries before window opens
   try { cacheManager.startupEviction(); } catch {}
 
@@ -1624,7 +1618,10 @@ async function _surveyBuildSpace() {
   // NESTED PATHS CANNOT BE SUMMED. Walk the container once. `build-output` is the only part of the
   // build space living outside that root, so it is the only thing added - and `stagingBytes` is
   // deliberately NOT added here for the same reason. (2026-08-14)
-  const footprintBytes = workspaceBytes + _dirSize(toolchain.getCoreTreeRoot());
+  // On Windows the trees have their own root beside the legacy one (B-670); the two never nest, so
+  // each is walked once and summed.
+  const footprintBytes = workspaceBytes +
+    toolchain.listCoreTreeRoots().reduce((n, r) => n + _dirSize(r), 0);
 
   // Cached builds are NOT build space, in either number. Build space is temp files and plugins.
   // A reset still removes builds that only work with a plugin it is deleting - they are unusable
@@ -3708,8 +3705,14 @@ ipcMain.handle('soundFonts:recordFolderAt', async (event, { name, destDir } = {}
 // LOOKED at, which the per-item write used to drop.
 // Whether the destination carries a usable sync manifest: 'ok', 'absent', 'unreadable' or
 // 'incompatible'. One file read, memoised, so the scan that follows reuses it.
+// `covered` names the folders the record holds, so a caller can tell how much of a selection
+// will compare off it (cheap) and how much has to be read through the destination (not).
 ipcMain.handle('syncManifest:state', (_, { destDir } = {}) => {
-  try { return { ok: true, state: require('./sfSyncManifest').readState(destDir).state }; }
+  try {
+    const r = require('./sfSyncManifest').readState(destDir);
+    const items = r && r.manifest && r.manifest.items;
+    return { ok: true, state: r.state, covered: items && typeof items === 'object' ? Object.keys(items) : [] };
+  }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }
 });
 
@@ -5707,9 +5710,32 @@ ipcMain.handle('dialog:pickExportFilePath', async (_, { name } = {}) => {
   }
 });
 
+// NEVER OPEN THE FOLDER PICKER INSIDE A BOARD CARD. Windows lists the folder before it shows
+// the dialog, and a card mounted through a Proffieboard is listed over the board's USB link, as
+// slowly as a font is read through it: on 2026-11-13 a card of 160+ folders kept the picker from
+// appearing at all for a long time, and the click looked dead; it had happened before. When the last destination is a removable drive and a Proffieboard is attached,
+// open at This PC instead; the card is one click away in the drive list. A folder picker takes
+// the bare shell path (no filename), which is the one case `exportDefaultPath`'s note says works.
+// Cheap on purpose: a serial port list and fsutil, never the ~2 s board-card association.
+async function _lastDirMayBeBoardCard(dir) {
+  if (process.platform !== 'win32' || !dir) return false;
+  try {
+    const { SerialPort } = require('serialport');
+    const ports = await SerialPort.list();
+    if (!ports.some((p) => String(p.vendorId || '').toLowerCase() === '1209')) return false;
+    const k = await require('./exportDestination').driveKind(dir);
+    return !!(k && k.removable);
+  } catch { return false; }
+}
+
 ipcMain.handle('dialog:pickExportDir', async (_, { title } = {}) => {
   try {
-    const lastDir = liveDir(Store.get('lastExportDir')) || app.getPath('downloads');
+    // A last location that is gone (card out, drive unplugged) is not opened either, and the
+    // check that says so must not hang on a dead reader: liveDirSafe, not liveDir.
+    const stored = await liveDirSafe(Store.get('lastExportDir'));
+    const lastDir = stored && (await _lastDirMayBeBoardCard(stored))
+      ? 'shell:MyComputerFolder'
+      : (stored || app.getPath('downloads'));
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       title: title || 'Choose export destination…',
       defaultPath: lastDir,
@@ -7913,12 +7939,13 @@ ipcMain.handle('core:listAvailable', async () => {
     // below the floor predates ProffieOS 7, so listing it would put eight traps
     // in a dropdown. Anything present on the machine is always included even
     // below the floor, so the list can never hide a core the user actually has.
-    // Each offered stock version that has a JMT fix gets its JMT entry right above it [B-668]. Made on
-    // demand from the stock files, so it is offered whether or not it has been made yet.
+    // A JMT version is listed once it is on this computer, right above its stock version [B-668].
+    // Until then the Get button beside the selector is the way to it.
     versions:  (() => {
       const offered = coreVersions.offeredVersions(res.versions, Object.keys(byVersion));
       const jmt = jmtPlugin.supportedBases(proffie.getResourcesPath())
-        .filter(b => offered.includes(b)).map(coreVersions.jmtVersionOf);
+        .filter(b => offered.includes(b)).map(coreVersions.jmtVersionOf)
+        .filter(j => byVersion[j]);
       return coreVersions.offeredVersions([], [...offered, ...jmt]);
     })(),
     // The always-visible line beside a JMT entry; the label itself stays "4.6.0 JMT".
@@ -8008,6 +8035,8 @@ ipcMain.handle('core:jmtOfferState', async () => {
     // them, because the answer is already known.
     choice:   _jmtChoice(),
     accepted: _jmtChoice() === 'always',
+    // The only time the offer is asked at startup: a first run, once the plugin is set up.
+    freshInstall: Store.freshInstall,
     // Never: nothing is offered and nothing is made.
     due: _jmtChoice() === 'never' ? [] : supported.filter(b => available.includes(b) && !available.includes(coreVersions.jmtVersionOf(b))
                             && (_jmtChoice() === 'always' || !offered[b])),

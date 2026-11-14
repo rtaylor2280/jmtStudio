@@ -117,8 +117,11 @@ function getActiveCoreVersion() { return _activeCoreVersion; }
 function setActiveCoreVersion(version, { explicit = true } = {}) {
   const next = coreVersions.normalizeVersion(version);
   if (next !== _activeCoreVersion) {
-    // Isolation was decided for the previous version, so it has to be re-asked.
-    _useIsolatedCore = null;
+    // Isolation was decided for the previous version, so it has to be re-asked - except for a JMT
+    // plugin, which exists only in its own tree and is ALWAYS isolated [B-668]. Leaving it null let
+    // compile() re-probe the system plugin, find Arduino15's stock 4.6 able to build, and link that:
+    // a "4.6.0 JMT" build without the fix (2026-11-13, laptop with Arduino IDE installed).
+    _useIsolatedCore = coreVersions.isJmtVersion(next) ? true : null;
   }
   _activeCoreVersion     = next;
   _coreVersionIsExplicit = explicit;
@@ -216,11 +219,11 @@ function findOurCoreTree(version) {
   return null;
 }
 
-// The root every core tree of ours lives under. Always the prod userData path so
+// The pre-1.8 data directory: <prod userData>/arduino-data. Always the prod userData path so
 // installed packages are shared between dev and prod builds: in dev mode
 // app.getPath('userData') is overridden to 'jmt-studio-dev', which would be
 // missing the board packages.
-function getCoreTreeRoot() {
+function _prodArduinoData() {
   const { app } = require('electron');
   const base = app.isPackaged
     ? app.getPath('userData')
@@ -228,11 +231,77 @@ function getCoreTreeRoot() {
   return path.join(base, 'arduino-data');
 }
 
-// The pre-1.8 layout: one tree at the root, holding whatever single core the
-// machine last installed. Kept as a first-class location rather than migrated,
-// see getCoreTreePath.
+// The root every per-version core tree of ours lives under.
+//
+// WINDOWS: %LOCALAPPDATA%\JMT, kept SHORT on purpose. gcc builds its header search paths
+// unnormalised ("...\bin\..\lib\gcc\arm-none-eabi\14.2.1\..\..\..\..\arm-none-eabi\include\c++\...")
+// and cannot open a path of 260 characters or more. Under %APPDATA%\jmt-studio\arduino-data\
+// 4.6.0-jmt the path to bits\gthr-default.h measured exactly 260 for a four-letter user name, and every
+// compile failed with "bits/gthr-default.h: No such file or directory" (B-670, 2026-11-13). This root
+// is 25 characters shorter, and the per-version level is the only thing it adds over Arduino15's own
+// layout, so the limit sits past Windows' 20-character user name. Local, not Roaming, also because
+// a 1.4 GB compiler is machine data and must never ride a roaming profile.
+//
+// Elsewhere there is no such limit and the root stays where it always was.
+function getCoreTreeRoot() {
+  if (process.platform !== 'win32') return _prodArduinoData();
+  const local = process.env.LOCALAPPDATA || path.join(require('os').homedir(), 'AppData', 'Local');
+  return path.join(local, 'JMT');
+}
+
+// The pre-1.8 layout: one tree at <prod userData>/arduino-data, holding whatever single core the
+// machine last installed (1.7.x). Kept as a first-class location rather than migrated, see
+// getCoreTreePath. On Windows it is no longer the root of the per-version trees; elsewhere it is.
 function getLegacyCoreTreePath() {
-  return getCoreTreeRoot();
+  return _prodArduinoData();
+}
+
+// Every directory per-version trees may live directly under: the root, and on Windows also the old
+// root, where a tree that could not be moved (B-670) stays visible, so a reset can still reclaim it.
+function _treeRoots() {
+  return Array.from(new Set([getCoreTreeRoot(), getLegacyCoreTreePath()]));
+}
+
+const _TREE_NAME = /^\d+\.\d+(\.\d+)?(-jmt)?$/;   // "4.6.0-jmt" is a JMT plugin's tree [B-668]
+
+/**
+ * Move per-version trees from the old root to the short one (Windows, B-670). 1.8 betas put them
+ * at <prod userData>/arduino-data/<version>; 1.7.x never made any, and its single legacy tree
+ * stays exactly where it is.
+ *
+ * A rename on one volume, so hard links inside a JMT tree survive and nothing is re-downloaded.
+ * Each tree's arduino-cli.yaml names its own path, so it is rewritten after the move. A tree that
+ * cannot be moved (open file, name already taken) is left where it is and still listed; nothing is
+ * ever deleted here except an abandoned "<version>-jmt.partial" build directory.
+ */
+function migrateCoreTrees(log = () => {}) {
+  const from = getLegacyCoreTreePath(), to = getCoreTreeRoot();
+  const out = { moved: [], left: [] };
+  if (from === to) return out;
+  let ents;
+  try { ents = fs.readdirSync(from, { withFileTypes: true }); } catch { return out; }
+  for (const d of ents) {
+    if (!d.isDirectory()) continue;
+    const src = path.join(from, d.name);
+    if (/^\d+\.\d+\.\d+-jmt\.partial$/.test(d.name)) {
+      try { fs.rmSync(src, { recursive: true, force: true }); } catch {}
+      continue;
+    }
+    if (!_TREE_NAME.test(d.name)) continue;
+    const dst = path.join(to, d.name);
+    if (fs.existsSync(dst)) { out.left.push(d.name); continue; }
+    try {
+      fs.mkdirSync(to, { recursive: true });
+      fs.renameSync(src, dst);
+    } catch (e) {
+      out.left.push(d.name);
+      log(`Could not move Proffieboard Plugin tree ${d.name}: ${e.message}`);
+      continue;
+    }
+    try { _writeCliConfig(dst); } catch (e) { log(`Moved ${d.name} but could not rewrite its config: ${e.message}`); }
+    out.moved.push(d.name);
+  }
+  return out;
 }
 
 /**
@@ -278,22 +347,22 @@ function getCoreTreePath(version) {
 // the same time. Also catches the empty shells `runCli`'s unconditional mkdir
 // leaves behind. (2026-08-12)
 function listCoreTreePaths() {
-  const root = getCoreTreeRoot();
   const out  = new Set([getLegacyCoreTreePath()]);
-  try {
-    for (const d of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!d.isDirectory()) continue;
-      // Same rule as listCoreTrees: `staging` and `tmp` live here too and are
-      // never trees.
-      if (!/^\d+\.\d+(\.\d+)?(-jmt)?$/.test(d.name)) continue;  // "4.6.0-jmt" is a JMT plugin's tree [B-668]
-      out.add(path.join(root, d.name));
-    }
-  } catch { /* no root yet: nothing installed */ }
+  for (const root of _treeRoots()) {
+    try {
+      for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+        if (!d.isDirectory()) continue;
+        // Same rule as listCoreTrees: `staging` and `tmp` live here too and are
+        // never trees.
+        if (!_TREE_NAME.test(d.name)) continue;
+        out.add(path.join(root, d.name));
+      }
+    } catch { /* no root yet: nothing installed */ }
+  }
   return Array.from(out);
 }
 
 function listCoreTrees() {
-  const root = getCoreTreeRoot();
   const out  = [];
   const seen = new Set();
 
@@ -307,15 +376,19 @@ function listCoreTrees() {
   };
 
   add(getLegacyCoreTreePath());
-  try {
-    for (const d of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!d.isDirectory()) continue;
-      // Only version-shaped subdirectories are trees. `staging` and `tmp` live
-      // here too and must never be mistaken for one.
-      if (!/^\d+\.\d+(\.\d+)?(-jmt)?$/.test(d.name)) continue;  // "4.6.0-jmt" is a JMT plugin's tree [B-668]
-      add(path.join(root, d.name));
-    }
-  } catch { /* no root yet: nothing installed */ }
+  // The short root first: a tree left behind at the old one (B-670) never shadows its moved copy,
+  // and, unlisted here, is an orphan the reset reclaims.
+  for (const r of _treeRoots()) {
+    try {
+      for (const d of fs.readdirSync(r, { withFileTypes: true })) {
+        if (!d.isDirectory()) continue;
+        // Only version-shaped subdirectories are trees. `staging` and `tmp` live
+        // here too and must never be mistaken for one.
+        if (!_TREE_NAME.test(d.name)) continue;
+        add(path.join(r, d.name));
+      }
+    } catch { /* no root yet: nothing installed */ }
+  }
 
   return out;
 }
@@ -526,17 +599,22 @@ async function ensureCliConfig(onLog, dataPath = getArduinoDataPath()) {
 
   if (!fs.existsSync(yamlPath)) {
     onLog('Writing arduino-cli config...', false);
-    const yaml = [
-      `board_manager:`,
-      `  additional_urls:`,
-      `    - ${BOARD_MANAGER_URL}`,
-      `directories:`,
-      `  data: "${dataPath.replace(/\\/g, '/')}"`,
-      `  downloads: "${path.join(dataPath, 'staging').replace(/\\/g, '/')}"`,
-      `  user: "${path.join(dataPath, 'user').replace(/\\/g, '/')}"`,
-    ].join('\n');
-    fs.writeFileSync(yamlPath, yaml, 'utf8');
+    _writeCliConfig(dataPath);
   }
+}
+
+// The config names the tree it lives in, so a tree that moves (B-670) gets it rewritten.
+function _writeCliConfig(dataPath) {
+  const yaml = [
+    `board_manager:`,
+    `  additional_urls:`,
+    `    - ${BOARD_MANAGER_URL}`,
+    `directories:`,
+    `  data: "${dataPath.replace(/\\/g, '/')}"`,
+    `  downloads: "${path.join(dataPath, 'staging').replace(/\\/g, '/')}"`,
+    `  user: "${path.join(dataPath, 'user').replace(/\\/g, '/')}"`,
+  ].join('\n');
+  fs.writeFileSync(path.join(dataPath, 'arduino-cli.yaml'), yaml, 'utf8');
 }
 
 // ── First-run: install core if not present ─────────────
@@ -793,17 +871,41 @@ async function _ensureJmtCore(onLog, version, dataPath, sentinelPath) {
   if (!jmtPlugin.isSupported(proffie.getResourcesPath(), version)) {
     return { ok: false, error: `There is no JMT version of Proffieboard Plugin ${base}.` };
   }
-  // The base, wherever it is: one of our trees, else the user's own Arduino tree, else install ours.
-  let baseTree = findOurCoreTree(base)?.path || null;
-  if (!baseTree && coreVersions.isVersionInstalled(getSystemArduinoDataPath(), base)) baseTree = getSystemArduinoDataPath();
-  if (!baseTree) {
-    const got = await ensureCore(onLog, base, { activate: false });
-    if (!got.ok) return got;
-    baseTree = findOurCoreTree(base)?.path
-      || (coreVersions.isVersionInstalled(getSystemArduinoDataPath(), base) ? getSystemArduinoDataPath() : null);
-    if (!baseTree) return { ok: false, error: `Proffieboard Plugin ${base} could not be found after installing it.` };
-  }
+  // The base whose compiler the JMT plugin will share: one of our trees, else the user's own
+  // Arduino tree, else install ours. The compiler is linked, not copied, so it is used ONLY when it
+  // is file for file the official release [B-671]. Studio did not install a system tree's compiler
+  // and cannot otherwise vouch for it; seconds of checking here beat a firmware nobody can explain.
+  const res = proffie.getResourcesPath();
+  const sys = getSystemArduinoDataPath();
+  const candidates = [];
+  const ours = findOurCoreTree(base)?.path || null;
+  if (ours) candidates.push(ours);
+  if (coreVersions.isVersionInstalled(sys, base) && !candidates.includes(sys)) candidates.push(sys);
+  const refused = [];
+  let baseTree = null;
   try { _beginInstall?.(version); } catch {}
+  for (const t of candidates) {
+    onLog(`Checking the compiler for Proffieboard Plugin ${base} against the official release...`, false);
+    const v = await jmtPlugin.verifyTools(t, base, res);
+    if (v.ok) { baseTree = t; break; }
+    refused.push(`${t}: ${v.why}`);
+    onLog(`Not used: ${v.why} (${t}).`, false);
+  }
+  if (!baseTree && !ours) {
+    // Nothing usable on this computer: install our own copy (arduino-cli checks the download
+    // against the index's checksum), then check it the same way.
+    const target = getCoreTreePath(base);
+    const got = await _installCoreInto(onLog, base, target, path.join(target, '.core-installed'));
+    if (!got.ok) return got;
+    const v = await jmtPlugin.verifyTools(target, base, res);
+    if (v.ok) baseTree = target;
+    else refused.push(`${target}: ${v.why}`);
+  }
+  if (!baseTree) {
+    try { _endInstall?.(version); } catch {}
+    return { ok: false, error: `Proffieboard Plugin ${base} JMT was not made: the compiler it would share is not exactly ` +
+                               `the official release, so it was left alone. ${refused.join(' ')}` };
+  }
   const made = jmtPlugin.createJmtTree({ base, baseTree, jmtTree: dataPath, resourcesPath: proffie.getResourcesPath(), onLog });
   if (!made.ok) return made;
   await ensureCliConfig(onLog, dataPath);
@@ -1197,6 +1299,39 @@ function _logCompileMetrics(record) {
   } catch {}
 }
 
+/**
+ * Did arduino-cli build with the plugin asked for? [B-672]
+ *
+ * Reads the "Used platform  Version  Path" table arduino-cli prints after every successful build.
+ * The version must be the requested plugin's stock version (a JMT plugin reports its stock number,
+ * e.g. "4.6"), and the path must be in the JMT plugin's own tree for a JMT plugin and in no JMT
+ * tree for a stock one. The paths are compared, not reasoned about: a JMT build that resolved the
+ * system plugin is exactly the failure this exists to catch.
+ *
+ * Returns { ok: true, verified: true }, { ok: true, verified: false, why } when the table is not
+ * there (cannot confirm, so the build is not cached, but nothing contradicts it), or
+ * { ok: false, why } for a build that used something else.
+ */
+function checkPlatformUsed(output, requested, requestedTree) {
+  const m = /^Used platform\s+Version\s+Path\s*$([\s\S]*)/m.exec(output || '');
+  const row = m && /^\s*proffieboard:stm32l4\s+(\S+)\s+(.+?)\s*$/m.exec(m[1]);
+  if (!row) return { ok: true, verified: false, why: 'arduino-cli did not report it' };
+  const usedVer = coreVersions.normalizeVersion(row[1]);
+  const usedPath = row[2];
+  const want = coreVersions.baseVersion(requested);
+  if (usedVer !== want) return { ok: false, why: `Proffieboard Plugin ${usedVer} (${usedPath})` };
+  const norm = (p) => path.resolve(p).toLowerCase() + path.sep;
+  const inJmtTree = /[\\/]\d+\.\d+\.\d+-jmt[\\/]/i.test(usedPath);
+  if (coreVersions.isJmtVersion(requested)) {
+    if (!requestedTree || !norm(usedPath).startsWith(norm(requestedTree))) {
+      return { ok: false, why: `the stock plugin at ${usedPath}` };
+    }
+  } else if (inJmtTree) {
+    return { ok: false, why: `the JMT plugin at ${usedPath}` };
+  }
+  return { ok: true, verified: true };
+}
+
 async function compile(configContent, fqbn, buildOptions, onLog) {
   onLog('--- Compile started ---', false);
 
@@ -1205,7 +1340,8 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
   // against whichever core happens to be on the machine, which is the whole
   // defect this guards against, and it costs one cheap probe once per session.
   if (_useIsolatedCore === null) {
-    _useIsolatedCore = !(await _systemCoreCanBuild());
+    // A JMT plugin is never the system one, whatever the probe says [B-668].
+    _useIsolatedCore = coreVersions.isJmtVersion(getActiveCoreVersion()) || !(await _systemCoreCanBuild());
   }
 
   const usb = (buildOptions && buildOptions.usb) || 'cdc_webusb';
@@ -1372,6 +1508,25 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
     ..._configFeatures(configContent),
   });
 
+  // THE PLUGIN ACTUALLY USED must be the one asked for, before anything labels or caches the build
+  // [B-672]. The cache key records the plugin REQUESTED; on 2026-11-13 a "4.6.0 JMT" build linked
+  // Arduino15's stock library (the B-668 isolation bug), was cached under the JMT key, and was later
+  // flashed as JMT firmware. arduino-cli names the platform it used at the end of every build.
+  if (result.ok && !wasAborted) {
+    const used = checkPlatformUsed(output, getActiveCoreVersion(), getCoreTreePath(getActiveCoreVersion()));
+    if (!used.ok) {
+      // The folder now holds a build nothing may identify as the one asked for: drop its label so
+      // an older label cannot make it look like a match at flash time.
+      try { fs.rmSync(path.join(buildPath, '_jmt_build_meta.json'), { force: true }); } catch {}
+      const msg = `This build used ${used.why}, not Proffieboard Plugin ${getActiveCoreVersion().replace(/-jmt$/, ' JMT')}, ` +
+                  `so it was not kept and must not be flashed. Compile again.`;
+      onLog(msg, true);
+      return { ok: false, error: msg };
+    }
+    if (!used.verified) onLog(`Could not confirm which plugin this build used (${used.why}), so it was not saved for reuse.`, false);
+    result.platformUnverified = !used.verified;
+  }
+
   if (result.ok) {
     onLog(`--- Compile successful (${(durationMs / 1000).toFixed(1)}s) ---`, false);
     // Set when the build could not be filed away for reuse. Carried back to the renderer so the
@@ -1396,8 +1551,8 @@ async function compile(configContent, fqbn, buildOptions, onLog) {
       } catch { /* advisory: never fail a good compile over a sidecar */ }
     }
     // Save to persistent cache (skipped for bench runs so timing harnesses
-    // never pollute the real cache).
-    if (!bench) {
+    // never pollute the real cache, and for a build whose plugin could not be confirmed [B-672]).
+    if (!bench && !result.platformUnverified) {
       try {
         const { app } = require('electron');
         const proffieOSHash = proffie.hashVersion(proffie.getSelectedVersion());
@@ -2668,6 +2823,9 @@ module.exports = {
   getCoreTreeRoot,
   getCoreTreePath,
   getLegacyCoreTreePath,
+  checkPlatformUsed,
+  listCoreTreeRoots: _treeRoots,
+  migrateCoreTrees,
   listCoreTrees,
   listCoreTreePaths,
   getSystemArduinoDataPath,

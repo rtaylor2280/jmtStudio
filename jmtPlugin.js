@@ -15,9 +15,10 @@
  * THE TREE. "<root>/4.6.0-jmt" is a complete arduino-cli data directory of its own:
  *   - the platform directory is a real COPY (66 MB) with the fixed libraries swapped in and
  *     platform.txt stamped "4.6.0-jmt.1", which is how coreVersions recognises it;
- *   - everything else under packages/proffieboard (the 1 GB compiler) is HARD-LINKED to the stock
- *     tree's files: no second gigabyte, and if the stock tree is ever removed anyway the links keep
- *     the data, so the JMT plugin keeps building.
+ *   - the compiler it depends on (about 1.4 GB) is HARD-LINKED to the stock tree's files: no second
+ *     copy, and if the stock tree is ever removed anyway the links keep the data, so the JMT plugin
+ *     keeps building. Only a compiler verified file for file against the official release is ever
+ *     linked (verifyTools, B-671); the caller checks before it calls createJmtTree.
  * Nothing in the stock tree is written. The board names are the same, so configs do not change.
  *
  * Built in "<tree>.partial" and renamed into place only once verified, so an interrupted build
@@ -50,6 +51,44 @@ function supportedBases(resourcesPath) {
 
 function isSupported(resourcesPath, version) {
   return supportedBases(resourcesPath).includes(coreVersions.baseVersion(version));
+}
+
+/**
+ * The compilers `base` depends on, as "name@version" (from the manifest, which records the stock
+ * platform's own dependencies) [B-671].
+ */
+function toolKeys(manifest, base) {
+  return (manifest && manifest.baseTools && manifest.baseTools[coreVersions.baseVersion(base)]) || [];
+}
+
+/** The same, as directories under packages/proffieboard: "tools/<name>/<version>". */
+function toolDirs(manifest, base) {
+  return toolKeys(manifest, base).map((k) => { const [n, v] = k.split('@'); return path.join('tools', n, v); });
+}
+
+/**
+ * Are the compilers `base` needs in `tree` exactly the official release? [B-671]
+ * Resolves { ok: true } or { ok: false, why } with why a plain sentence.
+ */
+async function verifyTools(tree, base, resourcesPath) {
+  const toolVerify = require('./toolVerify');
+  const manifest = readManifest(resourcesPath);
+  const keys = toolKeys(manifest, base);
+  if (!keys.length) return { ok: false, why: `there is no record of the official compiler for ${base}` };
+  for (const k of keys) {
+    const [name, ver] = k.split('@');
+    const expected = toolVerify.expectedFor(manifest, name, ver);
+    if (!expected) return { ok: false, why: `there is no record of the official compiler ${ver} for this computer` };
+    const dir = path.join(tree, 'packages', coreVersions.PACKAGE_NAME, 'tools', name, ver);
+    if (!fs.existsSync(dir)) return { ok: false, why: `compiler ${ver} is not there` };
+    const r = await toolVerify.verifyToolDir(dir, expected);
+    if (!r.ok) {
+      return { ok: false, why: r.reason === 'mismatch'
+        ? `compiler ${ver} is not exactly the official release (${r.files} files, the release has ${r.expectedFiles})`
+        : `compiler ${ver} could not be checked (${r.reason})` };
+    }
+  }
+  return { ok: true };
 }
 
 function sha256(file) {
@@ -87,6 +126,7 @@ function createJmtTree({ base, baseTree, jmtTree, resourcesPath, onLog = () => {
   const manifest = readManifest(resourcesPath);
   const libs     = manifest && manifest.bases && manifest.bases[base];
   if (!libs) return { ok: false, error: `There is no JMT version of Proffieboard Plugin ${base}.` };
+  if (!toolDirs(manifest, base).length) return { ok: false, error: `There is no record of the compiler Proffieboard Plugin ${base} uses.` };
 
   const dirName = coreVersions.installedVersionString(baseTree, base);
   if (!dirName) return { ok: false, error: `Proffieboard Plugin ${base} is not installed, so its JMT version cannot be made.` };
@@ -119,11 +159,13 @@ function createJmtTree({ base, baseTree, jmtTree, resourcesPath, onLog = () => {
     }
     const pkgSrc = path.join(baseTree, 'packages', coreVersions.PACKAGE_NAME);
     const pkgDst = path.join(tmp, 'packages', coreVersions.PACKAGE_NAME);
+    // Only the compiler(s) this version depends on, and only ones the caller verified against the
+    // official release [B-671]. A system tree can hold other compilers; none of them is linked.
+    for (const dir of toolDirs(manifest, base)) {
+      _linkTree(path.join(pkgSrc, dir), path.join(pkgDst, dir), stats);
+    }
     for (const ent of fs.readdirSync(pkgSrc, { withFileTypes: true })) {
-      if (ent.name === 'hardware') continue;
-      const s = path.join(pkgSrc, ent.name), d = path.join(pkgDst, ent.name);
-      if (ent.isDirectory()) _linkTree(s, d, stats);
-      else { fs.mkdirSync(pkgDst, { recursive: true }); fs.copyFileSync(s, d); }
+      if (ent.isFile()) { fs.mkdirSync(pkgDst, { recursive: true }); fs.copyFileSync(path.join(pkgSrc, ent.name), path.join(pkgDst, ent.name)); }
     }
     const builtin = path.join(baseTree, 'packages', 'builtin');
     if (fs.existsSync(builtin)) _linkTree(builtin, path.join(tmp, 'packages', 'builtin'), stats);
@@ -164,4 +206,4 @@ function createJmtTree({ base, baseTree, jmtTree, resourcesPath, onLog = () => {
   return { ok: true, version, stats };
 }
 
-module.exports = { NOTE, readManifest, supportedBases, isSupported, createJmtTree, sha256 };
+module.exports = { NOTE, readManifest, supportedBases, isSupported, createJmtTree, verifyTools, toolKeys, toolDirs, sha256 };

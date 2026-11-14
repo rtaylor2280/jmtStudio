@@ -494,6 +494,32 @@ const coreVersions_normalize = v => {
 // How a plugin version reads to a person: "4.6.0-jmt" is "4.6.0 JMT".
 const _vpPluginLabel = v => String(v || '').replace(/-jmt$/i, ' JMT');
 
+// Beside the selector [B-668]: the amber warning on a stock plugin that has a JMT version, and the
+// green note on the JMT version itself. Both return HTML.
+// "3.6.0", "3.6.0 and 4.6.0", "3.6.0, 4.6.0 and 4.7.0": the plugin versions named in a sentence.
+const _vpJmtList = list => {
+  const v = [...new Set(list.map(b => coreVersions_normalize(b).replace(/-jmt$/, '')))].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true }));
+  const text = v.length < 2 ? (v[0] || '') : `${v.slice(0, -1).join(', ')} and ${v[v.length - 1]}`;
+  return { text, plural: v.length > 1 };
+};
+const _vpJmtWarning = (base, bugBases = [base]) => {
+  const b = _vpJmtList(bugBases);
+  return `<strong>Consider using ${_vpEsc(base)} JMT.</strong> ${b.plural ? 'Plugins' : 'Plugin'} ` +
+  `${_vpEsc(b.text)} ${b.plural ? 'use' : 'uses'} STMicroelectronics' USB ` +
+  `code from 2015, which has a bug in its Mass Storage handling: with an SD card larger than 4 GB ` +
+  `(nearly every card sold today), reading or writing the card from a computer can corrupt it. It ` +
+  `depends on where data sits on the card, not how full it is. STMicroelectronics ` +
+  `fixed this in their own code in 2020, and ${_vpEsc(base)} JMT has that fix. It patches only the ` +
+  `USB Mass Storage code and uses the rest of the plugin as written.`;
+};
+const _vpJmtNote = base =>
+  `STMicroelectronics' 2015 USB code has a bug in its Mass Storage handling that can corrupt an SD card ` +
+  `larger than 4 GB (nearly every card sold today) when a computer reads or writes it. ` +
+  `STMicroelectronics fixed this in their own code in 2020, and ${_vpEsc(base)} JMT has that fix. It ` +
+  `patches only the USB Mass Storage code and uses the rest of the plugin as written. Added by JMT ` +
+  `Sabers · jmtfoundry.com.`;
+
 const _VP_PHASE = {
   index:       'Checking for plugin',
   downloading: 'Downloading plugin',
@@ -541,12 +567,22 @@ async function _vpRenderCoreSection(v, opts = {}) {
   const options = (avail.versions || []).map(ver => {
     const src   = sources[ver];
     const badge = src === 'system' ? ' · system' : src === 'jmt' ? ' · installed' : '';
-    // A JMT entry carries its explanation beside it in the list, always [B-668].
-    const note  = notes[ver] ? ' · 4 GB card fix' : '';
     return `<option value="${_vpEsc(ver)}"${current.pinned === ver ? ' selected' : ''}>` +
-           `${_vpEsc(_vpPluginLabel(ver))}${note}${badge}</option>`;
+           `${_vpEsc(_vpPluginLabel(ver))}${badge}</option>`;
   }).join('');
   const noteFor = ver => notes[ver] || '';
+  // Beside the selector [B-668]: on a JMT version, its note; on a stock version that has a JMT
+  // version, an amber warning about the bug, and a Get button while the JMT version is not on
+  // this computer (once it is, picking it in the list is the way to it).
+  const pinBase   = coreVersions_normalize(current.pinned || '');
+  const jmtOfPin  = pinBase + '-jmt';
+  const onStock   = !/-jmt$/.test(pinBase) && !!notes[jmtOfPin];
+  const jmtHere   = !!sources[jmtOfPin];
+  const sideHtml  = noteFor(pinBase)
+    ? `<span id="vp-core-note" style="font-size:12px;color:var(--c-text-sub);">${_vpJmtNote(pinBase.replace(/-jmt$/, ''))}</span>`
+    : onStock
+      ? `<span id="vp-core-warn" style="font-size:12px;color:var(--c-warn-text);">${_vpJmtWarning(pinBase, Object.keys(notes))}</span>`
+      : '';
 
   // Explanation lives in a tooltip, not inline. An inline paragraph is height
   // every user pays on every visit, including everyone who already knows.
@@ -558,13 +594,15 @@ async function _vpRenderCoreSection(v, opts = {}) {
     'ProffieOS version, so it is worth trying both. This never changes on its own.';
 
   body.innerHTML = `
-    <div title="${_vpEsc(sectionTitle)}" style="display:flex;flex-direction:column;gap:8px;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <select id="vp-core-select" style="${_VP_SELECT_CSS}">${options}</select>
-        ${notes[(current.pinned || '') + '-jmt'] ? `<button id="vp-core-jmt" class="btn btn-secondary" title="${_vpEsc(notes[current.pinned + '-jmt'])}">Get ${_vpEsc(current.pinned)} JMT</button>` : ''}
+    <div title="${_vpEsc(sectionTitle)}" style="display:flex;align-items:flex-start;gap:12px;">
+      <div style="display:flex;flex-direction:column;gap:8px;flex:0 0 auto;">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <select id="vp-core-select" style="${_VP_SELECT_CSS}width:320px;flex:0 0 auto;">${options}</select>
+          ${onStock && !jmtHere ? `<button id="vp-core-jmt" class="vp-action-btn vp-jmt-btn" style="flex:0 0 auto;" title="${_vpEsc(notes[jmtOfPin])}">⚙ Install JMT Patch</button>` : ''}
+        </div>
+        <div id="vp-core-status" style="display:flex;align-items:center;gap:10px;min-height:24px;"></div>
       </div>
-      <div id="vp-core-note" style="font-size:12px;color:var(--c-text-sub);${noteFor(current.pinned) ? '' : 'display:none;'}">${_vpEsc(noteFor(current.pinned))}</div>
-      <div id="vp-core-status" style="display:flex;align-items:center;gap:10px;min-height:24px;"></div>
+      ${sideHtml ? `<div style="flex:1 1 auto;min-width:0;max-width:900px;">${sideHtml}</div>` : ''}
     </div>
   `;
 
@@ -877,12 +915,6 @@ async function _vpRenderCoreSection(v, opts = {}) {
         `Switch back to ${_vpEsc(_vpPluginLabel(impact.fromCore))} later and ${one ? 'it' : 'they'} ` +
         `will be reused again.</p>`,
       ];
-      // Only claim a duration when one was actually recorded.
-      if (impact.longestLosingMs != null) {
-        const secs = Math.round(impact.longestLosingMs / 1000);
-        const fmt  = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
-        lines.push(`<p>The longest of those took <strong>${_vpEsc(fmt)}</strong> to build.</p>`);
-      }
       if (impact.keeping > 0) {
         lines.push(`<p style="color:var(--c-text-dim);">${impact.keeping} build` +
                    `${impact.keeping === 1 ? '' : 's'} already cached against ` +
@@ -2058,25 +2090,34 @@ window.vpSaveCurrentNotes = _vpDoSaveNotes;
 window.offerJmtPlugin = async function offerJmtPlugin({ base, reason = 'button', others = null } = {}) {
   base = coreVersions_normalize(base).replace(/-jmt$/, '');
   const jmt = `${base} JMT`;
-  const lead = reason === 'usb'
-    ? `<p>This USB type includes Mass Storage, which is where the problem below happens.</p>` : '';
+  // Every plugin version with the bug is named, and accepting fixes every one on this computer, so
+  // the others are listed whichever way the offer was reached.
+  let st = null;
+  try { st = await window.electronAPI.jmtPluginOfferState(); } catch {}
+  // The other patched versions, installed or not: the fix applies to each when it is here.
+  if (!others) others = ((st && st.supported) || []).filter(b => coreVersions_normalize(b) !== base);
+  const bugBases = _vpJmtList((st && st.supported) || [base]);
   const go = await window.promptConfirm({
-    title: `Proffieboard Plugin ${jmt}`,
-    messageHtml: lead +
-      `<p>With plugin ${_vpEsc(base)}, an SD card larger than 4 GB can be damaged when the board is ` +
-      `used as a USB drive: anything read or written past the first 4 GB lands at the start of the ` +
-      `card instead.</p>` +
-      `<p><strong>${_vpEsc(jmt)}</strong> is the same plugin with that fixed, the way ST, who wrote ` +
-      `the USB code, fixed it in their own library.</p>` +
+    title: 'Reduce the risk of SD card corruption',
+    messageHtml:
+      `<p>${_vpEsc(bugBases.plural ? 'Plugins' : 'Plugin')} ${_vpEsc(bugBases.text)} ` +
+      `${bugBases.plural ? 'use' : 'uses'} STMicroelectronics' USB code from 2015, which has a bug in its ` +
+      `Mass Storage handling: with an SD card larger than 4 GB (nearly every card sold today), reading ` +
+      `or writing the card from a computer can corrupt it. It depends on where data sits on the card, ` +
+      `not how full it is.</p>` +
+      `<p>STMicroelectronics fixed this in their own code in 2020, and <strong>${_vpEsc(jmt)}</strong> ` +
+      `has that fix. It patches only the USB Mass Storage code and uses the rest of the plugin as ` +
+      `written.</p>` +
       `<p style="color:var(--c-text-dim);">It is added beside ${_vpEsc(base)}, which is not changed. ` +
       `Every ProffieOS version set to ${_vpEsc(base)} moves to ${_vpEsc(jmt)}, and any of them can ` +
       `go back to ${_vpEsc(base)} in OS Versions.</p>` +
       ((others && others.length)
-        ? `<p style="color:var(--c-text-dim);">Plugin ${others.map(_vpEsc).join(' and ')} on this computer ` +
-          `${others.length === 1 ? 'gets' : 'get'} the same fix, and any plugin version added later ` +
-          `gets it too.</p>`
-        : `<p style="color:var(--c-text-dim);">Any plugin version added later gets the same fix.</p>`),
-    confirmText: `Use ${jmt}`,
+        ? `<p style="color:var(--c-text-dim);">${others.length === 1 ? 'Plugin' : 'Plugins'} ` +
+          `${_vpEsc(_vpJmtList(others).text)} ${others.length === 1 ? 'gets' : 'get'} the same fix, now or ` +
+          `whenever ${others.length === 1 ? 'it is' : 'they are'} added.</p>`
+        : ''),
+    // The click patches, then sets the JMT version for every ProffieOS version on <base>.
+    confirmText: `Patch and Use ${jmt}`,
     confirmKind: 'primary',
     cancelText:  'Not now',
     // Never is remembered in Settings > Remembered choices, where it can be set back [B-561 pattern].
@@ -2088,7 +2129,7 @@ window.offerJmtPlugin = async function offerJmtPlugin({ base, reason = 'button',
     return false;
   }
   if (!go || go === 'cancel') { try { await window.electronAPI.jmtPluginOfferAnswered(base); } catch {} return false; }
-  const res = await window.electronAPI.upgradeToJmtPlugin(base);
+  const res = await _vpJmtUpgradeWithProgress(base);
   if (!res || !res.ok) {
     await window.promptConfirm({ title: `Proffieboard Plugin ${jmt}`, message: (res && res.error) || `Could not make ${jmt}.`,
                                  confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
@@ -2104,13 +2145,92 @@ window.offerJmtPlugin = async function offerJmtPlugin({ base, reason = 'button',
   return true;
 };
 
-// The once-per-version offer: any stock plugin on this machine with a JMT fix not yet offered.
-window.checkJmtPluginOffer = async function checkJmtPluginOffer() {
+// The Mass Storage offer once the JMT plugin is accepted: this ProffieOS version is set to the
+// standard plugin, so switch just this version. Its own remembered choice, jmtSwitchChoice
+// (Settings > Remembered choices): Not now asks again next time, Always switches without asking,
+// Never stops asking.
+window.switchToJmtPlugin = async function switchToJmtPlugin({ versionName, base }) {
+  base = coreVersions_normalize(base).replace(/-jmt$/, '');
+  const jmt = `${base} JMT`;
+  const remembered = await window._jmtRememberedChoice?.('jmtSwitchChoice');
+  if (remembered === 'never') return false;
+  if (remembered !== 'always') {
+    const choice = await window.promptConfirm({
+      title: 'Reduce the risk of SD card corruption',
+      messageHtml:
+        `<p><strong>${_vpEsc(versionName)}</strong> builds with plugin ${_vpEsc(base)}, which uses ` +
+        `STMicroelectronics' USB code from 2015. A bug in its Mass Storage handling can corrupt an SD ` +
+        `card larger than 4 GB (nearly every card sold today) when a computer reads or writes it. ` +
+        `STMicroelectronics fixed this in their own code in 2020, and <strong>${_vpEsc(jmt)}</strong>, ` +
+        `already installed, has that fix.</p>`,
+      leadText:    'Never switch',
+      cancelText:  'Not now',
+      middleText:  'Switch',
+      confirmText: 'Always switch',
+      confirmKind: 'primary',
+      closeX:      true,
+    });
+    if (choice === 'lead') { try { await window.electronAPI.setSetting('jmtSwitchChoice', 'never'); } catch {} }
+    if (choice !== 'middle' && choice !== 'confirm') return false;
+    if (choice === 'confirm') { try { await window.electronAPI.setSetting('jmtSwitchChoice', 'always'); } catch {} }
+  }
+  const res = await window.electronAPI.setCoreForVersion(versionName, `${base}-jmt`);
+  if (!res || !res.ok) {
+    await window.promptConfirm({ title: `Switch to ${jmt}?`, message: (res && res.error) || `Could not switch to ${jmt}.`,
+                                 confirmText: 'OK', confirmKind: 'primary', hideCancel: true });
+    return false;
+  }
+  window.showToast?.(`${versionName} now builds with ${jmt}.`);
+  if (res.appliedToActive) window.onCoreVersionChanged?.(`Proffieboard Plugin changed to ${jmt}, recompile needed`);
+  else window._refreshSelectedVersionJmtState?.();
+  if (_vpSelected && _vpSelected.name === versionName && document.getElementById('vp-core-body')) {
+    _vpRenderCoreSection(_vpSelected);
+  }
+  return true;
+};
+
+// Making a JMT version, shown the way a plugin install is: the status bar, the locked Compile and
+// selector, and in OS Versions the phase line with the moving bar.
+async function _vpJmtUpgradeWithProgress(base) {
+  const jmt = `${base} JMT`;
+  window._coreInstallInFlight = `${base}-jmt`;
+  window.updateCompileButton?.();
+  window.setToolchainBusy?.(`Installing Proffieboard Plugin ${jmt}...`);
+  const sel    = document.getElementById('vp-core-select');
+  const status = document.getElementById('vp-core-status');
+  if (sel) sel.disabled = true;
+  if (status) {
+    status.innerHTML =
+      `<span id="vp-core-phase" style="color:var(--c-text-dim);">${_VP_PHASE.installing} ${_vpEsc(jmt)}…</span>` +
+      `<span class="vp-wait-track"><div class="bm-bar-knightrider"></div></span>`;
+  }
+  const stopPhase = window.electronAPI.onCoreInstallProgress?.(({ phase }) => {
+    const t = document.getElementById('vp-core-phase');
+    if (t && phase && _VP_PHASE[phase]) t.textContent = `${_VP_PHASE[phase]} ${jmt}…`;
+  });
+  let res = null;
+  try { res = await window.electronAPI.upgradeToJmtPlugin(base); }
+  catch (e) { res = { ok: false, error: e && e.message }; }
+  finally {
+    try { stopPhase?.(); } catch {}
+    window._coreInstallInFlight = null;
+    window.updateCompileButton?.();
+    window.clearToolchainBusy?.();
+    if (_vpSelected && document.getElementById('vp-core-body')) _vpRenderCoreSection(_vpSelected);
+  }
+  return res;
+}
+
+// Accepted once: every stock plugin on this computer without its JMT version gets one, no question.
+// Not yet accepted: asked only on a first run of JMT Studio (opts.ask), once the plugin is set up;
+// everyone else first meets the offer when they pick a Mass Storage USB type.
+window.checkJmtPluginOffer = async function checkJmtPluginOffer(opts = {}) {
   let st; try { st = await window.electronAPI.jmtPluginOfferState(); } catch { return; }
+  if (!st || (!st.accepted && !(opts.ask && st.freshInstall))) return;
   for (const base of (st && st.due) || []) {
     if (st.accepted) {
       // Already said yes once: a plugin added since gets its JMT version as the default, no question.
-      const res = await window.electronAPI.upgradeToJmtPlugin(base);
+      const res = await _vpJmtUpgradeWithProgress(base);
       if (res && res.ok) {
         window.showToast?.(`${base} JMT added and set as the default for ${base}.`);
         if (res.appliedToActive) window.onCoreVersionChanged?.(`Proffieboard Plugin changed to ${base} JMT, recompile needed`);
@@ -2118,7 +2238,7 @@ window.checkJmtPluginOffer = async function checkJmtPluginOffer() {
     } else {
       // ONE question covers every plugin version on this computer: a yes
       // fixes them all (offerJmtPlugin comes back here as accepted), a no is recorded for all.
-      const yes = await window.offerJmtPlugin({ base, reason: 'first', others: st.due.filter(b => b !== base) });
+      const yes = await window.offerJmtPlugin({ base, reason: 'first' });
       if (!yes) for (const b of st.due) { try { await window.electronAPI.jmtPluginOfferAnswered(b); } catch {} }
       return;
     }

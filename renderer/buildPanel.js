@@ -576,10 +576,9 @@ async function initBuildPanel() {
     // current type, ask, and only a yes re-fires this handler through _applyUsbChoice.
     if (!_usbChoiceApproved) {
       const v = e.target.value;
-      if (v === '__advanced__' || _isAdvancedUsb(v) || v === 'cdc_msc_webusb') {
+      if (v === '__advanced__' || _isAdvancedUsb(v)) {
         e.target.value = selectedUsb;
-        if (v === 'cdc_msc_webusb') _confirmRiskyUsb(v);
-        else _openAdvancedUsb();
+        _openAdvancedUsb();
         return;
       }
     }
@@ -751,10 +750,10 @@ async function initBuildPanel() {
   // Initial port scan
   await refreshPorts();
 
-  // Once per plugin version: offer its JMT version, the first time Studio has it [B-668]. After
-  // the toolchain is up, so a first install has already landed. Not awaited: a dialog must not
-  // hold up startup.
-  setTimeout(() => { window.checkJmtPluginOffer?.(); }, 1500);
+  // The JMT plugin [B-668]: asked on a first run of JMT Studio, after the toolchain is up so the
+  // plugin it set up has landed; otherwise only made, when the user already said yes. Not awaited:
+  // a dialog must not hold up startup.
+  setTimeout(() => { window.checkJmtPluginOffer?.({ ask: true }); }, 1500);
 }
 
 // ── Gate phase ─────────────────────────────────────────
@@ -849,6 +848,12 @@ async function doCompile(opts) {
     ? await window.checkMassStorageSafety(selectedUsb, 'compile')
     : true;
   if (!_sdCompile || _gateCancelled) { setGatePhase(false); return; } // Cancel from the SD guard
+
+  // [B-668] Compiling a Mass Storage build on a standard plugin that has a JMT version: the same
+  // offer as picking the USB type. Whatever the answer, the compile goes on, with the plugin it leaves.
+  if (/msc/i.test(selectedUsb || '')) {
+    try { await window.offerJmtPluginForUsb?.(); } catch { /* the compile goes on */ }
+  }
 
   // Preflight registry: every config-truth check we have, run once, reported in
   // ONE dialog. Adding a check is adding an entry to preflight-checks.js — not an
@@ -1347,7 +1352,8 @@ const USB_LABELS = {
 // ── USB type choices that need words first [B-660] ──
 // His spec (2026-11-10 00:51): the common types stay in the list; the rest sit behind
 // "Advanced…", and picking one shows what it is with a "know what you're doing" warning.
-// The RISKY common one (Mass Storage + WebUSB) stays in the list but warns strongly.
+// Mass Storage + WebUSB is a common type with no warning of its own: the card corruption it was
+// blamed for was the core's 4 GiB address wrap, fixed by the JMT plugin. [B-668]
 const USB_ADVANCED = [
   { value: 'cdc_hid',     what: 'The board also acts as a USB keyboard and mouse. Only useful with code written to use it.' },
   { value: 'cdc_msc_hid', what: 'The same, plus the SD card shows up as a drive.' },
@@ -1395,52 +1401,6 @@ async function _openAdvancedUsb() {
   });
   if (res && res.confirmed && res.value) _applyUsbChoice(res.value);
 }
-
-async function _confirmRiskyUsb(value) {
-  const prevLabel = USB_LABELS[selectedUsb] || selectedUsb;
-  const ok = await window.promptConfirm({
-    title: 'Serial + Mass Storage + WebUSB',
-    messageHtml: `<strong>This combination often stalls the board's serial connection.</strong> `
-      + `Commands stop getting through, and the board can drop off USB. If that happens while the SD card is open as a drive, the card can be corrupted.<br><br>`
-      + `If you need the SD card as a drive, use Serial + Mass Storage. For browser tools like ProffieOS Workbench, use Serial + WebUSB.`,
-    confirmText: 'Use it anyway', confirmKind: 'danger', cancelText: `Keep ${prevLabel}`,
-  });
-  if (ok) _applyUsbChoice(value);
-}
-
-// Serials of every connected Proffieboard running Mass Storage + WebUSB. One USB listing,
-// milliseconds; used to decide whether the ~2 s board-card lookup is worth paying at all.
-window._boardsWithUsbRisk = async () => {
-  try {
-    if (!navigator.usb) return [];
-    const out = [];
-    for (const d of await navigator.usb.getDevices()) {
-      if (d.vendorId !== 0x1209 || !d.serialNumber) continue;
-      const b = await window._boardUsbBuild(d.serialNumber);
-      if (b && b.webusb && b.msc) out.push(String(d.serialNumber).toUpperCase());
-    }
-    return out;
-  } catch { return []; }
-};
-
-// Which USB build is this board running? Read from the board itself through Chromium's
-// WebUSB device list (listing only; never opened or claimed). Proven 2026-11-10: WebUSB is a
-// vendor (255) interface WITH endpoints, Mass Storage is a class-8 interface. Returns
-// { webusb, msc } or null when the board is not visible or the answer is unclear.
-window._boardUsbBuild = async (serial) => {
-  try {
-    if (!navigator.usb || !serial) return null;
-    const sn = String(serial).trim().toUpperCase();
-    const d = (await navigator.usb.getDevices()).find(x => x.vendorId === 0x1209 && String(x.serialNumber || '').toUpperCase() === sn);
-    if (!d) return null;
-    const ifs = (d.configuration || (d.configurations && d.configurations[0]) || { interfaces: [] }).interfaces;
-    const alts = ifs.map(i => i.alternate || i.alternates[0] || {});
-    return {
-      webusb: alts.some(a => a.interfaceClass === 255 && (a.endpoints || []).length > 0),
-      msc:    alts.some(a => a.interfaceClass === 8),
-    };
-  } catch { return null; }
-};
 
 // [B-385] THIS FIELD ANSWERS ONE QUESTION: does the current selection match the
 // LAST COMPILED VERSION? Settled 2026-09-14: "it's job is to show if the current
@@ -2684,6 +2644,10 @@ const SERIAL_MAX_LINES = 1000;
 // behaviour it was written for; flip it to turn it back on for that, and off again after.
 const SERIAL_DEBUG = false;
 let _serialRxBytes = 0;
+// When the board last said anything, and what it has said since a reset was sent
+// (restartBoardViaMonitor). Null means nobody is listening for a reply.
+let _serialLastRxAt = 0;
+let _serialRxSinceReset = null;
 function _debugSerial(event, extra) {
   if (!SERIAL_DEBUG) return;
   const tab      = _serialActive ? 'serial' : 'build';
@@ -3035,6 +2999,8 @@ async function openSerialMonitor() {
   if (!_serialUnsubData) {
     _serialUnsubData = window.electronAPI.onSerialData(({ text }) => {
       _serialRxBytes += text.length;
+      _serialLastRxAt = Date.now();
+      if (_serialRxSinceReset !== null) _serialRxSinceReset = (_serialRxSinceReset + text).slice(-4000);
       if (_serialPaused) {
         _serialPausedBuf += text;
         if (_serialPausedBuf.length > 200000) {
@@ -3578,17 +3544,43 @@ async function restartBoardViaMonitor(portPath) {
     return false;
   };
   if (!_serialOpen) { await openSerialMonitor(); if (!_serialOpen) return null; await sleep(500); }
-  _serialAppend('> reset\n');
-  const log = el('bp-serial-log');
-  if (log) log.scrollTop = log.scrollHeight;
-  const w = await window.electronAPI.writeSerial('reset\n');
-  if (!w || !w.ok) return null;
-  let dropped = await dropsWithin(2000);
-  for (let i = 0; !dropped && i < 2; i++) {
-    // The retry, as clicked by hand: reconnect, nothing sent.
-    await closeSerialMonitor();
-    await openSerialMonitor();
-    dropped = await dropsWithin(2500);
+  // LET THE BOARD SETTLE FIRST. Right after an eject the board takes its card back and rescans
+  // the fonts; a reset sent during that sat unread and then arrived as "eset" ("Whut? :eset",
+  // 2026-11-13), while the same reset typed a minute later worked. Wait for 1.5 s of quiet on the
+  // serial line, at most 15 s.
+  const tSettle = Date.now();
+  if (!_serialLastRxAt) _serialLastRxAt = tSettle;
+  while (Date.now() - _serialLastRxAt < 1500 && Date.now() - tSettle < 15000) await sleep(100);
+  const sendReset = async () => {
+    _serialAppend('> reset\n');
+    const log = el('bp-serial-log');
+    if (log) log.scrollTop = log.scrollHeight;
+    _serialRxSinceReset = '';
+    const w = await window.electronAPI.writeSerial('reset\n');
+    return !!(w && w.ok);
+  };
+  // "Whut?" back means the reset arrived damaged and was NOT run, so sending it again right away
+  // still runs exactly one: the rule above is about a HELD reset running twice, and this never ran.
+  let resent = false;
+  const resendIfGarbled = async () => {
+    if (resent || !/Whut\?/.test(_serialRxSinceReset || '')) return false;
+    resent = true;
+    return sendReset();
+  };
+  let dropped = false;
+  try {
+    if (!(await sendReset())) return null;
+    dropped = await dropsWithin(2000);
+    if (!dropped && (await resendIfGarbled())) dropped = await dropsWithin(2500);
+    for (let i = 0; !dropped && i < 2; i++) {
+      // The retry, as clicked by hand: reconnect, nothing sent.
+      await closeSerialMonitor();
+      await openSerialMonitor();
+      dropped = await dropsWithin(2500);
+      if (!dropped && (await resendIfGarbled())) dropped = await dropsWithin(2500);
+    }
+  } finally {
+    _serialRxSinceReset = null;
   }
   if (!dropped) return { ok: true, status: 'not-restarted', via: 'monitor' };
   window.electronAPI.boardForgetSdShared?.(portPath);   // a restarted board boots with access off

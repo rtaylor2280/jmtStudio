@@ -154,13 +154,18 @@ ok('the old refuse+warn pair is gone from every door',
      'anchor moved - re-find it before trusting the positions below');
   const raiseAt = runner.indexOf("_sfDeleteProgress.show('Checking the destination…'");
   const planAt = runner.indexOf('await door.plan(_check)');
-  const preflightAt = runner.indexOf('_sfPreflightDestination({');
+  // The plan-sized preflight (`const pf`). A door may also ask an EARLY worst-case preflight
+  // before its plan (2026-11-13), which by design sits above the plan.
+  const preflightAt = runner.indexOf('const pf = await _sfPreflightDestination({');
   ok('the runner raises its modal, plans, then preflights - in that order',
      raiseAt > -1 && planAt > -1 && preflightAt > -1
        && raiseAt < planAt && planAt < preflightAt,
      `raise@${raiseAt} plan@${planAt} preflight@${preflightAt} - a raise AFTER the plan leaves a `
      + 'slow plan explaining itself with nothing, which is what the deleted overlay was covering');
   // A raise that is never taken back down strands an explanation over an operation that ended.
+  const earlyAt = runner.indexOf('await door.worstCase()');
+  ok('the early worst-case check, when a door has one, runs after the raise and before the plan',
+     earlyAt > raiseAt && earlyAt < planAt, `raise@${raiseAt} early@${earlyAt} plan@${planAt}`);
   ok('and it drops the modal again when the plan refuses or is cancelled',
      /_dropRaised\(\);\s*\n?\s*return out;/.test(runner) || /await _dropRaised\(\)/.test(runner),
      'both early exits out of plan() have to put back what the raise took');

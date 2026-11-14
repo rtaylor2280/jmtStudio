@@ -1652,7 +1652,8 @@ async function entryMatchesAt(userData, name, destDir, opts = {}) {
     // font's tracks are megabytes each and hashFile reads one whole file synchronously.
     // [B-173] Counted so a rejected manifest entry is VISIBLE. hashed>0 on a card we just
     // exported to means entries are not being believed - a validation defect, not a slow disk.
-    const destHash = valid ? (reused++, ent[2]) : (hashed++, sync.countHash(), await hashFileAsync(abs));
+    const destHash = valid ? (reused++, ent[2]) : (hashed++, sync.countHash(), await hashFileAsync(abs, { shouldStop: opts.shouldStop }));
+    if (opts.shouldStop && opts.shouldStop()) return { ok: true, canceled: true };   // stopped mid-file
     refreshed.set(rec.relPath, [st.size, mtime, destHash]);
     if (destHash !== rec.fileHash) identical = false;
     if (_onBytes) {
@@ -3074,7 +3075,8 @@ async function recordFolderAt(destDir, name, opts = {}) {
       try {
         const ent = cache.get(childRel);
         const valid = sync.entryValid(ent, f.size, f.mtime);
-        const h = valid ? ent[2] : (sync.countHash(), await hashFileAsync(childAbs));
+        const h = valid ? ent[2] : (sync.countHash(), await hashFileAsync(childAbs, { shouldStop: opts.shouldStop }));
+        if (opts.shouldStop && opts.shouldStop()) return { ok: true, canceled: true };   // stopped mid-file
         if (h) observed.push([childRel, [f.size, f.mtime, h]]);
       } catch { /* a file that cannot be read simply goes unrecorded, and is re-read next time */ }
       // CREDITED WHETHER IT WAS READ OR REUSED. A reused entry costs no I/O, but it is still
@@ -3174,7 +3176,8 @@ async function planFolderWrite(userData, name, destDir, opts = {}) {
     else {
       await breathe();
       sync.countHash();
-      destHash = await hashFileAsync(f.abs);
+      destHash = await hashFileAsync(f.abs, { shouldStop });
+      if (shouldStop && shouldStop()) return { ok: true, canceled: true };   // stopped mid-file
       hashed++;
       _done += (f.size || 0);
       if (onBytes) { try { onBytes({ done: _done, total: _total, name: r.relPath }); } catch {} }

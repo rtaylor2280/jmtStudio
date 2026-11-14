@@ -72,7 +72,12 @@ const { execFile } = require('child_process');
 // DO NOT RE-ADD IT FROM THE ARGUMENT ABOVE. The per-file round trip is real; it is simply
 // not large enough at these counts to cross the threshold where a human perceives a wait.
 // Re-adding it needs a NEW measurement, not the old reasoning.
-const SLOW_WRITE_MIN_BYTES = 60 * 1024 * 1024;
+//
+// 100 MB, RAISED FROM 60 ON 2026-11-13. 60 was chosen when the file-count limb still existed, to
+// catch a single big font that cleared bytes long before files. Bytes alone decide now, and 60 MB
+// through a board is about five minutes of writing, which is not a wait worth a warning. 100 MB is
+// the size the 2026-10-04 measurement named as earning one.
+const SLOW_WRITE_MIN_BYTES = 100 * 1024 * 1024;
 
 // THE FIRST ARGUMENT IS IGNORED AND THE SIGNATURE KEPT IT ON PURPOSE. Several call sites
 // pass `(files, bytes)`. Dropping to one parameter means editing every one of them, and a
@@ -364,15 +369,18 @@ function rawVolumePath(destDir) {
 //
 // DEGRADES TO null, NEVER TO A REFUSAL. [B-028]. A volume that cannot be opened, is not
 // FAT32, or reads short is unknown - and unknown must not block a write that was asked for.
-function volumeDirty(destDir) {
+//
+// THE READ RUNS OFF THE MAIN THREAD WITH A TIME LIMIT [B-669]. A reader that stops answering
+// returns 'unresponsive', never a hang.
+async function volumeDirty(destDir) {
   const dev = rawVolumePath(destDir);
   if (!dev) return null;
-  let fd;
-  try { fd = fs.openSync(dev, 'r'); } catch { return null; }
+  // A raw volume read must be sector-aligned; offset 0, one sector, is the safe shape.
+  const r = await require('./cardProbe').readHead(dev, 512);
+  if (!r.ok) return r.reason === 'timeout' ? 'unresponsive' : null;
+  const bs = r.buf;
   try {
-    const bs = Buffer.alloc(512);
-    // A raw volume read must be sector-aligned; offset 0, one sector, is the safe shape.
-    if (fs.readSync(fd, bs, 0, 512, 0) < 512) return null;
+    if (bs.length < 512) return null;
     // CONFIRM IT IS FAT32 BEFORE TRUSTING THE OFFSET. On FAT12/16 the flag lives at 0x25
     // and 0x41 is something else entirely, so reading it blind would invent a verdict.
     if (bs.readUInt16LE(0x16) !== 0 || bs.readUInt32LE(0x24) === 0) return null;
@@ -380,8 +388,6 @@ function volumeDirty(destDir) {
     return (bs.readUInt8(0x41) & 0x01) === 0x01;
   } catch {
     return null;
-  } finally {
-    try { fs.closeSync(fd); } catch {}
   }
 }
 
@@ -393,8 +399,10 @@ function volumeDirty(destDir) {
 // 0x00 throughout - so the bit is not "this was unplugged", it is "this was left mid-write".
 // A card in that state genuinely is unknown, which is what the dialog says. So the case that
 // looked like a false positive is a true one, and the Windows-only confirm bought nothing.
-function destinationHealth(destDir) {
-  return volumeDirty(destDir) === true ? { dirty: true } : null;
+async function destinationHealth(destDir) {
+  const d = await volumeDirty(destDir);
+  if (d === 'unresponsive') return { unresponsive: true };
+  return d === true ? { dirty: true } : null;
 }
 
 // Split out so it can be tested against real device strings without a Windows box.
@@ -566,10 +574,11 @@ const FIT_CHECK_MIN_BYTES = 0;
 // the whole case - a rare false refusal costs a retry; attempting a write we can predict will
 // fail costs a part-written archive on a card. And it lands hardest on backup, because a
 // truncated backup is the artefact someone reaches for on the day everything else went wrong.
-// [B-594] Writing to a card with 32 KB clusters through a saber on Windows corrupts it, the same
-// way every time: 9 of 9, across two computers and two plugins, while 8, 16 and 64 KB came through
-// clean. Only this exact size, and only through a board. Not known why. A reader is fine.
-const SABER_UNSAFE_CLUSTER = 32768;
+//
+// NO CLUSTER-SIZE REFUSAL. 32 KB cards written through a board were refused here from B-594 on
+// (9 of 9 corrupted on Windows). The cause turned out to be the core's USB Mass Storage wrapping
+// every address past 4 GiB, which those runs reliably reached; with the JMT plugin the same test
+// came back exact repeatedly, writes past 4 GiB included (2026-11-13). [B-668]
 
 async function preflight(destDir, {
   fileSizes = null, totalBytes = 0, fileCount = 0, dirCount = 0, classify = false,
@@ -608,13 +617,7 @@ async function preflight(destDir, {
   // the transport regardless of size.
   const wantBoard = classify === true || isSlowWriteJob(files, bytes);
 
-  // The cluster size costs 0.3 ms and the board answer ~1,900 ms, so only a card at the unsafe size
-  // pays for the lookup on a small write. Any size of write has to be asked: this refuses, it
-  // does not warn.
-  let d = await describe(destDir, { classify: wantBoard });
-  if (!wantBoard && process.platform === 'win32' && d.blockSize === SABER_UNSAFE_CLUSTER) {
-    d = await describe(destDir, { classify: true });
-  }
+  const d = await describe(destDir, { classify: wantBoard });
   out.ok = !!d.ok;
   out.bytesFree = d.bytesFree;
   out.blockSize = d.blockSize;
@@ -627,19 +630,6 @@ async function preflight(destDir, {
   // conflation is safe, and `transport: null` is what distinguishes the two for anyone
   // inspecting the result.
   out.boardCard = isSlowTransport(d.transport);
-
-  // Rides `unhealthy` because every door already refuses on that and writes nothing. An unknown
-  // transport is not a board card, so a failed lookup writes, the same ruling as everywhere else.
-  //
-  // WINDOWS ONLY, MEASURED. A Mac does recognise a board card (macDisks), so without this check
-  // the refusal reached the Mac by inference on 2026-11-07. It was then measured: a full 32 KB
-  // write through the board on the Mac came back clean on a read-only chkdsk (20,126 files, no
-  // lost chains), the second clean Mac run, against 9 of 9 corrupted on Windows. The writer is
-  // Windows, not the board. The ruling: "Yep, windows only". [B-594, B-614]
-  if (out.boardCard && d.blockSize === SABER_UNSAFE_CLUSTER && process.platform === 'win32') {
-    out.unhealthy = { saberUnsafeCluster: true };
-    return out;
-  }
 
   // ── 1. Is it in a state worth writing to at all ── [B-441]
   //
@@ -699,7 +689,7 @@ async function preflight(destDir, {
 module.exports = {
   describe, checkFit, onDiskCost, classifyTransport, preflight, driveKind,
   SLOW_WRITE_MIN_BYTES, SLOW_CLEANUP_MIN_FILES, FIT_CHECK_MIN_BYTES,
-  isSlowWriteJob, isSlowCleanupJob, isSlowTransport, SABER_UNSAFE_CLUSTER,
+  isSlowWriteJob, isSlowCleanupJob, isSlowTransport,
   // [B-441] Exported so the check can be exercised against real volumes rather than only
   // through `preflight`, which cannot be pointed at a specific card from a test.
   volumeDirty, destinationHealth, rawVolumePath,

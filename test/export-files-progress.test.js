@@ -50,7 +50,7 @@ ok('the export helper was found', caller.length > 0);
 // ── the renderer asks first ────────────────────────────────────────────────
 {
   ok('a multi-file export picks the destination BEFORE any work',
-     /subPaths\.length > 1/.test(caller) && /pickExportDir/.test(caller),
+     /subPaths\.length > 1/.test(caller) && /[pP]ickExportDir/.test(caller),
      'the whole fix is the order; a bar in front of the old flow sat behind a native dialog');
   // RE-ANCHORED 2026-09-22 when the funnel migrated. This asserted the door called
   // `_sfRunWithByteProgress` ITSELF, which was "the shared runner" at the time this was written.
@@ -75,7 +75,7 @@ ok('the export helper was found', caller.length > 0);
   ok('a single item needs no probe to choose its picker',
      /const _wantFolder = !!isDir && !asFile;/.test(caller)
      && /pickExportFilePath/.test(caller)
-     && /pickExportDir/.test(caller),
+     && /[pP]ickExportDir/.test(caller),
      'the caller supplies isDir, so no work happens between the click and the dialog');
 }
 

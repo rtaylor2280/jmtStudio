@@ -204,14 +204,21 @@ async function _collectRecordsAsync(itemRoot, onFile, filter) {
 // Resolves null on error rather than throwing, matching hashFileAsync in
 // soundFontSharedTracksHash, because a caller that cannot read a file must treat it as "unknown"
 // and go read it, never as "matches".
-function hashFileAsync(absPath) {
+//
+// `shouldStop` IS CHECKED PER CHUNK. One sound file read through a board's USB link is seconds,
+// and a Cancel that waited for the whole file read as a hang (2026-11-13). A stopped read resolves null, so the caller sees "unknown",
+// never "matches", and must check its own stop flag to tell the two apart.
+function hashFileAsync(absPath, { shouldStop = null } = {}) {
   return new Promise((resolve) => {
     let h;
     try { h = crypto.createHash('sha256'); } catch { resolve(null); return; }
     let stream;
     try { stream = fs.createReadStream(absPath, { highWaterMark: 64 * 1024 }); }
     catch { resolve(null); return; }
-    stream.on('data', (chunk) => h.update(chunk));
+    stream.on('data', (chunk) => {
+      if (shouldStop && shouldStop()) { try { stream.destroy(); } catch {} resolve(null); return; }
+      h.update(chunk);
+    });
     stream.on('error', () => { try { stream.destroy(); } catch {} resolve(null); });
     stream.on('end', () => { try { resolve(h.digest('hex')); } catch { resolve(null); } });
   });

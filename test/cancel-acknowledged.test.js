@@ -75,7 +75,7 @@ for (const p of painters) {
 // `.busy-dots` exists (2026-08-14) because "a static 'Resetting…' is indistinguishable from a
 // frozen app" — and a frozen app is precisely what a user suspects at the moment they press Cancel
 // on a long export. The one place the animation mattered most was hand-rolling a literal ellipsis.
-const offerAt = region.indexOf('offerCancel(onCancel)');
+const offerAt = region.indexOf('offerCancel(onCancel');
 const offerEnd = region.indexOf('clearCancel()', offerAt);
 const offer = (offerAt > 0 && offerEnd > offerAt) ? region.slice(offerAt, offerEnd) : '';
 ok('offerCancel was located', offer.length > 0);

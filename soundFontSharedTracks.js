@@ -506,7 +506,8 @@ async function planExport(userData, destDir, onFile = null, shouldStop = null) {
     const { breathe, hashFileAsync } = require('./soundFontFileHash');
     await breathe();
     // [B-173] - see the twin in soundFontEntries.
-    let destHash = valid ? entry[2] : (sync.countHash(), await hashFileAsync(dst));
+    let destHash = valid ? entry[2] : (sync.countHash(), await hashFileAsync(dst, { shouldStop }));
+    if (shouldStop && shouldStop()) return { ok: true, canceled: true };   // stopped mid-file
     refreshed.set(name, [st.size, mtime, destHash]);
 
     const libHash = libHashes.get(name) || await hashFileAsync(path.join(srcDir, name));

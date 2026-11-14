@@ -675,10 +675,38 @@ function lookupCache(configHash, buildPkgHash) {
   try {
     const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     if (metadata.configHash !== configHash || metadata.buildPkgHash !== buildPkgHash) return null;
+    if (!_jmtEntryGenuine(cacheDir, metadata, metaPath)) return null;
     return { cacheDir, metadata };
   } catch {
     return null;
   }
+}
+
+/**
+ * A build filed under a JMT plugin must have linked the JMT plugin's library [B-672].
+ *
+ * The key records the plugin REQUESTED. On 2026-11-13 a "4.6.0 JMT" build that had linked
+ * Arduino15's stock library (the B-668 isolation bug) sat under the JMT key and was flashed as JMT
+ * firmware. The build's own map file names the library it linked, so it is read once, and the
+ * verdict is stamped on the entry so the next lookup (they run while typing) costs nothing. An entry
+ * that fails, or has no map to read, is a miss: the compile that follows replaces it.
+ */
+function _jmtEntryGenuine(cacheDir, metadata, metaPath) {
+  if (!/-jmt$/.test(String(metadata.coreVersion || ''))) return true;
+  if (metadata.jmtLibLinked === true) return true;
+  let ok = false;
+  try {
+    const map = fs.readdirSync(cacheDir, { recursive: true }).find((f) => /\.map$/i.test(String(f)));
+    if (map) {
+      const text = fs.readFileSync(path.join(cacheDir, String(map)), 'utf8');
+      const lib = /^.*libstm32l4\d+\.a.*$/m.exec(text);
+      ok = !!lib && /[\\/]\d+\.\d+\.\d+-jmt[\\/]/i.test(lib[0]);
+    }
+  } catch { ok = false; }
+  if (ok) {
+    try { metadata.jmtLibLinked = true; fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2)); } catch {}
+  }
+  return ok;
 }
 
 /**
@@ -830,6 +858,7 @@ function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOS
 }
 
 module.exports = {
+  _jmtEntryGenuine,
   computeConfigHash,
   computeBuildPackageHash,
   checkOnly,

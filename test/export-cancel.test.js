@@ -490,8 +490,14 @@ ok('a cancelled REPLACE tracks export restores the folder it set aside',
 
 // ── 7. The button lives on the modal, and never outlives its work ──
 ok('the shared progress modal owns the cancel affordance',
-   /id="sf-bulk-progress-cancel"/.test(html) && /offerCancel\(onCancel\)/.test(html),
+   /id="sf-bulk-progress-cancel"/.test(html) && /offerCancel\(onCancel[,)]/.test(html),
    'nine doors wiring their own button is nine chances to word it differently');
+// A phase that only READS stops mid-file, so it must not promise to finish the current file.
+// Caught 2026-11-13: the check phase promised to finish a file it had no reason to finish.
+ok('the SD Export scan says plain "Stopping…", not the copy phase\'s promise',
+   /_scanCanceled = true;\s*await _sfExportCancelOpt\.onCancel\(\);\s*\}, \{ stoppingNote: 'Stopping…' \}\)/.test(html));
+ok('the copy phase keeps its promise as the default',
+   /offerCancel\(onCancel, \{ stoppingNote = 'Stopping… \(finishing the current file\)' \} = \{\}\)/.test(html));
 ok('it is hidden until an operation opts in',
    /id="sf-bulk-progress-actions" style="display:none/.test(html),
    'a button that cannot stop anything is worse than no button');

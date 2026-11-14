@@ -107,7 +107,10 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
         try {
           const parsed = JSON.parse((stdout || '').trim() || '[]');
           const rows = Array.isArray(parsed) ? parsed : [parsed];
-          resolve(rows.map((v) => ({ ...v, health: _healthFromDirtyBit(v) })));
+          Promise.all(rows.map(async (v) => {
+            const h = await _healthFromDirtyBit(v);
+            return { ...v, health: h.health, ...(h.unresponsive ? { unresponsive: true } : {}) };
+          })).then(resolve, () => resolve([]));
         } catch { resolve([]); }
       });
   });
@@ -130,15 +133,18 @@ function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
 // decision instead of a rename spreading across surfaces.
 // null means CANNOT TELL, and must stay distinct from 'Healthy': a folder, a non-FAT32
 // volume, or a volume that will not open is unknown, never confirmed-good.
-function _healthFromDirtyBit(v) {
+// Async, and never blocks the main process: the read runs with a time limit [B-669]. A card
+// that does not answer is null (cannot tell), and the row is marked unresponsive.
+async function _healthFromDirtyBit(v) {
   try {
     const mount = v && (v.mountPath || (v.drive ? v.drive + '\\' : null));
-    if (!mount) return null;
-    const dirty = require('./exportDestination').volumeDirty(mount);
-    if (dirty === true) return 'Warning';
-    if (dirty === false) return 'Healthy';
-    return null;
-  } catch { return null; }
+    if (!mount) return { health: null };
+    const dirty = await require('./exportDestination').volumeDirty(mount);
+    if (dirty === 'unresponsive') return { health: null, unresponsive: true };
+    if (dirty === true) return { health: 'Warning' };
+    if (dirty === false) return { health: 'Healthy' };
+    return { health: null };
+  } catch { return { health: null }; }
 }
 
 // macOS rows come from macDisks.js. A reader with no card in it has no mounted volume there, so
@@ -164,11 +170,11 @@ async function enumerateAllVolumes() {
 // card browser to leave the health line off, since a line that always says "unknown" carries no
 // information. If a read ever succeeds, the line returns with a real answer.
 // Windows rows never set it: there, a failed read is about one card, and "unknown" says so.
-function _withHealth(rows) {
-  return (rows || []).map((v) => {
-    const health = _healthFromDirtyBit(v);
-    return { ...v, health, healthReadable: health !== null };
-  });
+async function _withHealth(rows) {
+  return Promise.all((rows || []).map(async (v) => {
+    const h = await _healthFromDirtyBit(v);
+    return { ...v, health: h.health, healthReadable: h.health !== null, ...(h.unresponsive ? { unresponsive: true } : {}) };
+  }));
 }
 
 // ONE LETTER, ONE ROW. [B-420] Use this wherever the question is "tell me about THIS drive".
@@ -193,14 +199,14 @@ async function volumeForPath(p) {
     const mac = require('./macDisks');
     const root = mac.mountRootOf(p);
     if (!root) return null;
-    const rows = _withHealth(await mac.enumerateVolumes(false, root));
+    const rows = await _withHealth(await mac.enumerateVolumes(false, root));
     return rows[0] || null;
   }
   if (os.platform() === 'linux') {
     const lin = require('./linuxDisks');
     const m = await lin.mountOf(p);
     if (!m) return null;
-    const rows = _withHealth(await lin.enumerateVolumes(false, m.root));
+    const rows = await _withHealth(await lin.enumerateVolumes(false, m.root));
     return rows[0] || null;
   }
   return null;
