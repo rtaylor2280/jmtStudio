@@ -26452,6 +26452,12 @@ function _buildStylesVisual() {
         window.electronAPI?.openExternal(cardUrl);
       });
     }
+    // SHIFT ON A CARD IS A RANGE, NEVER A TEXT SELECTION - the same fix as the Sound Fonts grid
+    // [B-477]. The browser extends its text selection on MOUSEDOWN, before any click handler, so a
+    // Shift+click highlighted every card's text between the last click and this one. [B-676]
+    card.addEventListener('mousedown', e => {
+      if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault();
+    });
     card.querySelector('.style-card-select-btn').addEventListener('click', e => {
       e.stopPropagation();
       if (e.shiftKey) _stylesShiftSelectTo(name);
