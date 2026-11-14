@@ -22455,7 +22455,9 @@ function _extractStyleLibraryCreatedDate(content) {
 // the entries inside parse cleanly — they get re-wrapped by _applyStyleLibraryStructure.
 function _stripStyleLibraryStructure(content) {
   let result = content
-    .replace(_SL_JMT_HEADER_RE, '')
+    // EVERY copy, not the first: a second banner (left by an Append before B-675) otherwise
+    // survives every save, since the save strips one and writes one.
+    .replace(new RegExp(_SL_JMT_HEADER_RE.source, 'gm'), '')
     // Strip legacy blank-creation header format (old "JMT Studio — Style Library" / "Created:" block)
     .replace(/^\/\/ =+\r?\n\/\/ JMT Studio[^\n]*\r?\n(?:\/\/[^\n]*\r?\n)*\/\/ =+\r?\n?/m, '')
     .replace(/\/\*[*\s]*Helper\s+functions[*\s]*\*\/[ \t]*\r?\n?/gi, '')
@@ -27043,7 +27045,10 @@ document.getElementById('btn-styles-append').addEventListener('click', async () 
   if (!_stylesEditorInstance) return;
 
   const existing = _stylesEditorInstance.getValue();
-  const incoming = result.content;
+  // A file Studio wrote carries the library's own header and section titles. They are the
+  // library's structure, not styles, so they never come in: appending one left a second
+  // "Style Library · JMT Studio" banner at the end of the library (2026-11-14). [B-675]
+  const incoming = _stripStyleLibraryStructure(result.content);
 
   // Collapse incoming before merging
   const incomingEntries = _parseStyleEntries(incoming);
@@ -27054,21 +27059,47 @@ document.getElementById('btn-styles-append').addEventListener('click', async () 
       collapsedIncoming = collapsedIncoming.slice(0, e.usingIdx) + compacted + collapsedIncoming.slice(e.usingIdx + e.usingCode.length);
   }
 
-  // Find conflicts
+  // APPEND ADDS ONLY WHAT IS NEW. [B-675] A style already in the library under the same name with
+  // the same code (whitespace aside) is left out, with its header and notes; appending the whole file
+  // brought every one of them in a second time as a conflict to clean up by hand. Same name with
+  // DIFFERENT code still comes in and is flagged as a conflict: that is a real difference to see.
+  const _norm = (code) => _compactStyleCode(String(code || '')).replace(/\s+/g, '');
+  const existingCode = new Map(_parseStyleEntries(existing).map(e => [e.name, _norm(e.usingCode)]));
+  const parsed = _parseStyleEntries(collapsedIncoming);
+  const dupes = parsed.filter(e => existingCode.has(e.name) && existingCode.get(e.name) === _norm(e.usingCode));
+  for (let i = parsed.length - 1; i >= 0; i--) {
+    if (!dupes.includes(parsed[i])) continue;
+    const end = i + 1 < parsed.length ? parsed[i + 1].blockStart : collapsedIncoming.length;
+    collapsedIncoming = collapsedIncoming.slice(0, parsed[i].blockStart) + collapsedIncoming.slice(end);
+  }
+  const added = parsed.length - dupes.length;
+  const tally = `${added} ${added === 1 ? 'style' : 'styles'}`
+    + (dupes.length ? `, skipped ${dupes.length} already in your library` : '');
+
+  // Find conflicts: what is left with a name the library already has differs from it.
   const existingNames = new Set([...existing.matchAll(/^using\s+(\w+)\s*=/mg)].map(m => m[1]));
   [...collapsedIncoming.matchAll(/^using\s+(\w+)\s*=/mg)].map(m => m[1])
     .filter(n => existingNames.has(n)).forEach(n => _conflictStyleNames.add(n));
 
-  const separator = existing.trimEnd().length > 0 ? '\n' : '';
-  _stylesUndoPush('append a file');
-  _stylesEditorInstance.setValue(existing.trimEnd() + separator + '\n' + collapsedIncoming.trimStart());
-  _stylesChanged();
-  if (_stylesViewMode === 'visual') _buildStylesVisual();
-  else _updateConflictBanner();
+  // Nothing new: leave the library exactly as it was (no stray header text from the file).
+  const nothingNew = parsed.length > 0 && added === 0;
+  const lead = nothingNew
+    ? `Nothing added: all ${dupes.length} ${dupes.length === 1 ? 'style is' : 'styles are'} already in your library`
+    : `Added ${tally}`;
+  if (!nothingNew) {
+    const separator = existing.trimEnd().length > 0 ? '\n' : '';
+    _stylesUndoPush('append a file');
+    _stylesEditorInstance.setValue(existing.trimEnd() + separator + '\n' + collapsedIncoming.trimStart());
+    _stylesChanged();
+    if (_stylesViewMode === 'visual') _buildStylesVisual();
+    else _updateConflictBanner();
+  }
   // [B-424] Eject offer, after the buffer and banner have settled. Same reason as the Import
   // File door above - this one had no eject surface either, and a toast is what it can carry.
   if (result.sourcePath && window._sfOfferEjectInToast) {
-    await window._sfOfferEjectInToast(result.sourcePath, 'Styles appended', 'from');
+    await window._sfOfferEjectInToast(result.sourcePath, lead, 'from');
+  } else {
+    showToast(`${lead}.`);
   }
 });
 document.getElementById('btn-styles-export').addEventListener('click', () => _exportStylesLibrary());
