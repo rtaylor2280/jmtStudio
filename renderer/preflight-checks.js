@@ -1389,10 +1389,10 @@
   // [B-656]. A preset still naming a style by a name the Style Library has since renamed: the
   // library writes `// formerly: Old` on the renamed style, and Old no longer exists, so the
   // compile stops with "not declared in this scope" at the preset. The config-open review offers
-  // the new name, and a user may decline it (his rule, 2026-11-09: "we wouldn't force a user to
-  // make a decision here"); this is the second chance, "without closing and reopening".
+  // the new name, and a user may decline it (2026-11-09: no user is forced to decide there);
+  // this is the second chance, "without closing and reopening".
   //
-  // ALIASES ONLY (his call, 2026-11-09). A name is flagged only when the library itself records it
+  // ALIASES ONLY (2026-11-09). A name is flagged only when the library itself records it
   // as a former name AND no style, in the library or the config, carries it now. An unknown name
   // that is not a former one could be defined somewhere this check cannot see, so it is left alone.
   // A former name two styles once had is named without a fix button: picking one would be a guess.
@@ -1512,8 +1512,8 @@
         if (now.length === 1) continue;
         const one = presets.length === 1;
         // The choice is the user's: a dropdown that starts on its prompt and one Update button,
-        // which stays off until they pick (his shape, 2026-11-09: a button per style "could be
-        // dozens"). The chosen name arrives as plan()'s second argument.
+        // which stays off until they pick (2026-11-09: a button per style could mean
+        // dozens). The chosen name arrives as plan()'s second argument.
         findings.push({
           title: `There is no style called ${old}.`,
           detail: `More than one style in your Style Library had that name. Choose the one ${one ? 'this preset' : `these ${presets.length} presets`} should use. The compile will fail until ${one ? 'it is' : 'they are'} updated.`,

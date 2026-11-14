@@ -1312,12 +1312,53 @@ ipcMain.handle('cache:getSize', () => {
 // They used to be one button called "Clear Compile Cache", which meant anyone reclaiming disk also
 // threw away the compiler's intermediates, and the label reported a leftover build tree as though
 // it were cached work — it once read 48.0 MB when the number of cached builds was zero.
-function _dirSize(p) {
+//
+// HARD LINKS ARE ONE FILE. A JMT tree hard-links its compiler (~1.4 GB) from the base tree, so
+// summing stat.size per entry counts those bytes once per link. _walkBytes sums files with one
+// link and hands every file with more to onLinked(key, size, nlink), keyed `dev:ino` from a bigint
+// stat as fsLinkCopy.js does (a Number inode can collide on Windows), adding what it returns.
+// _dirSize counts each linked file once per `seen`; pass one set across walks that make one
+// total. [B-677]
+function _walkBytes(p, onLinked) {
   if (!fs.existsSync(p)) return 0;
-  return fs.readdirSync(p, { withFileTypes: true }).reduce((sum, e) => {
+  let sum = 0;
+  for (const e of fs.readdirSync(p, { withFileTypes: true })) {
     const full = path.join(p, e.name);
-    return sum + (e.isDirectory() ? _dirSize(full) : fs.statSync(full).size);
-  }, 0);
+    if (e.isDirectory()) { sum += _walkBytes(full, onLinked); continue; }
+    const st = fs.statSync(full, { bigint: true });
+    sum += st.nlink > 1n ? onLinked(`${st.dev}:${st.ino}`, Number(st.size), Number(st.nlink)) : Number(st.size);
+  }
+  return sum;
+}
+function _dirSize(p, seen = new Set()) {
+  return _walkBytes(p, (key, size) => {
+    if (seen.has(key)) return 0;
+    seen.add(key);
+    return size;
+  });
+}
+// What deleting a set of paths frees. A linked file frees its bytes only when every one of its
+// links is among the paths deleted: a JMT tree removed while its base tree stays frees nothing of
+// the compiler they share. size(p, bucket) returns p's unlinked bytes and tallies its linked ones;
+// settle() then returns, per bucket, the linked bytes whose links were all seen, each file counted
+// once, in the bucket that saw it first. [B-677]
+function _reclaimTally() {
+  const linked = new Map();
+  return {
+    size(p, bucket) {
+      return _walkBytes(p, (key, size, nlink) => {
+        const r = linked.get(key);
+        if (r) r.seen++;
+        else linked.set(key, { size, nlink, seen: 1, bucket });
+        return 0;
+      });
+    },
+    settle() {
+      const out = {};
+      for (const r of linked.values()) if (r.seen >= r.nlink) out[r.bucket] = (out[r.bucket] || 0) + r.size;
+      return out;
+    },
+  };
 }
 
 ipcMain.handle('cache:clearBuilds', async () => {
@@ -1458,6 +1499,10 @@ async function _surveyBuildSpace() {
   const legacyPath = toolchain.getLegacyCoreTreePath();
 
   let toolBytes = 0;
+  // Trees, tool folders and orphaned trees the reset deletes, sized so a compiler hard-linked
+  // between a tree that goes and one that stays counts nothing, and one whose every link goes counts
+  // once. [B-677]
+  const reclaim = _reclaimTally();
   const treeFor = new Map(toolchain.listCoreTrees()
     .map(t => [coreVersions.normalizeVersion(t.version), t.path]));
   // Every tool directory already accounted for, so the stray sweep below cannot count one twice.
@@ -1501,18 +1546,18 @@ async function _surveyBuildSpace() {
     // The legacy root is different - it survives the reset - so there only the platform and the
     // tools it leaves behind are reclaimable. (2026-08-14)
     if (treePath !== legacyPath) {
-      toolBytes += _dirSize(treePath);
+      toolBytes += reclaim.size(treePath, 'tools');
       countedTreePaths.add(treePath);
       continue;
     }
 
-    toolBytes += _dirSize(path.join(coreVersions.getHardwarePath(treePath), onDisk));
+    toolBytes += reclaim.size(path.join(coreVersions.getHardwarePath(treePath), onDisk), 'tools');
     // Its compiler too. Each tree carries its own toolchain - 3.6 needs
     // 9-2020-q2-update and 4.6 needs 14-2-rel1-xpack, sharing no bytes - and it
     // is the larger half by a wide margin. Counting only the platform reported a
     // fraction of what removing the core actually frees.
     for (const t of coreVersions.unusedToolDirs(treePath, Array.from(keep), idx.toolDeps)) {
-      toolBytes += _dirSize(t.path);
+      toolBytes += reclaim.size(t.path, 'tools');
       countedToolPaths.add(t.path);
     }
   }
@@ -1535,7 +1580,7 @@ async function _surveyBuildSpace() {
       for (const t of coreVersions.unusedToolDirs(treePath, Array.from(keep), idx.toolDeps)) {
         if (countedToolPaths.has(t.path) || insideCountedTree(t.path)) continue;
         countedToolPaths.add(t.path);
-        strayToolBytes += _dirSize(t.path);
+        strayToolBytes += reclaim.size(t.path, 'stray');
       }
     }
   } catch {}
@@ -1594,7 +1639,11 @@ async function _surveyBuildSpace() {
   const orphanTrees = toolchain.listCoreTreePaths()
     .filter(p => p !== legacyPath && !liveTrees.has(p));
   let orphanTreeBytes = 0;
-  for (const p of orphanTrees) orphanTreeBytes += _dirSize(p);
+  for (const p of orphanTrees) orphanTreeBytes += reclaim.size(p, 'orphan');
+  const linkedFreed = reclaim.settle();
+  toolBytes       += linkedFreed.tools  || 0;
+  strayToolBytes  += linkedFreed.stray  || 0;
+  orphanTreeBytes += linkedFreed.orphan || 0;
 
   // TWO numbers, because the row and the button answer different questions.
   //
@@ -1619,9 +1668,11 @@ async function _surveyBuildSpace() {
   // build space living outside that root, so it is the only thing added - and `stagingBytes` is
   // deliberately NOT added here for the same reason. (2026-08-14)
   // On Windows the trees have their own root beside the legacy one (B-670); the two never nest, so
-  // each is walked once and summed.
+  // each is walked once and summed. One `seen` set across the roots, so the compiler a JMT tree
+  // hard-links from its base tree counts once, not once per tree. [B-677]
+  const footprintSeen = new Set();
   const footprintBytes = workspaceBytes +
-    toolchain.listCoreTreeRoots().reduce((n, r) => n + _dirSize(r), 0);
+    toolchain.listCoreTreeRoots().reduce((n, r) => n + _dirSize(r, footprintSeen), 0);
 
   // Cached builds are NOT build space, in either number. Build space is temp files and plugins.
   // A reset still removes builds that only work with a plugin it is deleting - they are unusable
@@ -7997,8 +8048,10 @@ ipcMain.handle('core:upgradeToJmt', async (_, { base }) => {
   const log = _installPhaseLogger(makeLogger());
   let made;
   try { made = await toolchain.ensureCore(log, jmt, { activate: false }); }
+  catch (e) { made = { ok: false, error: (e && e.message) || String(e) }; }
   finally { _clearInstallPhase(); }
-  if (!made.ok) return made;
+  if (!made.ok) { _jmtFailRecord(base, made.error); return made; }
+  _jmtFailClear(base);
   const moved = [];
   for (const name of proffie.listVersions()) {
     const pin = proffie.getVersionCore(name);
@@ -8022,9 +8075,47 @@ function _jmtOfferRecord(base) {
   rec[coreVersions.baseVersion(base)] = new Date().toISOString();
   Store.set('jmtPluginOffered', rec);
 }
+// A JMT version that could not be made is recorded beside the offers, against the manifest
+// revision and app version it failed on. Once the choice is Always, startup makes every missing JMT
+// version, and without this record a failure would be retried, unseen, on every launch, locking
+// Compile each time. The record holds until either one changes (a new fix or a new JMT Studio can
+// succeed where this one did not); a later success clears it, and the Install JMT Patch button
+// still tries on request. [B-677]
+function _jmtManifestRevision() {
+  try { return (jmtPlugin.readManifest(proffie.getResourcesPath()) || {}).revision || 1; } catch { return 1; }
+}
+function _jmtFailRecord(base, error) {
+  const rec = Store.get('jmtPluginFailed') || {};
+  rec[coreVersions.baseVersion(base)] = {
+    revision: _jmtManifestRevision(), appVersion: app.getVersion(),
+    at: new Date().toISOString(), error: String(error || ''),
+  };
+  Store.set('jmtPluginFailed', rec);
+}
+function _jmtFailClear(base) {
+  const rec = Store.get('jmtPluginFailed') || {};
+  const b = coreVersions.baseVersion(base);
+  if (!(b in rec)) return;
+  delete rec[b];
+  Store.set('jmtPluginFailed', rec);
+}
+// True while a recorded failure still applies: same manifest revision, same app version.
+function _jmtFailHolds(rec, revision, appVersion) {
+  return !!rec && rec.revision === revision && rec.appVersion === appVersion;
+}
+// Stock versions on this computer with a JMT fix that has not been made, and that are not held
+// back by a failure recorded for this revision and app version. Not yet accepted: only those never
+// offered. Never: none.
+function _jmtDue({ choice, supported, available, offered, failed, revision, appVersion, jmtVersionOf }) {
+  if (choice === 'never') return [];
+  return supported.filter(b => available.includes(b) && !available.includes(jmtVersionOf(b))
+    && (choice === 'always' || !offered[b])
+    && !_jmtFailHolds(failed[b], revision, appVersion));
+}
 ipcMain.handle('core:jmtOfferState', async () => {
   const supported = jmtPlugin.supportedBases(proffie.getResourcesPath());
   const offered   = Store.get('jmtPluginOffered') || {};
+  const failed    = Store.get('jmtPluginFailed') || {};
   const available = toolchain.listAvailableCores().map(c => c.version);
   return {
     ok: true,
@@ -8037,9 +8128,11 @@ ipcMain.handle('core:jmtOfferState', async () => {
     accepted: _jmtChoice() === 'always',
     // The only time the offer is asked at startup: a first run, once the plugin is set up.
     freshInstall: Store.freshInstall,
-    // Never: nothing is offered and nothing is made.
-    due: _jmtChoice() === 'never' ? [] : supported.filter(b => available.includes(b) && !available.includes(coreVersions.jmtVersionOf(b))
-                            && (_jmtChoice() === 'always' || !offered[b])),
+    // Never: nothing is offered and nothing is made. A failure recorded for this revision and app
+    // version keeps its base out until either changes. [B-677]
+    due: _jmtDue({ choice: _jmtChoice(), supported, available, offered, failed,
+                   revision: _jmtManifestRevision(), appVersion: app.getVersion(),
+                   jmtVersionOf: coreVersions.jmtVersionOf }),
     made: supported.filter(b => available.includes(coreVersions.jmtVersionOf(b))),
   };
 });

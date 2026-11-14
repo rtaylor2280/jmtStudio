@@ -83,23 +83,27 @@ function fingerprintDir(root) {
   });
 }
 
-// arduino-cli's name for this computer's build of a tool, as the package index spells it.
-function hostKeys() {
-  const a = process.arch, p = process.platform;
+// arduino-cli's name for this computer's build of a tool, as the package index spells it, in
+// the order arduino-cli prefers them. An Apple Silicon Mac falls back to the Intel build when a
+// tool has no arm64 Mac build (arm-none-eabi-gcc 9-2020-q2-update, used by the 3.6.0 base), and
+// arduino-cli installs that build to run under Rosetta, so its fingerprint is the one to check.
+// The native build still wins whenever the manifest has it. [B-677]
+function hostKeys(p = process.platform, a = process.arch) {
   if (p === 'win32')  return ['i686-mingw32'];
-  if (p === 'darwin') return a === 'arm64' ? ['arm64-apple-darwin', 'aarch64-apple-darwin'] : ['x86_64-apple-darwin'];
+  if (p === 'darwin') return a === 'arm64' ? ['arm64-apple-darwin', 'aarch64-apple-darwin', 'x86_64-apple-darwin'] : ['x86_64-apple-darwin'];
   if (p === 'linux')  return a === 'arm64' ? ['aarch64-linux-gnu'] : ['x86_64-pc-linux-gnu', 'x86_64-linux-gnu'];
   return [];
 }
 
 /**
  * The expected fingerprint of `toolName@toolVersion` on this computer, from a manifest's
- * `tools` block, or null when the manifest has none (then nothing can be verified).
+ * `tools` block, or null when the manifest has none (then nothing can be verified). `keys`
+ * defaults to this computer's; tests pass another computer's.
  */
-function expectedFor(manifest, toolName, toolVersion) {
+function expectedFor(manifest, toolName, toolVersion, keys = hostKeys()) {
   const t = manifest && manifest.tools && manifest.tools[`${toolName}@${toolVersion}`];
   if (!t) return null;
-  for (const k of hostKeys()) if (t[k]) return t[k];
+  for (const k of keys) if (t[k]) return t[k];
   return null;
 }
 

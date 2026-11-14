@@ -1,7 +1,7 @@
 // The JMT plugin's version identity [B-668].
 //
 //   1. "-jmt" survives normalising, in every spelling, and never collapses to the stock version.
-//      It used to: normalizeVersion parsed each part with parseInt, so "4.6.0-jmt" became "4.6.0",
+//      The defect guarded: normalizeVersion parsing each part with parseInt, so "4.6.0-jmt" became "4.6.0",
 //      and a JMT cancel would have deleted the stock tree.
 //   2. Ordering: 4.6.0 < 4.6.0-jmt < 4.7.0, so "newer available" still means a real release.
 //   3. A JMT tree is recognised from its platform.txt stamp, while its directory keeps

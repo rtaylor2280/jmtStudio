@@ -194,10 +194,12 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
   check('Remembered choices opens collapsed every time Settings opens', aboutAt > 0
     && /getElementById\('settings-remembered-body'\)\.style\.display = 'none'/.test(aboutOpen)
     && /_rememberedBtn\.innerHTML = '&#9654; Show'/.test(aboutOpen));
-  check('Remembered choices holds all three',
-    ['setting-sd-include-config', 'setting-images-always-rename', 'setting-font-rename-update'].every((id) => body.includes(`id="${id}"`)));
-  check('and is wired to their settings', /\['setting-sd-include-config', 'sdExportIncludeConfig', 'never'\],\s*\['setting-images-always-rename', 'imagesAlwaysRename', 'ask'\],\s*\['setting-font-rename-update', 'fontRenameAlwaysUpdate', 'ask'\],/.test(html));
-  check('each is Ask / Always / Never', ['setting-sd-include-config', 'setting-images-always-rename', 'setting-font-rename-update'].every((id) => {
+  // The SD Export config question left Settings for the SD Export dialog's own box [B-664].
+  check('Remembered choices holds the image and font rename choices',
+    ['setting-images-always-rename', 'setting-font-rename-update'].every((id) => body.includes(`id="${id}"`))
+    && !body.includes('id="setting-sd-include-config"'));
+  check('and is wired to their settings', /\['setting-images-always-rename', 'imagesAlwaysRename', 'ask'\],\s*\['setting-font-rename-update', 'fontRenameAlwaysUpdate', 'ask'\],/.test(html));
+  check('each is Ask / Always / Never', ['setting-images-always-rename', 'setting-font-rename-update'].every((id) => {
     const at = body.indexOf(`id="${id}"`);
     const seg = body.slice(at, body.indexOf('</div>', at));
     return /data-choice="ask">Ask<[\s\S]*data-choice="always">Always<[\s\S]*data-choice="never">Never</.test(seg);
@@ -223,10 +225,9 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
     return (await ctx.f('k')) === 'ask';
   })());
   check('each dialog has a Never button, and it saves Never',
-    ['Never update', 'Never rename', 'Never include'].every((t) => html.includes(`leadText: '${t}'`))
+    ['Never update', 'Never rename'].every((t) => html.includes(`leadText: '${t}'`))
     && /if \(choice === 'lead'\) \{ try \{ await window\.electronAPI\.setSetting\('fontRenameAlwaysUpdate', 'never'\)/.test(html)
-    && /if \(choice === 'lead'\) \{ try \{ await window\.electronAPI\.setSetting\('imagesAlwaysRename', 'never'\)/.test(html)
-    && /if \(_ans === 'lead'\) await window\._sfSdSetConfigChoice\('never'\);/.test(html));
+    && /if \(choice === 'lead'\) \{ try \{ await window\.electronAPI\.setSetting\('imagesAlwaysRename', 'never'\)/.test(html));
   check('no dialog carries a "Don\'t ask again" box', !html.includes(`label: "Don't ask again"`));
   // Font rename, image rename, a font's style as its Last used style [B-569], and a style
   // rename, which shares the font rename's setting [B-651].
@@ -234,10 +235,10 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
   check('the Never button sits before Cancel and resolves lead',
     /id="modal-confirm-lead"[^>]*><\/button>\s*<button class="modal-btn-cancel" id="modal-confirm-cancel"/.test(html)
     && /leadBtn\.onclick\s*=\s*\(\) => cleanup\('lead'\)/.test(html));
-  check('SD Export asks every time on Ask; Include and Don\'t include are this export only',
-    /window\._sfSdConfigChoice\(\) === 'ask'/.test(html)
-    && /_thisTime = _ans === 'middle' \|\| _ans === 'confirm';/.test(html)
-    && !/_ans === 'cancel'[^\n]*_sfSdSetConfigChoice/.test(html));
+  // [B-664] The SD Export dialog's config box opens as it was left: the tick is remembered, and
+  // only while a config is open (a greyed box the user could not touch saves nothing).
+  check('SD Export remembers the config box as it was left, only with a config open',
+    /if \(_cfgOpen\) \{ try \{ await window\._sfSdSetConfigChoice\(_dlg\.cfg \? 'always' : 'never'\); \} catch \{\} \}/.test(html));
   check('an image copied in the app keeps its name on Paste; a clipboard image is named after the item',
     /fromCopied = !!\(tmp && tmp\.ok\);/.test(html)
     && /await setFromFile\(tmp\.filePath, fromCopied\);/.test(html)
@@ -249,10 +250,9 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
     && /const _sfRenderEntryPictureViews = async \(\) => \{[\s\S]{0,200}_sfRenderEntryPictureRow\(\);\s*_sfRenderPicture\(\{ imgId: 'sf-entry-picture'[\s\S]{0,600}_sfRenderDocChips\(/.test(html));
   check('every remembered-choice dialog has the X',
     /confirmText: 'Always update', confirmKind: 'primary',\s*closeX: true,/.test(html)
-    && /confirmText: 'Always rename', confirmKind: 'primary',\s*closeX: true,/.test(html)
-    && /confirmText: 'Always include',\s*confirmKind: 'primary',\s*closeX: true,/.test(html));
+    && /confirmText: 'Always rename', confirmKind: 'primary',\s*closeX: true,/.test(html));
   check('the write uses this export\'s answer, not the setting again',
-    /const _incl = _sdWantCfg;/.test(html) && /_sdWantCfg = _wantCfg;/.test(html));
+    /const _incl = _sdWantCfg;/.test(html) && /_sdWantCfg = _cfgOpen && _dlg\.cfg;/.test(html));
 
   // ── 6. [B-641] An import that matched a font you have, and did not import it, records the
   // incoming name as a former name of that font.

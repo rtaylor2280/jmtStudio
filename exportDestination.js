@@ -576,7 +576,7 @@ const FIT_CHECK_MIN_BYTES = 0;
 // truncated backup is the artefact someone reaches for on the day everything else went wrong.
 //
 // NO CLUSTER-SIZE REFUSAL. 32 KB cards written through a board were refused here from B-594 on
-// (9 of 9 corrupted on Windows). The cause turned out to be the core's USB Mass Storage wrapping
+// (9 of 9 corrupted on Windows). The cause is the core's USB Mass Storage wrapping
 // every address past 4 GiB, which those runs reliably reached; with the JMT plugin the same test
 // came back exact repeatedly, writes past 4 GiB included (2026-11-13). [B-668]
 

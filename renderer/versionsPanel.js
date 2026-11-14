@@ -2221,6 +2221,16 @@ async function _vpJmtUpgradeWithProgress(base) {
   return res;
 }
 
+// Why a JMT version made at startup could not be made, in plain words. The raw error names folders
+// and checks; it stays in main's record, and this says what happened and what still works. [B-677]
+function _vpJmtFailureWords(base, error) {
+  const jmt = `${base} JMT`;
+  const why = /compiler it would share/i.test(String(error || ''))
+    ? `the compiler it shares with ${base} is not the official release, so it was left alone`
+    : 'something went wrong while adding it';
+  return `Could not add ${jmt}: ${why}. ${base} works as before, and Install JMT Patch in OS Versions tries again.`;
+}
+
 // Accepted once: every stock plugin on this computer without its JMT version gets one, no question.
 // Not yet accepted: asked only on a first run of JMT Studio (opts.ask), once the plugin is set up;
 // everyone else first meets the offer when they pick a Mass Storage USB type.
@@ -2234,6 +2244,10 @@ window.checkJmtPluginOffer = async function checkJmtPluginOffer(opts = {}) {
       if (res && res.ok) {
         window.showToast?.(`${base} JMT added and set as the default for ${base}.`);
         if (res.appliedToActive) window.onCoreVersionChanged?.(`Proffieboard Plugin changed to ${base} JMT, recompile needed`);
+      } else {
+        // Said once: main records the failure, so this base is not tried again at startup until
+        // the JMT fix or JMT Studio changes. [B-677]
+        window.showToast?.(_vpJmtFailureWords(base, res && res.error), { kind: 'error', durationMs: 12000 });
       }
     } else {
       // ONE question covers every plugin version on this computer: a yes

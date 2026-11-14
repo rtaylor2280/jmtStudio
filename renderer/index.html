@@ -7427,26 +7427,6 @@
   </div>
 </div>
 
-<!-- ── Include-common-folder courtesy modal: shown at Save time when the open
-     config does NOT reference ";common" but the user has multiple common
-     folders available. Dropdown forces an explicit pick (no pre-select),
-     since asking is a courtesy and assuming the default would defeat that.
-     ── -->
-<div class="modal-overlay" id="modal-sf-include-common">
-  <div class="modal">
-    <h2>Include common folder?</h2>
-    <p class="sf-import-hint">The open config does not reference a "common" folder, but your library has several. Pick one to include alongside the selected fonts, or skip to save fonts only.</p>
-    <div style="margin: 14px 0 18px;">
-      <label for="sf-include-common-select" style="display:block; margin-bottom: 6px; font-size: 0.78rem; color: var(--c-text-sub);">Common folder</label>
-      <select id="sf-include-common-select" style="width: 100%; padding: 6px 8px; background: var(--c-bg-inset); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 3px; font-size: 0.82rem;"></select>
-    </div>
-    <div class="modal-btns">
-      <button class="modal-btn-cancel" id="sf-include-common-cancel">Cancel</button>
-      <button class="modal-btn-cancel" id="sf-include-common-skip">Skip</button>
-      <button class="modal-btn-primary" id="sf-include-common-include" disabled>Include</button>
-    </div>
-  </div>
-</div>
 
 <!-- ── Bulk add tags modal: applies one or more tags to every selected font
      in one pass. Existing tags on each entry are preserved; new tags are
@@ -10259,6 +10239,9 @@ async function _offerProtectSd({ title, intro }) {
 // [B-668] The live offer, on picking a Mass Storage USB type: only when this config's ProffieOS
 // version builds with a stock plugin that has a JMT version.
 window.offerJmtPluginForUsb = async function () {
+  // [B-677] Runs after the Mass Storage question, whose answer can be "Remove Mass Storage":
+  // no offer about a mode that is no longer selected.
+  if (!/msc/i.test(_currentUsbMode())) return;
   const pin = _normPlugin(_statPluginVersion);
   if (!pin || /-jmt$/.test(pin)) return;
   let st; try { st = await window.electronAPI.jmtPluginOfferState(); } catch { return; }
@@ -10942,7 +10925,7 @@ function _sfPromptFormerNames(rows) {
   // section and its own sentence: a sound's old name can still be right (the card has it), a
   // style's old name no longer exists, so keeping it means the preset will not compile. [B-656]
   // Not "saber" (a board is not always in one), and not definite about the card: we cannot know
-  // what it holds. His words, 2026-11-09. [B-656]
+  // what it holds. (2026-11-09) [B-656]
   const _soundDesc = '<strong>Update</strong> uses your library\'s names in the presets. If your card still has '
     + 'the old names, update it from <strong>Sound Fonts &rarr; SD Export</strong> after you flash.<br>'
     + '<strong>Ignore</strong> keeps the names the presets have now.';
@@ -11033,8 +11016,8 @@ function _sfFormerNamesAwait(modal, list, rows, applyBtn, cancelBtn, bulkRow) {
     };
     // A line with more than one match starts UNDECIDED (no choice selected). Apply never decides it:
     // it marks every undecided line red, says what is needed, scrolls to the first, and waits.
-    // Choosing in the dropdown or pressing Not now / Ignore clears it. (His design, 2026-11-09:
-    // defaulting to Not now "means that if I just click apply, I never make a decision".) [B-656]
+    // Choosing in the dropdown or pressing Not now / Ignore clears it. (2026-11-09: a
+    // default of Not now would let one click of Apply pass with no decision made.) [B-656]
     const _undecided = () => rows.map((row, i) => i)
       .filter((i) => !list.querySelector(`input[name="former-${i}"]:checked`));
     const _rowEl = (i) => list.querySelector(`[data-former-pick="${i}"]`)?.closest('.sf-save-conflict-row')
@@ -20745,8 +20728,7 @@ let _stylesLinked       = false; // true when config contains #include for the l
 const STYLES_INCLUDE = '#include "my_styles.h"';
 // The older form is recognised by its tail, not by this computer's full path: a link written by
 // either build (jmt-studio, jmt-studio-dev) on any computer, any user, either slash, is the app's
-// own library. His call 2026-11-12: "no matter what computer it comes from or what old link it was,
-// we just fix it." Matching only this machine's path missed a config from the other machine, from
+// own library, whatever computer or old link it came from (2026-11-12). Matching only this machine's path missed a config from the other machine, from
 // the other build, or from a customer. [B-667]
 const _OWN_STYLES_FULL_PATH = /(?:^|[\\/])jmt-studio(?:-dev)?[\\/]my_styles\.h$/i;
 function _isOwnStylesFullPath(p) {
@@ -32087,15 +32069,14 @@ require(['vs/editor/editor.main'], function () {
         return _sfPropNeedsCommon ? ['common'] : [];
       };
 
-      // WHICH COMMON FOLDERS ARE OUTLINED IN BLUE. [his rule, 2026-11-11 13:50]
-      // "shouldn't the blue outline on the common be indicating the one that's actively selected by
-      // the config? or if config is closed it goes to the starred one?" It used to outline the
-      // STARRED folder whenever the config used one, so a config assigned English_A still outlined a
-      // starred English_C - and SD Export, which reads the real assignment, wrote English_A.
-      // Now the same rule SD Export follows: each slot's assigned pack; a slot with no assignment
+      // WHICH COMMON FOLDERS ARE OUTLINED IN BLUE. [B-665, 2026-11-11]
+      // The outline shows the folder the open config actually uses, or the starred one with no
+      // config open. Outlining the STARRED folder whenever the config used one would show a starred
+      // English_C for a config assigned English_A, while SD Export, which reads the real assignment,
+      // writes English_A. The rule is the one SD Export follows: each slot's assigned pack; a slot with no assignment
       // takes the starred one; a slot naming a pack that is not in the library outlines nothing.
       // No config open: the starred one. A config open that uses no common folder: none, since
-      // nothing would go on the card (his question left open; my recommendation, stated 14:36).
+      // nothing would go on the card.
       const _sfOutlinedCommonUuids = () => {
         const out = new Set();
         const open = typeof fileIsOpen !== 'undefined' && !!fileIsOpen;
@@ -51273,56 +51254,6 @@ require(['vs/editor/editor.main'], function () {
       // source of truth and the card is output, so a drifted card folder is
       // stale rather than precious. Skip stays one click away on every row, and
       // the caution line below only appears while something is set to Replace.
-      // Multi-common include prompt — shown when the open config does NOT
-      // reference ";common" and the user has more than one common available.
-      // Default common is pre-selected so there's always a valid choice;
-      // user can change the dropdown if they want a different one.
-      // Resolves with { action, uuid? } where action is
-      // 'cancel' | 'skip' | 'include'.
-      const _sfPromptIncludeCommonChoice = () => {
-        const modal = document.getElementById('modal-sf-include-common');
-        const select = document.getElementById('sf-include-common-select');
-        const cancelBtn = document.getElementById('sf-include-common-cancel');
-        const skipBtn = document.getElementById('sf-include-common-skip');
-        const includeBtn = document.getElementById('sf-include-common-include');
-        if (!modal || !select) return Promise.resolve({ action: 'cancel' });
-        // Build options. Default common is marked and pre-selected so the
-        // Include button has a valid target from the start.
-        const opts = [];
-        for (const c of _sfCommons) {
-          const isDefault = c.uuid === _sfStarredCommonUuid;
-          const label = isDefault ? `${c.meta.name || c.uuid} (default)` : (c.meta.name || c.uuid);
-          opts.push(`<option value="${_sfEscape(c.uuid)}">${_sfEscape(label)}</option>`);
-        }
-        select.innerHTML = opts.join('');
-        select.value = _sfStarredCommonUuid || _sfCommons[0]?.uuid || '';
-        includeBtn.disabled = !select.value;
-        return new Promise(resolve => {
-          const cleanup = (result) => {
-            modal.classList.remove('active');
-            cancelBtn.removeEventListener('click', onCancel);
-            skipBtn.removeEventListener('click', onSkip);
-            includeBtn.removeEventListener('click', onInclude);
-            modal.removeEventListener('click', onBackdrop);
-            document.removeEventListener('keydown', onKey);
-            resolve(result);
-          };
-          const onCancel = () => cleanup({ action: 'cancel' });
-          const onSkip = () => cleanup({ action: 'skip' });
-          const onInclude = () => {
-            if (!select.value) return;
-            cleanup({ action: 'include', uuid: select.value });
-          };
-          const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
-          const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
-          cancelBtn.addEventListener('click', onCancel);
-          skipBtn.addEventListener('click', onSkip);
-          includeBtn.addEventListener('click', onInclude);
-          modal.addEventListener('click', onBackdrop);
-          document.addEventListener('keydown', onKey);
-          modal.classList.add('active');
-        });
-      };
       // Persisted "include the shared tracks folder when exporting" preference.
       // OFF by default, and that default is a real finding rather than caution:
       // a tracks/ folder at the card ROOT is read by the ProffieOS 8 Edit Track
@@ -52901,14 +52832,14 @@ require(['vs/editor/editor.main'], function () {
         //
         // This used to be a run of popups before the card was chosen: put the config on the card,
         // the uncompiled config, the common folder (missing, under two names, or optional), the
-        // tracks folder. They are all in the SD Export dialog now (his design, 2026-11-11). This
+        // tracks folder. They are all in the SD Export dialog (2026-11-11). This
         // section only GATHERS the facts, with no questions; the dialog asks; the code after it
         // applies the answers. The rules each popup applied are unchanged and noted where they
         // still decide something.
         let _provSkipConfig = false, _provSkipReason = '', _cfgNote = '';
         let _sdWantCfg = false;
         // ── Config [B-229]
-        // Last state, his call 11:43: the box opens as it was left. The remembered value is the
+        // Last state: the box opens as it was left. The remembered value is the
         // old setting's key: 'always' = ticked, anything else = unticked.
         const _cfgOpen  = typeof fileIsOpen !== 'undefined' && !!fileIsOpen;
         const _cfgLabel = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : 'This config';
@@ -57122,7 +57053,7 @@ require(['vs/editor/editor.main'], function () {
                 // door had the [B-420] bug the main SD Export door lost on 09-24: Cancel reached
                 // main, which stopped the font being copied and took it back off the card, then
                 // this loop started the next font and the summary counted the stopped one as
-                // exported. Seen with two fonts: "Export complete... 2 fonts" after his Cancel,
+                // exported. Seen with two fonts: "Export complete... 2 fonts" after a Cancel,
                 // with one font on the card. Checked at the TOP of the loop, and `canceled` on a
                 // reply is read BEFORE the font is recorded.
                 let _stoppedReply = null;
@@ -60269,8 +60200,8 @@ require(['vs/editor/editor.main'], function () {
         await _sfMarkSeenBulk(names, 'as seen');
       });
       // ── SD Export is for a card ──────────────────────────────────────── [B-664]
-      // His design, 2026-11-11: "the purpose of it is exporting to an sd card. There's no reason to
-      // use it for a plain export which you still have access to on right click." And no folder
+      // The rule (2026-11-11): SD Export exists to export to an SD card; a plain export to a folder
+      // stays on right click. And no folder
       // destination: a folder copy on the computer is a second copy of the library ("It goes
       // against the concept of keeping a single copy on the computer without duplicates").
       // DISABLED, NOT HIDDEN, so the tooltip can say why. Main pushes the card list on every change.
@@ -60308,7 +60239,7 @@ require(['vs/editor/editor.main'], function () {
         window.electronAPI.onCardsChanged((s) => { _sfCardState = s || _sfCardState; _sfSyncSdExportBtn(); });
         window.electronAPI.getCardPresence().then((s) => { if (s) { _sfCardState = s; _sfSyncSdExportBtn(); } }).catch(() => {});
       }
-      // The card for this export, in one small dialog. [B-664, his design 11:25]
+      // The card for this export, in one small dialog. [B-664]
       // "a smaller modal that shows what we're going to do and the card ... with an export, cancel",
       // a dropdown starting with a prompt when there is more than one card, and a card we already
       // know the export would refuse is not offered: "no point trying if we already know we're
@@ -60334,13 +60265,13 @@ require(['vs/editor/editor.main'], function () {
         } catch { return null; }   // a failed check is not a refusal [B-028]; the export re-checks
       };
       // ── THE SD EXPORT DIALOG ───────────────────────────────────────────── [B-664]
-      // His design, 2026-11-11 11:25-11:43: one dialog titled SD Export that says what is going
+      // The design (2026-11-11): one dialog titled SD Export that says what is going
       // ("export 4 font folders and size and tracks if applicable and config") and holds every
-      // question that used to be its own popup before the card was chosen: config, common folder,
+      // question asked before the card is chosen, each formerly its own popup: config, common folder,
       // tracks. The toolbar tracks toggle folded in here too ("cleaner button").
       // The card is chosen at the bottom: one card is named, several are a dropdown that starts on
       // "Choose a card", and a card the export would refuse is greyed with the refusal's own words.
-      // LAST STATE, his call 11:43: config and tracks open as they were last time, "as long as forced
+      // LAST STATE: config and tracks open as they were last time, "as long as forced
       // tracks since referenced in config doesn't change the last state". The same holds for a
       // config box greyed because no config is open: a box the user could not touch saves nothing.
       // IT OPENS AT ONCE, from facts the caller already holds and the card list main keeps current.
@@ -60364,7 +60295,7 @@ require(['vs/editor/editor.main'], function () {
           cfg: !!o.cfg.checked, commonOn: !!o.common.optionalOn, commonUuid: o.common.optionalUuid || null,
           unresolvedUseDefault: true, tracks: !!o.tracks.checked, card: cards.length === 1 ? cards[0].mountPath : '',
         };
-        // HIS LAYOUT, 12:49: "a paragraph of what is happening then the options with shorter
+        // THE LAYOUT: "a paragraph of what is happening then the options with shorter
         // wording." The paragraph is rebuilt on every change, so it always says what Export will do,
         // including WHY anything is forced and the total. The options are one short line each.
         const cm = o.common, tr = o.tracks, cf = o.cfg;
@@ -60567,7 +60498,7 @@ require(['vs/editor/editor.main'], function () {
         _sfSdExportRunning = true; _sfSyncSdExportBtn();   // [B-664] greyed at the click itself
         // SOMETHING APPEARS AT THE CLICK. ("A click always acts instantly", ui-conventions.md.) The
         // dialog needs a moment of reading first (tracks, the config's common folders, the prop), and
-        // a greyed button alone read as a click that did nothing (his 13:48). The dialog takes this
+        // a greyed button alone reads as a click that did nothing. The dialog takes this
         // down as it opens.
         showBusy('Preparing SD Export…');
         try { await _sfBulkSaveOnce(); }

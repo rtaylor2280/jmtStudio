@@ -40,8 +40,8 @@ console.log('2. the early gate');
     /ipcMain\.handle\('syncManifest:state'[\s\S]{0,300}readState\(destDir\)[\s\S]{0,300}covered: /.test(main));
   check('preload exposes it', /syncManifestState:\s*\(params\)\s*=>\s*ipcRenderer\.invoke\('syncManifest:state'/.test(pre));
 
-  // 2026-11-13: the question used to be held back whenever ANY record existed, so a card whose
-  // record covered 44 of 259 folders compared for minutes through a board with no warning. Now the
+  // 2026-11-13: holding the question back whenever ANY record exists means a card whose
+  // record covers 44 of 259 folders compares for minutes through a board with no warning. Now the
   // worst case is every selected folder the record does NOT cover, asked before anything is read.
   const at = html.indexOf('let _manifestOk = false, _covered = new Set();');
   const seg = at > -1 ? html.slice(at, at + 1600) : '';

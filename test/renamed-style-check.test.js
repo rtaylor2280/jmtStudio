@@ -2,7 +2,7 @@
  * A preset still naming a style the Style Library renamed — the [B-656] compile check.
  *
  * The config-open review offers the library's new name and the user may decline it; this is the
- * second chance at compile, "without closing and reopening". Aliases only (his call, 2026-11-09):
+ * second chance at compile, "without closing and reopening". Aliases only (2026-11-09):
  * a name is flagged only when the library records it as a former name and nothing carries it now.
  *
  * Run: node test/renamed-style-check.test.js
@@ -73,7 +73,7 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
     ok('after the fix the check is quiet', again.length === 0);
   }
   {
-    // His read 2026-11-09: other checks combine their findings; so does this one.
+    // 2026-11-09: other checks combine their findings; so does this one.
     const text = cfg('StylePtr<AstralProjection>()', 'StylePtr<Celsius>()', 'StylePtr<PixelSwitchWrapper<Celsius>>("0,1,0")');
     const ctx = ctxFor(text);
     const f = mine(await preflight.run(ctx));
@@ -102,7 +102,7 @@ const mine = (res) => res.findings.filter(f => f.checkId === 'renamed-library-st
     const g = mine(await preflight.run(ctx));
     ok('nothing chosen, nothing changed', g[0].fix.plan(ctx, '').length === 0 && g[0].fix.plan(ctx, 'NotAnOwner').length === 0);
     const after = apply(text, g[0].fix.plan(ctx, 'TwinB'));
-    ok('choosing the second applies the second', /StylePtr<TwinB>\(\)/.test(after) && !/Twin/.test(after), after);
+    ok('choosing the second applies the second', /StylePtr<TwinB>\(\)/.test(after) && !/\bTwin\b/.test(after), after);
   }
   {
     const f = mine(await preflight.run(ctxFor(cfg('StylePtr<SomethingUnknown>()'))));

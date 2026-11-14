@@ -7,7 +7,7 @@
 // WHY THIS IS NOT sdCardDetect.scan(). The full scan reads Win32_LogicalDisk through CIM and
 // then assesses every card, and it was measured 2026-11-11 at 7.5-10 s with a board whose card
 // had dropped mid-write, twice returning [] (its 10 s timeout) while a card sat in the reader.
-// Fine for Read my SD card, which is a deliberate act; useless for a button's enabled state.
+// Fine for the SD card read, which is a deliberate act; useless for a button's enabled state.
 // DriveInfo answers "which removable drives have media" from the volume itself: measured
 // 1-38 ms in-process with that same stuck drive attached. The cost here is the PowerShell
 // start (~1 s), paid only when something changed.

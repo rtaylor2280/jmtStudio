@@ -1,7 +1,7 @@
 // A Cancel during a destination check stops the read mid-file, not after it.
 //
-// One sound file read through a board's USB link takes seconds, and the scan used to finish the
-// whole file before looking at the stop flag. Seen 2026-11-13 on a board card: Cancel sat on
+// One sound file read through a board's USB link takes seconds, so a scan that finishes the
+// whole file before looking at the stop flag ignores Cancel for that long. Seen 2026-11-13 on a board card: Cancel sat on
 // "finishing the current file" during a phase that only reads.
 //
 // Run: node test/hash-stop-midfile.test.js

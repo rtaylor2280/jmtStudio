@@ -92,11 +92,11 @@ const aliasesOf = (ud, name) => (T.listFiles(ud).find((f) => f.name === name) ||
   check('IPC: sharedTracks:addAlias', /ipcMain\.handle\('sharedTracks:addAlias'/.test(fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8')));
   check('an import that brought anything in rechecks, once', /window\._sfRecordImportAliases\?\.\(pairs, \{ recheck: _ran \|\| _trackPairs\.length > 0 \}\);/.test(html));
   check('a track rename rechecks the open config', /await _sfRefreshSharedTracksModal\(\);\s*\/\/[^\n]*\n[^\n]*\n\s*setTimeout\(\(\) => \{ window\._sfCheckConfigFormerNames\?\.\(\); \}, 0\);/.test(html));
-  check('the review says what each choice means for the card: Update -> SD Export after flashing, Ignore -> card as it is',
-    /The card in your saber still has '\s*\+ 'the old names, so after you flash, update the card from <strong>Sound Fonts &rarr; SD Export<\/strong>/.test(html)
-    && /<strong>Ignore<\/strong> keeps the card\\'s names, and the card works as it is\./.test(html));
+  check('the review says what each choice means: Update -> SD Export after flashing if the card has the old names, Ignore -> the presets as they are',
+    /If your card still has '\s*\+ 'the old names, update it from <strong>Sound Fonts &rarr; SD Export<\/strong> after you flash\./.test(html)
+    && /<strong>Ignore<\/strong> keeps the names the presets have now\./.test(html));
   check('the review\'s words claim neither renamed nor no-longer',
-    /in this config \$\{one \? 'has another name' : 'have other names'\} in your library/.test(html) && /In your library: \$\{_preflightEsc\(r\.owners\[0\]\.name\)\}/.test(html));
+    /in this config \$\{one \? 'has another name' : 'have other names'\} in your library/.test(html) && /const where = r\.kind === 'style' \? 'In your Style Library' : 'In your library';/.test(html));
 
   for (const d of [ud, ud2, ud3, card]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
   console.log(failures ? `\n${failures} failed` : '\nall passed');

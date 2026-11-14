@@ -51,7 +51,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'
   console.log('2. SD Export');
   check('its button runs the export through the helper',
     /const _sfBulkSaveOnce = jmtOneAtATime\(_sfBulkSave\);/.test(html)
-    && /getElementById\('btn-sf-bulk-save'\)\?\.addEventListener\('click', async \(e\) => \{\s*e\.stopPropagation\(\);\s*await _sfBulkSaveOnce\(\);/.test(html));
+    && /getElementById\('btn-sf-bulk-save'\)\?\.addEventListener\('click', async \(e\) => \{\s*e\.stopPropagation\(\);[\s\S]{0,800}?try \{ await _sfBulkSaveOnce\(\); \}/.test(html));
 
   console.log(failures ? `\n${failures} failing` : '\nall passed');
   process.exit(failures ? 1 : 0);

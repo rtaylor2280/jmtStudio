@@ -84,12 +84,12 @@ function ok(name, cond, extra) {
 // Timing was the defect, so timing is what these assert.
 {
   ok('the volume lookup is primed when the destination is picked',
-     /const destDir = pick\.dirPath;\s*\n\s*_sfPrimeVolume\(destDir\);/.test(html));
+     /const destDir = (?:pick\.dirPath|_dlg\.card);\s*\n\s*_sfPrimeVolume\(destDir\);/.test(html));
 
   // BOTH export flows pick a destination. One primed and one not is [B-357]'s
   // "three per-kind strings, two wired" for the third time this week.
   ok('EVERY destination pick primes it, not just one',
-     (html.match(/const destDir = pick\.dirPath;/g) || []).length
+     (html.match(/const destDir = (?:pick\.dirPath|_dlg\.card);/g) || []).length
      === (html.match(/_sfPrimeVolume\(destDir\);/g) || []).length,
      'a pick site without a prime silently falls back to the bare drive letter');
 

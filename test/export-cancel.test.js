@@ -623,7 +623,7 @@ ok('the stopping state is reset with the handler',
   {
     const started = [];
     const api = {};
-    // A stub that presses Cancel while A is copying, as his click did.
+    // A stub that presses Cancel while A is copying, as a real click does.
     const d = new Function('window', '_sfAllEntries', `
       let r = null; let _stopAsked = false;
       const _fonts = ['A', 'B', 'C']; const _plans = {}; const _done = [];

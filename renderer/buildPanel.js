@@ -1350,7 +1350,7 @@ const USB_LABELS = {
 };
 
 // ── USB type choices that need words first [B-660] ──
-// His spec (2026-11-10 00:51): the common types stay in the list; the rest sit behind
+// The rule (2026-11-10): the common types stay in the list; the rest sit behind
 // "Advanced…", and picking one shows what it is with a "know what you're doing" warning.
 // Mass Storage + WebUSB is a common type with no warning of its own: the card corruption it was
 // blamed for was the core's 4 GiB address wrap, fixed by the JMT plugin. [B-668]
@@ -1367,7 +1367,7 @@ let _usbChoiceApproved = false;   // set only while _applyUsbChoice re-fires the
 function _escUsb(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 // An advanced type shows in the list only while it is the one selected; once another type is
-// picked it goes back behind "Advanced…" (his call 2026-11-10 23:11).
+// picked it goes back behind "Advanced…" (2026-11-10).
 function _syncAdvancedUsbOptions(current) {
   const sel = el('bp-usb-select');
   if (!sel) return;
@@ -4353,7 +4353,7 @@ async function doFlashDFU() {
 // without WebUSB wipes it while the "already read" flag stays set. So after a WebUSB build
 // goes on, browser tools (ProffieOS Workbench) can fail with only "Unable to claim
 // interface" and no reason. Proven on a real board 2026-11-10, including that it re-breaks
-// on every switch. His spec (22:08): check after the board comes back, BEFORE saying done,
+// on every switch. The rule: check after the board comes back, BEFORE saying done,
 // and offer the fix inside this modal. The check needs no admin; the fix is one Windows
 // permission prompt, never run without the user's click.
 // Status text for this step: a bold lead (what happened), a plain detail line, and an optional
