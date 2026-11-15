@@ -274,6 +274,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('app:splash-dismissed', handler);
   },
   isSplashDismissed: () => ipcRenderer.invoke('app:isSplashDismissed'),
+  installCheck: () => ipcRenderer.invoke('app:installCheck'),
 
   // ── Sound Fonts Library ───────────────────────────────
   soundFontsExists:        ()                       => ipcRenderer.invoke('soundFonts:exists'),

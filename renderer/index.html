@@ -30105,6 +30105,23 @@ async function refreshEmptyStateFavs() {
   setTimeout(() => { hide(); _scheduleStylesPreload(); }, 6000);
 })();
 
+// [B-681] Files the install shipped with that have since gone (antivirus is the usual cause).
+// Asked once, after the splash, so the notice lands on a settled window. Without it each missing
+// file fails later as something else: a compile, a flash, an empty card list.
+(function initInstallCheck() {
+  let asked = false;
+  const ask = async () => {
+    if (asked) return;
+    asked = true;
+    try {
+      const r = await window.electronAPI?.installCheck?.();
+      if (r && r.title) promptError(r.title, r.message);
+    } catch {}
+  };
+  window.electronAPI?.onSplashDismissed?.(ask);
+  setTimeout(ask, 6000);
+})();
+
 // Builds the Style Library when the app goes idle after startup, so its tab is ready on the first visit.
 // Not when there is no library: its tab is hidden, and creating or importing one builds it. [B-595]
 let _stylesPreloadScheduled = false;

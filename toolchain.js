@@ -422,7 +422,9 @@ function getFlashStagePath() {
 function validateCli() {
   const cliPath = getCliPath();
   if (!fs.existsSync(cliPath)) {
-    return { ok: false, error: `arduino-cli not found at:\n${cliPath}\n\nCheck that the binary is included in resources/arduino-cli/` };
+    // [B-681] Said for the user, not the developer: antivirus removing it is the usual cause.
+    return { ok: false, error: 'JMT Studio cannot find arduino-cli, which it uses to compile. Antivirus '
+      + 'software sometimes removes it, and reinstalling JMT Studio puts it back.' };
   }
   ensureExecutable(cliPath);
   return { ok: true, cliPath };

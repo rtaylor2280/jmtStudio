@@ -1601,7 +1601,7 @@ function onBuildLog({ line, isError }) {
   appendModalLog(shown, isError);
 }
 
-function onBuildStatus({ type, ok, needsProffieOS, message, coreVersion, running }) {
+function onBuildStatus({ type, ok, needsProffieOS, message, coreVersion, running, detail }) {
   // A background repair is fetching a plugin nothing is pinned to. The panel has
   // to know, so it does not offer to install the same one again - but Compile
   // stays available, because this plugin is not what the current build needs and
@@ -1710,6 +1710,8 @@ function onBuildStatus({ type, ok, needsProffieOS, message, coreVersion, running
       try { window.vpRefresh?.(); } catch {}
     }
     setStatus('toolchain', state, message);
+    // [B-681] Missing installed files: the hover holds the launch notice's full words.
+    if (detail) { const t = el('bp-status-toolchain-text'); if (t) t.title = detail; }
     const notice = document.getElementById('bp-setup-notice');
     if (notice) notice.style.display = 'none';
     // Show port/compile/flash only when compile is actually reachable. Hide

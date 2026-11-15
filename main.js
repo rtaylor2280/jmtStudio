@@ -1013,6 +1013,18 @@ ipcMain.handle('store:setSetting', (_, key, value) => {
 ipcMain.on('title:set', (_, title) => win.setTitle(title));
 
 // ── IPC: Toolchain ─────────────────────────────────────
+// [B-681] Once per launch: the files Studio was installed with that are no longer there, as
+// { title, message } for the window to show, or null when nothing is missing.
+ipcMain.handle('app:installCheck', () => {
+  try {
+    const ic = require('./installCheck');
+    const appDir = __dirname.replace(/([\\/])app\.asar$/, '$1app.asar.unpacked');
+    const missing = ic.missingFiles({ resourcesPath: proffie.getResourcesPath(), appDir });
+    if (missing.length) console.log('[install-check] missing: ' + missing.map((m) => m.file).join(' | '));
+    return ic.describe(missing);
+  } catch { return null; }
+});
+
 ipcMain.handle('toolchain:initialize', async () => {
   // Same phase reporting as a panel-initiated install: this path runs the exact
   // same ensureCore, so it should look the same while it does. (2026-08-15)
@@ -1036,16 +1048,29 @@ ipcMain.handle('toolchain:initialize', async () => {
     // we surface that as an error-state next-action message in the same status
     // slot rather than a misleading green "Toolchain ready" while compile is
     // still gated. The renderer reads needsProffieOS to pick the right state.
-    const msg = !result.ok            ? result.error
-              // Kept short because the renderer puts a "Get ProffieOS" button
-              // beside it; repeating the instruction in words would be noise.
-              : result.needsProffieOS ? 'No ProffieOS installed.'
-                                      : 'Toolchain ready';
+    let msg = !result.ok            ? result.error
+            // Kept short because the renderer puts a "Get ProffieOS" button
+            // beside it; repeating the instruction in words would be noise.
+            : result.needsProffieOS ? 'No ProffieOS installed.'
+                                    : 'Toolchain ready';
+    // [B-681] A failure caused by installed files going missing says so in a short label, and
+    // its hover carries the same words as the launch notice, so a dismissed notice can be read
+    // again here.
+    let detail = null;
+    if (!result.ok) {
+      try {
+        const ic = require('./installCheck');
+        const appDir = __dirname.replace(/([\\/])app\.asar$/, '$1app.asar.unpacked');
+        const d = ic.describe(ic.missingFiles({ resourcesPath: proffie.getResourcesPath(), appDir }));
+        if (d) { msg = 'JMT Studio files missing'; detail = d.message; }
+      } catch {}
+    }
     win.webContents.send('build:status', {
       type: 'toolchain',
       ok: result.ok,
       needsProffieOS: !!result.needsProffieOS,
-      message: msg
+      message: msg,
+      detail,
     });
   }
 
