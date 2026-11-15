@@ -85,80 +85,26 @@ const PLATFORMS = {
     // PER-VOLUME, NOT PER-DEVICE. The USB reader has two slots on ONE device holding H: and
     // I:, so a device-level eject would dismount a sibling card it is still using.
     // No admin required, which is why this and not `mountvol /p`.
-    // FIND THE VERB, DO NOT NAME IT. This called `InvokeVerb("Eject")`, which is a match
-    // against the verb's DISPLAY name - and the display name on this machine is `E&ject`, with
-    // the menu accelerator in it. `InvokeVerb` returns nothing whether it matched or missed, so
-    // a miss is indistinguishable from a success that the media ignored.
     //
-    // AND THE DISPLAY NAME IS LOCALISED. On a German Windows the verb is `Aus&werfen`; on a
-    // French one `&Éjecter`. The literal string "Eject" cannot match either, so every eject on a
-    // non-English Windows would have silently done nothing while the app waited 15 seconds and
-    // then told the user their card was in use. Nobody would have reported it as a bug - it
-    // looks exactly like a busy volume. Measured 2026-09-21 by enumerating `Verbs()`.
+    // IN-PROCESS, NO CHILD PROCESS. [B-681] winDisks.eject runs the documented removable-media
+    // sequence on the volume through the Win32 API: FSCTL_LOCK_VOLUME (retried), then
+    // FSCTL_DISMOUNT_VOLUME, IOCTL_STORAGE_MEDIA_REMOVAL (allow) and IOCTL_STORAGE_EJECT_MEDIA.
+    // Launching PowerShell from a %TEMP% script with -ExecutionPolicy Bypass is the pattern
+    // behaviour-based antivirus kills the app for (QA BUG-012), so nothing is launched.
     //
-    // SO STRIP THE `&` AND COMPARE, and report WHICH branch happened, because `raw` is the
-    // only evidence the caller gets about whether the verb ever fired:
-    //     "ejected"      the verb was found and called
-    //     "no-verb"      the volume offers no Eject - a real answer, not a timeout
-    //     "no-item"      the shell has no such volume
-    // `raw` IS NOT COSMETIC. It always said "invoked", which is what made the app's "in use"
-    // report unreadable: it could not say whether the verb was refused or the wait ran out.
-    // THE LAUNCHER IS THE FIX, NOT THE API. [2026-09-22]
-    //
-    // The same shell verb worked from a standalone PowerShell and did nothing useful from a
-    // PowerShell that Electron spawned: the card ejected either way, but Windows' own
-    // "Safe To Remove Hardware" notification only ever appeared from the standalone one.
-    // Launching through `cmd /c start` - so the shell starts it and this process is not its
-    // parent - makes the notification appear from inside the app.
-    //
-    // THE MECHANISM IS NOT KNOWN AND THIS COMMENT WILL NOT PRETEND OTHERWISE. Five
-    // candidates were killed BY MEASUREMENT, not by argument: `-NonInteractive` (the standalone
-    // host passes it too), the console window (`GetConsoleWindow()` returned 0 on both),
-    // ApartmentState (STA on both), session id (1 on both), and job-object limits - both hosts
-    // reported `LimitFlags 0x3C00` including SILENT_BREAKAWAY_OK. Every field available was
-    // identical; only the parent process differed. So the fix was tested rather than reasoned,
-    // and anyone extending this should treat "why" as open.
-    //
-    // THE SCRIPT GOES TO A FILE, NOT THROUGH `start`'s ARGUMENT PARSER. Quoting a multi-line
-    // PowerShell script through cmd.exe, then `start`, then powershell is three levels of
-    // escaping whose failure mode is silently running something else.
-    //
-    // AND THE COST IS REAL: `start` RETURNS AS SOON AS IT LAUNCHES, SO THERE IS NO STDOUT.
-    // `raw` can no longer say whether the verb fired, was refused, or found no volume - the
-    // three honest outcomes this module exists to report. It now says `launched` and nothing
-    // more. **The verdict therefore rests ENTIRELY on `waitForMediaGone` observing the media
-    // leave.** That is a narrower promise than this file used to make and it is not yet the
-    // ruling; see the two-witnesses question in the notes.
-    //
-    // ASK READABLY, ACT DETACHED — AND THAT SPLIT IS WHY THE HONEST OUTCOMES SURVIVED.
-    //
-    // The detached launcher is what makes Windows draw its own notification, and the price is
-    // that `start` returns immediately and hands back no stdout. Moving the whole operation
-    // behind it therefore destroyed the one thing this module promises: `raw` could only ever
-    // say 'launched', so a volume offering NO Eject verb became indistinguishable from one that
-    // refused to leave, and both would have told the user to close files that were never open.
-    // That is the localisation defect from 2026-09-21 coming straight back, and the suite
-    // caught it - `test/safe-eject.test.js`, "no-verb is NOT reported as busy".
-    //
-    // The resolution is that only the ACTION needs the detached host. The QUESTION - does
-    // this volume even offer an Eject verb - is a plain read, so it runs in a normal child we
-    // can hear back from. Two spawns instead of one, and the verdict keeps its detail.
+    // `raw` IS EVIDENCE, NOT DECORATION, and each branch names itself:
+    //     "ejected"      every step succeeded; the media watch still has the verdict
+    //     "no-verb"      the volume is not a kind that ejects - a real answer, not a timeout
+    //     "no-item"      there is no such volume
+    //     "busy: ..."    the lock was refused, carrying `busy: true`: something has it open
+    //     "error: ..."   another step failed, with the step and the Windows error code
+    //     "pending"      the sequence did not answer in time; the media watch decides
+    // A refused lock is the API's own statement that a handle is open, so `busy` no longer has to
+    // be inferred from a watch that ran out.
     invoke: async (mountPath) => {
       const L = String(mountPath || '').slice(0, 1).toUpperCase();
       if (!/^[A-Z]$/.test(L)) return { ok: false, raw: 'bad-mount-path' };
-      const letter = L;
-
-      // ── The question, asked where we can read the answer ──
-      // [B-681] The query script and its PowerShell spawn live in winDisks.ejectVerbQuery.
-      const q = await require('./winDisks').ejectVerbQuery(letter, _exec);
-      // Both are real answers, not timeouts, and both must reach the caller unchanged - they
-      // are the difference between "nothing was ever asked to release this" and "it refused".
-      if (q.out === 'no-item' || q.out === 'no-verb') return { ok: true, raw: q.out };
-      if (q.out && q.out.startsWith('error:')) return { ok: false, raw: q.out };
-
-      // [B-681] The eject script, its %TEMP% file and the cmd.exe launcher live in
-      // winDisks.ejectLaunch.
-      return require('./winDisks').ejectLaunch(letter, _exec);
+      return require('./winDisks').eject(L);
     },
     vocab: {
       // MEASURED: the letter stays behind as an empty drive on board cards and USB readers.
@@ -354,20 +300,30 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
     return { status: 'ejected', ...t, alreadyGone: true, ms: 0 };
   }
 
+  const t0 = Date.now();
   const inv = await p.invoke(t.mountPath);
 
-  // THE POLL IS BACK, AND IT IS NOW THE ONLY WITNESS WE HAVE. [2026-09-22]
+  // ANSWERED BY THE CALL, SO NOT WAITED FOR. [B-681] A refused lock means something has the
+  // volume open: that is `busy`, the same result the watch reports when the media never leaves,
+  // returned at once instead of after the full timeout. A failed step that is not the lock cannot
+  // release the card either, so it is `unsupported` at once; the watch would only reopen the
+  // dismounted volume and run out the clock. Only a platform that reports `busy` takes the first
+  // branch. The second is Windows only, where `ok: false` is a definite answer from the API; the
+  // macOS and Linux tools keep the watch below.
+  if (inv && inv.busy) {
+    return { status: 'busy', ...t, ms: Date.now() - t0, raw: inv.raw, everGone: false };
+  }
+  if (inv && !inv.ok && p === PLATFORMS.win32) {
+    return { status: 'unsupported', ...t, ms: Date.now() - t0, raw: inv.raw,
+             reason: 'the eject failed' };
+  }
+
+  // THE WATCH HAS THE VERDICT ON SUCCESS. A call that reports success has asked the device to
+  // let go; it has not shown the media left. Everything this module promises - the three honest
+  // outcomes, never a success dressed up - rests on watching the media leave.
   //
-  // `cmd /c start` returns the moment it launches, so `raw` can no longer report whether the
-  // verb fired, was refused, or found no volume. Everything this module promises - the three
-  // honest outcomes, never a success dressed up - now rests entirely on watching the media
-  // leave. The poll went from a check on the return value to the whole verdict.
-  //
-  // AND THE ORIGINAL QUESTION IS FINALLY TESTABLE HERE. It was proposed that this poll, opening
-  // the volume ROOT every 250 ms, denies the exclusive lock a dismount needs and so prevents
-  // the very thing it watches for. That was tested while the eject was broken for an unrelated
-  // reason, so it never got a clean answer. With the eject working, a `busy` from this line
-  // means the poll really is the blocker.
+  // The watch starts only after invoke resolves, so its 250 ms opens of the volume ROOT cannot
+  // hold a handle against the lock the eject takes.
   const res = await waitForMediaGone(t.mountPath, timeoutMs, stableMs);
   if (res.gone) return { status: 'ejected', ...t, ms: res.ms, raw: inv.raw };
 
@@ -375,11 +331,6 @@ async function ejectVolume(destDirOrMount, { timeoutMs = DEFAULT_EJECT_TIMEOUT_M
   // and the media is still there, `busy` would tell the user to close their files - advice that
   // cannot possibly help, because nothing was ever asked to release the card. `unsupported` is
   // the honest branch and the renderer already draws it.
-  //
-  // THIS BRANCH IS REACHABLE AGAIN BECAUSE THE QUESTION IS ASKED SEPARATELY FROM THE ACTION.
-  // While the whole operation ran behind `cmd /c start`, `raw` could only say 'launched' and
-  // this condition could never be true - a branch that reads as handling something while
-  // handling nothing. Splitting ask from act is what restored it.
   if (inv && (inv.raw === 'no-verb' || inv.raw === 'no-item')) {
     return { status: 'unsupported', ...t, ms: res.ms, raw: inv.raw,
              reason: 'volume offers no Eject verb' };

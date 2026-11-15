@@ -19,6 +19,19 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// [B-681] describe() asks winDisks for the drive kind on Windows, which loads koffi on a worker.
+// koffi's native exit hook fail-fasts (0xC0000409) when stderr is a handle it cannot flush, and
+// Git Bash's /dev/null is one: the suite loop runs every file with 2>/dev/null, so the file would
+// report FAIL with every check passing. Studio's own handles (none, a file, a pipe, a console) all
+// exit cleanly. The drive kind is not what this file tests - test/win-disks-native.test.js and the
+// live old-versus-new comparison cover it - so here it answers from a fixed value: the temp folder
+// is on a fixed disk.
+if (process.platform === 'win32') {
+  const WD = require('../winDisks');
+  WD.driveKind = async () => ({ removable: false, kind: 'fixed' });
+  WD.classify = async () => null;
+}
+
 let failed = 0;
 const ok = (name, cond, why) => {
   if (!cond) failed++;

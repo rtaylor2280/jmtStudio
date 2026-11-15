@@ -1,9 +1,12 @@
-// Every Windows shell-out lives in winDisks.js or winSystem.js. [B-681]
+// Every Windows shell-out lives in winSystem.js; the card code launches none. [B-681]
 //
 // PowerShell, cmd, reg, fsutil, tasklist and taskkill launched from an Electron app are the
-// pattern behaviour-based antivirus blocks (QA BUG-012). Keeping every such launch in two files
+// pattern behaviour-based antivirus blocks (QA BUG-012). Keeping every such launch in one file
 // makes the set of outside programs Studio starts on Windows readable in one place, and lets
 // them be replaced with native calls without hunting. This fails when one appears anywhere else.
+//
+// winDisks.js (card detection, export destinations, safe eject) answers everything through the
+// Win32 API in winDisksNative.js, so both are held at ZERO launches and no child_process at all.
 //
 // WHAT COUNTS AS A LAUNCH: a string literal naming one of those programs as the first argument of
 // execFile / execFileSync / spawn / spawnSync / exec / execSync / _exec, or as the start of the
@@ -15,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const ALLOWED = new Set(['winDisks.js', 'winSystem.js']);
+const ALLOWED = new Set(['winSystem.js']);
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
@@ -98,15 +101,23 @@ function sourceFiles() {
      !hits.some((h) => /registry-tool/.test(h.text)));
 }
 
-// ── the two homes really do hold the launches (so a clean result is not vacuous) ──
+// ── the card code launches nothing ──────────────────────────────────────────
 {
-  const disks = launchesIn(fs.readFileSync(path.join(ROOT, 'winDisks.js'), 'utf8'));
+  for (const f of ['winDisks.js', 'winDisksNative.js']) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const hits = launchesIn(src);
+    ok(`${f} has zero shell-outs`, hits.length === 0, hits.map((h) => `${h.line} ${h.text}`).join(' | '));
+    // Wider than the launch pattern: no child process of ANY program, under any name.
+    ok(`${f} does not use child_process`, !/child_process/.test(stripComments(src)));
+  }
+}
+
+// ── the remaining home really does hold launches (so a clean result is not vacuous) ──
+// The scanner's own fixture above proves it can see a launch; this proves the real file it is
+// pointed at still has the seven it must find, so "nothing stray" is not a blind scan.
+{
   const sys = launchesIn(fs.readFileSync(path.join(ROOT, 'winSystem.js'), 'utf8'));
   const joined = (hs) => hs.map((h) => h.text).join(' | ');
-  ok(`winDisks.js launches are found: ${disks.length}`, disks.length >= 6, joined(disks));
-  for (const p of ['powershell.exe', 'fsutil', 'cmd.exe']) {
-    ok(`winDisks.js: ${p} is found`, disks.some((h) => h.text.toLowerCase().includes(p)), joined(disks));
-  }
   ok(`winSystem.js launches are found: ${sys.length}`, sys.length >= 7, joined(sys));
   for (const p of ['taskkill', 'tasklist', 'reg', 'powershell']) {
     ok(`winSystem.js: ${p} is found`, sys.some((h) => new RegExp(`['"\`]${p}`, 'i').test(h.text)), joined(sys));
@@ -124,8 +135,9 @@ function sourceFiles() {
       stray.push(`${f}:${h.line}  ${h.text}`);
     }
   }
-  ok(`no Windows shell-out outside winDisks.js / winSystem.js: ${stray.length}`, stray.length === 0,
-     'Move the launch into winDisks.js (card and volume work) or winSystem.js (everything else).\n       '
+  ok(`no Windows shell-out outside winSystem.js: ${stray.length}`, stray.length === 0,
+     'Card and volume work answers through the Win32 API in winDisksNative.js; any other launch '
+     + 'goes in winSystem.js.\n       '
      + stray.join('\n       '));
 }
 

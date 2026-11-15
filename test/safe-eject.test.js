@@ -157,65 +157,63 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
   ok('and waitForMediaGone reports that fact rather than discarding it',
      /everGone/.test(SRC) && /everGone = true/.test(SRC),
      'the classifier cannot distinguish what the watcher never recorded');
-  ok('the eject verb\'s return value is NOT used as the verdict',
+  ok('the eject call\'s success is NOT used as the verdict',
      /const res = await waitForMediaGone/.test(SRC)
      && !/if \(inv\.ok\) return \{ status: 'ejected'/.test(SRC),
-     'InvokeVerb is fire-and-forget; trusting it would report success it cannot know');
-  // [B-681] The eject scripts live in winDisks.js; safeEject.js calls them.
-  const WD = fs.readFileSync(path.join(__dirname, '..', 'winDisks.js'), 'utf8');
+     'a successful eject request has not shown the media left; trusting it would report success it cannot know');
+  // [B-681] The eject is the native sequence in winDisksNative.opEject.
+  const WN = fs.readFileSync(path.join(__dirname, '..', 'winDisksNative.js'), 'utf8');
+  const ejectBody = WN.slice(WN.indexOf('function opEject'), WN.indexOf('const OPS ='));
   ok('the eject is aimed at a VOLUME, not a device',
-     /Namespace\(17\)\.ParseName/.test(WD),
-     'his dual-slot reader holds two letters on one device - a device eject takes both');
+     ejectBody.length > 0 && /'\\\\\\\\\.\\\\' \+ L \+ ':'/.test(ejectBody)
+     && !/PhysicalDrive|CM_Request_Device_Eject/.test(WN),
+     'a dual-slot reader holds two letters on one device - a device eject takes both');
   ok('non-Windows degrades to unsupported rather than claiming success',
      /status: 'unsupported'/.test(SRC));
 }
 
-// ── THE VERB IS FOUND, NOT NAMED ────────────────────────────────
+// ── NATIVE, IN-PROCESS, AND NOT TIED TO A DISPLAY NAME ── [B-681]
 //
-// Measured 2026-09-21: the Eject verb's display name on a real machine is `E&ject`, carrying the menu
-// accelerator. The shipped call was `InvokeVerb("Eject")` - a match against that display name, which
-// returns nothing whether it hits or misses.
-//
-// AND THE DISPLAY NAME IS LOCALISED: `Aus&werfen` on German Windows, `&Éjecter` on French. A
-// literal "Eject" matches neither, so every eject on a non-English Windows would silently do
-// nothing, wait out the full timeout, and report the card as in use. That is invisible in testing
-// on an English machine, and indistinguishable from a genuinely busy volume in the wild - which is
-// exactly why it needs a test rather than a comment.
+// The eject is the volume-level Win32 sequence: lock, dismount, allow removal, eject. Nothing is
+// launched (the PowerShell-from-%TEMP% launcher is what behaviour-based antivirus killed the app
+// for, QA BUG-012), and nothing matches a verb's display name, which is localised (`E&ject`,
+// `Aus&werfen`, `&Éjecter`) - so a non-English Windows cannot silently fail to eject and then
+// report the card as in use.
 {
   // Its own read. `SRC` above is block-scoped, and borrowing it across blocks is the exact
   // defect that cost 2026-09-21 in the renderer: a top-level function reading a const declared
   // inside an `if`, throwing where a try/catch written for something else swallowed it.
   const SRC = fs.readFileSync(path.join(__dirname, '..', 'safeEject.js'), 'utf8');
-  // [B-681] The verb query and the eject script live in winDisks.js; safeEject.js calls them.
   const WD = fs.readFileSync(path.join(__dirname, '..', 'winDisks.js'), 'utf8');
+  const WN = fs.readFileSync(path.join(__dirname, '..', 'winDisksNative.js'), 'utf8');
+  const ejectBody = WN.slice(WN.indexOf('function opEject'), WN.indexOf('const OPS ='));
 
-  ok('the Eject verb is located by enumerating Verbs(), not by naming it',
-     /\$item\.Verbs\(\)/.test(WD),
-     'InvokeVerb("Eject") is a display-name string match and misses on any localised Windows');
-  ok('the accelerator is stripped before comparing',
-     /-replace\s*'&'\s*,\s*''/.test(WD),
-     "the real name is `E&ject`; comparing against `Eject` without removing `&` never matches");
-  ok('the matched verb is actually fired',
-     /\$verb\.DoIt\(\)/.test(WD));
+  ok('no shell verb, no PowerShell, no temp script',
+     !/Shell\.Application|Verbs\(\)|DoIt\(\)|InvokeVerb|tmpdir|\.ps1/.test(WD + WN),
+     'the eject must not depend on a launched host or a localised verb name');
+  const at = (k) => ejectBody.indexOf(k);
+  ok('lock, then dismount, then allow removal, then eject',
+     at('FSCTL_LOCK_VOLUME') > 0 && at('FSCTL_LOCK_VOLUME') < at('FSCTL_DISMOUNT_VOLUME')
+     && at('FSCTL_DISMOUNT_VOLUME') < at('IOCTL_STORAGE_MEDIA_REMOVAL')
+     && at('IOCTL_STORAGE_MEDIA_REMOVAL') < at('IOCTL_STORAGE_EJECT_MEDIA'));
+  ok('a refused lock is the one result reported as busy',
+     /step === 'lock'\) return \{ ok: false, busy: true/.test(WN)
+     && (WN.match(/busy: true/g) || []).length === 1);
+  ok('and safeEject reports it as `busy` without waiting out the watch',
+     /if \(inv && inv\.busy\) \{\s*return \{ status: 'busy'/.test(SRC));
 
-  // `raw` IS EVIDENCE, NOT DECORATION. It always said "invoked", which is what made an
-  // instrumented in-app failure unreadable: it could not distinguish a refused verb from a wait
-  // that ran out. Each branch must name itself.
+  // `raw` IS EVIDENCE, NOT DECORATION. A flat "invoked" for every outcome is what made an
+  // instrumented in-app failure unreadable: it could not distinguish a refused eject from a wait
+  // that ran out. Each branch must name itself where it is produced.
   for (const branch of ['ejected', 'no-verb', 'no-item']) {
     ok(`raw names the '${branch}' branch`,
-       new RegExp(`'${branch}'|"${branch}"`).test(SRC),
+       new RegExp(`'${branch}'`).test(WN),
        'a flat "invoked" for every outcome is why the failure could not be diagnosed');
   }
   ok('no-verb is NOT reported as busy',
      /raw === 'no-verb'[\s\S]{0,200}status: 'unsupported'/.test(SRC),
      '"something has it open" tells the user to close files, which cannot help when nothing '
      + 'was ever asked to release the card');
-
-  // The English name survives as a FALLBACK only - removing it entirely would regress any
-  // volume whose verb list cannot be enumerated.
-  ok('the literal verb name remains as a fallback',
-     /InvokeVerb\("Eject"\)/.test(SRC),
-     'the fallback is what keeps the fixed path no worse than the shipped one');
 }
 
 // ── Already-gone is not an error, and not a boast ────────────────────
