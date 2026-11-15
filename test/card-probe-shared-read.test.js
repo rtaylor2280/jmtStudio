@@ -1,7 +1,7 @@
 // [B-677] Two reads of the same card path that overlap must both get the real answer.
 // An export door primes the volume info while the export preflight checks the same volume, so two
-// reads of \\.\E: overlap in normal use; the second one used to answer 'timeout' at once and the
-// preflight refused the export of a working card.
+// reads of \\.\E: overlap in normal use. Answering the second one 'timeout' at once made the
+// preflight refuse the export of a working card.
 // The [B-669] guarantee still holds: a read that never returns answers 'timeout' after its own time
 // limit, and the stuck path is not given a second worker. Workers are counted by wrapping the
 // Worker class before cardProbe captures it; a named pipe that never writes stands in for a hung

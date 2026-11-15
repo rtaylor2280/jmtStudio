@@ -149,47 +149,16 @@ const PLATFORMS = {
       const letter = L;
 
       // ── The question, asked where we can read the answer ──
-      const query = [
-        '$ErrorActionPreference = "Stop"',
-        'try {',
-        '  $sh = New-Object -comObject Shell.Application',
-        `  $item = $sh.Namespace(17).ParseName("${letter}:")`,
-        '  if ($item -eq $null) { "no-item"; exit 0 }',
-        '  $found = $false',
-        // The accelerator can sit anywhere in the word, so remove every `&` rather than trimming
-        // a prefix. `E&ject` and `&Eject` both have to reduce to `Eject`.
-        "  foreach ($v in $item.Verbs()) { if ($v.Name -and ($v.Name -replace '&','') -eq 'Eject') { $found = $true } }",
-        '  if ($found) { "has-verb" } else { "no-verb" }',
-        '} catch { "error: " + $_.Exception.Message }',
-      ].join('\n');
-      const q = await _exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query]);
+      // [B-681] The query script and its PowerShell spawn live in winDisks.ejectVerbQuery.
+      const q = await require('./winDisks').ejectVerbQuery(letter, _exec);
       // Both are real answers, not timeouts, and both must reach the caller unchanged - they
       // are the difference between "nothing was ever asked to release this" and "it refused".
       if (q.out === 'no-item' || q.out === 'no-verb') return { ok: true, raw: q.out };
       if (q.out && q.out.startsWith('error:')) return { ok: false, raw: q.out };
 
-      const script = [
-        '$sh = New-Object -comObject Shell.Application',
-        `$item = $sh.Namespace(17).ParseName('${letter}:')`,
-        'if ($null -ne $item) {',
-        '  $verb = $null',
-        // The accelerator can sit anywhere in the word, so remove every `&` rather than trimming
-        // a prefix. `E&ject` and `&Eject` both have to reduce to `Eject`.
-        "  foreach ($v in $item.Verbs()) { if ($v.Name -and ($v.Name -replace '&','') -eq 'Eject') { $verb = $v } }",
-        '  if ($null -ne $verb) { $verb.DoIt() }',
-        '}',
-        // Holds the host open past DoIt(), which posts the verb rather than performing it.
-        'Start-Sleep -Milliseconds 2500',
-      ].join('\r\n');
-      try {
-        const tmp = path.join(require('os').tmpdir(), `jmt-eject-${letter}.ps1`);
-        fs.writeFileSync(tmp, script, 'utf8');
-        await _exec('cmd.exe', ['/c', 'start', '', '/min', 'powershell.exe',
-                                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', tmp]);
-        return { ok: true, raw: 'launched' };
-      } catch (err) {
-        return { ok: false, raw: 'launch-failed: ' + String(err && err.message || err) };
-      }
+      // [B-681] The eject script, its %TEMP% file and the cmd.exe launcher live in
+      // winDisks.ejectLaunch.
+      return require('./winDisks').ejectLaunch(letter, _exec);
     },
     vocab: {
       // MEASURED: the letter stays behind as an empty drive on board cards and USB readers.

@@ -161,8 +161,10 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
      /const res = await waitForMediaGone/.test(SRC)
      && !/if \(inv\.ok\) return \{ status: 'ejected'/.test(SRC),
      'InvokeVerb is fire-and-forget; trusting it would report success it cannot know');
+  // [B-681] The eject scripts live in winDisks.js; safeEject.js calls them.
+  const WD = fs.readFileSync(path.join(__dirname, '..', 'winDisks.js'), 'utf8');
   ok('the eject is aimed at a VOLUME, not a device',
-     /Namespace\(17\)\.ParseName/.test(SRC),
+     /Namespace\(17\)\.ParseName/.test(WD),
      'his dual-slot reader holds two letters on one device - a device eject takes both');
   ok('non-Windows degrades to unsupported rather than claiming success',
      /status: 'unsupported'/.test(SRC));
@@ -184,15 +186,17 @@ ok('garbage input is absent, not a throw', !E.mediaPresent('') && !E.mediaPresen
   // defect that cost 2026-09-21 in the renderer: a top-level function reading a const declared
   // inside an `if`, throwing where a try/catch written for something else swallowed it.
   const SRC = fs.readFileSync(path.join(__dirname, '..', 'safeEject.js'), 'utf8');
+  // [B-681] The verb query and the eject script live in winDisks.js; safeEject.js calls them.
+  const WD = fs.readFileSync(path.join(__dirname, '..', 'winDisks.js'), 'utf8');
 
   ok('the Eject verb is located by enumerating Verbs(), not by naming it',
-     /\$item\.Verbs\(\)/.test(SRC),
+     /\$item\.Verbs\(\)/.test(WD),
      'InvokeVerb("Eject") is a display-name string match and misses on any localised Windows');
   ok('the accelerator is stripped before comparing',
-     /-replace\s*'&'\s*,\s*''/.test(SRC),
+     /-replace\s*'&'\s*,\s*''/.test(WD),
      "the real name is `E&ject`; comparing against `Eject` without removing `&` never matches");
   ok('the matched verb is actually fired',
-     /\$verb\.DoIt\(\)/.test(SRC));
+     /\$verb\.DoIt\(\)/.test(WD));
 
   // `raw` IS EVIDENCE, NOT DECORATION. It always said "invoked", which is what made an
   // instrumented in-app failure unreadable: it could not distinguish a refused verb from a wait

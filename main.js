@@ -8677,10 +8677,8 @@ ipcMain.handle('versions:downloadRelease', async (event, { downloadUrl, versionN
     win.webContents.send('versions:downloadProgress', { phase: 'extracting' });
     await new Promise((resolve, reject) => {
       if (process.platform === 'win32') {
-        execFile('powershell.exe', [
-          '-NoProfile', '-NonInteractive', '-Command',
-          `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${extractDir}' -Force`
-        ], { timeout: 120000 }, err => err ? reject(err) : resolve());
+        // [B-681] The Expand-Archive spawn lives in winSystem.expandArchive.
+        require('./winSystem').expandArchive(zipPath, extractDir).then(resolve, reject);
       } else {
         execFile('unzip', ['-q', zipPath, '-d', extractDir], { timeout: 120000 }, err => err ? reject(err) : resolve());
       }

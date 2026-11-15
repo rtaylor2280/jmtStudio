@@ -16,21 +16,11 @@
 // caller keeps the last answer rather than disabling the button on a guess.
 'use strict';
 const os = require('os');
-const { execFile } = require('child_process');
 
+// [B-681] The PowerShell DriveInfo query lives in winDisks.listReadyRemovable, with every other
+// Windows card shell-out.
 function _windowsCards() {
-  const ps = "[System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Removable' -and $_.IsReady } "
-           + "| ForEach-Object { $_.Name + '|' + $_.VolumeLabel }";
-  return new Promise((resolve) => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
-      { windowsHide: true, timeout: 8000 }, (err, stdout) => {
-        if (err) { resolve(null); return; }
-        resolve(String(stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).map((l) => {
-          const i = l.indexOf('|');
-          return { mountPath: i < 0 ? l : l.slice(0, i), label: i < 0 ? '' : l.slice(i + 1) };
-        }));
-      });
-  });
+  return require('./winDisks').listReadyRemovable();
 }
 
 async function _otherCards() {

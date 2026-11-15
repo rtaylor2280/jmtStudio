@@ -35,9 +35,9 @@ function _killTree(proc) {
   const pid = proc.pid;
   if (process.platform === 'win32') {
     // /T = whole tree, /F = force. Fire-and-forget; if taskkill can't spawn,
-    // fall back to at least killing the parent.
+    // fall back to at least killing the parent. [B-681] The taskkill spawn is winSystem.killTree.
     try {
-      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      require('./winSystem').killTree(pid);
     } catch { try { proc.kill('SIGKILL'); } catch {} }
   } else {
     // Spawned detached on POSIX, so the child leads its own process group
@@ -1761,12 +1761,10 @@ function getDfuSuffixPath() {
 // ── Arduino IDE process check ──────────────────────────
 function checkArduinoRunning() {
   return new Promise(resolve => {
-    const { execFile, exec } = require('child_process');
+    const { exec } = require('child_process');
     if (process.platform === 'win32') {
-      execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
-        if (err) { resolve(false); return; }
-        resolve(stdout.toLowerCase().includes('arduino'));
-      });
+      // [B-681] The tasklist spawn is winSystem.arduinoRunning.
+      require('./winSystem').arduinoRunning().then(resolve);
     } else {
       exec('ps aux', { timeout: 3000 }, (err, stdout) => {
         if (err) { resolve(false); return; }
@@ -1845,13 +1843,8 @@ function touchReset(port, onLog) {
 // WinUSB bind-in-progress from a wrong driver that will never become openable.
 function _getDfuBoundService() {
   if (process.platform !== 'win32') return Promise.resolve('');
-  const { execFile } = require('child_process');
-  const ps = "$d = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_0483&PID_DF11' } | Select-Object -First 1; if ($d) { (Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_Service' -ErrorAction SilentlyContinue).Data }";
-  return new Promise((resolve) => {
-    execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 4000 }, (err, stdout) => {
-      resolve(err ? '' : String(stdout || '').trim());
-    });
-  });
+  // [B-681] The Get-PnpDevice query and its spawn live in winSystem.dfuBoundService.
+  return require('./winSystem').dfuBoundService();
 }
 
 // ── Wait for DFU device to become accessible ───────────
@@ -2313,7 +2306,6 @@ function detectDFU() {
 function ensureDfuDriver(onLog) {
   if (process.platform !== 'win32') return Promise.resolve({ ok: true, status: 'not-needed' });
   const os = require('os');
-  const { execFile } = require('child_process');
   const resDir     = proffie.getResourcesPath();
   const helper     = path.join(resDir, 'dfu-driver', 'ensure-winusb.ps1');
   const infPath    = path.join(resDir, 'dfu-driver', 'jmt_proffie_winusb.inf');
@@ -2325,12 +2317,8 @@ function ensureDfuDriver(onLog) {
 
   onLog('Installing the WinUSB driver...', false);
 
-  // Self-elevate a PowerShell that runs the bundled helper. Single-quote every
-  // path (doubling embedded quotes) so spaces in "Program Files" survive.
-  // -WindowStyle Hidden on both the outer probe shell and the elevated helper
-  // keeps the raw PowerShell console off the user's screen. The UAC prompt and
-  // the "install this device software" dialog are separate system windows and
-  // still appear (that consent is intentional); only the console is suppressed.
+  // Self-elevate a PowerShell that runs the bundled helper. [B-681] The launcher command and its
+  // spawn live in winSystem.launchDfuDriverHelper, with why it is quoted and hidden as it is.
   // Do NOT rely on Start-Process -Wait/-PassThru to know when the elevated
   // helper finished: neither reliably waits across the UAC elevation boundary
   // (they can signal on the consent broker, not the real process), which made us
@@ -2338,17 +2326,10 @@ function ensureDfuDriver(onLog) {
   // The helper writes its result JSON as its LAST action, so we poll for that
   // file as the completion signal instead. If the user declines the UAC prompt,
   // Start-Process throws and the launcher exits non-zero.
-  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-  const psCmd =
-    `$a=@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',${q(helper)},` +
-    `'-InfPath',${q(infPath)},'-ResultPath',${q(resultPath)});` +
-    `try { Start-Process -FilePath 'powershell' -ArgumentList $a -Verb RunAs -WindowStyle Hidden | Out-Null; exit 0 } catch { exit 3 }`;
-
   const dbg = (m) => { try { fs.appendFileSync(path.join(os.tmpdir(), 'jmt-dfu-app-debug.log'), `[${new Date().toISOString()}] ${m}\n`); } catch {} };
 
   return new Promise((resolve) => {
-    execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', psCmd],
-      { timeout: 120000, windowsHide: true }, async (error) => {
+    require('./winSystem').launchDfuDriverHelper(helper, infPath, resultPath, async (error) => {
         dbg(`launch done; err=${error ? (error.message || error.code) : 'none'}`);
         if (error) {
           // Non-zero exit from the launcher means the elevated launch failed,
@@ -2389,11 +2370,8 @@ function ensureDfuDriver(onLog) {
 function checkWebUsbWindows(serial) {
   if (process.platform !== 'win32') return Promise.resolve({ status: 'ok', detail: 'not-windows' });
   if (!_isBoardSerial(serial)) return Promise.resolve({ status: 'unknown', detail: 'no board serial' });
-  const { execFile } = require('child_process');
-  const reg = (key, value) => new Promise((resolve) => {
-    execFile('reg', ['query', key, '/v', value], { windowsHide: true, timeout: 5000 },
-      (err, stdout) => resolve(err ? null : String(stdout || '')));
-  });
+  // [B-681] The reg query spawn lives in winSystem.regQuery.
+  const reg = require('./winSystem').regQuery;
   const base = 'HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB\\';
   return (async () => {
     const parent = await reg(`${base}VID_1209&PID_6668\\${serial.trim()}`, 'ParentIdPrefix');
@@ -2414,20 +2392,14 @@ function fixWebUsbWindows(serial) {
   if (process.platform !== 'win32') return Promise.resolve({ ok: true, status: 'not-needed' });
   if (!_isBoardSerial(serial)) return Promise.resolve({ ok: false, status: 'error', detail: 'No board serial.' });
   const os = require('os');
-  const { execFile } = require('child_process');
   const helper     = path.join(proffie.getResourcesPath(), 'webusb-fix', 'fix-webusb-guid.ps1');
   const resultPath = path.join(os.tmpdir(), `jmt-webusb-fix-${Date.now()}.json`);
   if (!fs.existsSync(helper)) {
     return Promise.resolve({ ok: false, status: 'error', detail: 'The WebUSB fix is missing from this build.' });
   }
-  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-  const psCmd =
-    `$a=@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',${q(helper)},` +
-    `'-Serial',${q(serial.trim())},'-ResultPath',${q(resultPath)});` +
-    `try { Start-Process -FilePath 'powershell' -ArgumentList $a -Verb RunAs -WindowStyle Hidden | Out-Null; exit 0 } catch { exit 3 }`;
+  // [B-681] The launcher command and its spawn live in winSystem.launchWebUsbFixHelper.
   return new Promise((resolve) => {
-    execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', psCmd],
-      { timeout: 120000, windowsHide: true }, async (error) => {
+    require('./winSystem').launchWebUsbFixHelper(helper, serial, resultPath, async (error) => {
         if (error) return resolve({ ok: false, status: 'cancelled', detail: 'The Windows permission prompt was declined.' });
         const deadline = Date.now() + 60000;
         let result = null;

@@ -44,7 +44,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
 
 // ── "This job is big enough to be worth warning about" ───────────────── [B-238]
 //
@@ -196,62 +195,10 @@ function onDiskCost(fileSizes, blockSize, dirCount = 0) {
 // sdCardDetect.enumerateAllVolumes for removable and then ran this for transport - two
 // PowerShell spawns for one question. DriveType comes off the same Win32_LogicalDisk the
 // association walk already lands on, so it costs nothing to carry it back here.
+// [B-681] The CIM association walk and its spawn live in winDisks.classify; classifyTransport
+// stays here and is passed in, as macDisks.classify takes it.
 function _classifyWindows(driveLetter) {
-  const letter = String(driveLetter || '').slice(0, 1).toUpperCase();
-  if (!/^[A-Z]$/.test(letter)) return Promise.resolve(null);
-  // ASK ABOUT ONE DRIVE, NOT ABOUT EVERY DRIVE. [B-420, 2026-09-24]
-  //
-  // This walked EVERY physical disk, then every partition of each, then every logical disk of
-  // each, and filtered for the target letter INSIDE the innermost loop. It enumerated the whole
-  // storage topology to answer a question about one letter — and on a bench with seven disks
-  // attached, that cross-product IS the two-and-a-half seconds every export pays before it starts.
-  //
-  // Start from the letter and take two association hops. Measured on the bench, all four
-  // drives, including the Proffieboard's own card:
-  //     D: (fixed NVMe)      1,974 ms -> 216 ms
-  //     E: (Tlera DOSFS)     1,950 ms -> 223 ms
-  //     H: (USB card reader) 1,774 ms -> 189 ms
-  //     I: (USB card reader) 1,739 ms -> 192 ms
-  // Identical model, PNP id, interface and driveType in every case — this is a DELETION of work,
-  // not a cache, so there is no staleness to reason about and no verdict being reused.
-  //
-  // `-First 1` on each hop is the same answer the old loop produced, not a narrowing: the old
-  // code overwrote `$t` on every match and kept the LAST one, so it was already committing to a
-  // single row. This commits to the first and documents that it is doing so.
-  // A letter with no partition association (a network path, a subst) yields null, which is the
-  // same "cannot tell" the old walk produced by never matching. [B-028]: failing to identify
-  // something is never evidence about it.
-  const ps = [
-    '$t = $null',
-    '$ld = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID=\'' + letter + ':\'"',
-    'if ($ld) {',
-    '  $p = Get-CimAssociatedInstance -InputObject $ld -ResultClassName Win32_DiskPartition '
-      + '-ErrorAction SilentlyContinue | Select-Object -First 1',
-    '  if ($p) {',
-    '    $d = Get-CimAssociatedInstance -InputObject $p -ResultClassName Win32_DiskDrive '
-      + '-ErrorAction SilentlyContinue | Select-Object -First 1',
-    '    if ($d) {',
-    '      $t = [pscustomobject]@{ model = $d.Model; pnp = $d.PNPDeviceID; iface = $d.InterfaceType; driveType = [int]$ld.DriveType }',
-    '    }',
-    '  }',
-    '}',
-    'if ($t) { ConvertTo-Json -InputObject $t -Depth 3 } else { "null" }',
-  ].join('\n');
-  return new Promise((resolve) => {
-    // [B-420] Bounded, same rule as sdCardDetect: no volume query may hang. 8s is well outside
-    // the ~1,900-2,600 ms measured for this walk. Degrades to null = "cannot tell".
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
-      { maxBuffer: 256 * 1024, windowsHide: true, timeout: 8000 },
-      (err, stdout) => {
-        if (err) { resolve(null); return; }
-        let o = null;
-        try { o = JSON.parse(String(stdout).trim()); } catch { o = null; }
-        if (!o || !o.pnp) { resolve(null); return; }
-        const c = classifyTransport(o.model, o.pnp);
-        c.removable = (o.driveType === 2);
-        resolve(c);
-      });
-  });
+  return require('./winDisks').classify(driveLetter, classifyTransport);
 }
 
 // ── The FAST half: is it removable? ──────────────────────────────── [B-005 item 4]
@@ -289,22 +236,8 @@ function driveKind(destDir) {
     if (process.platform !== 'win32') { resolve(null); return; }
     const m = /^([A-Za-z]):/.exec(path.resolve(String(destDir || '')));
     if (!m) { resolve(null); return; }
-    // [B-420] Bounded. Measured at 72-128 ms, so 5s means "this volume is not answering".
-    execFile('fsutil', ['fsinfo', 'drivetype', m[1].toUpperCase() + ':'],
-      { windowsHide: true, maxBuffer: 64 * 1024, timeout: 5000 },
-      (err, stdout) => {
-        if (err) { resolve(null); return; }
-        const s = String(stdout || '');
-        // MATCH THE KIND, DO NOT INFER IT FROM THE ABSENCE OF ANOTHER. "not Fixed" is not
-        // "removable" - Remote, CD-ROM and Unknown are all neither, and an unrecognised
-        // string must come back null so callers keep treating it as "cannot tell".
-        if (/Removable Drive/i.test(s))     { resolve({ removable: true,  kind: 'removable' }); return; }
-        if (/Fixed Drive/i.test(s))         { resolve({ removable: false, kind: 'fixed' }); return; }
-        if (/Remote\/Network Drive/i.test(s)) { resolve({ removable: false, kind: 'network' }); return; }
-        if (/CD-ROM Drive/i.test(s))        { resolve({ removable: false, kind: 'cdrom' }); return; }
-        if (/RAM Disk/i.test(s))            { resolve({ removable: false, kind: 'ramdisk' }); return; }
-        resolve(null);
-      });
+    // [B-681] The fsutil spawn and its parse live in winDisks.driveKind.
+    require('./winDisks').driveKind(m[1]).then(resolve);
   });
 }
 

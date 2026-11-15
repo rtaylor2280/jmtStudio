@@ -13,7 +13,6 @@ const fs = require('fs');
 const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
 const path = require('path');
 const os = require('os');
-const { execFile } = require('child_process');
 const { fontShapeOf } = require('./proffieFontShape');
 
 const SIDECAR_NAME = '.jmt-sd-id';
@@ -39,81 +38,14 @@ const SIDECAR_NAME = '.jmt-sd-id';
 // would run cleanly: "you can't just disconnect a drive to 'fix' an issue." Right - that hides
 // the defect and verifies nothing about the real case. The machine being in that state was the
 // opportunity, not the obstacle: a live repro we cannot normally produce on demand.
+// [B-681] The Win32_LogicalDisk query, its spawn and its parse live in winDisks.enumerateVolumes,
+// which degrades to [] exactly as this did; health is stamped here, in-process.
 function enumerateVolumesWindows(removableOnly, onlyLetter = null) {
-  // DriveType=2 = removable media (SD readers, USB sticks). Merge HealthStatus from
-  // Get-Volume, which Win32_LogicalDisk does not carry. removableOnly=false is used when
-  // the user explicitly points at a drive, so its metadata can still be reported.
-  //
-  // hasMedia distinguishes "no card in this slot" from "card present but unreadable".
-  // A multi-slot reader publishes a drive letter for EVERY slot, occupied or not, so an
-  // empty slot arrives here looking like a volume. Win32_LogicalDisk reports Size as null
-  // for it (verified 2026-08-06 against a two-slot reader: the loaded slot reported a size,
-  // the empty one reported null), and the storage layer agrees — Win32_DiskDrive gives that
-  // slot a blank MediaType and a null Size. Note this must be tested BEFORE the [int64] cast
-  // below, which turns null into 0 and destroys the distinction. Empty slots cannot be
-  // reached through partition associations, since a slot with no media has no partitions,
-  // which is why the answer is taken here rather than derived downstream.
-  // FILTERED IN THE CIM QUERY, NOT IN JAVASCRIPT AFTERWARDS. That is the whole point: a row
-  // excluded here is never materialised, so its VolumeName is never read and no network round
-  // trip happens. Filtering the returned array would be too late - the blocking has already
-  // occurred by the time we could look at it.
-  const clauses = [];
-  if (removableOnly) clauses.push('DriveType=2');
-  if (onlyLetter) {
-    const L = String(onlyLetter).slice(0, 1).toUpperCase();
-    if (!/^[A-Z]$/.test(L)) return Promise.resolve([]);
-    clauses.push(`DeviceID='${L}:'`);
-  }
-  const filter = clauses.length ? ` -Filter "${clauses.join(' AND ')}"` : '';
-  const ps = [
-    '$vols = Get-CimInstance Win32_LogicalDisk' + filter,
-    '$out = foreach ($v in $vols) {',
-    // `Get-Volume` USED TO RUN HERE, ONCE PER VOLUME, AND IT IS GONE. [B-441] It supplied
-    // HealthStatus, which is now computed in JS from the filesystem's own dirty flag - one
-    // method, this surface and the export refusal both. See `_healthFromDirtyBit` below.
-    // Removing it also takes a per-volume cost out of every enumeration: measured
-    // 2026-09-27 at 124 ms warm and 1864 ms cold, inside a loop over every volume.
-    '  $letter = $v.DeviceID.TrimEnd(":")',
-    '  [pscustomobject]@{',
-    '    drive        = $v.DeviceID',
-    '    mountPath    = $v.DeviceID + "\\"',
-    '    fileSystem   = $v.FileSystem',
-    '    label        = $v.VolumeName',
-    '    volumeSerial = $v.VolumeSerialNumber',
-    '    hasMedia     = ($null -ne $v.Size)',
-    '    sizeBytes    = [int64]$v.Size',
-    '    freeBytes    = [int64]$v.FreeSpace',
-    // `health` is NOT emitted here any more - it is stamped on in JS below, so that this
-    // surface and the export refusal cannot end up answering from two different signals.
-    '    driveType    = [int]$v.DriveType',
-    '  }',
-    '}',
-    'ConvertTo-Json -InputObject @($out) -Depth 4',
-  ].join('\n');
-  return new Promise((resolve) => {
-    // 2026-09-21 [B-420] THE RULE, AND IT IS THE GENERAL FORM OF THE FIX ABOVE: "anythign that
-    // could break based on changing drives on a system is fragile and the wrong architecture."
-    // Filtering network drives fixes one INSTANCE. The CLASS is that any volume can be slow or
-    // dead - a dying card, a stalled reader, a drive mid-format - and the app must not care what
-    // happens to be attached.
-    // So no volume query may block indefinitely. 10s is far outside the ~3,100-3,200 ms this
-    // is documented at, so a healthy-but-slow system still answers; a wedged one gives up.
-    // Degrades to [] = "we could not enumerate", which is the [B-028] rule: failing to
-    // identify something is never evidence about it, and must never be read as "no cards".
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
-      { maxBuffer: 1024 * 1024, windowsHide: true, timeout: 10000 },
-      (err, stdout) => {
-        if (err) { resolve([]); return; }
-        try {
-          const parsed = JSON.parse((stdout || '').trim() || '[]');
-          const rows = Array.isArray(parsed) ? parsed : [parsed];
-          Promise.all(rows.map(async (v) => {
-            const h = await _healthFromDirtyBit(v);
-            return { ...v, health: h.health, ...(h.unresponsive ? { unresponsive: true } : {}) };
-          })).then(resolve, () => resolve([]));
-        } catch { resolve([]); }
-      });
-  });
+  return require('./winDisks').enumerateVolumes(removableOnly, onlyLetter).then((rows) =>
+    Promise.all(rows.map(async (v) => {
+      const h = await _healthFromDirtyBit(v);
+      return { ...v, health: h.health, ...(h.unresponsive ? { unresponsive: true } : {}) };
+    })).then((r) => r, () => []));
 }
 
 // ── One signal, two surfaces ────────────────────────────────────────────────── [B-441]
