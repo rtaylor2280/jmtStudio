@@ -36,6 +36,9 @@ function _nativePath(file) {
 function runNative(file, op, args, timeoutMs, failValue, timeoutValue = failValue) {
   if (process.platform !== 'win32') return Promise.resolve(failValue);
   _guardQuit();
+  // Once a quit has begun, nothing new starts: a call begun now could only add to what the quit
+  // has to wait for.
+  if (_quitting) return Promise.resolve(failValue);
   return new Promise((resolve) => {
     let w;
     let done = false;
@@ -74,30 +77,54 @@ function serveNative(file, ops) {
 }
 
 // ── Quitting while a call is in flight ──
-// Electron's shutdown stops every worker still running, and a worker stopped inside koffi takes
-// the process down with the fatal N-API error above (measured: app.quit() with calls in flight,
-// exit 0x86). So the first will-quit that finds workers running holds the quit until they have
-// exited, or QUIT_WAIT_MS has passed, and then quits again. A normal call finishes in well under
-// a second. A worker waiting on a wedged device past the limit is not waited for: the quit goes
-// ahead, and the shutdown waits on that call as it would on any thread in the kernel.
-// Studio's before-quit handlers are idempotent sweeps, so the second quit is safe to run.
+// A call still inside koffi when the process shuts down crashes it: the call returns into a
+// torn-down environment and koffi's error is fatal. A volume read stalled on an unreachable
+// network drive shows it: after a quit the process lingers with no window until the read
+// returns, about 22 s later, then exits 134 with a napi_throw fatal error. The same happens to a
+// worker stopped mid-call.
+//
+// So, from the moment a quit begins:
+//   1. No new call starts (runNative answers its failure value at once).
+//   2. The first will-quit that finds calls running holds the quit until they have exited, or
+//      QUIT_WAIT_MS has passed. Every window is already closed by will-quit, so the wait is
+//      invisible. A normal call finishes in well under a second; a slow card in a few.
+//   3. Then the quit runs again, in full. Studio's before-quit handlers are idempotent sweeps,
+//      so the second pass is safe.
+//   4. If a call is STILL running when that quit completes, it is waiting on a device or host
+//      that is not answering, and letting it return would crash the process. So the process ends
+//      itself instead (process.kill on its own pid = TerminateProcess): no JavaScript and no
+//      N-API code runs after that, and the kernel cancels the waiting request. Everything Studio
+//      does on quit has already run by then.
 // Outside Electron (tests, scripts) there is no app and nothing is hooked.
 const _live = new Map();   // Worker -> promise that settles when it exits
-const QUIT_WAIT_MS = 3000;
+const QUIT_WAIT_MS = 15000;
 let _quitHooked = false;
+let _quitting = false;
 function _guardQuit() {
   if (_quitHooked) return;
   _quitHooked = true;
   let app = null;
   try { app = require('electron').app; } catch { app = null; }
   if (!app || typeof app.on !== 'function') return;
+  app.on('before-quit', () => { _quitting = true; });
   let held = false;
   app.on('will-quit', (e) => {
+    _quitting = true;
     if (held || _live.size === 0) return;
     held = true;
     e.preventDefault();
+    const t0 = Date.now();
+    console.log(`[native] quit held: ${_live.size} call(s) running`);
     const limit = new Promise((r) => setTimeout(r, QUIT_WAIT_MS));
-    Promise.race([Promise.all([..._live.values()]), limit]).then(() => app.quit());
+    Promise.race([Promise.all([..._live.values()]), limit]).then(() => {
+      console.log(`[native] quit resumed after ${Date.now() - t0} ms, ${_live.size} call(s) still running`);
+      app.quit();
+    });
+  });
+  app.on('quit', () => {
+    if (_live.size === 0) return;
+    console.log(`[native] ${_live.size} call(s) still running at exit: ending the process directly`);
+    try { process.kill(process.pid); } catch { /* the normal exit goes ahead */ }
   });
 }
 
