@@ -8,11 +8,11 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win --x64",
+    "build": "node scripts/build-driver-helper.js && electron-builder --win --x64",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux --x64",
     "build:icons": "node scripts/build-icons.js",
-    "postinstall": "node scripts/copy-monaco.js"
+    "postinstall": "node scripts/copy-monaco.js && node scripts/build-driver-helper.js"
   },
   "build": {
     "appId": "com.jmt.proffieos-editor",
@@ -81,8 +81,9 @@
         "filter": [
           "arduino-cli/**/*",
           "tools/**/*",
-          "dfu-driver/**/*",
-          "webusb-fix/**/*",
+          "dfu-driver/*.inf",
+          "dfu-driver/*.cat",
+          "driver-helper/*.exe",
           "jmt-plugin/**/*"
         ]
       }

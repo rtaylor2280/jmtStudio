@@ -22,3 +22,6 @@ electron
 jmt-studio@*
 # The font catalogue is published on purpose, not by a commit
 fontCatalogueData.json
+
+# [B-681] Built by scripts/build-driver-helper.js (postinstall and build), never committed.
+resources/driver-helper/

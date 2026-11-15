@@ -2311,7 +2311,7 @@ function ensureDfuDriver(onLog) {
   if (process.platform !== 'win32') return Promise.resolve({ ok: true, status: 'not-needed' });
   const os = require('os');
   const resDir     = proffie.getResourcesPath();
-  const helper     = path.join(resDir, 'dfu-driver', 'ensure-winusb.ps1');
+  const helper     = path.join(resDir, 'driver-helper', 'JMTStudioDriverHelper.exe');
   const infPath    = path.join(resDir, 'dfu-driver', 'jmt_proffie_winusb.inf');
   const resultPath = path.join(os.tmpdir(), `jmt-dfu-driver-${Date.now()}.json`);
 
@@ -2321,23 +2321,17 @@ function ensureDfuDriver(onLog) {
 
   onLog('Installing the WinUSB driver...', false);
 
-  // Self-elevate a PowerShell that runs the bundled helper. [B-681] The launcher command and its
-  // spawn live in winSystem.launchDfuDriverHelper, with why it is quoted and hidden as it is.
-  // Do NOT rely on Start-Process -Wait/-PassThru to know when the elevated
-  // helper finished: neither reliably waits across the UAC elevation boundary
-  // (they can signal on the consent broker, not the real process), which made us
-  // read the result before it was written and mis-report success as failure.
-  // The helper writes its result JSON as its LAST action, so we poll for that
-  // file as the completion signal instead. If the user declines the UAC prompt,
-  // Start-Process throws and the launcher exits non-zero.
+  // [B-681] JMT Studio Driver Helper, started through the Windows administrator prompt
+  // (winSystem.launchDfuDriverHelper). The helper writes its result JSON as its LAST action, so
+  // that file is the completion signal, polled for below; the launch only says whether the helper
+  // started. A declined prompt comes back as a launch error.
   const dbg = (m) => { try { fs.appendFileSync(path.join(os.tmpdir(), 'jmt-dfu-app-debug.log'), `[${new Date().toISOString()}] ${m}\n`); } catch {} };
 
   return new Promise((resolve) => {
     require('./winSystem').launchDfuDriverHelper(helper, infPath, resultPath, async (error) => {
         dbg(`launch done; err=${error ? (error.message || error.code) : 'none'}`);
         if (error) {
-          // Non-zero exit from the launcher means the elevated launch failed,
-          // almost always the user declining the UAC prompt.
+          // The helper did not start: almost always the administrator prompt declined.
           return resolve({ ok: false, status: 'cancelled', detail: 'Driver install was cancelled. Accept the Windows permission prompt to continue.' });
         }
         // Poll for the helper's result file (its final write) up to ~3 minutes,
@@ -2395,12 +2389,12 @@ function fixWebUsbWindows(serial) {
   if (process.platform !== 'win32') return Promise.resolve({ ok: true, status: 'not-needed' });
   if (!_isBoardSerial(serial)) return Promise.resolve({ ok: false, status: 'error', detail: 'No board serial.' });
   const os = require('os');
-  const helper     = path.join(proffie.getResourcesPath(), 'webusb-fix', 'fix-webusb-guid.ps1');
+  const helper     = path.join(proffie.getResourcesPath(), 'driver-helper', 'JMTStudioDriverHelper.exe');
   const resultPath = path.join(os.tmpdir(), `jmt-webusb-fix-${Date.now()}.json`);
   if (!fs.existsSync(helper)) {
     return Promise.resolve({ ok: false, status: 'error', detail: 'The WebUSB fix is missing from this build.' });
   }
-  // [B-681] The launcher command and its spawn live in winSystem.launchWebUsbFixHelper.
+  // [B-681] Started by winSystem.launchWebUsbFixHelper, as ensureDfuDriver starts it.
   return new Promise((resolve) => {
     require('./winSystem').launchWebUsbFixHelper(helper, serial, resultPath, async (error) => {
         if (error) return resolve({ ok: false, status: 'cancelled', detail: 'The Windows permission prompt was declined.' });

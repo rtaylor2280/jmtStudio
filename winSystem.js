@@ -1,12 +1,12 @@
 // Windows process, registry, device, elevation and archive calls. [B-681]
 //
-// NO CHILD PROCESSES EXCEPT THE TWO ELEVATED HELPERS. The registry read, the DFU driver-service
-// lookup, the process list and the process-tree kill are Win32 calls made in-process through
-// koffi (winSystemNative.js, on a worker thread via winNativeRun.js), and the archive unpack is
-// node-stream-zip, because behaviour-based antivirus kills an Electron app that keeps launching
-// reg.exe, tasklist, taskkill and PowerShell (QA BUG-012). The only launches left are the two
-// elevated helper launches below; a guard test (test/windows-shellouts-one-place.test.js) holds
-// this file to exactly those and every other file to none.
+// NO CHILD PROCESSES. The registry read, the DFU driver-service lookup, the process list and the
+// process-tree kill are Win32 calls made in-process through koffi (winSystemNative.js, on a
+// worker thread via winNativeRun.js), and the archive unpack is node-stream-zip, because
+// behaviour-based antivirus kills an Electron app that keeps launching reg.exe, tasklist,
+// taskkill and PowerShell (QA BUG-012). The two jobs that need administrator rights are done by
+// Studio's own signed driver helper, started through the Windows administrator prompt. A guard
+// test (test/windows-shellouts-one-place.test.js) holds this file and every other to no launches.
 //
 // SAME ANSWERS, SAME TIME LIMITS. Each export resolves what the launched program's version
 // resolved, and degrades to the same failure value after the same time limit. The toolchain's own
@@ -14,7 +14,6 @@
 
 'use strict';
 
-const { execFile } = require('child_process');
 const { runNative } = require('./winNativeRun');
 const N = require('./winSystemNative');
 
@@ -55,36 +54,33 @@ function dfuBoundService() {
   return boundServiceOf(DFU_INSTANCE_PATTERN);
 }
 
-// ── Elevated helper launches ──
-// Self-elevate a PowerShell that runs the bundled helper. Single-quote every
-// path (doubling embedded quotes) so spaces in "Program Files" survive.
-// -WindowStyle Hidden on both the outer probe shell and the elevated helper
-// keeps the raw PowerShell console off the user's screen. The UAC prompt and
-// the "install this device software" dialog are separate system windows and
-// still appear (that consent is intentional); only the console is suppressed.
-// If the user declines the UAC prompt, Start-Process throws and the launcher exits non-zero.
-// `done(error)` is the execFile callback; the caller polls the helper's result file from it.
-
-// The WinUSB DFU driver install (resources/dfu-driver/ensure-winusb.ps1).
-function launchDfuDriverHelper(helper, infPath, resultPath, done) {
-  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-  const psCmd =
-    `$a=@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',${q(helper)},` +
-    `'-InfPath',${q(infPath)},'-ResultPath',${q(resultPath)});` +
-    `try { Start-Process -FilePath 'powershell' -ArgumentList $a -Verb RunAs -WindowStyle Hidden | Out-Null; exit 0 } catch { exit 3 }`;
-  execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', psCmd],
-    { timeout: 120000, windowsHide: true }, done);
+// ── The driver helper: the two jobs that need administrator rights ──
+// JMT Studio Driver Helper (driver-helper/DriverHelper.cs, built to
+// resources/driver-helper/JMTStudioDriverHelper.exe and signed with Studio) installs the WinUSB
+// DFU driver and repairs a board's WebUSB setting. It is started directly through the Windows
+// administrator prompt, which names the signed publisher; no PowerShell, no hidden console.
+// The helper writes its result file as its last action, and the caller polls for that file.
+// `done(error)` is called once the helper is running (error null) or could not be started:
+// error.code 1223 is the prompt declined.
+const ELEVATED_START_MS = 120000;   // the prompt waits on the user
+function _startHelper(exe, args, done) {
+  _run('runElevated', [String(exe), args], ELEVATED_START_MS, { ok: false, error: 'no-answer' })
+    .then((r) => {
+      if (r && r.ok) return done(null);
+      const e = new Error('The driver helper did not start' + (r && r.error ? ` (${r.error})` : ''));
+      e.code = r && r.error;
+      done(e);
+    }, (err) => done(err || new Error('The driver helper did not start')));
 }
 
-// The WebUSB interface-GUID fix (resources/webusb-fix/fix-webusb-guid.ps1).
-function launchWebUsbFixHelper(helper, serial, resultPath, done) {
-  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-  const psCmd =
-    `$a=@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',${q(helper)},` +
-    `'-Serial',${q(serial.trim())},'-ResultPath',${q(resultPath)});` +
-    `try { Start-Process -FilePath 'powershell' -ArgumentList $a -Verb RunAs -WindowStyle Hidden | Out-Null; exit 0 } catch { exit 3 }`;
-  execFile('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', psCmd],
-    { timeout: 120000, windowsHide: true }, done);
+// Install the WinUSB DFU driver (helper command dfu-driver).
+function launchDfuDriverHelper(exe, infPath, resultPath, done) {
+  _startHelper(exe, ['dfu-driver', '--inf', infPath, '--result', resultPath], done);
+}
+
+// Repair one board's WebUSB setting (helper command webusb). [B-660]
+function launchWebUsbFixHelper(exe, serial, resultPath, done) {
+  _startHelper(exe, ['webusb', '--serial', String(serial).trim(), '--result', resultPath], done);
 }
 
 // One registry value under HKLM. Resolves { type, data } (winSystemNative.decodeRegValue: a

@@ -27,7 +27,9 @@ exports.default = async function sign(configuration) {
   // signature; signing them would also break any signatures they ship with.
   // Only sign our own binaries: the main app .exe and the NSIS installer/
   // uninstaller.
-  if (/[\\\/]resources[\\\/]/i.test(file)) {
+  // [B-681] JMT Studio Driver Helper is Studio's own program and ships in resources/: it is
+  // signed, so the Windows administrator prompt names the publisher.
+  if (/[\\\/]resources[\\\/]/i.test(file) && !/JMTStudioDriverHelper\.exe$/i.test(file)) {
     console.log(`[sign] Skipping third-party binary: ${file}`);
     return;
   }

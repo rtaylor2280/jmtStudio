@@ -74,6 +74,21 @@ function regValueText(v) {
   return '';
 }
 
+// One argument as Windows' command-line parser (CommandLineToArgvW and the C runtime) reads it
+// back unchanged: quoted when it holds a space, tab or quote or is empty, with the backslashes
+// before a quote, or before the closing quote, doubled.
+function quoteArg(a) {
+  a = String(a);
+  if (a !== '' && !/[\s"]/.test(a)) return a;
+  let out = '"', slashes = 0;
+  for (const c of a) {
+    if (c === '\\') { slashes++; continue; }
+    if (c === '"') { out += '\\'.repeat(slashes * 2 + 1) + '"'; slashes = 0; continue; }
+    out += '\\'.repeat(slashes) + c; slashes = 0;
+  }
+  return out + '\\'.repeat(slashes * 2) + '"';
+}
+
 // PROCESSENTRY32W, as Process32FirstW / NextW fill it. 64-bit layout (568 bytes):
 //   0 dwSize, 8 th32ProcessID, 16 th32DefaultHeapID (pointer), 24 th32ModuleID, 28 cntThreads,
 //   32 th32ParentProcessID, 36 pcPriClassBase, 40 dwFlags, 44 szExeFile[260]
@@ -178,6 +193,14 @@ function bind() {
     CloseHandle: k32.func('bool __stdcall CloseHandle(void *h)'),
     GetLastError: k32.func('uint32 __stdcall GetLastError()'),
   };
+  // SHELLEXECUTEINFOW, for starting the driver helper with the administrator prompt.
+  W.SEI = koffi.struct('SHELLEXECUTEINFOW', {
+    cbSize: 'uint32', fMask: 'uint32', hwnd: 'void *', lpVerb: 'str16', lpFile: 'str16',
+    lpParameters: 'str16', lpDirectory: 'str16', nShow: 'int32', hInstApp: 'void *',
+    lpIDList: 'void *', lpClass: 'str16', hkeyClass: 'void *', dwHotKey: 'uint32',
+    hIconOrMonitor: 'void *', hProcess: 'void *',
+  });
+  W.ShellExecuteExW = koffi.load('shell32.dll').func('bool __stdcall ShellExecuteExW(_Inout_ SHELLEXECUTEINFOW *info)');
   return W;
 }
 
@@ -302,8 +325,30 @@ function opKillTree(root) {
   return { killed, failed };
 }
 
+// Start `exe` with `args` through the Windows administrator prompt (the "runas" verb), as the
+// signed driver helper is started. Returns once the helper is running: { ok: true }, or
+// { ok: false, error } with the Windows error code, 1223 when the prompt was declined. The helper
+// reports its own outcome in its result file, which the caller reads.
+const SEE_MASK_NOCLOSEPROCESS = 0x40, SEE_MASK_NOASYNC = 0x100, SEE_MASK_FLAG_NO_UI = 0x400;
+const SW_HIDE = 0;
+function opRunElevated(exe, args) {
+  bind();
+  const info = {
+    cbSize: W.koffi.sizeof(W.SEI),
+    fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+    hwnd: null, lpVerb: 'runas', lpFile: String(exe),
+    lpParameters: (args || []).map(quoteArg).join(' '), lpDirectory: null, nShow: SW_HIDE,
+    hInstApp: null, lpIDList: null, lpClass: null, hkeyClass: null, dwHotKey: 0,
+    hIconOrMonitor: null, hProcess: null,
+  };
+  const ok = W.ShellExecuteExW(info);
+  const error = ok ? 0 : W.GetLastError();
+  if (info.hProcess && !invalid(info.hProcess)) W.CloseHandle(info.hProcess);
+  return ok ? { ok: true } : { ok: false, error };
+}
+
 const OPS = { regValue: opRegValue, pnpServices: opPnpServices, processList: opProcessList,
-              killTree: opKillTree };
+              killTree: opKillTree, runElevated: opRunElevated };
 
 // ── Worker entry ────────────────────────────────────────────────────────────
 // Runs only inside a worker winNativeRun.js started for this file.
@@ -311,6 +356,6 @@ require('./winNativeRun').serveNative('winSystemNative.js', OPS);
 
 module.exports = {
   OPS, REG_TYPES,
-  utf16z, splitRegKey, decodeRegValue, regValueText, processEntryLayout, parseProcessEntry,
+  utf16z, splitRegKey, decodeRegValue, regValueText, quoteArg, processEntryLayout, parseProcessEntry,
   anyArduino, treeOrder, instanceMatcher,
 };
