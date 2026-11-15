@@ -1,0 +1,58 @@
+JMT Studio - third-party software
+=================================
+
+JMT Studio is Copyright 2026 Ryan Taylor (JMT Sabers). It includes the programs and libraries
+below, which belong to their authors and are used under their own licences. The licence texts
+are in this folder. JMT Studio's own licence does not apply to them.
+
+The JMT Studio installer for Windows signs these files with the JMT Studio code-signing
+certificate so Windows can show who distributed them. Signing does not change them.
+
+
+arduino-cli 1.4.1
+  Compiles ProffieOS for the board.
+  Copyright Arduino SA. https://github.com/arduino/arduino-cli
+  Licence: GNU General Public License version 3 (GPL-3.0.txt)
+  Source: the exact source of this version is published with every JMT Studio release, as
+  arduino-cli-1.4.1-source.tar.gz, on the release's page at
+  https://github.com/rtaylor2280/jmtStudio/releases
+  It is also at https://github.com/arduino/arduino-cli/releases/tag/v1.4.1
+
+dfu-util and dfu-suffix 0.9 (Windows) and 0.11 (macOS, Linux)
+  Write the firmware to the board's bootloader.
+  Copyright 2005-2009 Weston Schmidt, Harald Welte and OpenMoko Inc., and the dfu-util authors.
+  https://dfu-util.sourceforge.net/
+  Licence: GNU General Public License version 2 (GPL-2.0.txt)
+  Source: included in the source folder (dfu-util-0.9.tar.gz, dfu-util-0.11.tar.gz).
+
+libusb 1.0.29 (macOS, Linux)
+  USB access for dfu-util.
+  Copyright the libusb authors. https://libusb.info/
+  Licence: GNU Lesser General Public License version 2.1 (LGPL-2.1.txt)
+  Source: included in the source folder (libusb-1.0.29.tar.bz2). The library is a separate
+  file next to dfu-util and can be replaced with any compatible build.
+
+winpthreads (libwinpthread-1.dll, Windows)
+  Thread support for dfu-util.
+  Copyright (c) 2011 mingw-w64 project.
+  Licence: MIT-style (winpthreads-MIT.txt)
+
+koffi 2.16.3
+  Lets JMT Studio ask Windows directly about cards and devices.
+  Copyright (C) 2025 Niels Martignène. https://koffi.dev/
+  Licence: MIT (koffi-MIT.txt)
+
+serialport (@serialport/bindings-cpp 13.0.0)
+  Talks to the board over its serial port.
+  Copyright 2010 Christopher Williams. https://serialport.io/
+  Licence: MIT (serialport-MIT.txt)
+
+JMT plugin: Proffieboard Arduino core system library (libstm32l433.a, libstm32l452.a)
+  Replacement builds of the board-support core's system library (based on Thomas Roell's Arduino
+  STM32L4 core; not ProffieOS) with a fix for USB Mass Storage above 4 GiB, built from the core's
+  own sources. ProffieOS itself is not included with JMT Studio.
+  Copyright (c) 2014, 2015 Thomas Roell; (c) 2015, 2016 STMicroelectronics; (c) 2012-2015 ARM Limited.
+  Licences: permissive notices reproduced in proffieboard-core-notices.txt (Thomas Roell; ARM; ST's
+  BSD-style terms; ST's MCD-ST Liberty SW License Agreement V2,
+  http://www.st.com/software_license_agreement_liberty_v2). They run only on the board's
+  STMicroelectronics microcontroller, as ST's terms require.

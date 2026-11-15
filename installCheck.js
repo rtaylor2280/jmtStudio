@@ -41,6 +41,8 @@ function requiredFiles({ resourcesPath, appDir, platform = process.platform, arc
       { file: A('winDisksNative.js'), purpose: CARDS },
       { file: A('winSystemNative.js'), purpose: CARDS },
       { file: A('node_modules', 'koffi', 'build', 'koffi', `win32_${arch}`, 'koffi.node'), purpose: CARDS },
+      { file: A('node_modules', '@serialport', 'bindings-cpp', 'prebuilds', `win32-${arch}`,
+          arch === 'arm64' ? '@serialport+bindings-cpp.armv8.node' : '@serialport+bindings-cpp.node'), purpose: FLASH },
     );
   } else if (platform === 'darwin') {
     list.push(

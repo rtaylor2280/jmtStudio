@@ -25,7 +25,8 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico",
-      "sign": "build/sign.js"
+      "sign": "build/sign.js",
+      "signExts": [".node", ".dll"]
     },
     "nsis": {
       "oneClick": false,
@@ -65,7 +66,8 @@
       "winDisksNative.js",
       "winSystemNative.js",
       "winNativeRun.js",
-      "node_modules/koffi/**/*"
+      "node_modules/koffi/**/*",
+      "node_modules/@serialport/bindings-cpp/prebuilds/**/*"
     ],
     "files": [
       "*.js",
@@ -84,6 +86,7 @@
           "dfu-driver/*.inf",
           "dfu-driver/*.cat",
           "driver-helper/*.exe",
+          "licenses/**/*",
           "jmt-plugin/**/*"
         ]
       }

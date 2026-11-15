@@ -24,4 +24,11 @@ This tool does not include ProffieOS. Users must supply their own copy.
 
 Generated configurations remain fully accessible and editable by the user.
 
+Third-party software. JMT Studio includes separate programs and libraries by other authors,
+among them arduino-cli, dfu-util, libusb, koffi, serialport and a patched build of the
+Proffieboard Arduino core's system library (not ProffieOS, which JMT Studio does not include).
+They are not covered by this licence: each is provided under its own licence, and nothing here
+limits the rights those licences give you. Their licence texts, notices and source information
+are in the licenses folder installed with JMT Studio (THIRD-PARTY-NOTICES.txt).
+
 Copyright © 2026 Ryan Taylor. All rights reserved.
