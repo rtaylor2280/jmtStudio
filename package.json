@@ -63,6 +63,8 @@
     },
     "asarUnpack": [
       "winDisksNative.js",
+      "winSystemNative.js",
+      "winNativeRun.js",
       "node_modules/koffi/**/*"
     ],
     "files": [

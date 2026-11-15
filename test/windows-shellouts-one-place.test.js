@@ -1,4 +1,4 @@
-// Every Windows shell-out lives in winSystem.js; the card code launches none. [B-681]
+// The only Windows shell-outs left are winSystem.js's two elevated helper launches. [B-681]
 //
 // PowerShell, cmd, reg, fsutil, tasklist and taskkill launched from an Electron app are the
 // pattern behaviour-based antivirus blocks (QA BUG-012). Keeping every such launch in one file
@@ -6,7 +6,11 @@
 // them be replaced with native calls without hunting. This fails when one appears anywhere else.
 //
 // winDisks.js (card detection, export destinations, safe eject) answers everything through the
-// Win32 API in winDisksNative.js, so both are held at ZERO launches and no child_process at all.
+// Win32 API in winDisksNative.js, and winSystem.js's registry read, DFU driver-service lookup,
+// process list and process-tree kill go through winSystemNative.js, both on workers started by
+// winNativeRun.js. Those four files are held at ZERO launches and no child_process at all.
+// winSystem.js keeps exactly two launches - the elevated DFU driver and WebUSB fix helpers,
+// replaced in a later phase by a signed helper - and nothing else.
 //
 // WHAT COUNTS AS A LAUNCH: a string literal naming one of those programs as the first argument of
 // execFile / execFileSync / spawn / spawnSync / exec / execSync / _exec, or as the start of the
@@ -101,9 +105,9 @@ function sourceFiles() {
      !hits.some((h) => /registry-tool/.test(h.text)));
 }
 
-// ── the card code launches nothing ──────────────────────────────────────────
+// ── the native files launch nothing ─────────────────────────────────────────
 {
-  for (const f of ['winDisks.js', 'winDisksNative.js']) {
+  for (const f of ['winDisks.js', 'winDisksNative.js', 'winSystemNative.js', 'winNativeRun.js']) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const hits = launchesIn(src);
     ok(`${f} has zero shell-outs`, hits.length === 0, hits.map((h) => `${h.line} ${h.text}`).join(' | '));
@@ -112,16 +116,60 @@ function sourceFiles() {
   }
 }
 
-// ── the remaining home really does hold launches (so a clean result is not vacuous) ──
-// The scanner's own fixture above proves it can see a launch; this proves the real file it is
-// pointed at still has the seven it must find, so "nothing stray" is not a blind scan.
+// ── winSystem.js: the two elevated helper launches, and nothing else ────────
+// The scanner's own fixture above proves it can see a launch; this proves the real file still
+// has the two it must find (so "nothing stray" is not a blind scan), that they are PowerShell,
+// and that each sits in its own helper function. Everything else the file does is native.
 {
-  const sys = launchesIn(fs.readFileSync(path.join(ROOT, 'winSystem.js'), 'utf8'));
-  const joined = (hs) => hs.map((h) => h.text).join(' | ');
-  ok(`winSystem.js launches are found: ${sys.length}`, sys.length >= 7, joined(sys));
-  for (const p of ['taskkill', 'tasklist', 'reg', 'powershell']) {
-    ok(`winSystem.js: ${p} is found`, sys.some((h) => new RegExp(`['"\`]${p}`, 'i').test(h.text)), joined(sys));
+  const SRC = fs.readFileSync(path.join(ROOT, 'winSystem.js'), 'utf8');
+  const code = stripComments(SRC);
+  const sys = launchesIn(SRC);
+  const joined = (hs) => hs.map((h) => `${h.line} ${h.text}`).join(' | ');
+  ok(`winSystem.js has exactly two launches: ${sys.length}`, sys.length === 2, joined(sys));
+  ok('both are PowerShell', sys.every((h) => /\(\s*'powershell$/.test(h.text)), joined(sys));
+  const bodyOf = (name) => {
+    const at = code.indexOf(`function ${name}(`);
+    if (at < 0) return '';
+    const next = code.indexOf('\nfunction ', at + 1);
+    return code.slice(at, next < 0 ? code.length : next);
+  };
+  for (const fn of ['launchDfuDriverHelper', 'launchWebUsbFixHelper']) {
+    const body = bodyOf(fn);
+    ok(`${fn} holds one of them`, launchesIn(body).length === 1, body ? '' : 'function not found');
+    ok(`${fn} still elevates with -Verb RunAs`, /-Verb RunAs/.test(body));
   }
+  ok('child_process is used for execFile only (the helper launches)',
+     /const \{ execFile \} = require\('child_process'\);/.test(code)
+     && (code.match(/child_process/g) || []).length === 1
+     && !/\bspawn\s*\(/.test(code), 'a spawn here would be a launch the scan above has not been told about');
+  for (const [fn, what] of [['killTree', 'taskkill'], ['arduinoRunning', 'tasklist'], ['dfuBoundService', 'Get-PnpDevice'],
+                            ['regQuery', 'reg query'], ['expandArchive', 'Expand-Archive']]) {
+    const body = bodyOf(fn);
+    ok(`${fn} launches nothing (was ${what})`, !!body && launchesIn(body).length === 0
+       && !/execFile|spawn|exec\(/.test(body), body ? body.slice(0, 200) : 'function not found');
+  }
+  ok('the native calls run on workers through winNativeRun',
+     /require\('\.\/winNativeRun'\)/.test(code) && /runNative\('winSystemNative\.js'/.test(code));
+  ok('the archive unpack is node-stream-zip, on a descriptor Studio owns',
+     /openZipOwned\(zipPath, /.test(bodyOf('expandArchive')));
+}
+
+// ── no old program name survives in code anywhere ───────────────────────────
+// Wider than the launch pattern: the program or cmdlet names in any code string (a command line
+// built elsewhere and handed to a launcher would not be caught by the first-argument scan).
+{
+  const files = sourceFiles();
+  const NAMES = /\b(?:tasklist|taskkill|Expand-Archive|Get-PnpDevice|fsutil)\b|['"`]reg(?:\.exe)?['"`]|\breg query\b/i;
+  ok('the name scan sees a name in code',
+     ["execFile('tasklist', [])", "const c = 'Expand-Archive -LiteralPath x';", "run('reg', ['query'])"].every((l) => NAMES.test(l))
+     && !NAMES.test('const registry = regQuery(key);'));
+  const found = [];
+  for (const f of files) {
+    const code = stripComments(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    code.split('\n').forEach((l, i) => { if (NAMES.test(l)) found.push(`${f}:${i + 1}  ${l.trim().slice(0, 120)}`); });
+  }
+  ok(`no tasklist / taskkill / reg / fsutil / Expand-Archive / Get-PnpDevice in code: ${found.length}`,
+     found.length === 0, found.join('\n       '));
 }
 
 // ── nowhere else ────────────────────────────────────────────────────────────
@@ -136,8 +184,8 @@ function sourceFiles() {
     }
   }
   ok(`no Windows shell-out outside winSystem.js: ${stray.length}`, stray.length === 0,
-     'Card and volume work answers through the Win32 API in winDisksNative.js; any other launch '
-     + 'goes in winSystem.js.\n       '
+     'Card, registry, device and process questions answer through the Win32 API '
+     + '(winDisksNative.js, winSystemNative.js); a new launch belongs nowhere.\n       '
      + stray.join('\n       '));
 }
 

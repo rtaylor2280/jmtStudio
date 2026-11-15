@@ -1,42 +1,58 @@
-// Windows process, registry, elevation and archive calls. [B-681]
+// Windows process, registry, device, elevation and archive calls. [B-681]
 //
-// Every taskkill, tasklist, reg and PowerShell launch outside the card code lives here, so the set
-// of outside programs Studio starts on Windows is in two files (this one and winDisks.js) that a
-// guard test (test/windows-shellouts-one-place.test.js) holds in place. The toolchain's own
+// NO CHILD PROCESSES EXCEPT THE TWO ELEVATED HELPERS. The registry read, the DFU driver-service
+// lookup, the process list and the process-tree kill are Win32 calls made in-process through
+// koffi (winSystemNative.js, on a worker thread via winNativeRun.js), and the archive unpack is
+// node-stream-zip, because behaviour-based antivirus kills an Electron app that keeps launching
+// reg.exe, tasklist, taskkill and PowerShell (QA BUG-012). The only launches left are the two
+// elevated helper launches below; a guard test (test/windows-shellouts-one-place.test.js) holds
+// this file to exactly those and every other file to none.
+//
+// SAME ANSWERS, SAME TIME LIMITS. Each export resolves what the launched program's version
+// resolved, and degrades to the same failure value after the same time limit. The toolchain's own
 // programs (arduino-cli, dfu-util, objcopy) are not here: they are the toolchain itself.
-//
-// The commands, arguments, timeouts and parsing are the ones the callers ran before the move;
-// the callers keep their own platform switches, polling and result handling.
 
 'use strict';
 
-const { execFile, spawn } = require('child_process');
+const { execFile } = require('child_process');
+const { runNative } = require('./winNativeRun');
+const N = require('./winSystemNative');
 
-// Kill a process tree. /T = whole tree, /F = force. Fire-and-forget; a spawn that throws
-// propagates, so the caller (toolchain._killTree) can fall back to killing the parent.
+const _run = (op, args, timeoutMs, failValue) =>
+  runNative('winSystemNative.js', op, args, timeoutMs, failValue);
+
+// Kill a process tree: every descendant of `pid`, then `pid` itself, force-terminated (what
+// taskkill /T /F did). Fire-and-forget: returns at once and never throws. The returned promise
+// resolves { killed, failed } once the tree has been stopped, or null when the native call could
+// not run at all, so the caller (toolchain._killTree) can fall back to killing the parent.
 function killTree(pid) {
-  spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+  return _run('killTree', [pid], 10000, null);
 }
 
 // Is an Arduino IDE process running? Resolves false when the process list cannot be read.
+// 3 s, as the tasklist call had. The rule is winSystemNative.anyArduino.
 function arduinoRunning() {
-  return new Promise(resolve => {
-    execFile('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 3000 }, (err, stdout) => {
-      if (err) { resolve(false); return; }
-      resolve(stdout.toLowerCase().includes('arduino'));
-    });
-  });
+  return _run('processList', [], 3000, null).then((procs) => (procs ? N.anyArduino(procs) : false));
+}
+
+// The present devices whose instance ID matches `pattern` (Get-PnpDevice's case-insensitive
+// -match), [{ id, service }] in enumeration order, or [] when none or the query fails. 4 s.
+function pnpServices(pattern) {
+  return _run('pnpServices', [String(pattern)], 4000, []).then((r) => (Array.isArray(r) ? r : []));
+}
+
+// The Windows driver service bound to the first present device matching `pattern`, or '' if
+// none/unknown. Exposed with the pattern so the lookup can be checked against a device that is
+// plugged in; dfuBoundService is the one the toolchain asks.
+function boundServiceOf(pattern) {
+  return pnpServices(pattern).then((r) => (r.length ? String(r[0].service || '').trim() : ''));
 }
 
 // The Windows driver service bound to the STM32 bootloader (e.g. 'WinUSB', 'STTub30'), or '' if
 // none/unknown.
+const DFU_INSTANCE_PATTERN = 'VID_0483&PID_DF11';
 function dfuBoundService() {
-  const ps = "$d = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_0483&PID_DF11' } | Select-Object -First 1; if ($d) { (Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_Service' -ErrorAction SilentlyContinue).Data }";
-  return new Promise((resolve) => {
-    execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 4000 }, (err, stdout) => {
-      resolve(err ? '' : String(stdout || '').trim());
-    });
-  });
+  return boundServiceOf(DFU_INSTANCE_PATTERN);
 }
 
 // ── Elevated helper launches ──
@@ -71,26 +87,115 @@ function launchWebUsbFixHelper(helper, serial, resultPath, done) {
     { timeout: 120000, windowsHide: true }, done);
 }
 
-// One registry value. Resolves the raw `reg query` output, or null when the key or value is
-// absent or the query fails. A plain read; needs no admin.
+// One registry value under HKLM. Resolves { type, data } (winSystemNative.decodeRegValue: a
+// string for REG_SZ, an array for REG_MULTI_SZ), or null when the key or value is absent or the
+// read fails or takes over 5 s. A plain read; needs no admin.
 function regQuery(key, value) {
-  return new Promise((resolve) => {
-    execFile('reg', ['query', key, '/v', value], { windowsHide: true, timeout: 5000 },
-      (err, stdout) => resolve(err ? null : String(stdout || '')));
-  });
+  return _run('regValue', [String(key), String(value)], 5000, null);
 }
 
-// Unpack a downloaded zip (Get ProffieOS). Resolves on success, rejects with the execFile error.
-function expandArchive(zipPath, extractDir) {
-  return new Promise((resolve, reject) => {
-    execFile('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-Command',
-      `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${extractDir}' -Force`
-    ], { timeout: 120000 }, err => err ? reject(err) : resolve());
+// How toolchain.checkWebUsbWindows reads the two values, as it read reg.exe's printed line.
+// ParentIdPrefix: a REG_SZ, its first whitespace-free run ("ParentIdPrefix  REG_SZ  (\S+)");
+// null when absent, empty or of another type.
+function webUsbParentPrefix(v) {
+  if (!v || v.type !== 'REG_SZ') return null;
+  const m = /\S+/.exec(N.regValueText(v));
+  return m ? m[0] : null;
+}
+// DeviceInterfaceGUIDs: true when the value's text holds a {GUID}. The printed key path never
+// held one (a ParentIdPrefix has no braces), so the value is all that was ever matched.
+function webUsbHasGuid(v) {
+  return /\{[0-9A-Fa-f-]{36}\}/.test(N.regValueText(v));
+}
+
+// ── Unpack a downloaded zip (Get ProffieOS) ──
+// Every entry into extractDir, directories created, existing files overwritten, each file's
+// modified time taken from the archive: what Expand-Archive -Force did. Resolves on success;
+// rejects on any failure, an entry that would land outside extractDir, or after 120 s.
+//
+// ZIP-SLIP. An entry named "../x", "C:/x", "/x" or with a ":" (an NTFS stream) would write outside
+// the folder or somewhere other than a plain file. Every name is checked before anything is
+// written, and one such entry rejects the whole archive. Expand-Archive skipped such an entry with
+// a non-terminating error and PowerShell still exited 0, so the unpack resolved with a file
+// missing; an archive that is not a zip at all likewise resolved with nothing extracted. Both
+// reject here, with the reason in the message.
+// Backslashes in names are separators, as Windows' own unzip read them.
+const EXPAND_TIMEOUT_MS = 120000;
+
+// The absolute path an entry extracts to, or null when it would escape `root`. '' for an entry
+// that names the root itself (a "./" directory entry).
+function zipEntryTarget(root, name) {
+  const path = require('path');
+  const n = String(name).replace(/\\/g, '/');
+  if (/^\//.test(n) || /^[A-Za-z]:/.test(n) || n.includes(':') || n.includes('\0')) return null;
+  const base = path.resolve(root);
+  const target = path.resolve(base, n);
+  if (target === base) return '';
+  const rel = path.relative(base, target);
+  if (!rel || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return null;
+  return target;
+}
+
+// A zip entry's DOS time as a local Date. node-stream-zip reads the DOS fields as UTC; DOS times
+// are local, which is how Windows set the extracted file's modified time.
+function zipLocalTime(entryTime) {
+  const d = new Date(entryTime);
+  if (isNaN(d)) return null;
+  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(),
+                  d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
+}
+
+function expandArchive(zipPath, extractDir, timeoutMs = EXPAND_TIMEOUT_MS) {
+  const fs = require('fs');
+  const path = require('path');
+  const { pipeline } = require('stream/promises');
+  // Owns the descriptor: node-stream-zip leaks it on a failed read, and a leaked one keeps the
+  // downloaded zip from being deleted afterwards. [B-479]
+  const { openZipOwned } = require('./zipOpen');
+  let zip = null;
+  let timedOut = false;
+  let timer = null;
+  const work = (async () => {
+    zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
+    const entries = Object.values(await zip.entries());
+    const plan = entries.map((e) => {
+      const target = zipEntryTarget(extractDir, e.name);
+      if (target === null) throw new Error(`The archive entry "${e.name}" is outside the destination folder.`);
+      if (target === '' && !e.isDirectory) throw new Error(`The archive entry "${e.name}" has no file name.`);
+      return { e, target };
+    });
+    fs.mkdirSync(extractDir, { recursive: true });
+    for (const { e, target } of plan) {
+      if (timedOut) return;
+      if (e.isDirectory) {
+        if (target) fs.mkdirSync(target, { recursive: true });
+        continue;
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      await pipeline(await zip.stream(e), fs.createWriteStream(target));
+      const t = zipLocalTime(e.time);
+      if (t) { try { fs.utimesSync(target, t, t); } catch {} }
+    }
+  })();
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error(`Unpacking the archive took longer than ${Math.round(timeoutMs / 1000)} s.`));
+    }, timeoutMs);
+  });
+  const guarded = work.catch((e) => {
+    throw new Error(`The archive could not be unpacked: ${e && e.message || e}`);
+  });
+  // The archive is closed BEFORE the promise settles: a close still in flight would release its
+  // descriptor number after the next open could have been handed the same one.
+  return Promise.race([guarded, limit]).finally(async () => {
+    clearTimeout(timer);
+    if (zip) { try { await zip.close(); } catch {} }
   });
 }
 
 module.exports = {
   killTree, arduinoRunning, dfuBoundService, launchDfuDriverHelper, launchWebUsbFixHelper,
-  regQuery, expandArchive,
+  regQuery, expandArchive, webUsbParentPrefix, webUsbHasGuid,
+  pnpServices, boundServiceOf, zipEntryTarget, zipLocalTime, DFU_INSTANCE_PATTERN, EXPAND_TIMEOUT_MS,
 };

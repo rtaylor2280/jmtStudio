@@ -356,14 +356,8 @@ const OPS = { listReady: opListReady, enumerate: opEnumerate, driveType: opDrive
               classify: opClassify, eject: opEject };
 
 // ── Worker entry ────────────────────────────────────────────────────────────
-const wt = require('worker_threads');
-if (!wt.isMainThread && wt.workerData && wt.workerData.winDisksOp) {
-  const { winDisksOp, args } = wt.workerData;
-  let msg;
-  try { msg = { ok: true, value: OPS[winDisksOp](...(args || [])) }; }
-  catch (e) { msg = { ok: false, error: String(e && e.message || e) }; }
-  wt.parentPort.postMessage(msg);
-}
+// Runs only inside a worker winNativeRun.js started for this file.
+require('./winNativeRun').serveNative('winDisksNative.js', OPS);
 
 const CODES = {
   IOCTL_STORAGE_GET_DEVICE_NUMBER, IOCTL_STORAGE_QUERY_PROPERTY, IOCTL_DISK_GET_PARTITION_INFO_EX,

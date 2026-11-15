@@ -34,10 +34,12 @@ function _killTree(proc) {
   if (!proc) return;
   const pid = proc.pid;
   if (process.platform === 'win32') {
-    // /T = whole tree, /F = force. Fire-and-forget; if taskkill can't spawn,
-    // fall back to at least killing the parent. [B-681] The taskkill spawn is winSystem.killTree.
+    // The whole tree, force-terminated. Fire-and-forget; if the native kill cannot run at all,
+    // fall back to at least killing the parent. [B-681] The tree kill is winSystem.killTree.
     try {
-      require('./winSystem').killTree(pid);
+      require('./winSystem').killTree(pid).then((r) => {
+        if (!r) { try { proc.kill('SIGKILL'); } catch {} }
+      });
     } catch { try { proc.kill('SIGKILL'); } catch {} }
   } else {
     // Spawned detached on POSIX, so the child leads its own process group
@@ -1763,7 +1765,7 @@ function checkArduinoRunning() {
   return new Promise(resolve => {
     const { exec } = require('child_process');
     if (process.platform === 'win32') {
-      // [B-681] The tasklist spawn is winSystem.arduinoRunning.
+      // [B-681] The process-list read is winSystem.arduinoRunning.
       require('./winSystem').arduinoRunning().then(resolve);
     } else {
       exec('ps aux', { timeout: 3000 }, (err, stdout) => {
@@ -1843,7 +1845,7 @@ function touchReset(port, onLog) {
 // WinUSB bind-in-progress from a wrong driver that will never become openable.
 function _getDfuBoundService() {
   if (process.platform !== 'win32') return Promise.resolve('');
-  // [B-681] The Get-PnpDevice query and its spawn live in winSystem.dfuBoundService.
+  // [B-681] The device lookup lives in winSystem.dfuBoundService.
   return require('./winSystem').dfuBoundService();
 }
 
@@ -2370,15 +2372,14 @@ function ensureDfuDriver(onLog) {
 function checkWebUsbWindows(serial) {
   if (process.platform !== 'win32') return Promise.resolve({ status: 'ok', detail: 'not-windows' });
   if (!_isBoardSerial(serial)) return Promise.resolve({ status: 'unknown', detail: 'no board serial' });
-  // [B-681] The reg query spawn lives in winSystem.regQuery.
-  const reg = require('./winSystem').regQuery;
+  // [B-681] The registry read is winSystem.regQuery: { type, data } or null.
+  const { regQuery: reg, webUsbParentPrefix, webUsbHasGuid } = require('./winSystem');
   const base = 'HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB\\';
   return (async () => {
-    const parent = await reg(`${base}VID_1209&PID_6668\\${serial.trim()}`, 'ParentIdPrefix');
-    const m = parent && parent.match(/ParentIdPrefix\s+REG_SZ\s+(\S+)/i);
-    if (!m) return { status: 'unknown', detail: 'board not in the registry' };
-    const params = await reg(`${base}VID_1209&PID_6668&MI_02\\${m[1]}&0002\\Device Parameters`, 'DeviceInterfaceGUIDs');
-    if (params && /\{[0-9A-Fa-f-]{36}\}/.test(params)) return { status: 'ok', detail: 'guid present' };
+    const prefix = webUsbParentPrefix(await reg(`${base}VID_1209&PID_6668\\${serial.trim()}`, 'ParentIdPrefix'));
+    if (!prefix) return { status: 'unknown', detail: 'board not in the registry' };
+    const params = await reg(`${base}VID_1209&PID_6668&MI_02\\${prefix}&0002\\Device Parameters`, 'DeviceInterfaceGUIDs');
+    if (webUsbHasGuid(params)) return { status: 'ok', detail: 'guid present' };
     return { status: 'missing', detail: 'WebUSB interface has no GUID' };
   })();
 }

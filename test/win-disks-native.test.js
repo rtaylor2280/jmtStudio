@@ -181,8 +181,12 @@ ok('bit 31 does not sign-flip the scan', same(N.lettersOf(0x80000001), ['A']));
   ok('driveKind: 5 s, null', /_run\('driveType', \[L\], 5000, null\)/.test(W));
   ok('an eject that does not answer hands the verdict to the media watch',
      /_run\('eject', \[L\], EJECT_TIMEOUT_MS, null, \{ ok: true, raw: 'pending' \}\)/.test(W));
-  ok('each call runs on a worker thread', /new Worker\(_nativePath\(\)/.test(W));
-  const code = W.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  // [B-681] The worker runner is winNativeRun.js, shared with winSystem.js.
+  ok('each call runs through the shared worker runner',
+     /runNative\('winDisksNative\.js', op, args, timeoutMs, failValue, timeoutValue\)/.test(W));
+  const R = fs.readFileSync(path.join(ROOT, 'winNativeRun.js'), 'utf8');
+  ok('each call runs on a worker thread', /new Worker\(_nativePath\(file\)/.test(R));
+  const code = [W, R].join('\n').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   ok('a worker is never terminated',
      !/\.terminate\(/.test(code),
      'stopping a worker inside a koffi call is a fatal N-API error that ends the whole process');
@@ -191,7 +195,7 @@ ok('bit 31 does not sign-flip the scan', same(N.lettersOf(0x80000001), ['A']));
      'a caller that exits right after the message races the worker unloading koffi');
   ok('a quit with calls in flight waits for them, within a limit',
      /app\.on\('will-quit'/.test(code) && /e\.preventDefault\(\)/.test(code) && /QUIT_WAIT_MS/.test(code));
-  ok('a packaged build loads the worker from the unpacked copy', /app\.asar\.unpacked/.test(W));
+  ok('a packaged build loads the worker from the unpacked copy', /app\.asar\.unpacked/.test(R));
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const unpack = (pkg.build && pkg.build.asarUnpack) || [];
   ok('package.json unpacks koffi and the worker file from the asar',
