@@ -98,7 +98,7 @@ ok('the async survey is awaited', !!body && /await[^\n]*surveyLibraryAsync|surve
 // ── CONTROL: the predicate must reject the shape this test exists to prevent ─────
 // Built in memory from the real source. Nothing is written to disk.
 const mutant = body && body.replace(
-  /await stallProbe\.around\('sfBackup:surveyLibrary',\s*\n?\s*\(\) => surveyLibraryAsync\(userData\)\)/,
+  /await stallProbe\.around\('sfBackup:surveyLibrary',\s*\n?\s*\(\) => surveyLibraryAsync\(userData(?:, _surveyOpts)?\)\)/,
   'surveyLibrary(userData)');
 ok('control: the mutant really differs from the real body', !!mutant && mutant !== body,
    'the replacement did not apply, so the control below proves nothing');

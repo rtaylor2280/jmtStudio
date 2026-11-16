@@ -725,12 +725,12 @@ ok('its synchronous recursive copy is gone',
   ok('the refusal comes before the export call', fitAt > 0 && (exportAt < 0 || fitAt < exportAt),
      'refusing after the write has begun is [B-203] all over again');
 
-  // SIZING. Hardlinks do not survive a zip, so the archive carries every NAME. Sizing this from
-  // the library's deduped on-disk figure would understate it by more than half and let a backup
-  // that cannot fit start anyway - the precise failure being fixed.
-  ok('it sizes from the survey total, not from the deduped on-disk figure',
-     /totalBytes:\s*survey\.totalBytes/.test(door),
-     'the archive stores every name; on-disk is the wrong number here');
+  // SIZING. [BUG-022] Since B-498 the archive stores a linked file's bytes once, so the room it
+  // needs is the survey's on-disk figure plus the zip's own weight (_sfBackupNeedBytes). Sizing
+  // from every name's bytes refused a 14.7 GB backup on a drive with 28 GB free.
+  ok('it sizes from the survey on-disk figure, not every name',
+     /totalBytes:\s*_sfBackupNeedBytes\(survey\)/.test(door) && /survey\.onDiskBytes/.test(read('renderer/index.html')),
+     'the archive stores each linked file once; the sum of every name is the wrong number here');
   ok('it does not size from the library readout', !/soundFontsSize|figure\.onDisk/.test(door));
 
   // CONTROL: the region rule has to be capable of failing, or a clean pass means nothing.

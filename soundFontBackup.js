@@ -404,7 +404,18 @@ function describeSkipConsequence(userData, unreadable) {
 // The probe rides this walk rather than taking its own: it is the same set of files, and a
 // second pass would double the syscalls to learn nothing new. Measured 2026-10-12 on an
 // 11,730-file library: 2,167 ms for the whole sweep.
-function _dirBytes(dir, unreadable, where) {
+// `links`, when given, is { ids: Set, repeatBytes: 0 } shared across the whole survey: a file with
+// a second name whose id was already seen adds its size to repeatBytes. [BUG-022] The archive
+// stores such a file once (B-498), so the room the backup needs is the total minus repeatBytes.
+// [BUG-023] SOUND IS STORED, NOT COMPRESSED. Measured on 601 MB of a real library's wav files:
+// deflate level 6 ran at 15 MB/s and saved 7.7%; level 1, 17 MB/s; store, 375 MB/s. A 14.7 GB
+// library took 21 m to back up to an internal drive, nearly all of it the compressor. Files that
+// are already compressed or barely compress go in as they are; text (configs, meta, notes) still
+// deflates, where it pays. Store is a standard zip method, so every reader restores it.
+const _STORE_EXT = /\.(wav|mp3|ogg|flac|m4a|aac|opus|zip|7z|rar|png|jpe?g|gif|webp|mp4|mov|pdf)$/i;
+function _storeUncompressed(name) { return _STORE_EXT.test(String(name || '')); }
+
+function _dirBytes(dir, unreadable, where, links) {
   let total = 0;
   if (!fs.existsSync(dir)) return total;
   const walk = (cur) => {
@@ -415,7 +426,21 @@ function _dirBytes(dir, unreadable, where) {
       const abs = path.join(cur, e.name);
       if (e.isDirectory()) walk(abs);
       else if (e.isFile()) {
-        try { total += fs.statSync(abs).size; } catch {}
+        if (links) links.files = (links.files || 0) + 1;
+        try {
+          if (links) {
+            // bigint: an NTFS file id does not fit a double, and two files must never share a key.
+            const st = fs.statSync(abs, { bigint: true });
+            total += Number(st.size);
+            if (st.nlink > 1n) {
+              const id = `${st.dev}:${st.ino}`;
+              if (links.ids.has(id)) links.repeatBytes += Number(st.size);
+              else links.ids.add(id);
+            }
+          } else {
+            total += fs.statSync(abs).size;
+          }
+        } catch {}
         if (unreadable) {
           const code = _probeReadable(abs);
           // The bucket and item travel with the finding so the dialog can say "in your Revan
@@ -469,6 +494,12 @@ async function surveyLibraryAsync(userData, opts) {
   const buckets = ['sources', 'library', 'common', 'attachments'];
   const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
   const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  // [BUG-022] Same four buckets, same dev:ino rule as the archive's own repeat count, so the room
+  // asked for is the room the archive takes. sharedTracks is left out there too.
+  const links = { ids: new Set(), repeatBytes: 0, files: 0 };
+  // [BUG-023] Bytes per top-level item, keyed `bucket/dirName`, so a later pass over the same
+  // items can report progress in bytes rather than in items of very different sizes.
+  const itemBytes = {};
   for (const b of buckets) {
     const root = path.join(_soundFontsRoot(userData), b);
     if (!fs.existsSync(root)) continue;
@@ -480,13 +511,22 @@ async function surveyLibraryAsync(userData, opts) {
     // THE BREATH IS PER TOP-LEVEL ITEM, NOT PER BUCKET. A bucket is four iterations; a single
     // multi-GB voicepack is the thing that actually holds the loop, and yielding between buckets
     // would leave the longest stretch exactly as blocking as it is now.
-    for (const d of dirs) {
+    for (let di = 0; di < dirs.length; di++) {
+      const d = dirs[di];
       await breathe();
+      // [BUG-023] A caller with a progress line gets a count per item, so a long survey is seen
+      // to move.
       // The RAW directory name rides along; the display name is resolved after the walk, only
       // for what actually failed. Resolving here would read a meta.json per top-level item on
       // every probed export to answer a question almost nobody asks.
-      totals[b] += _dirBytes(path.join(root, d.name), unreadable,
-        unreadable ? { bucket: b, top: d.name } : null);
+      const _ib = _dirBytes(path.join(root, d.name), unreadable,
+        unreadable ? { bucket: b, top: d.name } : null, links);
+      totals[b] += _ib;
+      itemBytes[`${b}/${d.name}`] = _ib;
+      // [BUG-023] Files so far, with no total: this is the first pass, so none is known yet.
+      if (opts && typeof opts.onItem === 'function') {
+        try { opts.onItem({ bucket: b, files: links.files }); } catch {}
+      }
     }
   }
   const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
@@ -502,6 +542,7 @@ async function surveyLibraryAsync(userData, opts) {
       // it buys, so it yields in batches. The loop still never runs long enough to drop a frame.
       if (++since >= 25) { since = 0; await breathe(); }
       counts.sharedTracks++;
+      links.files++;
       // Counted before the probe. The survey reports what is in the library; whether a file can
       // be read is a separate question, and the exclusion happens downstream once the user has
       // answered it.
@@ -523,7 +564,10 @@ async function surveyLibraryAsync(userData, opts) {
       if (u.top) u.item = _friendlyTop(userData, u.bucket, u.top);
     }
   }
-  return { counts, totals, totalBytes, unreadable: unreadable || [] };
+  // onDiskBytes: what the archive will hold, each linked file once. The fit check asks for this.
+  const onDiskBytes = Math.max(0, totalBytes - links.repeatBytes);
+  return { counts, totals, totalBytes, onDiskBytes, fileCount: links.files, itemBytes,
+           unreadable: unreadable || [] };
 }
 
 // DO NOT CALL THIS FROM THE MAIN PROCESS. USE `surveyLibraryAsync`. [B-478, 2026-10-11]
@@ -682,8 +726,15 @@ async function exportBackup({
   // marks here are what will name the rest; do not read this fix as closing the question.
   await stallProbe.around('sfBackup:ensureCandidateCaches',
     () => _ensureCandidateCaches(userData));
+  // [BUG-023] Every stage before the first byte reports a stage and a count. The screen showed
+  // only an elapsed clock for the first minutes of a large backup, and read as stuck.
+  onProgress({ verb: 'Reading', stage: 'reading' });
+  const _surveyOpts = {
+    onItem: ({ bucket, files }) => onProgress({ verb: 'Reading', stage: 'reading', bucket, files }),
+  };
   const survey = await stallProbe.around('sfBackup:surveyLibrary',
-    () => surveyLibraryAsync(userData));
+    () => surveyLibraryAsync(userData, _surveyOpts));
+  const _breathe = require('./soundFontFileHash').breathe;
 
   // Content-hash pre-pass. One sha256 per top-level item, written into
   // the manifest so the Replace-import survey can do a true byte-level
@@ -770,6 +821,12 @@ async function exportBackup({
       else _countedIds.add(id);
     } catch {}
   };
+  // [BUG-023] Each stage before the write is timed on its own, so the stall log says which one
+  // a slow start belongs to.
+  stallProbe.begin('sfBackup:checkFiles');
+  let _checkedFiles = 0;
+  const _checkFilesTotal = Math.max(0, (survey.fileCount || 0) - ((survey.counts && survey.counts.sharedTracks) || 0));
+  onProgress({ verb: 'Checking', stage: 'checking', files: 0, filesTotal: _checkFilesTotal });
   for (const bucket of ['sources', 'library', 'common', 'attachments']) {
     const root = path.join(_soundFontsRoot(userData), bucket);
     if (!fs.existsSync(root)) continue;
@@ -873,6 +930,17 @@ async function exportBackup({
       };
       walk(abs);
       filesPerTopItem.set(`${bucket}/${top.name}`, count);
+      // [BUG-023] Files checked, out of the survey's file count. Each file is one header read, so
+      // files are an even unit here. The breath between items keeps the app answering (Cancel
+      // included); this pass held the main process for minutes on a large library.
+      _checkedFiles += count;
+      onProgress({ verb: 'Checking', stage: 'checking', bucket,
+                   files: _checkedFiles, filesTotal: _checkFilesTotal });
+      await _breathe();
+      if (signal && signal.aborted) {
+        stallProbe.end('sfBackup:checkFiles');
+        const e = new Error('Cancelled'); e.cancelled = true; throw e;
+      }
       if (bucket === 'common') {
         try {
           const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
@@ -926,6 +994,7 @@ async function exportBackup({
       }
     }
   } catch {}
+  stallProbe.end('sfBackup:checkFiles');
 
   // HASH PHASE — per-bucket aggregate counters, "Preparing" verb so
   // the user doesn't see the implementation term. Each phase emits
@@ -1002,18 +1071,39 @@ async function exportBackup({
       }
       onProgress({
         verb: 'Preparing',
+        stage: 'preparing',
+        bucket,
         currentItem: `${bucket}/${friendlyItemName}`,
         topItemName: bucketLabel,
         topItemFilesProcessed: i + 1,
         topItemFilesTotal: items.length,
+        // [BUG-023] BYTES, NOT ITEMS. Items differ in size by a thousand times, so a count sits
+        // still on one large voicepack. An item already fingerprinted counts its bytes at once;
+        // that is true, the bytes are accounted for, they just did not need reading.
+        preparedBytes: _preparedBytes,
+        prepareTotalBytes: _prepareTotalBytes,
       });
       const h = hashForItem(bucket, item.name, item.abs);
       if (h) contentHashes[bucket][item.name] = h;
+      _preparedBytes += _itemBytesOf(bucket, item.name);
+      await _breathe();
     }
   };
-  await hashPhaseBucket('sources', 'Source Files');
-  await hashPhaseBucket('library', 'Font Files');
-  await hashPhaseBucket('common', 'Common Folder Files');
+  const _itemBytesOf = (bucket, name) =>
+    Number((survey.itemBytes && survey.itemBytes[`${bucket}/${name}`]) || 0);
+  let _preparedBytes = 0;
+  let _prepareTotalBytes = 0;
+  for (const b of ['sources', 'library', 'common']) {
+    for (const it of bucketTops[b]) _prepareTotalBytes += _itemBytesOf(b, it.name);
+  }
+  for (const [b, label] of [['sources', 'Source Files'], ['library', 'Font Files'],
+                            ['common', 'Common Folder Files']]) {
+    stallProbe.begin(`sfBackup:prepare:${b}`);
+    try { await hashPhaseBucket(b, label); }
+    finally { stallProbe.end(`sfBackup:prepare:${b}`); }
+  }
+  onProgress({ verb: 'Preparing', stage: 'preparing',
+               preparedBytes: _prepareTotalBytes, prepareTotalBytes: _prepareTotalBytes });
 
   // Build the manifest first so a corrupted partial zip still gets the
   // type marker even if it doesn't finish.
@@ -1663,6 +1753,7 @@ async function exportBackup({
         }
         e.name = placed.object;
         e.prefix = '';
+        if (_storeUncompressed(rel)) e.store = true;
         return e;
       };
     };
@@ -1677,7 +1768,7 @@ async function exportBackup({
         const onEntry = (e) => { if (e && e.name === placed.object) { archive.removeListener('entry', onEntry); resolve(); } };
         archive.on('entry', onEntry);
       });
-      archive.append(buf, { name: placed.object });
+      archive.append(buf, { name: placed.object, ...(_storeUncompressed(rel) ? { store: true } : {}) });
       await Promise.race([written, fatal]);
     };
     archive.append(_readmeText(appVersion, manifest.exportedAt), { name: README_NAME });

@@ -8978,6 +8978,19 @@ async function _sfRefuseNotEnoughRoom(fit, { blockedDelete = false, noun = 'expo
 }
 window._sfRefuseNotEnoughRoom = _sfRefuseNotEnoughRoom;
 
+// [BUG-022] THE ROOM A LIBRARY BACKUP NEEDS. The library's on-disk bytes (each linked file once,
+// B-498), plus the zip's own weight: sound is stored as it is (BUG-023), so the archive is a little
+// LARGER than the library, by a header per file and the manifest and path list. 256 bytes a file
+// covers the local and central headers with a long name and the zip64 fields; 16 MiB covers the
+// manifest and path list of a very large library. A survey from before onDiskBytes existed falls
+// back to the sum of every name, which is always more.
+function _sfBackupNeedBytes(survey) {
+  if (!survey) return 0;
+  if (survey.onDiskBytes == null) return Number(survey.totalBytes || 0);
+  return Number(survey.onDiskBytes) + Number(survey.fileCount || 0) * 256 + 16 * 1024 * 1024;
+}
+window._sfBackupNeedBytes = _sfBackupNeedBytes;
+
 // ── Refusing a destination the OS has already flagged ───────────────────────── [B-441]
 //
 // SAY THE OPINION, NEVER THE INSTRUCTION. Settled 2026-09-27. A plain verdict is
@@ -9674,7 +9687,8 @@ window._sfExportStoppedNotice = _sfExportStoppedNotice;
 async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes = 0,
                                          fileCount = 0, dirCount = 0,
                                          blockedDelete = false, slowWriteDecided = false,
-                                         worstCase = false } = {}) {
+                                         worstCase = false, noun = 'export' } = {}) {
+  // `noun`: what the refusal calls the write. A backup is not an export ([B-500]).
   // `worstCase`: the size is everything that MIGHT be written, before any of it is compared, so
   // the warning says "up to" (2026-11-13: it said 110.4 MB, the export then wrote 87.7 MB).
   // `info` is the raw preflight result - bytesFree, blockSize, transport, boardSerial. Doors
@@ -9824,7 +9838,7 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
       dropBar();
       // `blockedDelete` rides through so the refusal can add "Nothing was deleted." The rule:
       // the sentence goes on whatever surface is already speaking. [2026-09-23]
-      await _sfRefuseNotEnoughRoom(p.tooBig, { blockedDelete });
+      await _sfRefuseNotEnoughRoom(p.tooBig, { blockedDelete, noun });
       out.proceed = false;
       return out;
     }
@@ -50471,6 +50485,10 @@ require(['vs/editor/editor.main'], function () {
                 labelOverride = p.label;
               }
               if (typeof p.frac === 'number') fracOverride = p.frac;
+              // An explicit null hands the line and the bar back to the byte defaults, for a door
+              // whose early stages speak in its own words and whose write is measured in bytes.
+              if (p.label === null) labelOverride = null;
+              if (p.frac === null) fracOverride = null;
               // SET ON EVERY TICK, NOT LATCHED. A door leaves an unsized phase by simply
               // reporting a sized one, so this has to fall back to false the moment it does -
               // otherwise the first quiet phase would pin the bar indeterminate for the whole run.
@@ -50862,6 +50880,8 @@ require(['vs/editor/editor.main'], function () {
           // Same shape: declared, never inferred. Only the door knows whether it already put
           // the slow-write question to this user for this destination. [B-420, 2026-09-24]
           slowWriteDecided: door.slowWriteDecided === true || _slowAskedEarly,
+          // Declared by the door, like the two above. [BUG-022]
+          noun: door.noun || 'export',
         });
         // If we raised it and the preflight took it down for a dialog, it stays down — the
         // operation is over. `_sfRunWithByteProgress` owns hiding it on the path that continues.
@@ -58374,7 +58394,7 @@ require(['vs/editor/editor.main'], function () {
         const cancelBtn = document.getElementById('sf-backup-prep-cancel');
         if (!prepModal || !summaryEl || !startBtn || !cancelBtn) return;
         const progTrack = document.getElementById('sf-backup-prep-progress-track');
-        summaryEl.textContent = 'Surveying library and benchmarking destination…';
+        summaryEl.textContent = 'Measuring your library…';
         startBtn.disabled = true;
         if (progTrack) progTrack.style.display = '';
         prepModal.classList.add('active');
@@ -58449,12 +58469,10 @@ require(['vs/editor/editor.main'], function () {
         // started writing to a card that could not hold it. Nothing has been written at this
         // point, so refusing costs only the survey already paid for.
         //
-        // THE UNDEDUPED TOTAL IS THE RIGHT SIZE HERE, which is the opposite of what the new
-        // library readout reports. Hardlinks do not survive a zip, so every NAME becomes its own
-        // entry carrying its own bytes: measured on a real backup at 18,465 entries for 5,649
-        // distinct files. Sizing this from the on-disk figure would understate the archive by
-        // more than half. `totalBytes` is an upper bound, since zip still compresses a little,
-        // which errs toward refusing a borderline write rather than failing one an hour in.
+        // THE ON-DISK FIGURE IS THE RIGHT SIZE HERE. [BUG-022] The archive stores a linked file's
+        // bytes once (B-498), so a well-deduped library's backup can be a third of the sum of
+        // every name. Sizing from that sum refuses backups that fit. `onDiskBytes` is still an
+        // upper bound, since zip compresses a little. The fallback covers an older survey.
         //
         // The progress track stays up through the lookup: on a big job preflight walks the device
         // association, and a modal that has gone still is a modal that looks hung.
@@ -58463,7 +58481,7 @@ require(['vs/editor/editor.main'], function () {
         try {
           const r = await window.electronAPI.preflightExportDest({
             destDir: _bkDestDir,
-            totalBytes: survey.totalBytes,
+            totalBytes: _sfBackupNeedBytes(survey),
           });
           _bkFit = (r && r.ok && r.result) || null;
         } catch { /* a preflight that cannot run must not block a backup that would have fit */ }
@@ -58512,7 +58530,12 @@ require(['vs/editor/editor.main'], function () {
         // is the same arithmetic the manifest uses, so this figure and the one on the completion
         // screen come from one place.
         const _bkFigure = (_bkSkipPaths.length && prep && prep.adjusted) ? prep.adjusted : survey;
-        summaryEl.textContent = _sfLibrarySummary(_bkFigure.counts, _bkFigure.totalBytes);
+        // [NOTE-017] The on-disk figure beside the total, as the completion screen and the footer
+        // show it: a deduped library's backup is a third of its name total, and "50 GB" alone
+        // reads as not fitting on a 30 GB drive. Left off when files were dropped, because the
+        // survey's on-disk figure still counts them.
+        summaryEl.textContent = _sfLibrarySummary(_bkFigure.counts, _bkFigure.totalBytes,
+          { onDiskBytes: _bkFigure === survey ? survey.onDiskBytes : undefined });
         startBtn.disabled = false;
         await new Promise((resolve) => {
           // ── AUTO-START COUNTDOWN ─────────────────────────────── [B-420, 2026-09-24]
@@ -58656,6 +58679,7 @@ require(['vs/editor/editor.main'], function () {
 
         return await _sfRunExport({
           label: 'backup',
+          noun: 'backup',
           destDir,
           // Its summary carries the eject row, so suppress the toast action. [B-420]
           summaryHasEject: true,
@@ -58669,8 +58693,10 @@ require(['vs/editor/editor.main'], function () {
           // fileCount stays 0 because the survey counts SOURCES/FONTS/COMMONS, not files. The
           // byte limb is the one that trips for a library backup anyway. Left explicit so the
           // zero is not read as a measurement.
+          // [BUG-022] The bytes are what the archive writes, each linked file once (B-498).
           plan: async () => ({
-            items: [], totalBytes: (survey && survey.totalBytes) || 0, fileCount: 0,
+            items: [], fileCount: 0,
+            totalBytes: _sfBackupNeedBytes(survey),
           }),
 
           // The door's own channel. Absolute bytes, its own shape, neither of the two the
@@ -58678,12 +58704,41 @@ require(['vs/editor/editor.main'], function () {
           subscribe: (sink) => {
             const off = window.electronAPI.onSfBackupProgress((p) => {
               if (!p || p.opId !== opId) return;
+              // [BUG-023] EACH STAGE BEFORE THE WRITE SAYS WHAT IT IS AND HOW FAR, in the most
+              // granular unit that is honest for it. Reading is the first pass, so it has no
+              // total and says only how many files so far. Checking reads one header per file, so
+              // files. Preparing (the fingerprint pass) reads whole files, so bytes. Writing is the archive's
+              // bytes, and carries its verb too, so all four stages read the same way.
+              const _n = (v) => Number(v || 0).toLocaleString();
+              const _b = (v) => (window._sfFormatBytes ? window._sfFormatBytes(v || 0) : `${v || 0} B`);
+              if (p.stage === 'reading') {
+                sink({ label: `Measuring your library · ${_n(p.files)} files`, unsized: true, name: '' });
+                return;
+              }
+              if (p.stage === 'checking') {
+                const t = Number(p.filesTotal || 0);
+                sink({ label: t ? `Screening files · ${_n(p.files)} of ${_n(t)}` : 'Screening files',
+                       frac: t ? Math.min(1, Number(p.files || 0) / t) : 0, unsized: !t, name: '' });
+                return;
+              }
+              if (p.stage === 'preparing') {
+                const t = Number(p.prepareTotalBytes || 0);
+                sink({ label: t ? `Verifying fonts · ${_b(p.preparedBytes)} of ${_b(t)}` : 'Verifying fonts',
+                       frac: t ? Math.min(1, Number(p.preparedBytes || 0) / t) : 0, unsized: !t,
+                       name: p.currentItem || '' });
+                return;
+              }
+              const _wt = Number(p.totalBytes || 0);
               sink({
                 done: p.processedBytes,
                 total: p.totalBytes,
-                // The backend sends a verb per phase ("Preparing" during the hash pre-pass,
-                // "Backing up" once the archive starts); the item name is what moves.
-                name: p.currentItem || p.topItemName || '',
+                // The write: bytes of the archive. The bar is the runner's own; the line carries the
+                // verb the other stages have.
+                label: _wt ? `Writing · ${_b(p.processedBytes)} of ${_b(_wt)}` : null, frac: null,
+                // [NOTE-017] A dot-file is Studio's own bookkeeping (library/.seen-backfill-done),
+                // not something the user put in the library, so it is not named under the bar.
+                name: /(^|\/)\.[^/]*$/.test(String(p.currentItem || '')) ? ''
+                  : (p.currentItem || p.topItemName || ''),
               });
             });
             return off;
@@ -58852,9 +58907,9 @@ require(['vs/editor/editor.main'], function () {
               const missingFiles = skipped.length
                 + droppedItems.reduce((a, it) => a + (it.unreadable || 0), 0);
               await _sfCompletionNotice({
-                title: 'Export complete, with files left out',
+                title: 'Backup complete, with files left out',
                 messageHtml: `<div>${_sfEscape(message).replace(/\n/g, '<br>')}</div>`
-                  // RED, and the title is what keeps that honest: "Export complete, with files
+                  // RED, and the title is what keeps that honest: "Backup complete, with files
                   // left out" owns the operation's outcome, so this line owns the FILE's. A
                   // failed read is an error even when the run routed around it.
                   // THE HEADLINE COUNTS EVERYTHING MISSING, items included. Counting only the
@@ -58872,7 +58927,7 @@ require(['vs/editor/editor.main'], function () {
               });
               return;
             }
-            await _sfCompletionNotice({ title: 'Export complete', message, destDir,
+            await _sfCompletionNotice({ title: 'Backup complete', message, destDir,
                                         ejectAuto: _sfDeleteProgress.wantsEject() });
           },
         });

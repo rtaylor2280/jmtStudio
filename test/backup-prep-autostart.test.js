@@ -150,7 +150,7 @@ ok('the copy names no cancelling gesture that does not exist',
   // The breath must be per TOP-LEVEL ITEM. A single multi-GB voicepack is what actually holds
   // the loop; yielding once per bucket would leave the longest stretch exactly as blocking.
   ok('it yields per directory, not merely per bucket',
-     /for \(const d of dirs\) \{\s*\n\s*await breathe\(\);/.test(asyncBody),
+     /for \((?:const d of dirs|let di = 0; di < dirs\.length; di\+\+)\) \{\s*\n(?:\s*const d = dirs\[di\];\s*\n)?\s*await breathe\(\);/.test(asyncBody),
      'four yields across four buckets would not unblock a single large source');
 }
 
