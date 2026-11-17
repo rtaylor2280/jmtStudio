@@ -1262,7 +1262,9 @@ async function showBoardRecords(sn) {
   document.getElementById('br-sub').textContent = r.generation ? `Proffieboard ${r.generation}` : '';
   const fmt = (at) => new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const items = r.recordings;
-  let selected = items.find(c => c.isOriginal) || items[items.length - 1] || null;
+  // Opens on what the board is running now (the newest such entry), else the newest entry.
+  let selected = [...items].reverse().find(c => _sameStamp(c.stamp, _boardInstalled)) || items[items.length - 1] || null;
+  let _recsScroll = 1e9;   // opens on the newest rows (clamped to the end); after that, keeps where it was scrolled
 
   const render = () => {
     body.innerHTML = '';
@@ -1313,7 +1315,10 @@ async function showBoardRecords(sn) {
       if (d.firmwareBytes) line(s, `${Math.round(d.firmwareBytes / 1024)} KB firmware`);
     }
     if (items.length) {
-      const s = section('Recordings');
+      const sec = section('Recordings');
+      // The recordings scroll on their own; the list keeps its place when a row is clicked.
+      const s = document.createElement('div'); s.className = 'br-recs';
+      sec.appendChild(s);
       for (const it of items) {
         const what = it.kind === 'flash'
           ? `Flashed${it.configName ? ` ${it.configName}` : ''}`
@@ -1323,14 +1328,16 @@ async function showBoardRecords(sn) {
         const d = line(s, '');
         d.classList.add('br-rec');
         if (it === selected) d.classList.add('br-rec-sel');
+        if (it.isOriginal) d.classList.add('br-rec-pinned');   // stays at the top while the list scrolls
         const main = document.createElement('span'); main.className = 'br-rec-main';
         main.textContent = `${fmt(it.at)} · ${what}`;
         d.title = main.textContent + (it.version ? ` · ${_osLabel(it.version)}` : '');
         d.appendChild(main);
         const tags = [it.isOriginal ? 'original' : '', _sameStamp(it.stamp, _boardInstalled) ? 'on the board now' : ''].filter(Boolean);
         if (tags.length) { const t = document.createElement('span'); t.className = 'br-tag br-rec-tags'; t.textContent = tags.join(' · '); d.appendChild(t); }
-        d.onclick = () => { selected = it; render(); };
+        d.onclick = () => { _recsScroll = s.scrollTop; selected = it; render(); };
       }
+      s.scrollTop = _recsScroll;
     }
     flashBtn.style.display = selected && selected.canFlash ? '' : 'none';
     flashBtn.textContent = selected && selected.isOriginal ? 'Flash original firmware' : 'Flash this firmware';
@@ -1354,6 +1361,14 @@ async function showBoardRecords(sn) {
   flashBtn.onclick = () => { const it = selected; close(); flashRecordedFirmware(it); };
   document.addEventListener('keydown', onKey, true);
   overlay.classList.add('active');
+  // The list can only scroll once the window is showing: bring the selected entry into view.
+  requestAnimationFrame(() => {
+    const box = body.querySelector('.br-recs');
+    const sel = body.querySelector('.br-rec-sel');
+    if (!box || !sel) return;
+    box.scrollTop = Math.max(0, sel.offsetTop - box.offsetTop - box.clientHeight + sel.offsetHeight);
+    _recsScroll = box.scrollTop;
+  });
 }
 
 // The build modal's bar: a fraction fills it, null runs the indeterminate sweep.
@@ -2717,7 +2732,14 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       return;
     }
     if (isDfuMode) {
-      // Post-DFU flash: lastFlashedSN + setFlashedTimestamp set in watchForSerialAfterDfu once real port is known
+      // [BUG-019] The board's serial came from dfu-util before the flash, so the config records the
+      // flashed board now. The port is added by watchForSerialAfterDfu once the board is back.
+      if (_dfuFlashSN) {
+        lastFlashedSN = _dfuFlashSN;
+        if (_flashedBuildKey && !_flashedBuildKey.sn) _flashedBuildKey.sn = _dfuFlashSN;
+        if (window.setFlashedTimestamp) window.setFlashedTimestamp(null, _dfuFlashSN);
+        _refreshFlashProvenance();
+      }
       // Not done until the board is back [B-543]: watchForSerialAfterDfu sets the final title.
       setBuildTitle('Waiting for the board to restart', { busy: true, color: 'var(--c-text-bright)' });
       document.getElementById('bm-abort').style.display = 'none';
@@ -5181,8 +5203,13 @@ async function watchForSerialAfterDfu() {
     await new Promise(r => setTimeout(r, 500));
     const result = await window.electronAPI.getRecommendedPort();
     if (result.ok && result.proffieports && result.proffieports.length > 0) {
-      // Prefer the port that wasn't present before the DFU flash
-      const newPort = result.proffieports.find(p => !preDfuPaths.has(p.path))
+      // With the flashed board's serial known (dfu-util, before the flash), wait for that board; another
+      // board already connected is not it. Otherwise prefer the port that wasn't present before the flash.
+      const wanted = _dfuFlashSN
+        ? result.proffieports.find(p => String(p.serialNumber || '').toUpperCase() === _dfuFlashSN)
+        : null;
+      if (_dfuFlashSN && !wanted) continue;
+      const newPort = wanted || result.proffieports.find(p => !preDfuPaths.has(p.path))
                    || result.proffieports[0];
       _userChosePort      = true;
       _userChosenPortPath = newPort.path;

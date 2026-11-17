@@ -1332,19 +1332,25 @@
     position: relative;
   }
   #br-sub         { font-size: 0.82rem; color: var(--c-text-sub); margin-bottom: 16px; }
-  #br-body        { max-height: 60vh; overflow-y: auto; margin-bottom: 20px; }
+  #br-body        { margin-bottom: 20px; }   /* never scrolls: only the presets and recordings lists do */
   .br-section     { margin-bottom: 16px; }
   .br-label       { font-size: 0.72rem; color: var(--c-text-sub); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
   .br-line        { font-size: 0.84rem; color: var(--c-text); line-height: 1.6; }
   .br-presets     { max-height: 180px; overflow-y: auto; background: var(--c-bg-inset); border-radius: 4px; padding: 6px 10px;
                     font-family: monospace; font-size: 0.76rem; color: var(--c-text-soft); line-height: 1.6; white-space: pre; }
   .br-tag         { color: var(--c-text-sub); }
+  .br-recs        { max-height: calc(5 * (0.84rem * 1.6 + 2px)); overflow-y: auto; }   /* five rows (.br-line + .br-rec padding) */
   .br-rec         { cursor: pointer; padding: 1px 6px; border-radius: 3px; display: flex; gap: 12px; align-items: baseline; }
   .br-rec-main    { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .br-rec-tags    { flex: none; white-space: nowrap; }
   .br-rec:hover   { background: rgba(0,130,255,0.1); }
   .br-rec.br-rec-sel       { background: rgba(0,130,255,0.2); }
   .br-rec.br-rec-sel:hover { background: rgba(0,130,255,0.28); }
+  .br-rec.br-rec-pinned { position: sticky; top: 0; z-index: 1; background: var(--c-bg-card); box-shadow: 0 1px 0 var(--c-border); }
+  /* The pinned row stays opaque in every state, or the rows scrolling under it show through. */
+  .br-rec.br-rec-pinned:hover { background: linear-gradient(rgba(0,130,255,0.1), rgba(0,130,255,0.1)), var(--c-bg-card); }
+  .br-rec.br-rec-pinned.br-rec-sel { background: linear-gradient(rgba(0,130,255,0.2), rgba(0,130,255,0.2)), var(--c-bg-card); }
+  .br-rec.br-rec-pinned.br-rec-sel:hover { background: linear-gradient(rgba(0,130,255,0.28), rgba(0,130,255,0.28)), var(--c-bg-card); }
   #bm-ask-msg     { font-size: 0.88rem; color: var(--c-text-soft); line-height: 1.5; margin: 0 0 20px; white-space: pre-wrap; }
   #bm-title       { font-size: 1.1rem; font-weight: 700; color: var(--c-text-bright); margin-bottom: 18px; letter-spacing: 0.04em; }
   #bm-bar-track   { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin-bottom: 18px; position: relative; }
