@@ -277,6 +277,14 @@ app.whenReady().then(() => {
     });
     dataRail.loadKept();
     if (Store.get('settings.dataUpdatesEnabled') !== false) setTimeout(() => dataRail.check(), 10000);
+    // [B-687] Counts this version's first run on this computer by downloading one file. Installed
+    // builds only, and off when the user has turned online data updates off. Never awaited.
+    if (app.isPackaged && Store.get('settings.dataUpdatesEnabled') !== false) {
+      setTimeout(() => {
+        require('./installCount').countFirstRun({ userData: app.getPath('userData'), version: app.getVersion(), get })
+          .catch(() => {});
+      }, 15000);
+    }
   } catch {}
 
   // Clear sound-font sources that were staged by an import that never finished.
@@ -1142,8 +1150,35 @@ ipcMain.handle('toolchain:benchCompile', async (_, { configContent, fqbn, buildO
   return result;
 });
 
-ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN, sourceDir }) => {
-  const log = makeLogger();
+// A successful flash goes into the board's record [B-543]: the firmware just staged, the config text
+// and my_styles.h the build key was computed over, and the versions. Never fails the flash.
+function _recordFlash(serial, fqbn, record) {
+  try {
+    if (!record || !toolchain.isBoardSerial(String(serial || ''))) return;
+    const firmware = fs.readFileSync(path.join(toolchain.getFlashStagePath(), 'ProffieOS.bin'));
+    let stylesText = null;
+    try { stylesText = proffie.readStagedStyles() || null; } catch {}
+    let proffieOSVersion = null;
+    try { proffieOSVersion = proffie.getSelectedVersion() || null; } catch {}
+    return boardForensics.recordFlash(app.getPath('userData'), {
+      serial, firmware, fqbn, stylesText, proffieOSVersion,
+      coreVersion: toolchain.getActiveCoreVersion ? toolchain.getActiveCoreVersion() : null,
+      configText: typeof record.configText === 'string' ? record.configText : null,
+      configName: record.configName || null, configPath: record.configPath || null, usb: record.usb || null,
+      configHash: record.configHash || null, buildPkgHash: record.buildPkgHash || null, appVersion: app.getVersion(),
+    });
+  } catch (e) {
+    console.warn('[forensics] flash record not saved:', e && e.message);
+    return null;
+  }
+}
+
+ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN, sourceDir, record }) => {
+  const _log = makeLogger();
+  // The last lines of the flash's own log go into the board's event log [B-543].
+  const tail = [];
+  const log = (line, isError) => { tail.push((isError ? '! ' : '') + line); if (tail.length > 60) tail.shift(); return _log(line, isError); };
+  const t0 = Date.now();
   await _abortVersionProbe?.();  // never let a version probe hold the port a flash needs
 
   if (win && !win.isDestroyed()) {
@@ -1154,6 +1189,16 @@ ipcMain.handle('toolchain:flash', async (_, { port, fqbn, expectedSN, sourceDir 
   // whichever board is in the bootloader, which is how a flash aimed at one board landed
   // on another (2026-07-26).
   const result = await toolchain.flash(port, fqbn, log, expectedSN, sourceDir);
+  const entry = result.ok ? _recordFlash(result.flashedSN || expectedSN, fqbn, record) : null;
+  boardForensics.logEvent(app.getPath('userData'), result.flashedSN || expectedSN, 'flash', {
+    ok: !!result.ok, error: result.ok ? null : (result.error || null), port, fqbn, expectedSN: expectedSN || null,
+    flashedSN: result.flashedSN || null, fromCache: !!sourceDir, durationMs: Date.now() - t0,
+    configName: (record && record.configName) || null, configHash: (record && record.configHash) || null,
+    buildPkgHash: (record && record.buildPkgHash) || null, usb: (record && record.usb) || null,
+    flashId: entry ? entry.id : null, firmwareSha256: entry ? entry.firmwareSha256 : null,
+    needsDfuDriver: !!result.needsDfuDriver, wrongBoard: !!result.wrongBoard, retriable: !!result.retriable,
+    appVersion: app.getVersion(), log: tail,
+  });
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', {
@@ -7409,7 +7454,7 @@ ipcMain.handle('board:forgetSdShared', (_, { portPath } = {}) => {
   return { ok: true };
 });
 
-ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
+async function _serialOpenHandler(_, { port, baudRate }) {
   if (!port) return { ok: false, error: 'No port specified' };
   await _abortVersionProbe?.();  // the monitor owns the port; a probe must not block it
   _closeSerialMonitor();
@@ -7429,10 +7474,15 @@ ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
       const text = chunk.toString('utf8');
       _sdTail = (_sdTail + text).slice(-64);   // a reply can arrive split across chunks
       const m = _sdTail.match(/SD Access (ON|OFF)(?![\s\S]*SD Access (?:ON|OFF))/);
-      if (m) { _sdSharedInApp.set(String(port).toUpperCase(), m[1] === 'ON'); _sdTail = ''; }
+      if (m) {
+        const key = String(port).toUpperCase(), on = m[1] === 'ON';
+        if (_sdSharedInApp.get(key) !== on) _logByPort(port, 'sd-access', { port, on });
+        _sdSharedInApp.set(key, on); _sdTail = '';
+      }
       _broadcastSerial('serial:data', { text });
     });
     sp.on('close', () => {
+      _logByPort(port, 'serial-close', { port, reason: 'closed' });
       // Could be intentional (we asked) or external (board unplugged). Either
       // way, clear the ref and notify renderer so its UI updates.
       _serialMonitorPort = null;
@@ -7446,6 +7496,11 @@ ipcMain.handle('serial:open', async (_, { port, baudRate }) => {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+ipcMain.handle('serial:open', async (...a) => {
+  const r = await _serialOpenHandler(...a);
+  _logByPort(a[1] && a[1].port, 'serial-open', { port: a[1] && a[1].port, baudRate: r && r.baudRate, ok: !!(r && r.ok), error: (r && r.error) || null });
+  return r;
 });
 
 ipcMain.handle('serial:close', async () => {
@@ -7859,6 +7914,131 @@ ipcMain.handle('serial:probeVersion', async (_, { port } = {}) => {
       finish({ ok: false, reason: 'write-failed', error: e.message });
     }
   });
+});
+
+// ── IPC: Board Forensics [B-543] ───────────────────────
+// Read a board, copy its firmware, keep it per board serial, and flash the original back.
+const boardForensics = require('./boardForensics');
+let _forensicsBusy = false;
+const _forensicsSend = (payload) => {
+  if (win && !win.isDestroyed()) win.webContents.send('forensics:progress', payload);
+};
+const _forensicsHooks = () => ({
+  onStage: (s) => _forensicsSend({ type: 'stage', ...s }),
+  log: (line, isError) => _forensicsSend({ type: 'log', line: String(line), isError: !!isError }),
+});
+
+ipcMain.handle('forensics:summary', (_, { serial } = {}) => {
+  if (!toolchain.isBoardSerial(String(serial || ''))) return { known: false, serial: serial || null, hasOriginal: false, offerDeclined: false, captures: [] };
+  return boardForensics.boardSummary(app.getPath('userData'), serial);
+});
+
+ipcMain.handle('forensics:setOfferDeclined', (_, { serial, declined = true } = {}) => {
+  if (!toolchain.isBoardSerial(String(serial || ''))) return { ok: false };
+  return { ok: true, ...boardForensics.setOfferDeclined(app.getPath('userData'), serial, declined) };
+});
+
+ipcMain.handle('forensics:capture', async (_, { port, serial, inBootloader = false } = {}) => {
+  if (_forensicsBusy) return { ok: false, error: 'Board Forensics is already running.' };
+  if (!port && !inBootloader) return { ok: false, error: 'No board port selected.' };
+  if (_serialMonitorPort && _serialMonitorPort.isOpen) return { ok: false, error: 'Close the Serial Monitor first. It is holding the board\'s port.' };
+  _forensicsBusy = true;
+  try {
+    await _abortVersionProbe?.();
+    let usb = null;
+    try {
+      const { SerialPort } = require('serialport');
+      const p = (await SerialPort.list()).find(x => x.path === port);
+      if (p) usb = { vendorId: p.vendorId || null, productId: p.productId || null, manufacturer: p.manufacturer || null,
+                     pnpId: p.pnpId || null, locationId: p.locationId || null, reportedSerial: p.serialNumber || null };
+    } catch {}
+    const r = await boardForensics.capture({ userData: app.getPath('userData'), port, serial, usb, inBootloader: !!inBootloader,
+                                             appVersion: app.getVersion(), ..._forensicsHooks() });
+    boardForensics.logEvent(app.getPath('userData'), serial, 'forensics', { ok: !!r.ok, error: r.error || null,
+      captureId: r.captureId || null, isOriginal: !!r.isOriginal, port, appVersion: app.getVersion() });
+    return r;
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    _forensicsBusy = false;
+  }
+});
+
+ipcMain.handle('forensics:restore', async (_, { port, serial, captureId, flashId } = {}) => {
+  if (_forensicsBusy) return { ok: false, error: 'Board Forensics is already running.' };
+  if (_serialMonitorPort && _serialMonitorPort.isOpen) return { ok: false, error: 'Close the Serial Monitor first. It is holding the board\'s port.' };
+  _forensicsBusy = true;
+  try {
+    await _abortVersionProbe?.();
+    const t0 = Date.now();
+    const r = await boardForensics.restore({ userData: app.getPath('userData'), port, serial, captureId, flashId, ..._forensicsHooks() });
+    boardForensics.logEvent(app.getPath('userData'), serial, 'restore', { ok: !!r.ok, error: r.error || null,
+      captureId: captureId || r.captureId || null, flashId: flashId || null, flashMatches: r.flashMatches ?? null,
+      versionMatches: r.versionMatches ?? null, version: r.version || null, port, durationMs: Date.now() - t0,
+      appVersion: app.getVersion() });
+    return r;
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    _forensicsBusy = false;
+  }
+});
+
+// Logs an event for the board on a port [B-543]. The port's serial comes from the serial-port list, or
+// arduino-cli's list when the OS reports an instance path in its place (a board with mass storage).
+function _logByPort(port, type, data = {}) {
+  (async () => {
+    try {
+      if (!port) return;
+      const want = String(port).toUpperCase();
+      let sn = null;
+      try {
+        const { SerialPort } = require('serialport');
+        const hit = (await SerialPort.list()).find(x => String(x.path).toUpperCase() === want);
+        if (hit && toolchain.isBoardSerial(String(hit.serialNumber || ''))) sn = hit.serialNumber;
+      } catch {}
+      if (!sn) {
+        const lp = await portDetect.listPorts();
+        const hit = ((lp && lp.ports) || []).find(x => String(x.path).toUpperCase() === want);
+        if (hit && toolchain.isBoardSerial(String(hit.serialNumber || ''))) sn = hit.serialNumber;
+      }
+      if (sn) boardForensics.logEvent(app.getPath('userData'), sn, type, { ...data, appVersion: app.getVersion() });
+    } catch {}
+  })();
+}
+
+// Events only the window knows about (the board being seen, a WebUSB check) [B-543].
+ipcMain.handle('forensics:log', (_, { serial, type, data } = {}) => {
+  if (!/^[a-z][a-z-]{1,30}$/.test(String(type || ''))) return;
+  boardForensics.logEvent(app.getPath('userData'), serial, type, { ...(data || {}), appVersion: app.getVersion() });
+});
+
+// The build stamp of the firmware ready to flash: a cache entry's folder, or build-output.
+ipcMain.handle('forensics:buildStamp', (_, { sourceDir } = {}) =>
+  boardForensics.buildStamp(sourceDir || cacheManager.getBuildOutputPath()));
+
+// A bootloader-mode flash whose board was only identified once it came back [B-543]: the staged
+// firmware is still the one flashed.
+ipcMain.handle('forensics:recordLastFlash', (_, { serial, record } = {}) => {
+  if (!toolchain.isBoardSerial(String(serial || ''))) return null;
+  const entry = _recordFlash(serial, null, record);
+  boardForensics.logEvent(app.getPath('userData'), serial, 'flash-filed', { mode: 'bootloader', flashId: entry ? entry.id : null,
+    note: 'Serial learned after the flash, when the board came back.', appVersion: app.getVersion() });
+  return entry ? entry.id : null;
+});
+
+ipcMain.handle('forensics:dfuStamp', async (_, { serial } = {}) => {
+  if (!toolchain.isBoardSerial(String(serial || ''))) return null;
+  try { return await boardForensics.dfuFirmwareStamp(serial); } catch { return null; }
+});
+
+ipcMain.handle('forensics:dfuSerials', async () => {
+  try { return await boardForensics.dfuSerials(); } catch { return []; }
+});
+
+ipcMain.handle('forensics:records', (_, { serial } = {}) => {
+  if (!toolchain.isBoardSerial(String(serial || ''))) return null;
+  return boardForensics.boardRecords(app.getPath('userData'), serial);
 });
 
 // ── IPC: Favorites ─────────────────────────────────────
@@ -9118,11 +9298,22 @@ ipcMain.handle('dfu:ensureDriver', async () => {
 });
 
 // [B-660] WebUSB on Windows: check (no admin) and fix (one UAC prompt).
-ipcMain.handle('webusb:check', async (_e, serial) => toolchain.checkWebUsbWindows(serial));
-ipcMain.handle('webusb:fix',   async (_e, serial) => toolchain.fixWebUsbWindows(serial));
+ipcMain.handle('webusb:check', async (_e, serial) => {
+  const r = await toolchain.checkWebUsbWindows(serial);
+  boardForensics.logEvent(app.getPath('userData'), serial, 'webusb-check', { result: r, appVersion: app.getVersion() });
+  return r;
+});
+ipcMain.handle('webusb:fix',   async (_e, serial) => {
+  const r = await toolchain.fixWebUsbWindows(serial);
+  boardForensics.logEvent(app.getPath('userData'), serial, 'webusb-fix', { result: r, appVersion: app.getVersion() });
+  return r;
+});
 
-ipcMain.handle('dfu:flash', async (_e, { sourceDir } = {}) => {
-  const log = makeLogger();
+ipcMain.handle('dfu:flash', async (_e, { sourceDir, serial = null, record = null } = {}) => {
+  const _log = makeLogger();
+  const tail = [];
+  const log = (line, isError) => { tail.push((isError ? '! ' : '') + line); if (tail.length > 60) tail.shift(); return _log(line, isError); };
+  const t0 = Date.now();
   await _abortVersionProbe?.();  // never let a version probe hold the port a flash needs
 
   if (win && !win.isDestroyed()) {
@@ -9132,7 +9323,16 @@ ipcMain.handle('dfu:flash', async (_e, { sourceDir } = {}) => {
   // [B-661] WHERE THE BUILD IS, same as toolchain:flash (B-216). Without it a bootloader flash
   // read the fresh-compile folder: 'No .elf file found' after a cache restore, or worse, an
   // older build that happened to be sitting there, flashed and reported as success.
-  const result = await toolchain.flashDFU(log, sourceDir);
+  const result = await toolchain.flashDFU(log, sourceDir, serial);
+  // [B-543] Recorded and logged under the serial dfu-util reported before the flash.
+  const entry = result.ok && serial ? _recordFlash(serial, null, record) : null;
+  if (serial) boardForensics.logEvent(app.getPath('userData'), serial, 'flash', {
+    mode: 'bootloader', ok: !!result.ok, error: result.ok ? null : (result.error || null), fromCache: !!sourceDir,
+    durationMs: Date.now() - t0, configName: (record && record.configName) || null,
+    configHash: (record && record.configHash) || null, buildPkgHash: (record && record.buildPkgHash) || null,
+    usb: (record && record.usb) || null, flashId: entry ? entry.id : null,
+    firmwareSha256: entry ? entry.firmwareSha256 : null, appVersion: app.getVersion(), log: tail,
+  });
 
   if (win && !win.isDestroyed()) {
     win.webContents.send('build:status', {

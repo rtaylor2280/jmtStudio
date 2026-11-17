@@ -674,6 +674,8 @@
     transition: transform 0.3s;
   }
   #bp-btn-refresh-ports:hover { color: var(--c-text); }
+  /* Board forensics takes Compile and Flash's place with no config open (the Flash right-click covers the rest). */
+  body:not(.no-config) #bp-btn-forensics, body:not(.no-config) #bp-forensics-divider { display: none !important; }
   @keyframes spin { 
     0%, 100% { opacity: 1; } 
     50% { opacity: 0.3; } 
@@ -1327,7 +1329,23 @@
     border-radius: 8px; padding: 28px 32px;
     width: 640px; max-width: 92vw;
     box-shadow: 0 0 40px rgba(2,81,146,0.3);
+    position: relative;
   }
+  #br-sub         { font-size: 0.82rem; color: var(--c-text-sub); margin-bottom: 16px; }
+  #br-body        { max-height: 60vh; overflow-y: auto; margin-bottom: 20px; }
+  .br-section     { margin-bottom: 16px; }
+  .br-label       { font-size: 0.72rem; color: var(--c-text-sub); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .br-line        { font-size: 0.84rem; color: var(--c-text); line-height: 1.6; }
+  .br-presets     { max-height: 180px; overflow-y: auto; background: var(--c-bg-inset); border-radius: 4px; padding: 6px 10px;
+                    font-family: monospace; font-size: 0.76rem; color: var(--c-text-soft); line-height: 1.6; white-space: pre; }
+  .br-tag         { color: var(--c-text-sub); }
+  .br-rec         { cursor: pointer; padding: 1px 6px; border-radius: 3px; display: flex; gap: 12px; align-items: baseline; }
+  .br-rec-main    { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .br-rec-tags    { flex: none; white-space: nowrap; }
+  .br-rec:hover   { background: rgba(0,130,255,0.1); }
+  .br-rec.br-rec-sel       { background: rgba(0,130,255,0.2); }
+  .br-rec.br-rec-sel:hover { background: rgba(0,130,255,0.28); }
+  #bm-ask-msg     { font-size: 0.88rem; color: var(--c-text-soft); line-height: 1.5; margin: 0 0 20px; white-space: pre-wrap; }
   #bm-title       { font-size: 1.1rem; font-weight: 700; color: var(--c-text-bright); margin-bottom: 18px; letter-spacing: 0.04em; }
   #bm-bar-track   { height: 6px; background: var(--c-bg-inset); border-radius: 3px; overflow: hidden; margin-bottom: 18px; position: relative; }
   /* Status box sits in a flex row with bm-hint (flex:1) and the action buttons.
@@ -5919,6 +5937,8 @@
 <div id="build-toolbar">
   <button class="build-btn-compile js-config-only" id="bp-btn-compile" disabled>⚙ Compile</button>
   <button class="build-btn-flash js-config-only"   id="bp-btn-flash"   disabled>⚡ Flash</button>
+  <button class="build-btn-compile" id="bp-btn-forensics" style="display:none"></button>
+  <div class="build-divider" id="bp-forensics-divider" style="display:none"></div>
 
   <div class="build-divider js-config-only"></div>
 
@@ -6161,6 +6181,20 @@
 </div>
 
 <!-- ── Reusable confirm modal (replaces native window.confirm for in-app confirmations) ── -->
+<!-- Board records [B-543]: what board forensics recorded for one board. -->
+<div class="modal-overlay" id="modal-board-records">
+  <div class="modal" style="max-width:600px;">
+    <button class="modal-btn-close" id="br-x" title="Close">&#10005;</button>
+    <h2 id="br-title"></h2>
+    <div id="br-sub"></div>
+    <div id="br-body"></div>
+    <div class="modal-btns">
+      <button class="modal-btn-primary" id="br-flash-original">Flash original firmware</button>
+      <button class="modal-btn-save" id="br-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-confirm">
   <div class="modal" style="position:relative">
     <!-- Shown only when a caller passes closeX: a ✕ that cancels the whole action, for a dialog whose
@@ -8119,6 +8153,13 @@
         <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
       </div>
     </div>
+    <div class="settings-item"
+         title="Whether board forensics runs before the first flash of a board that has not been recorded yet.">
+      <span class="settings-item-label">Record a new board, or unrecorded firmware, before flashing</span>
+      <div class="theme-selector" id="setting-board-forensics">
+        <button class="choice-btn" data-choice="ask">Ask</button><button class="choice-btn" data-choice="always">Always</button><button class="choice-btn" data-choice="never">Never</button>
+      </div>
+    </div>
     </div>
 
     <div class="about-section-heading">About</div>
@@ -8444,6 +8485,9 @@ function promptConfirm(opts) {
       checkbox2   = null,
       dropdown    = null,
       closeX      = false,
+      // Which buttons are remembered (Always / Never on a remembered choice). A dialog with a Never
+      // (leadText) is one, so its Never and its confirm (Always) get the tooltip by default.
+      rememberedButtons = leadText ? ['lead', 'confirm'] : [],
     } = opts || {};
     // CLEAR ANY STALE EJECT ROW BEFORE THIS DIALOG RENDERS. [B-424, 2026-10-05]
     // `_sfPlaceEjectRowInButtons()` defaults to `#modal-confirm .modal-btns`, so an import
@@ -8601,6 +8645,9 @@ function promptConfirm(opts) {
     }
     const okBtn = document.getElementById('modal-confirm-ok');
     okBtn.textContent = confirmText;
+    // Remembered-choice buttons say where the choice can be changed later.
+    const _rememberTip = (name) => rememberedButtons.includes(name) ? window.REMEMBERED_CHOICE_TIP : '';
+    okBtn.title = _rememberTip('confirm');
     // THE BUTTON SAYS WHAT IT WILL DO. When a checkbox CHANGES THE OPERATION
     // rather than just a setting, the confirm label follows it: ticking "Export
     // source first" on the delete dialog means the button now exports AND deletes,
@@ -8638,6 +8685,7 @@ function promptConfirm(opts) {
     cancelBtn.style.display = hideCancel ? 'none' : '';
     const middleBtn = document.getElementById('modal-confirm-middle');
     if (middleBtn) {
+      middleBtn.title = _rememberTip('middle');
       if (middleText) {
         middleBtn.textContent = middleText;
         middleBtn.style.display = '';
@@ -8650,6 +8698,7 @@ function promptConfirm(opts) {
     // so the row reads Never, the one-time answers, then Always.
     const leadBtn = document.getElementById('modal-confirm-lead');
     if (leadBtn) {
+      leadBtn.title = _rememberTip('lead');
       if (leadText) {
         leadBtn.textContent = leadText;
         leadBtn.style.display = '';
@@ -8731,6 +8780,8 @@ async function _jmtRememberedChoice(key, legacyFalse = 'ask') {
   return 'ask';
 }
 window._jmtRememberedChoice = _jmtRememberedChoice;
+// The tooltip on every button that sets a remembered choice.
+window.REMEMBERED_CHOICE_TIP = 'Remembered. You can change this in Settings, under Remembered choices.';
 // The file viewers show an image at its own shape: the window hugs it, a large one is scaled down to fit
 // the screen, a small one is scaled up until its longer side is about 480px. Text and PDFs keep the
 // fixed-size window, so `modalEl` loses the class whenever something else is shown. [B-511]
@@ -35846,6 +35897,7 @@ require(['vs/editor/editor.main'], function () {
         ['setting-font-style-use', 'fontStyleAlwaysUse', 'ask'],
         ['setting-jmt-plugin', 'jmtPluginChoice', 'ask'],
         ['setting-jmt-switch', 'jmtSwitchChoice', 'ask'],
+        ['setting-board-forensics', 'boardForensicsChoice', 'ask'],
       ];
       const _showRemembered = (el, v) => {
         el.querySelectorAll('.choice-btn').forEach((b) => b.classList.toggle('active', b.dataset.choice === v));
@@ -52040,6 +52092,8 @@ require(['vs/editor/editor.main'], function () {
         try { r = window._bpRestartBoardViaMonitor ? await window._bpRestartBoardViaMonitor(port) : null; } catch { r = null; }
         if (!r) { try { r = await window.electronAPI.restartBoardAfterEject((d && d.boardSerial) || '', port); } catch {} }
         const st = r && r.status;
+        // Into the board's event log [B-543]: its card was ejected and the board restarted (or not).
+        if (d && d.boardSerial) window.electronAPI.forensicsLog?.(d.boardSerial, 'card-eject-restart', { port, status: st || null })?.catch?.(() => {});
         // The short line, as before B-646: no Serial Monitor instructions. [B-653]
         if (st === 'not-restarted') return SF_BOARD_POWER_CYCLE;
         if (st === 'restarted' && r.ready) return 'Board restarted and ready to use.';
@@ -53354,11 +53408,25 @@ require(['vs/editor/editor.main'], function () {
           el.style.display = '';
           el.textContent = `${window._sfFormatDuration ? window._sfFormatDuration(sec) : `${Math.round(sec)}s`} elapsed`;
         }, 1000);
+        // The bar moves WITHIN a font, not only between fonts: one font read back through a
+        // board's USB is most of a minute, and a per-font count sat still for all of it. [BUG-021]
+        // Same channel and shape as "Recording what you kept"; subscribed for the font loop only.
+        let _scanSub = 0, _scanFont = '';
+        const _scanOff = window.electronAPI.onSoundFontByteProgress((p) => {
+          if (!p || !_scanFont) return;
+          if (typeof p.done === 'number' && typeof p.total === 'number' && p.total > 0) {
+            _scanSub = Math.min(0.999, Math.max(0, p.done / p.total));
+          }
+          _scanTick(p.name ? `${_scanFont} · ${p.name}` : _scanFont, _scanSub);
+        });
+        try {
         for (const name of names) {
           if (_scanCanceled) break;
+          _scanFont = name;
+          _scanSub = 0;
           _scanTick(name);
           try {
-            const m = await window.electronAPI.entryMatchesAt({ name, destDir });
+            const m = await window.electronAPI.entryMatchesAt({ name, destDir, reportProgress: true });
             // A card that could not be read is not an empty one. [B-638]
             if (m && m.destUnreadable) { _scanDestUnreadable = true; break; }
             if (m && m.ok && m.exists) {
@@ -53379,7 +53447,12 @@ require(['vs/editor/editor.main'], function () {
             if (m && m.exists === true) _scanExisted.add(name);
           } catch {}
           _scanDone++;
+          _scanSub = 0;
           _scanTick(name);
+        }
+        } finally {
+          _scanFont = '';
+          try { _scanOff && _scanOff(); } catch {}
         }
         // The literal label "common" can collide with a font folder named
         // "common" in extreme edge cases; pre-scan order is fonts first then
@@ -71215,6 +71288,13 @@ function _getFreshFieldRange(fieldName) {
 
     <!-- Log output -->
     <div id="bm-log"></div>
+
+    <!-- A question asked inside this modal (board forensics before a flash). [B-543] -->
+    <button class="modal-btn-close" id="bm-x" title="Cancel" style="display:none">&#10005;</button>
+    <div id="bm-ask" style="display:none;">
+      <p id="bm-ask-msg"></p>
+      <div class="modal-btns" id="bm-ask-btns"></div>
+    </div>
 
     <!-- Multi-board port selector (shown when multiple Proffieboards detected) -->
     <div id="bm-board-select-wrap" style="display:none;">

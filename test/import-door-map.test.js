@@ -116,6 +116,9 @@ const NOT_INWARD = [
   // Touches no file at all. Caught on its first run by this sweep, which is the
   // register doing its job. [B-473]
   'proffieOS:addonsVersionFor',
+  // `forensics:restore` [B-543] flashes a board's saved original firmware back onto THAT BOARD.
+  // Nothing enters the library; "restore" in the name is the board's state, not library content.
+  'forensics:restore',
   // `entries:addImportAliases` [B-641] writes, but brings nothing in: it adds a NAME to the
   // formerNames list in an existing font's meta.json, the same kind of write as a rename
   // (entries:update / entries:renameMany, which this sweep has never flagged). No file, no new

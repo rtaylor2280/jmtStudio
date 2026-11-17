@@ -1980,6 +1980,31 @@ function waitForDfuAccessible(onLog, deadlineMs = 25000) {
   });
 }
 
+// Appends the 16-byte DFU suffix (Proffieboard VID:PID, DFU 1.0, CRC32) to a raw image.
+function withDfuSuffix(bin) {
+  const suffix = Buffer.alloc(16);
+  suffix.writeUInt16LE(0xffff, 0);  // bcdDevice
+  suffix.writeUInt16LE(0x6668, 2);  // idProduct
+  suffix.writeUInt16LE(0x1209, 4);  // idVendor
+  suffix.writeUInt16LE(0x0100, 6);  // bcdDFU (DFU 1.0)
+  suffix[8]  = 0x55;                // 'U'
+  suffix[9]  = 0x46;                // 'F'
+  suffix[10] = 0x44;                // 'D'
+  suffix[11] = 16;                  // bLength
+  // CRC32 over binary + first 12 suffix bytes (everything except dwCRC)
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bin.length; i++) {
+    crc ^= bin[i];
+    for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+  }
+  for (let i = 0; i < 12; i++) {
+    crc ^= suffix[i];
+    for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+  }
+  suffix.writeUInt32LE(crc >>> 0, 12);
+  return Buffer.concat([bin, suffix]);
+}
+
 // ── Prepare firmware (shared by flash and flashDFU) ───
 // Converts .elf → .bin → .dfu and returns { ok, dfuPath, toolsDir }
 async function prepareFirmware(onLog, sourceDir) {
@@ -2081,28 +2106,7 @@ async function prepareFirmware(onLog, sourceDir) {
   // Add DFU suffix (pure Node.js — no dfu-suffix binary needed)
   onLog('Adding DFU suffix...', false);
   try {
-    const bin = fs.readFileSync(binPath);
-    const suffix = Buffer.alloc(16);
-    suffix.writeUInt16LE(0xffff, 0);  // bcdDevice
-    suffix.writeUInt16LE(0x6668, 2);  // idProduct
-    suffix.writeUInt16LE(0x1209, 4);  // idVendor
-    suffix.writeUInt16LE(0x0100, 6);  // bcdDFU (DFU 1.0)
-    suffix[8]  = 0x55;                // 'U'
-    suffix[9]  = 0x46;                // 'F'
-    suffix[10] = 0x44;                // 'D'
-    suffix[11] = 16;                  // bLength
-    // CRC32 over binary + first 12 suffix bytes (everything except dwCRC)
-    let crc = 0xFFFFFFFF;
-    for (let i = 0; i < bin.length; i++) {
-      crc ^= bin[i];
-      for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
-    }
-    for (let i = 0; i < 12; i++) {
-      crc ^= suffix[i];
-      for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
-    }
-    suffix.writeUInt32LE(crc >>> 0, 12);
-    fs.writeFileSync(dfuPath, Buffer.concat([bin, suffix]));
+    fs.writeFileSync(dfuPath, withDfuSuffix(fs.readFileSync(binPath)));
   } catch (e) {
     onLog(`DFU suffix failed: ${e.message}`, true);
     return { ok: false, error: e.message };
@@ -2154,6 +2158,39 @@ function _classifyDfuStderrLine(line, downloadDone) {
 }
 
 // ── Run dfu-util flash (shared by flash and flashDFU) ─
+// dfu-util uses bare \r as cursor-to-column-0 throughout output, on both
+// stdout and stderr depending on the build. Apply terminal emulator semantics
+// to both streams so chunk boundaries never produce partial log lines.
+function makeTermEmu(onFlush) {
+  let line = '', pos = 0;
+  return {
+    write(str) {
+      for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+        if (ch === '\n') {
+          onFlush(line);
+          line = '';
+          pos = 0;
+        } else if (ch === '\r') {
+          if (line.trim()) onFlush(line);
+          line = '';
+          pos = 0;
+        } else {
+          if (pos < line.length) {
+            line = line.slice(0, pos) + ch + line.slice(pos + 1);
+          } else {
+            line += ch;
+          }
+          pos++;
+        }
+      }
+    },
+    flush() {
+      if (line.trim()) { onFlush(line); line = ''; pos = 0; }
+    }
+  };
+}
+
 async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
   onLog(expectedSN ? `Flashing firmware to board ${expectedSN}...` : 'Flashing firmware...', false);
   ensureExecutable(getDfuUtilPath());
@@ -2176,38 +2213,7 @@ async function runDfuFlash(dfuPath, toolsDir, onLog, expectedSN) {
 
     let stdout = '', stderr = '';
 
-    // dfu-util uses bare \r as cursor-to-column-0 throughout output, on both
-    // stdout and stderr depending on the build. Apply terminal emulator semantics
-    // to both streams so chunk boundaries never produce partial log lines.
-    function makeTermEmu(onFlush) {
-      let line = '', pos = 0;
-      return {
-        write(str) {
-          for (let i = 0; i < str.length; i++) {
-            const ch = str[i];
-            if (ch === '\n') {
-              onFlush(line);
-              line = '';
-              pos = 0;
-            } else if (ch === '\r') {
-              if (line.trim()) onFlush(line);
-              line = '';
-              pos = 0;
-            } else {
-              if (pos < line.length) {
-                line = line.slice(0, pos) + ch + line.slice(pos + 1);
-              } else {
-                line += ch;
-              }
-              pos++;
-            }
-          }
-        },
-        flush() {
-          if (line.trim()) { onFlush(line); line = ''; pos = 0; }
-        }
-      };
-    }
+    // makeTermEmu (module scope) gives both streams dfu-util's bare-\r terminal semantics.
 
     // Which stream carries "Download done." varies by dfu-util build, so both streams feed the
     // flag that tells the classifier a leave is now expected.
@@ -2271,7 +2277,7 @@ function detectDFU() {
 
   ensureExecutable(getDfuUtilPath());
   return new Promise(resolve => {
-    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, (err, stdout, stderr) => {
+    execFile(dfuUtil, ['-l'], { timeout: 5000, cwd: toolsDir, env: getDfuEnv(toolsDir) }, async (err, stdout, stderr) => {
       const output = (stdout || '') + (stderr || '');
       const lines  = output.split(/\r?\n/);
 
@@ -2292,9 +2298,14 @@ function detectDFU() {
       );
       if (accessible) return resolve({ found: true, accessible: true });
 
-      // Proffieboard mentioned but not accessible (wrong driver on Windows)
+      // Proffieboard mentioned but not accessible. On Windows that is a driver other than WinUSB, or, with
+      // WinUSB already bound, another program holding the bootloader (busy) [B-688].
       const mentioned = output.includes('0483:df11') || output.includes('1209:6668');
-      if (mentioned) return resolve({ found: true, accessible: false });
+      if (mentioned) {
+        let svc = null;
+        if (process.platform === 'win32') { try { svc = await _getDfuBoundService(); } catch {} }
+        return resolve({ found: true, accessible: false, busy: !!svc && /winusb/i.test(svc), boundService: svc || null });
+      }
 
       resolve({ found: false });
     });
@@ -2492,7 +2503,7 @@ async function flash(port, fqbn, onLog, expectedSN, sourceDir) {
       const target = _resolveTarget(already.serials);
       if (target.error) return target.error;
       onLog('Board is already in bootloader mode - flashing directly.', false);
-      return await runDfuFlash(dfuPath, toolsDir, onLog, target.sn);
+      return { ...(await runDfuFlash(dfuPath, toolsDir, onLog, target.sn)), flashedSN: target.sn || null };
     }
     let msg;
     if (resetResult.cause === 'port-locked') {
@@ -2523,7 +2534,7 @@ async function flash(port, fqbn, onLog, expectedSN, sourceDir) {
   if (acc.openable) {
     const target = _resolveTarget(acc.serials);
     if (target.error) return target.error;
-    return await runDfuFlash(dfuPath, toolsDir, onLog, target.sn);
+    return { ...(await runDfuFlash(dfuPath, toolsDir, onLog, target.sn)), flashedSN: target.sn || null };
   }
 
   if (acc.wrongDriver) {
@@ -2566,13 +2577,15 @@ async function flash(port, fqbn, onLog, expectedSN, sourceDir) {
  * onLog(line, isError) streams output back to renderer.
  * Returns { ok, error? }
  */
-async function flashDFU(onLog, sourceDir) {
+async function flashDFU(onLog, sourceDir, expectedSN = null) {
   onLog('--- DFU Flash started ---', false);
 
   const prep = await prepareFirmware(onLog, sourceDir);
   if (!prep.ok) return prep;
 
-  return await runDfuFlash(prep.dfuPath, prep.toolsDir, onLog);
+  // The board's serial, from dfu-util's own list, pins the flash to it as the regular flash does.
+  if (expectedSN && !_isBoardSerial(expectedSN)) expectedSN = null;
+  return { ...(await runDfuFlash(prep.dfuPath, prep.toolsDir, onLog, expectedSN || undefined)), flashedSN: expectedSN || null };
 }
 
 // ── Extract readable flash error ───────────────────────
@@ -2804,5 +2817,17 @@ module.exports = {
   // compiler does. Duplicating the rule is how the two drift apart, and a
   // board list reading a different directory than the compile is exactly the
   // class of bug this release exists to fix.
-  coreCanBuildAt: _ourCoreCanBuild
+  coreCanBuildAt: _ourCoreCanBuild,
+
+  // Board Forensics (boardForensics.js) reads and restores firmware over the same path a flash uses.
+  touchReset,
+  waitForDfuAccessible,
+  runDfuFlash,
+  withDfuSuffix,
+  getDfuUtilPath,
+  getToolsPath,
+  getDfuEnv,
+  ensureExecutable,
+  isBoardSerial: _isBoardSerial,
+  makeTermEmu, classifyDfuStderrLine: _classifyDfuStderrLine, isDfuDownloadDone: _isDfuDownloadDone,
 };

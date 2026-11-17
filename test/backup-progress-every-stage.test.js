@@ -2,8 +2,8 @@
  * A backup reports every stage before the write, in an honest unit for each  [BUG-023]
  *
  * The first minutes of a large backup showed only an elapsed clock, then "0 B of 14.93 GB" with
- * a name, and the main process was held for 2 m 13 s. His words: "it's not actually doing
- * anything." What has to hold:
+ * a name, and the main process was held for 2 m 13 s, so it looked like nothing was happening.
+ * What has to hold:
  *   - the survey reports files so far (no total: it is the first pass) and returns fileCount
  *     and bytes per item
  *   - the stages arrive in order: reading, checking, preparing, then the write

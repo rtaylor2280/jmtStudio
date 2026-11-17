@@ -542,9 +542,15 @@ async function initBuildPanel() {
   // them again on hover keeps it true.
   el('bp-btn-compile').addEventListener('pointerenter', applyCompileButtonState);
   el('bp-btn-flash').addEventListener('click', doFlash);
+  // Right-click Flash: Board Forensics [B-543]. Reaches a disabled Flash too (Chromium 122
+  // delivers contextmenu to disabled buttons), which matters: a board straight out of the
+  // package usually has nothing compiled for it yet.
+  el('bp-btn-flash').addEventListener('contextmenu', openFlashMenu);
   el('bp-btn-refresh-ports').addEventListener('click', async () => {
     const btn = el('bp-btn-refresh-ports');
     btn.style.animation = 'spin 0.7s linear infinite';
+    // A refresh asks for fresh information: the selected board is asked its version again.
+    if (!isBusy) forgetBoardOSVersion();
     await refreshPorts();
     btn.style.animation = '';
   });
@@ -693,10 +699,9 @@ async function initBuildPanel() {
     } else {
       appendModalLog('', false);
       appendModalLog(result.detail || 'Driver install was cancelled or failed.', true);
-      appendModalLog('Click Install DFU Driver to try again, or use a manual option below.', false);
+      appendModalLog("The driver was not installed. Try again, or email studio@jmtfoundry.com and we'll help you get it set up.", false);
       setupBtn.textContent = '▶ Install DFU Driver';
       setupBtn.style.display = 'inline-block';
-      manualRow.style.display = 'flex';
       document.getElementById('bm-close').style.display = 'inline-block';
     }
   });
@@ -1091,6 +1096,16 @@ async function doFlash() {
     }
   }
 
+  // A board that has not been recorded yet: asked inside the build modal. [B-543] The X closes the
+  // modal and nothing is flashed.
+  const _bfAnswer = await _forensicsAskBeforeFlash();
+  if (_bfAnswer === 'cancel') {
+    stopPortWatch();
+    document.getElementById('build-modal').style.display = 'none';
+    setFlashEnabled(true);
+    return;
+  }
+
   // Reuse modal in flash mode — clear prior attempt's log so retries (watcher-triggered
   // or manual Retry) don't pile up. Persistent build-output panel keeps full history.
   stopCompileHints();
@@ -1100,10 +1115,34 @@ async function doFlash() {
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
-  _typeFlashHint(_sdFlash);
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
+
+  // Optional first stage: board forensics, in this modal; the flash follows in the same one.
+  if (_bfAnswer === 'record') {
+    setBusy(true);
+    const _bfStage = await _forensicsStageInFlash();
+    setBusy(false);
+    if (_bfStage === 'cancel') {
+      stopFlashTimer();
+      setBuildTitle('Flash cancelled', { busy: false, color: 'var(--c-text-bright)' });
+      document.getElementById('bm-bar').className = '';
+      document.getElementById('bm-status').textContent = 'Nothing was flashed. Click Flash to try again.';
+      document.getElementById('bm-close').style.display = 'inline-block';
+      setFlashEnabled(true);
+      return;
+    }
+  }
+  if (!selectedPort) {
+    appendModalLog('The board did not come back on USB, so the flash cannot start. Unplug it and plug it back in.', true);
+    showWaitForBoardInModal();
+    startPortWatch('wait-flash');
+    return;
+  }
+  setBuildTitle('⚡ Flashing', { busy: true, color: 'var(--c-text-bright)' });
+  document.getElementById('bm-status').textContent = '';
+  _typeFlashHint(_sdFlash);
   setBarMode('flash');
   window._isFlashing = true;
   await pauseSerialBeforeFlash();
@@ -1128,8 +1167,529 @@ async function doFlash() {
                                               _currentBuildKey.buildPkgHash,
                                               _currentBuildKey.configId); } catch {}
   }
-  await window.electronAPI.flash(selectedPort, selectedFqbn, _flashTargetSN, _currentBuildDir);
+  await window.electronAPI.flash(selectedPort, selectedFqbn, _flashTargetSN, _currentBuildDir, _flashRecordInfo());
   setBusy(false);
+}
+
+// ── Board Forensics [B-543] ────────────────────────────
+// Reads a board, copies its firmware and keeps it per board serial; the first copy is the board's
+// original firmware and can be flashed back. Main does the work (boardForensics.js). This runs it in
+// the build modal: as an optional first stage of a flash, or on its own from a right-click on Flash.
+// Every line it reports goes to the modal log and to Build Output.
+let _closeFlashMenu = null;
+
+// What a successful flash records with the board [B-543]: the config the build key was computed over.
+function _flashRecordInfo() {
+  const p = window._currentFilePath || null;
+  let configText = null;
+  try { configText = window.getEditorContent(); } catch {}
+  return {
+    configText, configPath: p, configName: p ? p.split(/[\\/]/).pop().replace(/\.h$/i, '') : null,
+    usb: selectedUsb || null,
+    configHash: (_currentBuildKey && _currentBuildKey.configHash) || null,
+    buildPkgHash: (_currentBuildKey && _currentBuildKey.buildPkgHash) || null,
+  };
+}
+
+function _forensicsSN() {
+  const sn = String(selectedPortSN || '').trim();
+  return /^[0-9A-Fa-f]{12}$/.test(sn) ? sn.toUpperCase() : null;
+}
+
+// "ProffieOS v7.14" from a board's own report; an installed version's name ("Test ProffieOS 8.10 +JMT")
+// already says ProffieOS and is shown as it is.
+function _osLabel(v) { return /proffieos/i.test(String(v)) ? String(v) : `ProffieOS ${v}`; }
+
+async function openFlashMenu(e) {
+  e.preventDefault();
+  if (!_flashMenuAvailable()) return;
+  const menu = document.getElementById('preset-ctx-menu');
+  if (!menu) return;
+  const sn = _forensicsSN();
+  let summary = null;
+  if (sn) { try { summary = await window.electronAPI.forensicsSummary(sn); } catch {} }
+  menu.innerHTML = '';
+  const close = () => {
+    menu.style.display = 'none';
+    document.removeEventListener('mousedown', outside, true);
+    _closeFlashMenu = null;
+  };
+  _closeFlashMenu = close;
+  const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
+  const mk = (label, run, disabled = false, tip = '') => {
+    const it = document.createElement('div');
+    it.className = 'preset-ctx-item';
+    it.textContent = label;
+    if (tip) it.title = tip;
+    if (disabled) { it.style.opacity = '0.45'; it.style.cursor = 'default'; }
+    it.addEventListener('mousedown', (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      if (disabled) return;
+      close();
+      if (isBusy) return;
+      run();
+    });
+    menu.appendChild(it);
+  };
+  // Again only when the board runs firmware its history does not have: an exact copy is already kept.
+  let _alreadyHave = false;
+  if (summary && summary.recorded && _boardInstalled) {
+    try {
+      const recs = await window.electronAPI.forensicsRecords(sn);
+      _alreadyHave = ((recs && recs.recordings) || []).some(r => _sameStamp(r.stamp, _boardInstalled));
+    } catch {}
+  }
+  if (!_alreadyHave) mk(summary && summary.recorded ? 'Run board forensics again' : 'Run board forensics', () => runBoardForensics());
+  const _orig = summary && summary.hasOriginal ? (summary.captures || []).find(c => c.id === summary.original) : null;
+  if (summary && summary.hasOriginal) mk('Flash original firmware', () => flashOriginalFirmware(), false,
+    _orig && _sameStamp(_orig.installed, _boardInstalled) ? 'The board is already running this firmware.' : '');
+  if (summary && summary.known) mk('Show board records', () => showBoardRecords(sn));
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 220) + 'px';
+  menu.style.top  = Math.min(e.clientY, window.innerHeight - 110) + 'px';
+  menu.style.display = 'block';
+  setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+}
+
+// Right-click Flash > Show board records: what board forensics recorded for this board.
+async function showBoardRecords(sn) {
+  let r = null;
+  try { r = await window.electronAPI.forensicsRecords(sn); } catch {}
+  if (!r) return;
+  const overlay = document.getElementById('modal-board-records');
+  const body = document.getElementById('br-body');
+  const flashBtn = document.getElementById('br-flash-original');
+  document.getElementById('br-title').textContent = `Board ${r.serial}`;
+  document.getElementById('br-sub').textContent = r.generation ? `Proffieboard ${r.generation}` : '';
+  const fmt = (at) => new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const items = r.recordings;
+  let selected = items.find(c => c.isOriginal) || items[items.length - 1] || null;
+
+  const render = () => {
+    body.innerHTML = '';
+    const section = (label) => {
+      const s = document.createElement('div'); s.className = 'br-section';
+      const l = document.createElement('div'); l.className = 'br-label'; l.textContent = label;
+      s.appendChild(l); body.appendChild(s); return s;
+    };
+    const line = (parent, text) => {
+      const d = document.createElement('div'); d.className = 'br-line'; d.textContent = text;
+      parent.appendChild(d); return d;
+    };
+    const c = selected;
+    if (c && c.kind === 'forensics' && c.detail) {
+      const d = c.detail, o = d.firmware;
+      const s = section(c.isOriginal ? 'Original firmware' : 'Recorded firmware');
+      if (o.version) line(s, `ProffieOS ${o.version}${o.installed ? `, built ${o.installed}` : ''}`);
+      else if (o.installed) line(s, `Built ${o.installed}`);
+      if (o.neverFlashed) line(s, 'Never flashed: the flash was empty when it was recorded');
+      if (o.askFailed) line(s, 'Read in bootloader mode. The board did not answer when asked for its presets and blade setup.');
+      else if (o.readInBootloader && !(d.presets && d.presets.length)) line(s, 'Read in bootloader mode, so no presets or blade setup');
+      if (o.configFile) line(s, `Config file: ${o.configFile}`);
+      if (o.prop) line(s, `Prop: ${o.prop}`);
+      if (o.usedBytes != null && o.flashSize) {
+        const prot = o.rdpLevel === 0 ? ' · read protection off' : o.rdpLevel != null ? ' · read protection on' : '';
+        line(s, `${Math.round(o.usedBytes / 1024)} KB used of ${Math.round(o.flashSize / 1024)} KB${prot}`);
+      }
+      if (d.blades.length || d.display || o.buttons != null) {
+        const h = section('Hardware');
+        if (d.blades.length) line(h, d.blades.map((b, i) => `Blade ${i + 1}: ${b.leds} LEDs`).join(' · ')
+          + (d.blades[0].type ? ` (${d.blades[0].type})` : ''));
+        if (o.buttons != null) line(h, `${o.buttons} button${o.buttons === 1 ? '' : 's'}`);
+        if (d.display) line(h, '1 display');
+      }
+      if (d.presets.length) {
+        const p = section(`Presets (${d.presets.length})`);
+        const box = document.createElement('div'); box.className = 'br-presets';
+        box.textContent = d.presets.map((t, i) => `${String(i + 1).padStart(2)}  ${t}`).join('\n');
+        p.appendChild(box);
+      }
+    } else if (c && c.kind === 'flash') {
+      const d = c.detail;
+      const s = section('Flashed firmware');
+      if (d.configName) line(s, `Config: ${d.configName}`);
+      const vers = [d.proffieOSVersion ? _osLabel(d.proffieOSVersion) : '', d.coreVersion ? `core ${d.coreVersion}` : '',
+                    d.usb ? `USB ${d.usb}` : ''].filter(Boolean).join(' · ');
+      if (vers) line(s, vers);
+      if (d.firmwareBytes) line(s, `${Math.round(d.firmwareBytes / 1024)} KB firmware`);
+    }
+    if (items.length) {
+      const s = section('Recordings');
+      for (const it of items) {
+        const what = it.kind === 'flash'
+          ? `Flashed${it.configName ? ` ${it.configName}` : ''}`
+          : 'Board forensics';
+        // One line per recording: what happened on the left (cut off with an ellipsis, full text on
+        // hover), its tags pinned right. The version is in the details when the row is selected.
+        const d = line(s, '');
+        d.classList.add('br-rec');
+        if (it === selected) d.classList.add('br-rec-sel');
+        const main = document.createElement('span'); main.className = 'br-rec-main';
+        main.textContent = `${fmt(it.at)} · ${what}`;
+        d.title = main.textContent + (it.version ? ` · ${_osLabel(it.version)}` : '');
+        d.appendChild(main);
+        const tags = [it.isOriginal ? 'original' : '', _sameStamp(it.stamp, _boardInstalled) ? 'on the board now' : ''].filter(Boolean);
+        if (tags.length) { const t = document.createElement('span'); t.className = 'br-tag br-rec-tags'; t.textContent = tags.join(' · '); d.appendChild(t); }
+        d.onclick = () => { selected = it; render(); };
+      }
+    }
+    flashBtn.style.display = selected && selected.canFlash ? '' : 'none';
+    flashBtn.textContent = selected && selected.isOriginal ? 'Flash original firmware' : 'Flash this firmware';
+    flashBtn.title = selected && _sameStamp(selected.stamp, _boardInstalled) ? 'The board is already running this firmware.' : '';
+  };
+  render();
+
+  const close = () => {
+    overlay.classList.remove('active');
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key !== 'Escape') return;
+    const top = [...document.querySelectorAll('.modal-overlay.active')].pop();
+    if (top !== overlay) return;
+    e.preventDefault(); e.stopPropagation(); close();
+  };
+  document.getElementById('br-x').onclick = close;
+  document.getElementById('br-close').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  flashBtn.onclick = () => { const it = selected; close(); flashRecordedFirmware(it); };
+  document.addEventListener('keydown', onKey, true);
+  overlay.classList.add('active');
+}
+
+// The build modal's bar: a fraction fills it, null runs the indeterminate sweep.
+function _bmBar(frac) {
+  const bar = document.getElementById('bm-bar');
+  if (!bar) return;
+  if (typeof frac !== 'number') { setBarMode('knightrider'); return; }
+  bar.classList.remove('bm-bar-knightrider', 'bm-bar-success', 'bm-bar-error');
+  bar.style.animation = 'none';
+  bar.style.position  = 'absolute';
+  bar.style.left      = '0';
+  bar.style.background = getComputedStyle(document.documentElement).getPropertyValue('--jmt-blue').trim();
+  bar.style.width     = Math.max(0, Math.min(1, frac)) * 100 + '%';
+}
+
+// Feeds main's forensics:progress into the build modal: stage label in the status line, fraction on
+// the bar, every log line into the modal log and Build Output. Returns the unsubscribe.
+function _forensicsDriveModal() {
+  const status = document.getElementById('bm-status');
+  return window.electronAPI.onForensicsProgress((p) => {
+    if (!p) return;
+    if (p.type === 'stage') {
+      if (status) status.textContent = p.detail && typeof p.fraction === 'number' ? `${p.label} · ${p.detail}` : (p.label || '');
+      _bmBar(typeof p.fraction === 'number' ? p.fraction : null);
+    } else if (p.type === 'log') {
+      // dfu-util's download lines also drive the bar, and stay in the log as they do on a regular flash.
+      const m = /^\s*Download\s*\[[^\]]*\]\s*(\d+)%\s+(\d+)\s+bytes/.exec(p.line);
+      if (m) {
+        _bmBar(Number(m[1]) / 100);
+        if (status) status.textContent = `${(status.textContent.split(' · ')[0]) || 'Flashing'} · ${Math.round(Number(m[2]) / 1024)} KB written`;
+      }
+      appendLog(p.line, p.isError);
+      appendModalLog(p.line, p.isError);
+    }
+  });
+}
+
+// Runs a capture inside the open build modal. Returns main's result.
+async function _forensicsCaptureInModal(sn, { bootloader = false } = {}) {
+  setBuildTitle('Running board forensics', { busy: true, color: 'var(--c-text-bright)' });
+  // Nothing else may run while the board is read: the bootloader wait screen's Flash Now and Close,
+  // and any setup or manual rows, are hidden for the run. The run's end sets the buttons again.
+  for (const id of ['bm-retry', 'bm-close', 'bm-dfu-setup', 'bm-manual-row']) {
+    const b = document.getElementById(id);
+    if (b) b.style.display = 'none';
+  }
+  const head = `--- Board forensics: ${sn} ${bootloader ? 'in bootloader mode' : 'on ' + selectedPort} ---`;
+  appendLog(head, false);
+  appendModalLog(head, false);
+  await pauseSerialBeforeFlash();
+  const off = _forensicsDriveModal();
+  let r;
+  try { r = await window.electronAPI.forensicsCapture(bootloader ? null : selectedPort, sn, bootloader); }
+  catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
+  try { off(); } catch {}
+  // The board can come back on a different port after leaving the bootloader (in bootloader mode it stays).
+  if (!bootloader) { try { await refreshPorts(); } catch {} }
+  const tail = r.ok
+    ? (r.isOriginal ? '--- Board recorded. Saved as its original firmware. ---' : '--- Board recorded. Saved beside its original firmware. ---')
+    : `--- Board forensics did not finish: ${r.error || 'unknown error'} ---`;
+  appendLog(tail, !r.ok);
+  appendModalLog(tail, !r.ok);
+  if (r.report && r.report.afterwards && r.report.afterwards.returnedToFirmware === false) {
+    const msg = 'The board has not come back on USB yet. If it stays dark, unplug it and plug it back in.';
+    appendLog(msg, true);
+    appendModalLog(msg, true);
+  }
+  return r;
+}
+
+function _forensicsOpenModal(title) {
+  showBuildModal(title);
+  stopCompileTimer();
+  document.getElementById('bm-timer-compile').style.display = 'none';
+  document.getElementById('bm-abort').style.display = 'none';
+  const lastEl = document.getElementById('bm-timer-last');
+  if (lastEl) { lastEl.textContent = ''; lastEl.style.display = 'none'; }
+  setBarMode('knightrider');
+}
+
+// Ends the way a compile or flash ends: finishBuildModal sets the title colour, bar, status and buttons.
+function _forensicsEndModal(ok, title, statusText, { isFlash = false } = {}) {
+  finishBuildModal(ok, title, statusText || '', { isFlash });
+}
+
+// Right-click Flash > Run board forensics.
+async function runBoardForensics() {
+  if (isBusy) return;
+  const sn = _forensicsSN();
+  if (!selectedPort || !sn) return;
+  setBusy(true);
+  _forensicsOpenModal('Running board forensics');
+  const r = await _forensicsCaptureInModal(sn);
+  setBusy(false);
+  // The board was reset, so what it reported before is stale. Forget it, THEN look for the board
+  // again so it is asked afresh, the order a regular flash uses.
+  forgetBoardOSVersion();
+  try { await refreshPorts(); } catch {}
+  _forensicsEndModal(r.ok, r.ok ? '✓ Board recorded' : '✗ Board forensics did not finish',
+    r.ok ? (window.isConfigOpen?.()
+      ? 'Right-click Flash to flash the original firmware back or show the board records.'
+      : 'Use Show Board Records to view it or flash the original firmware back.') : (r.error || ''));
+}
+
+// Right-click Flash > Flash original firmware.
+async function flashOriginalFirmware() {
+  if (isBusy) return;
+  const sn = _forensicsSN();
+  if (!sn) return;
+  let summary = null;
+  try { summary = await window.electronAPI.forensicsSummary(sn); } catch {}
+  if (!summary || !summary.hasOriginal) return;
+  const orig = (summary.captures || []).find(c => c.id === summary.original) || {};
+  return flashRecordedFirmware({ kind: 'forensics', id: summary.original, at: orig.at, isOriginal: true,
+    detail: { firmware: { version: orig.version || null, installed: orig.installed || null } } });
+}
+
+// Flashes a recording from the board's record: a forensics capture or an earlier flash.
+async function flashRecordedFirmware(item) {
+  if (isBusy || !item) return;
+  const sn = _forensicsSN();
+  if (!sn) return;
+  const isFlash = item.kind === 'flash';
+  const openName = window._currentFilePath ? window._currentFilePath.split(/[\\/]/).pop().replace(/\.h$/i, '') : '';
+  const notOpen = openName ? `, not the config you have open (${openName})` : '';
+  let title, message, confirmText, label;
+  if (isFlash) {
+    const d = item.detail || {};
+    title = 'Flash this firmware?';
+    message = `${d.configName || 'Config not known'}${d.proffieOSVersion ? ` · ${_osLabel(d.proffieOSVersion)}` : ''}\n`
+      + `Flashed ${new Date(item.at).toLocaleString()}.\n\n`
+      + 'This is the firmware that was flashed to the board then. It replaces what is on the board now.';
+    confirmText = 'Flash'; label = 'saved firmware';
+  } else {
+    const o = (item.detail && item.detail.firmware) || {};
+    const what = o.version ? `ProffieOS ${o.version}${o.installed ? `, built ${o.installed}` : ''}` : (item.isOriginal ? 'Original firmware' : 'Recorded firmware');
+    const when = item.at ? `Recorded ${new Date(item.at).toLocaleString()}.` : '';
+    title = item.isOriginal ? 'Flash original firmware?' : 'Flash this firmware?';
+    message = item.isOriginal
+      ? `${what}\n${when}\n\nThis is the firmware that was on the board when it was first recorded${notOpen}. It replaces what is on the board now.`
+      : `${what}\n${when}\n\nThis is the firmware that was on the board when this recording was made${notOpen}. It replaces what is on the board now.`;
+    confirmText = item.isOriginal ? 'Flash original' : 'Flash';
+    label = item.isOriginal ? 'original firmware' : 'recorded firmware';
+  }
+  const ok = await window.promptConfirm({ title, message, confirmText, confirmKind: 'primary' });
+  if (!ok) return;
+  const Label = label[0].toUpperCase() + label.slice(1);
+  setBusy(true);
+  _forensicsOpenModal(`Flashing ${label}`);
+  startFlashTimer();
+  const head = `--- Flashing ${label} to ${sn} ---`;
+  appendLog(head, false);
+  appendModalLog(head, false);
+  await pauseSerialBeforeFlash();
+  const off = _forensicsDriveModal();
+  let r;
+  try {
+    r = await window.electronAPI.forensicsRestore(selectedPort, sn, isFlash ? null : item.id, isFlash ? item.id : null);
+  } catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
+  try { off(); } catch {}
+  stopFlashTimer();
+  setBusy(false);
+  // Forget what the board reported before the flash, THEN look for it again so it is asked afresh.
+  forgetBoardOSVersion();
+  try { await refreshPorts(); } catch {}
+  let statusText;
+  if (r.ok) {
+    setStatus('flash', 'ok', `${Label} flashed`);
+    const what = isFlash ? 'the saved firmware' : item.isOriginal ? 'the original' : 'the recording';
+    const flashLine = r.flashMatches === true ? `The flash matches ${what} exactly. `
+      : r.flashMatches === false ? `The flash does not match ${what}. ` : '';
+    const v = r.version || {};
+    const reports = `${v.version ? `ProffieOS ${v.version}` : 'the same version'}${v.installed ? `, built ${v.installed}` : ''}`;
+    statusText = flashLine + (r.versionMatches === true
+      ? `The board reports ${reports}, the same as when it was recorded.`
+      : r.versionMatches === false
+        ? 'The board reports a different version than when it was recorded.'
+        : v.version ? `The board reports ${reports}.`
+          : 'The board did not answer a version check afterwards.');
+  } else {
+    statusText = r.error || `The ${label} was not flashed.`;
+  }
+  const tail = r.ok ? `--- ${Label} flashed ---` : `--- ${Label} not flashed: ${statusText} ---`;
+  appendLog(tail, !r.ok);
+  appendModalLog(tail, !r.ok);
+  const end = () => _forensicsEndModal(r.ok, r.ok ? '✓ Flash Complete' : '✗ Flash Failed', statusText, { isFlash: true });
+  // A recorded flash built with WebUSB gets the same WebUSB check as a regular flash. A forensics
+  // recording does not say how its firmware's USB was set up, so it is not checked.
+  const builtUsb = isFlash && item.detail && item.detail.usb;
+  if (r.ok && builtUsb && /webusb/i.test(builtUsb)) _finishFlashWithWebUsbCheck(sn, { usb: builtUsb, done: end });
+  else end();
+}
+
+// Asks a question inside the build modal, opening it if it is closed, so the question has the same
+// footprint as the compile and flash it sits between. The modal's other rows are hidden while it
+// asks and shown again after. Resolves with the clicked button's id, or 'close' for the X or Esc.
+function _askInBuildModal({ title, message, buttons }) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('build-modal');
+    const ask   = document.getElementById('bm-ask');
+    const msg   = document.getElementById('bm-ask-msg');
+    const row   = document.getElementById('bm-ask-btns');
+    const x     = document.getElementById('bm-x');
+    const statusRow = document.getElementById('bm-status')?.parentElement;
+    const hide = [document.getElementById('bm-bar-track'), document.getElementById('bm-log'),
+      document.getElementById('bm-board-select-wrap'), statusRow, document.getElementById('bm-manual-row'),
+      document.getElementById('bm-dfu-note'), document.getElementById('bm-timer-row')].filter(Boolean);
+    const saved = hide.map(n => n.style.display);
+    hide.forEach(n => { n.style.display = 'none'; });
+    stopCompileHints();
+    setBuildTitle(title, { busy: false, color: 'var(--c-text-bright)' });
+    msg.textContent = message;
+    row.innerHTML = '';
+    const done = (answer) => {
+      document.removeEventListener('keydown', onKey, true);
+      ask.style.display = 'none';
+      x.style.display = 'none';
+      x.onclick = null;
+      row.innerHTML = '';
+      hide.forEach((n, i) => { n.style.display = saved[i]; });
+      resolve(answer);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done('close'); } };
+    for (const b of buttons) {
+      const btn = document.createElement('button');
+      btn.className = b.primary ? 'modal-btn-primary' : 'modal-btn-cancel';
+      btn.textContent = b.text;
+      if (b.title) btn.title = b.title;
+      btn.onclick = () => done(b.id);
+      row.appendChild(btn);
+    }
+    x.onclick = () => done('close');
+    x.style.display = '';
+    ask.style.display = 'block';
+    modal.style.display = 'flex';
+    document.addEventListener('keydown', onKey, true);
+  });
+}
+
+// Asked before a flash opens its modal, like the flash's other questions. Returns 'record' (run board
+// forensics as the flash's first stage), 'flash' (go straight to the flash) or 'cancel'.
+async function _forensicsAskBeforeFlash({ sn: givenSN = null, bootloader = false } = {}) {
+  const sn = givenSN || _forensicsSN();
+  if (!sn || (!bootloader && !selectedPort)) return 'flash';
+  let summary = null;
+  try { summary = await window.electronAPI.forensicsSummary(sn); } catch { return 'flash'; }
+  if (summary && summary.known) {
+    // A board seen before: what this flash adds goes into its existing record [B-543].
+    const note = `Board ${sn} already has records in JMT Studio. This flash is added to them.`;
+    appendLog(note, false);
+    window.electronAPI.forensicsLog?.(sn, 'merged', { bootloader, recorded: !!summary.recorded })?.catch?.(() => {});
+  }
+  if (!summary) return 'flash';
+  // A board with records: is what is on it now in its history? Its build date (asked on connect, or
+  // read from the flash in bootloader mode) against every recording and flash. No match means it was
+  // flashed elsewhere, so it is offered like a new board. No date at all means it cannot be told.
+  let unrecorded = null;
+  if (summary.recorded) {
+    let stamp = null;
+    if (bootloader) {
+      appendLog(`Checking the firmware on ${sn} against its records...`, false);
+      _forensicsOpenModal("Checking the board's firmware against its records");
+      document.getElementById('bm-log').innerHTML = '';
+      for (const id of ['bm-retry', 'bm-close', 'bm-dfu-setup', 'bm-manual-row']) { const b = document.getElementById(id); if (b) b.style.display = 'none'; }
+      let st = null;
+      try { st = await window.electronAPI.forensicsDfuStamp(sn); } catch {}
+      stamp = st && !st.empty ? st.stamp : null;
+    } else {
+      stamp = _boardInstalled || null;
+    }
+    if (!stamp) return 'flash';
+    let recs = null;
+    try { recs = await window.electronAPI.forensicsRecords(sn); } catch {}
+    const known = ((recs && recs.recordings) || []).some(r => _sameStamp(r.stamp, stamp));
+    if (known) return 'flash';
+    unrecorded = stamp;
+    appendLog(`The firmware on ${sn} (built ${stamp}) is not in its records.`, false);
+    window.electronAPI.forensicsLog?.(sn, 'unrecorded-firmware', { installed: stamp, bootloader })?.catch?.(() => {});
+  } else if (summary.offerDeclined) {
+    return 'flash';
+  }
+  const remembered = (await window._jmtRememberedChoice?.('boardForensicsChoice')) || 'ask';
+  if (remembered === 'never') return 'flash';
+  if (remembered !== 'always') {
+    const bootSentence = bootloader ? ' This board is in bootloader mode, where its presets and blade setup cannot be read. '
+      + 'If it is running ProffieOS, JMT Studio starts it briefly to read them, then returns it to bootloader mode for the flash.' : '';
+    const choice = await _askInBuildModal(unrecorded ? {
+      title: "This board has firmware that hasn't been recorded",
+      message: `Its firmware was built ${unrecorded}, which matches nothing in this board's history. `
+        + 'JMT Studio can record it before flashing, so you can put it back later.' + bootSentence,
+      buttons: [
+        { id: 'lead',    text: 'Never record', title: window.REMEMBERED_CHOICE_TIP },
+        { id: 'cancel',  text: 'Not now' },
+        { id: 'middle',  text: 'Record this board' },
+        { id: 'confirm', text: 'Always record new boards', primary: true, title: window.REMEMBERED_CHOICE_TIP },
+      ],
+    } : {
+      title: 'This board has not been recorded yet',
+      message:
+        'JMT Studio can run board forensics on each new board before its first flash. It records the board '
+        + 'and saves the original firmware as first seen in JMT Studio, so you can flash it back at any time with '
+        + 'a right-click on Flash, no matter which config you have open. Every flash is recorded with the board '
+        + 'too, and can be flashed again from its records.'
+        + (bootloader ? ' This board is in bootloader mode, where its presets and blade setup cannot be read. '
+          + 'If it is running ProffieOS, JMT Studio starts it briefly to read them, then returns it to bootloader '
+          + 'mode for the flash.' : '') + '\n\n'
+        + 'In a future release, board history will show the configs used on each board and what the original '
+        + "firmware was built with: ProffieOS version, prop, presets, blade setup and more. What's recorded now "
+        + 'stays on this computer, so those features will work without connecting the board again.',
+      buttons: [
+        { id: 'lead',    text: 'Never record', title: window.REMEMBERED_CHOICE_TIP },
+        { id: 'cancel',  text: 'Not now' },
+        { id: 'middle',  text: 'Record this board' },
+        { id: 'confirm', text: 'Always record new boards', primary: true, title: window.REMEMBERED_CHOICE_TIP },
+      ],
+    });
+    if (choice === 'lead') { try { await window.electronAPI.setSetting('boardForensicsChoice', 'never'); } catch {} return 'flash'; }
+    if (choice === 'cancel') return 'flash';
+    if (choice !== 'middle' && choice !== 'confirm') return 'cancel';
+    if (choice === 'confirm') { try { await window.electronAPI.setSetting('boardForensicsChoice', 'always'); } catch {} }
+  }
+  return 'record';
+}
+
+// The first stage of a flash, inside the flash's open modal. Returns 'flash' or 'cancel'.
+async function _forensicsStageInFlash({ sn: givenSN = null, bootloader = false } = {}) {
+  const sn = givenSN || _forensicsSN();
+  if (!sn || (!bootloader && !selectedPort)) return 'flash';
+  const r = await _forensicsCaptureInModal(sn, { bootloader });
+  if (r && r.ok) return 'flash';
+  const go = await _askInBuildModal({
+    title: 'Board forensics did not finish',
+    message: `${(r && r.error) || 'The firmware was not copied.'}\n\nFlash anyway?`,
+    buttons: [{ id: 'cancel', text: 'Cancel' }, { id: 'flash', text: 'Flash anyway', primary: true }],
+  });
+  return go === 'flash' ? 'flash' : 'cancel';
 }
 
 // ── Port detection ─────────────────────────────────────
@@ -1232,6 +1792,12 @@ async function refreshPorts() {
       portSelect.value = '';
       selectedPort = null;
       selectedPortIsProffieboard = false;
+      // [BUG-024] Nothing is selected, so the box says so: "—" first, as when no board is found. It
+      // showed the first board's port as though chosen, with nothing read from it.
+      const placeholder = document.createElement('option');
+      placeholder.value = ''; placeholder.textContent = '—';
+      portSelect.insertBefore(placeholder, portSelect.firstChild);
+      portSelect.value = '';
       clearDetectedBoard();
       setStatus('port', 'warn', `${result.proffieports.length} Proffieboards, select port`);
     }
@@ -1460,9 +2026,17 @@ function updatePortChangedIndicator() {
 
 // Marks the Detected field when a Proffieboard is on the selected port.
 // Version (V2/V3) cannot be determined from USB data — user selects it via the Board dropdown.
+// The board last logged as detected, so the event log gets one line per arrival, not one per poll [B-543].
+let _loggedDetectedSN = null;
 function applyDetectedBoard(port) {
   if (!port) return;
   selectedPortSN = port.serialNumber || null;
+  if (/^[0-9A-Fa-f]{12}$/.test(String(selectedPortSN || '')) && selectedPortSN !== _loggedDetectedSN) {
+    _loggedDetectedSN = selectedPortSN;
+    window.electronAPI.forensicsLog?.(selectedPortSN, 'detected', { port: port.path, vendorId: port.vendorId || null,
+      productId: port.productId || null, platform: window.electronAPI.platform || null })?.catch?.(() => {});
+  }
+  applyFlashTitle();
   updateBoardDisplay(port.serialNumber ? `SN: ${port.serialNumber}` : 'Proffieboard');
   window.updateSnIndicator?.();
   setStatus('port', 'ok', `Proffieboard on ${port.path}`);
@@ -1477,7 +2051,12 @@ function applyDetectedBoard(port) {
 
 // Clears the Detected field when no Proffieboard is on the selected port.
 function clearDetectedBoard() {
+  if (_loggedDetectedSN) {
+    window.electronAPI.forensicsLog?.(_loggedDetectedSN, 'disconnected', {})?.catch?.(() => {});
+    _loggedDetectedSN = null;
+  }
   selectedPortSN = null;
+  applyFlashTitle();
   updateBoardDisplay('');
   window.updateSnIndicator?.();
   updateCompileButton();
@@ -2139,9 +2718,11 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
     }
     if (isDfuMode) {
       // Post-DFU flash: lastFlashedSN + setFlashedTimestamp set in watchForSerialAfterDfu once real port is known
-      setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
+      // Not done until the board is back [B-543]: watchForSerialAfterDfu sets the final title.
+      setBuildTitle('Waiting for the board to restart', { busy: true, color: 'var(--c-text-bright)' });
       document.getElementById('bm-abort').style.display = 'none';
-      document.getElementById('bm-close').style.display = 'inline-block';
+      // Close appears when the wait ends (board back, or not seen in time): watchForSerialAfterDfu.
+      document.getElementById('bm-close').style.display = 'none';
       // Reset close label — the DFU driver-fix flow renames it to "Cancel" because
       // there IS something cancellable mid-install. Once we've reached "✓ Flash
       // Complete" the button just dismisses the modal, and "Cancel" reads wrong.
@@ -3642,7 +4223,52 @@ function flashBlockedReason() {
 function applyFlashTitle() {
   const btn = el('bp-btn-flash');
   if (!btn) return;
-  btn.title = btn.disabled ? (flashBlockedReason() || '') : flashReadyTip();
+  const base = btn.disabled ? (flashBlockedReason() || '') : flashReadyTip();
+  const menu = _flashMenuAvailable() ? 'Right-click for board forensics.' : '';
+  const current = compileSuccess && _sameStamp(_buildStamp, _boardInstalled) ? 'The board is already running this build.' : '';
+  btn.title = [base, current, menu].filter(Boolean).join('\n');
+  applyForensicsButton();
+  _refreshBuildStamp();
+}
+
+// The build stamp compiled into firmware (__DATE__ __TIME__), compared with the board's "installed:" [B-686].
+const _sameStamp = (a, b) => !!a && !!b && String(a).replace(/\s+/g, ' ').trim() === String(b).replace(/\s+/g, ' ').trim();
+let _buildStamp = null, _buildStampToken = 0;
+async function _refreshBuildStamp() {
+  const token = ++_buildStampToken;
+  let stamp = null;
+  if (compileSuccess) { try { stamp = await window.electronAPI.forensicsBuildStamp(_currentBuildDir); } catch {} }
+  if (token !== _buildStampToken || stamp === _buildStamp) return;
+  _buildStamp = stamp;
+  applyFlashTitle();
+}
+
+// The port row's board forensics button, shown with no config open (CSS hides it otherwise):
+// Run Board Forensics for a board with no recording, Show Board Records once it has one.
+let _forensicsBtnToken = 0;
+async function applyForensicsButton() {
+  const btn = el('bp-btn-forensics');
+  if (!btn) return;
+  const sn = _flashMenuAvailable() ? _forensicsSN() : null;
+  const token = ++_forensicsBtnToken;
+  const div = el('bp-forensics-divider');
+  if (!sn) { btn.style.display = 'none'; if (div) div.style.display = 'none'; return; }
+  let summary = null;
+  try { summary = await window.electronAPI.forensicsSummary(sn); } catch {}
+  if (token !== _forensicsBtnToken) return;
+  const recorded = !!(summary && summary.recorded);
+  btn.textContent = recorded ? 'Show Board Records' : 'Run Board Forensics';
+  btn.title = recorded ? 'Show what was recorded for this board.\nRight-click for more options.' : '';
+  btn.onclick = () => { if (isBusy) return; if (recorded) showBoardRecords(sn); else runBoardForensics(); };
+  btn.oncontextmenu = recorded ? openFlashMenu : (ev) => ev.preventDefault();
+  btn.style.display = '';
+  if (div) div.style.display = '';
+}
+
+// The right-click menu on Flash opens only when it has something to run: a Proffieboard with a
+// serial number on the selected port, and nothing else in progress.
+function _flashMenuAvailable() {
+  return !isBusy && !isDfuMode && !!selectedPort && !!_forensicsSN();
 }
 
 // What Flash will do when it is live, the same way Compile's tooltip says what Compile will do.
@@ -4004,6 +4630,14 @@ function _setupDfuModeUI() {
 }
 
 function enterDfuMode() {
+  // [B-543] Into the board's event log: it left its serial connection for bootloader mode.
+  if (_loggedDetectedSN) {
+    window.electronAPI.forensicsLog?.(_loggedDetectedSN, 'disconnected', { reason: 'bootloader' })?.catch?.(() => {});
+    _loggedDetectedSN = null;
+  }
+  window.electronAPI.forensicsDfuSerials?.().then(list => {
+    for (const sn of (Array.isArray(list) ? list : [])) window.electronAPI.forensicsLog?.(sn, 'bootloader', { boards: list.length })?.catch?.(() => {});
+  }).catch(() => {});
   _setupDfuModeUI();
   setStatus('port', 'warn', 'Checking for DFU device...');
   _checkDfuOnEntry();
@@ -4163,9 +4797,13 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     const isWin   = navigator.platform.startsWith('Win');
     const isLinux = navigator.platform.startsWith('Linux');
     let linuxCopyCmd = '';
+    // [B-688] WinUSB already bound but the board cannot be opened: another program is using it.
+    const boardBusy = isWin && !!dfuResult.busy && !justInstalled;
 
     // ── Messages ──────────────────────────────────────────
-    if (isWin) {
+    if (boardBusy) {
+      appendModalLog('The board is in bootloader mode, but another program is using it. Close that program, then click Try Again.', false);
+    } else if (isWin) {
       if (driverStillLoading) {
         appendModalLog('The driver installed, but Windows has not finished activating it on this board.', false);
         appendModalLog('', false);
@@ -4174,13 +4812,11 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
         appendModalLog('Unplug the board, reconnect it in Bootloader Mode, then click Try Again.', false);
         appendModalLog('If it still fails, click Install DFU Driver below.', false);
       } else {
-        appendModalLog('STM32 Bootloader detected, but dfu-util cannot reach it. WinUSB is not the active driver on this board.', false);
+        appendModalLog('The board is in bootloader mode, but JMT Studio cannot reach it until its driver is set up.', false);
         appendModalLog('', false);
         appendModalLog('  Detected: STM32 Bootloader (0483:df11)', false);
         appendModalLog('', false);
-        appendModalLog("JMT Studio can set this up with its own signed driver. No download, and it will not stack up driver copies the way the manual tools do. On most systems it is a one-time setup and future boards just work.", false);
-        appendModalLog('', false);
-        appendModalLog('Click Install DFU Driver and accept the Windows prompts (permission, plus installing the driver the first time), or use a manual option below.', false);
+        appendModalLog('Click Install DFU Driver and accept the Windows prompts. JMT Studio installs its own signed driver, with nothing to download. This is a one-time setup that also covers any boards you connect later.', false);
       }
     } else if (isLinux) {
       appendModalLog('DFU device detected but cannot be accessed.', true);
@@ -4204,7 +4840,7 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     // Windows really does have a driver problem (WinUSB rebinding per port).
     // Linux/Mac don't — it's a permissions issue (udev rules), and calling it
     // a "driver" misleads users into searching for software that doesn't exist.
-    setBuildTitle(isWin ? 'Fix DFU Driver' : 'Fix DFU Access', { color: 'var(--c-warn-text)' });
+    setBuildTitle(boardBusy ? 'Board Busy' : isWin ? 'Fix DFU Driver' : 'Fix DFU Access', { color: 'var(--c-warn-text)' });
     document.getElementById('bm-abort').style.display = 'none';
     document.getElementById('bm-close').style.display = 'inline-block';
     document.getElementById('bm-close').textContent = 'Cancel';
@@ -4217,7 +4853,15 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     const retryBtn = document.getElementById('bm-retry');
 
     // ── Per-OS button and status logic ────────────────────
-    if (isWin) {
+    if (boardBusy) {
+      retryBtn.textContent = '↺ Try Again';
+      retryBtn.style.display = 'inline-block';
+      _dfuRetryRecheck   = true;
+      _dfuRetryAutoFlash = autoFlash;
+      dfuSetupBtn.style.display = 'none';
+      document.getElementById('bm-manual-row').style.display = 'none';
+      document.getElementById('bm-status').textContent = 'Board busy';
+    } else if (isWin) {
       if (driverStillLoading) {
         if (justInstalled) {
           retryBtn.textContent = '↺ Try Again';
@@ -4233,7 +4877,9 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
         document.getElementById('bm-status').textContent = 'Windows driver required';
       }
       dfuSetupBtn.style.display = 'inline-block';
-      document.getElementById('bm-manual-row').style.display = 'flex';
+      // The manual tools (Setup Tool, Zadig) are no longer offered: their WinUSB is outranked by ST's signed
+      // driver, the per-board re-binding Studio's own signed driver fixed. The row stays hidden.
+      document.getElementById('bm-manual-row').style.display = 'none';
     } else if (isLinux) {
       retryBtn.style.display = 'none';
       document.getElementById('bm-status').textContent = 'Reboot required';
@@ -4329,14 +4975,36 @@ async function doFlashDFU() {
     return;
   }
 
+  // [B-543] The board's serial from dfu-util's list, so the flash is filed under it and can be recorded
+  // first. Unknown when more than one board is in bootloader mode; then it is filed once the board is back.
+  _dfuFlashSN = null;
+  try {
+    const list = await window.electronAPI.forensicsDfuSerials();
+    if (Array.isArray(list) && list.length === 1) _dfuFlashSN = list[0];
+  } catch {}
+  let _dfuRecorded = false;
+  if (_dfuFlashSN) {
+    const ans = await _forensicsAskBeforeFlash({ sn: _dfuFlashSN, bootloader: true });
+    if (ans === 'cancel') { document.getElementById('build-modal').style.display = 'none'; setFlashEnabled(true); return; }
+    if (ans === 'record') {
+      document.getElementById('bm-log').innerHTML = '';
+      document.getElementById('build-modal').style.display = 'flex';
+      setBusy(true);
+      const stageAns = await _forensicsStageInFlash({ sn: _dfuFlashSN, bootloader: true });
+      setBusy(false);
+      if (stageAns === 'cancel') { document.getElementById('build-modal').style.display = 'none'; setFlashEnabled(true); return; }
+      _dfuRecorded = true;
+    }
+  }
+
   // Device confirmed present — go straight to flash
   setBuildTitle('⚡ Flashing (DFU)', { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
-  document.getElementById('bm-status').textContent = 'Uploading firmware...';
+  document.getElementById('bm-status').textContent = 'Flashing firmware...';
   document.getElementById('build-modal').style.display = 'flex';
-  document.getElementById('bm-log').innerHTML = '';
+  if (!_dfuRecorded) document.getElementById('bm-log').innerHTML = '';
   startFlashTimer();
   setBarMode('flash');
   window._isFlashing = true;
@@ -4345,7 +5013,7 @@ async function doFlashDFU() {
   setStatus('flash', 'pending', 'Flashing via DFU...');
   _typeFlashHint(_sdFlash);
 
-  await window.electronAPI.flashDFU(_currentBuildDir);   // [B-661] the build's real folder, as the normal flash does
+  await window.electronAPI.flashDFU(_currentBuildDir, _dfuFlashSN, _flashRecordInfo());   // [B-661] the build's real folder, as the normal flash does
   setBusy(false);
   // onBuildDone handles success/failure via IPC
 }
@@ -4379,20 +5047,23 @@ function _setWebUsbStatus(lead, detail = '', boldTail = '', { busy = false } = {
 
 // Does this flash need the check at all? Windows only, a build that includes WebUSB, and a
 // real board serial to look the setting up by.
-function _webUsbCheckApplies(sn) {
-  const usb = (window.getCompiledUsb && window.getCompiledUsb()) || selectedUsb || '';
+function _webUsbCheckApplies(sn, usbOverride = null) {
+  const usb = usbOverride || (window.getCompiledUsb && window.getCompiledUsb()) || selectedUsb || '';
   return window.electronAPI.platform === 'win32' && /webusb/i.test(usb)
       && /^[0-9A-Fa-f]{12}$/.test((sn || '').trim()) && !!window.electronAPI.checkWebUsb;
 }
 
 // Normal (touch-reset) flash: the check runs before "Flash Complete" is ever shown.
-async function _finishFlashWithWebUsbCheck(flashedSN) {
-  const done = () => finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true });
+// usb/done: a flash of a recorded build [B-543] passes the USB setting that build was made with and its
+// own completion; a regular flash uses the open config's.
+async function _finishFlashWithWebUsbCheck(flashedSN, { usb = null, done: doneOverride = null } = {}) {
+  const done = doneOverride || (() => finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true }));
   const sn   = (flashedSN || '').trim();
-  if (!_webUsbCheckApplies(sn)) { done(); return; }
+  if (!_webUsbCheckApplies(sn, usb)) { done(); return; }
 
   _setWebUsbStatus('Checking that WebUSB tools can reach the board', '', '', { busy: true });
   const verdict = await _webUsbVerdictAfterFlash(sn);
+  window.electronAPI.forensicsLog?.(sn, 'webusb', { verdict })?.catch?.(() => {});
   if (verdict !== 'missing') { done(); return; }
 
   finishBuildModal(true, '✓ Flashed, one more step for WebUSB', '', { isFlash: true });
@@ -4408,6 +5079,7 @@ async function _webUsbCheckAfterDfu(sn) {
   closeBtn.style.display = 'none';   // same as the normal path: no Close mid-check
   _setWebUsbStatus('Checking that WebUSB tools can reach the board', '', '', { busy: true });
   const verdict = await _webUsbVerdictAfterFlash(sn);
+  window.electronAPI.forensicsLog?.(sn, 'webusb', { verdict })?.catch?.(() => {});
   closeBtn.style.display = 'inline-block';
   if (verdict !== 'missing') {
     _setWebUsbStatus('Firmware flashed successfully.', 'Board is back online.');
@@ -4499,6 +5171,7 @@ async function _onWebUsbFixClick() {
   appendModalLog(`WebUSB fix: ${(res && res.detail) || 'failed'}`, true);
 }
 
+let _dfuFlashSN = null;   // the board a bootloader-mode flash went to, from dfu-util's list [B-543]
 async function watchForSerialAfterDfu() {
   const timeout    = 10000;
   const start      = Date.now();
@@ -4524,6 +5197,13 @@ async function watchForSerialAfterDfu() {
       _refreshFlashProvenance();
       appendModalLog(`✓ Board restarted on ${newPort.path}.`, false);
       document.getElementById('bm-status').textContent = 'Board is back online.';
+      setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
+      document.getElementById('bm-close').style.display = 'inline-block';
+      // [B-543] A flash whose board was not known before it (several in bootloader mode) is filed now.
+      if (!_dfuFlashSN && /^[0-9A-Fa-f]{12}$/.test(String(lastFlashedSN || ''))) {
+        window.electronAPI.forensicsRecordLastFlash?.(lastFlashedSN, _flashRecordInfo())?.catch?.(() => {});
+      }
+      _dfuFlashSN = null;
       setTimeout(() => exitDfuMode(), 1500);
       _webUsbCheckAfterDfu(lastFlashedSN);   // [B-660]
       return;
@@ -4532,6 +5212,9 @@ async function watchForSerialAfterDfu() {
 
   _portsBeforeDfu = [];
   exitDfuMode();
+  setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
+  document.getElementById('bm-close').style.display = 'inline-block';
+  _dfuFlashSN = null;
   document.getElementById('bm-status').textContent =
     'Flash complete, but the board has not been detected yet. Try power cycling.';
   appendModalLog('Board not detected after restart. Try power cycling or reconnecting.', true);
@@ -4600,6 +5283,10 @@ async function probeBoardOSVersion(port) {
     _boardInstalled = (r?.ok || r?.reason === 'unrecognised') ? (r?.installed || null) : null;
     _boardOSReason  = r?.ok ? null : (r?.reason || 'error');
     _boardOSRaw     = r?.reason === 'unrecognised' ? (r?.raw || null) : null;
+    // Into the board's event log [B-543]: every time it is seen, and what it said.
+    const _seenSN = /^[0-9A-Fa-f]{12}$/.test(String(port.serialNumber || '')) ? port.serialNumber : _forensicsSN();
+    if (_seenSN) window.electronAPI.forensicsLog?.(_seenSN, 'seen', { port: port.path, ok: !!r?.ok,
+      version: r?.version || null, installed: r?.installed || null, reason: r?.reason || null, raw: r?.raw || null })?.catch?.(() => {});
     // "The port was busy" is not "the board won't answer." Clear the marker so
     // the next detection tries again, once the monitor or the flash is done.
     // A timeout or a failed open does mean the board is not talking, and that
@@ -4635,6 +5322,7 @@ function selectedTreeOSVersion() {
 }
 
 function applyOSVersionSignal() {
+  applyFlashTitle();   // the Flash tooltip says when the board already runs this build [B-686]
   const sel = el('input-version');
   if (!sel) return;
   const name    = sel.value;

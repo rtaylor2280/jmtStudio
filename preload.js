@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('toolchain:benchCompile', { configContent, fqbn, buildOptions, optList }),
   // sourceDir = WHERE THIS BUILD IS: build-output after a compile, the cache entry after a hit.
   // The flash reads the .elf from there instead of assuming build-output holds it. (B-216)
-  flash:   (port, fqbn, expectedSN, sourceDir) => ipcRenderer.invoke('toolchain:flash', { port, fqbn, expectedSN, sourceDir }),
+  flash:   (port, fqbn, expectedSN, sourceDir, record) => ipcRenderer.invoke('toolchain:flash', { port, fqbn, expectedSN, sourceDir, record }),
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
   getAppVersion:      ()         => ipcRenderer.invoke('app:getVersion'),
@@ -99,6 +99,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeSerial: (text)                  => ipcRenderer.invoke('serial:write',  { text }),
   isSerialOpen: ()                     => ipcRenderer.invoke('serial:isOpen'),
   probeBoardVersion: (port)            => ipcRenderer.invoke('serial:probeVersion', { port }),
+  // Board Forensics [B-543]
+  forensicsSummary:        (serial)                   => ipcRenderer.invoke('forensics:summary', { serial }),
+  forensicsSetOfferDeclined: (serial, declined = true) => ipcRenderer.invoke('forensics:setOfferDeclined', { serial, declined }),
+  forensicsCapture:        (port, serial, inBootloader) => ipcRenderer.invoke('forensics:capture', { port, serial, inBootloader }),
+  forensicsDfuSerials:     ()                         => ipcRenderer.invoke('forensics:dfuSerials'),
+  forensicsDfuStamp:       (serial)                   => ipcRenderer.invoke('forensics:dfuStamp', { serial }),
+  forensicsRecordLastFlash: (serial, record)          => ipcRenderer.invoke('forensics:recordLastFlash', { serial, record }),
+  forensicsRestore:        (port, serial, captureId, flashId) => ipcRenderer.invoke('forensics:restore', { port, serial, captureId, flashId }),
+  forensicsRecords:        (serial)                   => ipcRenderer.invoke('forensics:records', { serial }),
+  forensicsBuildStamp:     (sourceDir)                => ipcRenderer.invoke('forensics:buildStamp', { sourceDir }),
+  forensicsLog:            (serial, type, data)       => ipcRenderer.invoke('forensics:log', { serial, type, data }),
+  onForensicsProgress: (cb) => {
+    const handler = (_, d) => cb(d);
+    ipcRenderer.on('forensics:progress', handler);
+    return () => ipcRenderer.removeListener('forensics:progress', handler);
+  },
   restartBoardAfterEject: (boardSerial, portPath) => ipcRenderer.invoke('board:restartAfterEject', { boardSerial, portPath }),
   boardPortForSerial: (boardSerial) => ipcRenderer.invoke('board:portForSerial', { boardSerial }),
   boardSdSharedInApp: (portPath) => ipcRenderer.invoke('board:sdSharedInApp', { portPath }),
@@ -227,7 +243,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── DFU ──────────────────────────────────────────────
   detectDFU:    () => ipcRenderer.invoke('dfu:detect'),
-  flashDFU:     (sourceDir) => ipcRenderer.invoke('dfu:flash', { sourceDir }),
+  flashDFU:     (sourceDir, serial, record) => ipcRenderer.invoke('dfu:flash', { sourceDir, serial, record }),
   ensureDfuDriver:   () => ipcRenderer.invoke('dfu:ensureDriver'),
   checkWebUsb:       (serial) => ipcRenderer.invoke('webusb:check', serial),
   fixWebUsb:         (serial) => ipcRenderer.invoke('webusb:fix', serial),

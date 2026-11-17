@@ -584,8 +584,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
       ? `<span id="vp-core-warn" style="font-size:12px;color:var(--c-warn-text);">${_vpJmtWarning(pinBase, Object.keys(notes))}</span>`
       : '';
 
-  // Explanation lives in a tooltip, not inline. An inline paragraph is height
-  // every user pays on every visit, including everyone who already knows.
+  // Tooltip on the plugin dropdown only, so it never covers the notice beside it.
   const sectionTitle =
     'The Proffieboard Plugin version this ProffieOS version compiles with - the same ' +
     'plugin you would install in Arduino IDE. Each plugin brings its own compiler, so ' +
@@ -594,11 +593,11 @@ async function _vpRenderCoreSection(v, opts = {}) {
     'ProffieOS version, so it is worth trying both. This never changes on its own.';
 
   body.innerHTML = `
-    <div title="${_vpEsc(sectionTitle)}" style="display:flex;align-items:flex-start;gap:12px;">
+    <div style="display:flex;align-items:flex-start;gap:12px;">
       <div style="display:flex;flex-direction:column;gap:8px;flex:0 0 auto;">
         <div style="display:flex;align-items:flex-start;gap:12px;">
-          <select id="vp-core-select" style="${_VP_SELECT_CSS}width:320px;flex:0 0 auto;">${options}</select>
-          ${onStock && !jmtHere ? `<button id="vp-core-jmt" class="vp-action-btn vp-jmt-btn" style="flex:0 0 auto;" title="${_vpEsc(notes[jmtOfPin])}">⚙ Install JMT Patch</button>` : ''}
+          <select id="vp-core-select" title="${_vpEsc(sectionTitle)}" style="${_VP_SELECT_CSS}width:320px;flex:0 0 auto;">${options}</select>
+          ${onStock && !jmtHere ? `<button id="vp-core-jmt" class="vp-action-btn vp-jmt-btn" style="flex:0 0 auto;">⚙ Install JMT Patch</button>` : ''}
         </div>
         <div id="vp-core-status" style="display:flex;align-items:center;gap:10px;min-height:24px;"></div>
       </div>
@@ -2122,6 +2121,7 @@ window.offerJmtPlugin = async function offerJmtPlugin({ base, reason = 'button',
     cancelText:  'Not now',
     // Never is remembered in Settings > Remembered choices, where it can be set back [B-561 pattern].
     middleText:  reason === 'button' ? null : "Don't offer again",
+    rememberedButtons: reason === 'button' ? [] : ['middle'],
   });
   if (go === 'middle') {
     try { await window.electronAPI.setSetting('jmtPluginChoice', 'never'); } catch {}
