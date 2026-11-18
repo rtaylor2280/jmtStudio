@@ -223,10 +223,10 @@ function startCompileHints(leadMessage) {
   _leadHint   = leadMessage || null;
 
   // A lead (compile opener / Easter egg / fix message) types in immediately and
-  // holds; the authored hint cycle still begins at the 60s mark and replaces it,
+  // holds; the authored hint cycle still begins at the 35s mark and replaces it,
   // so the timed hints stay exactly as written.
   if (_leadHint) _showNextHint();
-  _hintTimeout = setTimeout(_showNextHint, 60000);
+  _hintTimeout = setTimeout(_showNextHint, 35000);
 }
 
 function stopCompileHints() {
@@ -270,7 +270,7 @@ function _showNextHint() {
     if (i >= text.length) {
       clearInterval(_hintTypingTimer);
       _hintTypingTimer = null;
-      if (isLead) return; // lead holds until the 60s timer starts the authored cycle
+      if (isLead) return; // lead holds until the 35s timer starts the authored cycle
       // Hold fully-typed for 12s, then fade out
       _hintFadeTimeout = setTimeout(() => {
         if (!_hintActive) return;

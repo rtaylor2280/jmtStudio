@@ -571,7 +571,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
            `${_vpEsc(_vpPluginLabel(ver))}${badge}</option>`;
   }).join('');
   const noteFor = ver => notes[ver] || '';
-  // Beside the selector [B-668]: on a JMT version, its note; on a stock version that has a JMT
+  // Beside the selector [B-668], or under it once beside would run past about six lines: on a JMT version, its note; on a stock version that has a JMT
   // version, an amber warning about the bug, and a Get button while the JMT version is not on
   // this computer (once it is, picking it in the list is the way to it).
   const pinBase   = coreVersions_normalize(current.pinned || '');
@@ -593,7 +593,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
     'ProffieOS version, so it is worth trying both. This never changes on its own.';
 
   body.innerHTML = `
-    <div style="display:flex;align-items:flex-start;gap:12px;">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px;">
       <div style="display:flex;flex-direction:column;gap:8px;flex:0 0 auto;">
         <div style="display:flex;align-items:flex-start;gap:12px;">
           <select id="vp-core-select" title="${_vpEsc(sectionTitle)}" style="${_VP_SELECT_CSS}width:320px;flex:0 0 auto;">${options}</select>
@@ -601,7 +601,7 @@ async function _vpRenderCoreSection(v, opts = {}) {
         </div>
         <div id="vp-core-status" style="display:flex;align-items:center;gap:10px;min-height:24px;"></div>
       </div>
-      ${sideHtml ? `<div style="flex:1 1 auto;min-width:0;max-width:900px;">${sideHtml}</div>` : ''}
+      ${sideHtml ? `<div style="flex:1 1 ${onStock && !noteFor(pinBase) ? 600 : 440}px;min-width:0;max-width:900px;">${sideHtml}</div>` : ''}
     </div>
   `;
 

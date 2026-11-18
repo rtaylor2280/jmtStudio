@@ -474,10 +474,23 @@ async function runBulkImport({ plan, userData }, callbacks = {}) {
         onProgress({ stage: 'source-progress', sourceIdx: i, total, label: src.cleanedName || src.rawName, sub: subProgress });
       });
       if (beside && beside.ok) {
+        // Stamped now, so the font carries its Customized tag the moment the import ends. [BUG-027]
+        try { soundFontEntries.getEntryCustomization(userData, beside.name); } catch {}
+        // The source was already in the library: only the new font counts toward the size line,
+        // its unshared bytes being what it cost on disk. [BUG-027]
+        let madeBytes = 0, madeOwnBytes = 0;
+        try {
+          const _size = require('./soundFontLibrarySize');
+          const _m = await _size.measurePaths(_size.sourcePaths(userData, beside.sourceUuid, [beside.name]).made);
+          madeBytes = _m.apparent;
+          madeOwnBytes = _m.unshared;
+        } catch {}
         summary.imported.push({
-          src: src.relPath || src.absPath, sourceUuid: beside.sourceUuid, entries: [beside.name],
+          src: src.relPath || src.absPath, sourceUuid: beside.sourceUuid,
+          entries: [{ name: beside.name, ok: true }],
           bundleName: null, multiCandidate: false, versionsSkipped: 0, variantsEmitted: 0,
           strippedFiles: [], besideOf: beside.besideOf,
+          footprint: 0, sourceBytes: 0, madeBytes, madeOwnBytes,
         });
         continue;
       }
@@ -944,11 +957,15 @@ async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
           // The label already says where its extra files are; the row adds nothing to it. [B-643]
           ownedElsewhere: !!(m.missingSplit && m.missingSplit.fresh === 0 && m.missingSplit.elsewhere > 0),
         };
+        // The same font file for file: nothing added, nothing taken out. Only that is already in the library;
+        // a curated copy (a quote deleted, extras held elsewhere) is a version and comes in beside it. [BUG-030]
+        r.match.identical = r.match.fullyOwned && !r.match.ownedElsewhere && !r.match.libHasMore
+          && (m.cardCoreCount || 0) === (m.libCoreCount || 0) && (m.cardCustCount || 0) === (m.libCustCount || 0);
         // Move it out of the bucket it was actually counted in. A corrupt font was
         // never added to newCount (the loop above counts it as corrupt), so
         // decrementing newCount for one would put the breakdown out by one and it
         // would stop summing to the total.
-        if (r.match.fullyOwned) {
+        if (r.match.identical) {
           r.owned = true; ownedCount++;
           if (r.corrupt) corruptCount--; else newCount--;
         }

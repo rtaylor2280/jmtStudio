@@ -24,6 +24,16 @@
   .undo { background: var(--jmt-blue); color: #ffffff; border: 1px solid #036bb8; border-radius: 4px;
     padding: 3px 10px; font: inherit; cursor: pointer; }
   .undo:hover { background: #036bb8; }
+  /* A save still in progress: the label without its ellipsis, the dots animated (index.html's .busy-dots). */
+  @keyframes busy-dots {
+    0%,     24.9% { clip-path: inset(0 100%  0 0); }
+    25%,    49.9% { clip-path: inset(0 66.6% 0 0); }
+    50%,    74.9% { clip-path: inset(0 33.3% 0 0); }
+    75%,    100%  { clip-path: inset(0 0     0 0); }
+  }
+  .value.pending { color: var(--c-text-dim, #999999); font-style: italic; }
+  .value.pending::after { content: '...'; display: inline-block; width: 1.1em; text-align: left;
+    white-space: nowrap; animation: busy-dots 1.2s infinite; }
   /* The app's scrollbar, as index.html sets it for every element. */
   *::-webkit-scrollbar { width: 6px; height: 6px; }
   *::-webkit-scrollbar-track { background: transparent; }
@@ -42,7 +52,7 @@
   const toast = document.getElementById('toast');
   let hideTimer = null;
   window.linkPicks.onUpdate(({ rows, toast: msg }) => {
-    rowsEl.replaceChildren(...rows.map(({ key, label, hint, value, undo }) => {
+    rowsEl.replaceChildren(...rows.map(({ key, label, hint, value, undo, pending }) => {
       const row = document.createElement('div');
       row.className = 'row';
       const l = document.createElement('div');
@@ -50,7 +60,7 @@
       l.textContent = label;
       if (hint) l.title = hint;
       const v = document.createElement('div');
-      v.className = 'value';
+      v.className = pending ? 'value pending' : 'value';
       v.textContent = value;
       v.title = value;
       const u = document.createElement('div');

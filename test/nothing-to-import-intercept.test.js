@@ -67,7 +67,7 @@ return { set: (v) => { _sfImport = v; }, fn: _sfNothingLeftToImport };`;
   ok('the predicate lifted and compiled', typeof nothingLeft === 'function');
 }
 
-const owned   = (name, matchName) => ({ name, path: `/p/${name}`, fullyOwned: true,  matchName });
+const owned   = (name, matchName) => ({ name, path: `/p/${name}`, fullyOwned: true,  identical: true, matchName });
 const variant = (name)            => ({ name, path: `/p/${name}`, fullyOwned: false, matchName: name });
 const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` }));
 
@@ -153,7 +153,9 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
       ? null : cmpLib.verdictLabel(m);
     setImport({ candidates: [{ name: 'Maul', path: '/p/Maul' }] });
     const results = label
-      ? [{ name: 'Maul', path: '/p/Maul', fullyOwned: cmpLib.isFullyOwned(m), matchName: 'Maul' }]
+      ? [{ name: 'Maul', path: '/p/Maul', fullyOwned: cmpLib.isFullyOwned(m), matchName: 'Maul',
+           // As main reports it: the same files, nothing added or taken out. [BUG-030]
+           identical: cmpLib.isFullyOwned(m) && card.core.size === lib.core.size && card.customizable.size === lib.customizable.size }]
       : [];
     return { intercepted: !!nothingLeft({ ok: true, results }), verdict: m.verdict, label };
   };
@@ -323,4 +325,12 @@ const cands   = (...names)        => names.map(n => ({ name: n, path: `/p/${n}` 
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall nothing-to-import tests passed');
+// [BUG-030] One font with every sound owned but not the same files (trimmed, or extras held elsewhere) is not
+// "already in your library": the import offers it as a version instead.
+{
+  setImport({ candidates: [{ name: 'DarkSaberQA', path: '/p/DarkSaberQA' }] });
+  const trimmed = { name: 'DarkSaberQA', path: '/p/DarkSaberQA', fullyOwned: true, identical: false, matchName: 'DarkSaber' };
+  ok('one font, all sounds owned but not identical → NOT intercepted', !nothingLeft({ ok: true, results: [trimmed] }));
+}
+
 process.exit(failures ? 1 : 0);

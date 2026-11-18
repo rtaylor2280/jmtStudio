@@ -106,11 +106,19 @@ const tmp = (t) => fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-beside-' + t + '-'
       && /els\.reimportBtn\.textContent = _oneC \? `Add as a version of \$\{_oneC\.name\}` : 'Re-import as a new source';/.test(h)
       && /const _sfPickFontFolder = async \(words, givenPath = null\) =>/.test(h));
     check('single import: a re-import\'s review keeps matches ticked',
-      /reimport: !!forceNewSource \}/.test(h) && /if \(hit\.fullyOwned && !_sfImport\.reimport && row\.dataset\.already !== '1'/.test(h));
+      /reimport: !!forceNewSource \}/.test(h) && /if \(hit\.identical && !_sfImport\.reimport && row\.dataset\.already !== '1'/.test(h));
   }
   const bulk = fs.readFileSync(path.join(ROOT, 'soundFontBulkImport.js'), 'utf8');
   check('the commit loop tries beside first, then the ordinary import',
-    /const beside = await _importBesideMatch\(\{ userData, src \}[\s\S]{0,700}continue;\s*\}\s*const result = await importPlannedSource\(/.test(bulk));
+    /const beside = await _importBesideMatch\(\{ userData, src \}[\s\S]{0,2000}continue;\s*\}\s*const result = await importPlannedSource\(/.test(bulk));
+  {
+    const at = bulk.indexOf('if (beside && beside.ok) {');
+    const seg = at < 0 ? '' : bulk.slice(at, bulk.indexOf('continue;', at));
+    check('BUG-027: the beside branch is found (non-empty slice)', seg.length > 0);
+    check('BUG-027: a beside font is reported in the counted shape', /entries: \[\{ name: beside\.name, ok: true \}\]/.test(seg));
+    check('BUG-027: a beside font is stamped at import (Customized tag)', /soundFontEntries\.getEntryCustomization\(userData, beside\.name\)/.test(seg));
+    check('BUG-027: a beside font reports its sizes for the space line', /madeBytes, madeOwnBytes/.test(seg) && /sourcePaths\(userData, beside\.sourceUuid, \[beside\.name\]\)/.test(seg));
+  }
 
   for (const d of [picked, userData, card]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
   console.log(failures ? `\n${failures} failed` : '\nall passed');

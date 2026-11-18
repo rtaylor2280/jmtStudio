@@ -101,7 +101,7 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
 check('card import: split before the label, flag on the row',
   /libraryHashes\(userData\)/.test(bulk) && /compare\.applyLibrarySplit\(m, _owned, \{ sourceName: \(u\) => soundFontSources\.sourceDisplayName\(userData, u\) \}\);\s*const label/.test(bulk) && /ownedElsewhere: !!\(m\.missingSplit/.test(bulk));
 check('single import: split excludes its own source, flag on the result',
-  /libraryHashes\(ud, \{ excludeSourceUuids: \[uuid\] \}\)/.test(main) && /compare\.applyLibrarySplit\(m, owned, \{ sourceName: \(u\) => soundFontSources\.sourceDisplayName\(ud, u\) \}\);/.test(main) && /ownedElsewhere: !!\(m\.missingSplit/.test(main));
+  /libraryHashes\(ud, \{ excludeSourceUuids: \[uuid\] \}\)/.test(main) && /compare\.applyLibrarySplit\(m, owned, \{ sourceName: \(u\) => soundFontSources\.sourceDisplayName\(ud, u\) \}\);/.test(main) && /_elsewhere = !!\(m\.missingSplit/.test(main) && /ownedElsewhere: _elsewhere/.test(main));
 check('both reviews leave the owned-elsewhere sentence as it is',
   /if \(m\.fullyOwned && !m\.ownedElsewhere && m\.matchName/.test(html) && /if \(m\.fullyOwned && !m\.ownedElsewhere\) _txt \+= m\.libHasMore/.test(html)
   && /note\.textContent = \(hit\.fullyOwned && !hit\.ownedElsewhere && hit\.matchName/.test(html));

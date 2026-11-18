@@ -6087,7 +6087,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
     : key.startsWith('image:') ? 'Puts back the font image from before'
     : key.startsWith('demo') ? 'Puts back the Demo from before' : 'Puts back the Link from before';
   const rows = () => Array.from(shown.entries()).reverse()
-    .map(([key, r]) => ({ ...r, key, undo: typeof onUndo === 'function' ? undoHint(key) : '' }));
+    .map(([key, r]) => ({ ...r, key, undo: typeof onUndo === 'function' && !r.pending ? undoHint(key) : '' }));
   const undo = (key) => {
     if (!shown.has(key)) return;
     shown.delete(key);
@@ -6128,10 +6128,25 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
     show();
   };
   const savePdf = async () => {
+    // The row shows at the click, saying it is working; a long page can take seconds to render. [BUG-028]
+    const prev = shown.get('proof') || null;
+    const dropPending = () => {
+      if (shown.get('proof') && shown.get('proof').pending) shown.delete('proof');
+      if (prev) shown.set('proof', prev);
+    };
     try {
       const dir = getDir();
       if (!dir) return;
-      const data = await page.webContents.printToPDF({ printBackground: true });
+      shown.delete('proof');
+      shown.set('proof', { label: 'Proof of purchase', hint: 'Your receipt, kept with the source', value: 'Saving the page', pending: true });
+      show();
+      // A page can keep the PDF render from ever finishing; the save then stops and says so,
+      // and a late result is dropped rather than written. [BUG-028]
+      let timer = null;
+      const data = await Promise.race([
+        page.webContents.printToPDF({ printBackground: true }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('this page did not finish rendering')), 20000); }),
+      ]).finally(() => clearTimeout(timer));
       const base = (page.webContents.getTitle() || 'Proof of purchase')
         .replace(/[<>:"/\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Proof of purchase';
       const fileName = `${base}.pdf`;
@@ -6141,6 +6156,8 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       proofPath = filePath;
       save('proof', 'Proof of purchase', { filePath, fileName }, fileName, 'Saved as proof of purchase', 'Your receipt, kept with the source');
     } catch (e) {
+      dropPending();
+      if (!shown.size) { try { strip.hide(); } catch {} }
       show(`Could not save the page as PDF: ${String(e && e.message || e)}`);
     }
   };
@@ -6554,7 +6571,10 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, sav
       backgroundColor,
       autoHideMenuBar: true,
       ...WINDOW_ICON,
-      webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js') },
+      // The import window waits on a download, so its pages show a bar between a Download click
+      // and the download starting. [BUG-029]
+      webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js'),
+        additionalArguments: ['--jmt-download-wait'] },
     });
     _keepWithStudio(bw);
     _attachFindBar(bw);
@@ -6881,8 +6901,13 @@ ipcMain.handle('sources:matchCandidates', async (_event, { uuid, candidates } = 
         ? null
         : compare.verdictLabel(m);
       if (!label) continue;
-      results.push({ name: c.name, path: c.path, verdict: m.verdict, exact: !!m.exact, label, tip: compare.verdictTip(m), fullyOwned: compare.isFullyOwned(m), matchName: m.bestMatch,
-        ownedElsewhere: !!(m.missingSplit && m.missingSplit.fresh === 0 && m.missingSplit.elsewhere > 0) });   // [B-643]
+      const _owned = compare.isFullyOwned(m);
+      const _elsewhere = !!(m.missingSplit && m.missingSplit.fresh === 0 && m.missingSplit.elsewhere > 0);   // [B-643]
+      results.push({ name: c.name, path: c.path, verdict: m.verdict, exact: !!m.exact, label, tip: compare.verdictTip(m), fullyOwned: _owned, matchName: m.bestMatch,
+        ownedElsewhere: _elsewhere,
+        // The same font file for file: nothing added, nothing taken out. A curated or trimmed copy is not. [BUG-030]
+        identical: _owned && !_elsewhere && (m.cardCoreCount || 0) === (m.libCoreCount || 0)
+          && (m.cardCustCount || 0) === (m.libCustCount || 0) });
     }
     return { ok: true, results };
   } catch (err) {

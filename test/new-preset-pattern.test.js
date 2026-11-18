@@ -44,6 +44,7 @@ vm.runInContext(`
     const lead = ((slot.expr || '').match(/^(\\w+)/) || [])[1];
     return DEFAULTS[lead] || null;
   }
+  function _takesBaseColor(expr) { return !!DEFAULTS[((expr || '').match(/^(\\w+)/) || [])[1]]; }
   var _text = '';
   var editor = { getModel: () => ({
     getValue: () => _text,
@@ -62,6 +63,7 @@ vm.runInContext(`
   ${extract('_slotRange')}
   ${extract('_matchColorOf')}
   ${extract('_copyWrapperFor')}
+  ${extract('_withColorArg')}
   ${extract('_copyTextFor')}
   ${extract('_newPresetSlotTexts')}
 `, Object.assign(sandbox, { DEFAULTS }));

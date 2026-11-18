@@ -68,10 +68,10 @@ const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
 const bulk = fs.readFileSync(path.join(ROOT, 'soundFontBulkImport.js'), 'utf8');
 check('no close-match bucket, flag or skip anywhere',
   !/closeCount|r\.closeMatch|_closeMatch|Close match to a font you have \(skipped\)/.test(bulk + html));
-check('the guided review unticks only what is owned (nothing new to the library)',
-  /if \(m\.fullyOwned && row\.checkbox && row\.checkbox\.checked/.test(html));
+check('the guided review unticks only an identical copy; a curated one is a version and stays ticked [BUG-030]',
+  /if \(m\.identical && row\.checkbox && row\.checkbox\.checked/.test(html) && /if \(r\.match\.identical\) \{\s*r\.owned = true/.test(bulk));
 check('quick import skips only what is owned', /const fresh = runPlan\.sources\.filter\(s => s\._prepared && !s\._corrupt && !s\._owned\s*\n/.test(html));
-check('the single review unticks only what is owned (and not on a re-import)', /if \(hit\.fullyOwned && !_sfImport\.reimport && row\.dataset\.already !== '1'/.test(html));
+check('the single review unticks only an identical copy (and not on a re-import)', /if \(hit\.identical && !_sfImport\.reimport && row\.dataset\.already !== '1'/.test(html));
 check('quick import flags Needs review: close match only for the same font, not a raw 75% share',
   /\} else if \(\(m\.verdict === 'have_it' \|\| m\.verdict === 'version'\) && !\(src\._enrich && src\._enrich\.catalogueName\)\) \{/.test(bulk)
   && !/m\.coreContainment >= compare\.VARIANT_DISPLAY_MIN && !\(src\._enrich/.test(bulk));

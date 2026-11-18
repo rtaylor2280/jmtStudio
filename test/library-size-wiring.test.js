@@ -67,7 +67,9 @@ ok('#sf-lib-size has styling',
   ok('the footer bar lays out as a grid', !!bar && /display:\s*grid/.test(bar[1]),
      'flex with an out-of-flow child is how the bar lost its height');
   ok('and it keeps a third column so the legend centres on the BAR',
-     !!bar && /grid-template-columns:\s*1fr\s+auto\s+1fr/.test(bar[1]),
+     // [NOTE-019/020] equal outer columns (Backup on the left, the size on the right), each at least its
+     // content: the key centres on the bar until one side needs more than half the spare room.
+     !!bar && /grid-template-columns:\s*minmax\(max-content,\s*1fr\)\s+auto\s+minmax\(max-content,\s*1fr\)/.test(bar[1]),
      'without the trailing 1fr the legend centres on the leftover space, not the bar');
   ok('the readout is in flow, not absolutely positioned',
      !!size && !/position:\s*absolute/.test(size[1]),

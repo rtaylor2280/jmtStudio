@@ -219,10 +219,16 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 9px 16px;
+    padding: 9px 52px 9px 16px;
     gap: 12px;
     flex-wrap: wrap;
+    position: relative;
   }
+  /* [NOTE-020] The gear sits in the reserved right padding, level with the tab row. */
+  /* 16px edge like the left side, a 30px gear, and the 6px gap the buttons use between themselves:
+     16 + 30 + 6 = the header's 52px right padding. */
+  .header-top > .settings-btn-pinned { position: absolute; right: 16px; top: 9px; height: 30px; align-items: center; }
+  .header-top > .settings-btn-pinned #btn-settings { width: 30px; padding: 2px 0; text-align: center; }
   .title-group {
     display: flex;
     align-items: center;
@@ -647,8 +653,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    max-width: 100%;   /* held to the row, so the Port dropdown narrows instead of USB running off the edge */
   }
   .port-group label { font-size: 0.72rem; color: var(--c-text-soft); white-space: nowrap; }
+  .port-group > * { flex-shrink: 0; }
+  .port-group > #bp-port-select { flex-shrink: 1; }
 
   #bp-port-select {
     background: var(--c-bg-raised);
@@ -2111,6 +2121,22 @@
   #tab-btns-versions   { display: none; }
   #tab-btns-styles     { display: none; }
   #tab-btns-soundfonts { display: none; }
+  /* [NOTE-020] The tab line keeps the tabs and the gear; the action row, ending in + Tracks / + Import or
+     Create / + Add Style, takes the line below as a whole, right-aligned, when it does not fit beside them
+     (.hdr-actions-own-line, set by a ResizeObserver). Labels shorten only when that line runs out too. */
+  .header-top > .hdr-actions { margin-left: auto; }
+  .sf-header-adds { display: flex; gap: 6px; align-items: center; }
+  /* Every header toolbar moves as one group: the labels shorten instead of a button wrapping. */
+  .hdr-actions .tab-btns { flex-wrap: nowrap; }
+  .sf-header-adds .lbl-short { display: none; }
+  .header-top.sf-adds-compact .sf-header-adds .lbl-full { display: none; }
+  .header-top.sf-adds-compact .sf-header-adds .lbl-short { display: inline; }
+  .header-top.sf-adds-compact-1 .sf-header-adds > :not(:last-child) .lbl-full { display: none; }
+  .header-top.sf-adds-compact-1 .sf-header-adds > :not(:last-child) .lbl-short { display: inline; }
+  /* On its own line the actions reach the normal 16px edge: the 52px right padding is the gear's, and the gear
+     sits on the tab line. */
+  .header-top.hdr-actions-own-line > .hdr-actions { order: 3; flex-basis: calc(100% + 36px); margin-right: -36px; justify-content: flex-end; }
+  #tab-btns-soundfonts .sf-toolbar-group { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; }
 
   /* ── Versions panel layout ── */
   #versions-view {
@@ -2581,11 +2607,21 @@
      (the config view) bleed through underneath. */
   .sf-browse-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .sf-browse-wrap.active { display: flex; }
-  .sf-search-bar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; background: var(--c-bg); padding: 0 20px; box-sizing: border-box; height: 42px; border-bottom: 1px solid var(--c-border); }
-  .sf-search-input-wrap { position: relative; flex: 1; max-width: 320px; display: flex; align-items: center; }
+  /* [NOTE-021] Wraps rather than clipping: at a narrow width the filters go to a second line instead of
+     running off the edge where they cannot be reached, and the search box keeps a usable width. */
+  .sf-search-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex-shrink: 0; background: var(--c-bg); padding: 6px 20px; box-sizing: border-box; min-height: 42px; border-bottom: 1px solid var(--c-border); }
+  .sf-search-input-wrap { position: relative; flex: 1 1 160px; min-width: 160px; max-width: 320px; display: flex; align-items: center; }
+  /* [NOTE-021] Filter rows wrap by group: search + count, view + sort, the facet dropdowns, the quick filters. */
+  /* A group moves to its own line first; only one wider than a whole line wraps inside itself. */
+  .filter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+  .filter-group.fg-search { flex: 1 1 240px; min-width: 200px; max-width: 420px; }
+  .filter-group.fg-search > span:first-child, .filter-group.fg-search > .sf-search-input-wrap { flex: 1 1 auto; min-width: 140px; }
+  .styles-search-count { white-space: nowrap; }
+  /* A group's leading divider shows while it sits beside the group before it, and hides when it starts a line. */
+  .fg-divider.fg-divider-off { display: none; }
   .sf-search-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 4px; color: var(--c-text); padding: 5px 10px; font-size: 0.8rem; outline: none; max-width: unset; width: 100%; padding-right: 22px; }
   .sf-search-input:focus { border-color: var(--jmt-blue); }
-  .sf-search-count { font-size: 0.72rem; color: var(--c-text-dim); }
+  .sf-search-count { font-size: 0.72rem; color: var(--c-text-dim); white-space: nowrap; }
   .sf-grid-scroll { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 20px 20px; }
   .sf-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; isolation: isolate; }
   .sf-card { position: relative; background: var(--c-bg-card); border: 1px solid var(--c-border); border-radius: 5px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
@@ -2882,15 +2918,25 @@
      the figures spilled off the bottom of the window where they could not even be hovered. As
      grid items both children contribute height, and the empty first column is what keeps the
      middle one centered on the bar rather than on the space the size readout leaves behind. */
-  #sf-legend.styles-legend { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 4px 20px; }
+  /* The key stays centred while the size fits beside it; when the size needs more than half the spare room
+     the key moves over, and when both no longer fit on one line the size takes its own line under the
+     centred key (.sf-legend-stacked, set by a ResizeObserver). [NOTE-019] */
+  #sf-legend.styles-legend { display: grid; grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr); align-items: center; padding: 4px 20px; column-gap: 16px; }
+  /* [NOTE-020] Backup on the footer's left, balancing the library size on the right; its menu opens upward. */
+  #sf-backup-wrap { grid-column: 1; justify-self: start; pointer-events: auto; }
+  #sf-backup-wrap .styles-tag-dropdown { top: auto; bottom: calc(100% + 4px); left: 0; right: auto; }
   #sf-lib-size { grid-column: 3; justify-self: end; min-width: 0; font-size: 0.7rem; color: var(--c-text-dim); white-space: nowrap; pointer-events: auto; cursor: default; }
   #sf-lib-size .sf-lib-sep { color: var(--c-text-faint); margin: 0 5px; }
   #sf-lib-size .sf-lib-saved { color: var(--jmt-blue); }
   #sf-legend-items { grid-column: 2; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  #sf-legend.styles-legend.sf-legend-stacked { grid-template-columns: auto 1fr; row-gap: 4px; }
+  #sf-legend.sf-legend-stacked #sf-legend-items { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
+  #sf-legend.sf-legend-stacked #sf-backup-wrap { grid-column: 1; grid-row: 2; }
+  #sf-legend.sf-legend-stacked #sf-lib-size { grid-column: 2; grid-row: 2; justify-self: end; }
   /* Narrow window: the figures and the centered legend would collide, and the legend is the one
      that explains the card colours the user is looking at right now. The column collapses to
      zero width, so the legend stays centered. */
-  @media (max-width: 1100px) { #sf-lib-size { display: none; } }
+
   /* In-use indicator — font directory matches a preset's font in the open
      config. Mirrors the Style Library convention: subtle blue border + tint
      at rest, full blue on hover. Selected state still wins if both apply. */
@@ -4250,10 +4296,14 @@
   .styles-helpers-empty { font-size: 0.75rem; color: var(--c-text-faint); padding: 16px 12px; }
   .styles-visual-main { flex: 1; min-width: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 10px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
   /* 26px on the right: the grid's 20px plus its 6px scrollbar gutter, as on Sound Fonts. [B-582] */
-  .styles-search-bar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; background: var(--c-bg); padding: 0 26px 0 20px; box-sizing: border-box; height: 42px; border-bottom: 1px solid var(--c-border); }
+  .styles-search-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex-shrink: 0; background: var(--c-bg); padding: 6px 26px 6px 20px; box-sizing: border-box; min-height: 42px; border-bottom: 1px solid var(--c-border); }
   .style-cards { isolation: isolate; }
   .styles-legend { background: var(--c-bg); padding: 6px 20px 6px; justify-content: center; pointer-events: none; border-top: 1px solid var(--c-border); flex-shrink: 0; position: relative; }
-  #styles-footer-meta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 0.67rem; color: var(--c-text-faint); white-space: nowrap; pointer-events: none; }
+  /* [NOTE-021] In flow, not absolute: the key stays centred between an empty left spacer and the dates on the
+     right, and when they no longer fit the dates take their own line instead of drawing over the key. */
+  #styles-legend { display: flex; flex-wrap: wrap; align-items: center; column-gap: 16px; row-gap: 2px; padding: 4px 20px; }
+  #styles-legend::before { content: ''; flex: 1 1 0; }
+  #styles-footer-meta { flex: 1 1 0; min-width: max-content; text-align: right; font-size: 0.67rem; color: var(--c-text-faint); white-space: nowrap; pointer-events: none; }
   .styles-search-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 4px; color: var(--c-text); padding: 5px 10px; font-size: 0.8rem; outline: none; max-width: 320px; }
   .styles-search-input:focus { border-color: var(--jmt-blue); }
   .styles-search-count { font-size: 0.72rem; color: var(--c-text-dim); }
@@ -5299,7 +5349,7 @@
         OS Versions
       </button>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;">
+    <div class="hdr-actions" style="display:flex;align-items:center;gap:8px;">
       <div class="tab-btns" id="tab-btns-config">
         <button id="btn-undo" class="btn-neutral js-config-only" title="Undo (Ctrl+Z)">&#8634;</button>
         <button id="btn-redo" class="btn-neutral js-config-only" title="Redo (Ctrl+Y)">&#8635;</button>
@@ -5339,6 +5389,10 @@
         <button id="btn-vp-import"   class="btn-blue"    title="Import a ProffieOS version folder">&#8593; Import Version</button>
       </div>
       <div class="tab-btns" id="tab-btns-soundfonts">
+        <!-- [NOTE-020] Only the library and selection actions live here. When they do not fit on the tab
+             line they take the second line as a whole, right-aligned; + Tracks / + Import and the gear stay
+             on the tab line (#sf-header-adds), and Backup lives in the footer. -->
+        <span class="sf-toolbar-group">
         <button id="btn-sf-select-all" class="btn-neutral" style="display:none" title="Select every font currently visible">Select all</button>
         <button id="btn-sf-select-in-use" class="btn-neutral" style="display:none" title="Select fonts referenced by the open config's presets">Select in-use</button>
         <!-- [B-297] PLACEMENT WAS THE WHOLE FIX, settled on sight 2026-09-13. This lived in the
@@ -5368,21 +5422,7 @@
           <button id="btn-sf-bulk-save" class="sf-export-btn" title="Export the selected fonts to an SD card as Proffie-shaped folders, with the config's common folders and shared tracks">&#8599; SD Export</button>
         </span>
         <button id="btn-sf-bulk-delete" class="btn-red" style="display:none" title="Delete the selected fonts">Delete</button>
-        <div class="ui-divider"></div>
-        <div class="styles-tag-filter-wrap">
-          <button id="btn-sf-backup-menu" class="btn-neutral" title="Library backup">Backup &#9660;</button>
-          <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:130px">
-            <button id="btn-sf-export-backup" class="styles-tag-dropdown-item" title="Export your entire Sound Font library as a single backup file">
-              <span class="styles-tag-dropdown-name">&#8599; Export Backup</span>
-            </button>
-            <button id="btn-sf-import-backup" class="styles-tag-dropdown-item" title="Restore from a previously exported Sound Font library backup">
-              <span class="styles-tag-dropdown-name">&#8601; Import Backup</span>
-            </button>
-          </div>
-        </div>
-        <div class="ui-divider"></div>
-        <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root, the universal track location ProffieOS scans for all presets.">&#43; Create Shared Tracks</button>
-        <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font into your library. Bulk-import many at once is offered inside.">&#43; Import Sound Font</button>
+        </span>
       </div>
       <div class="tab-btns" id="tab-btns-styles">
         <!-- [B-582] Multi-select, as on Sound Fonts: Select all / in use with nothing selected, then
@@ -5410,7 +5450,6 @@
         <span id="styles-library-btns" style="display:contents">
           <button id="btn-styles-append"  class="btn-blue"    title="Append another file to the current Style Library">&#8853; Append</button>
           <button id="btn-styles-export"  class="btn-neutral" title="Export a copy">&#8599; Export</button>
-          <div class="ui-divider"></div>
         </span>
         <!-- Linking is the Config Manager's ("easily done" there), so it is not on this bar. Kept, hidden,
              for the code that still sets its state. [B-582] -->
@@ -5420,20 +5459,31 @@
         <!-- Making something new at the end of the bar, as Import on Sound Fonts. Visual view's. [B-582]
              Create: a helper or a style segment; the Helpers / Segments panel shows once one exists. [B-578] -->
         <span id="styles-create-btns" style="display:contents">
-          <div class="styles-tag-filter-wrap styles-create-wrap" style="flex-shrink:0">
-            <button class="btn-neutral" id="btn-styles-create-menu" title="Create a helper or a style segment">Create &#9662;</button>
-            <div id="styles-create-dropdown" class="styles-tag-dropdown" style="display:none">
-              <button class="styles-tag-dropdown-item" id="btn-styles-create-helper"><span class="styles-tag-dropdown-name">Helper</span></button>
-              <button class="styles-tag-dropdown-item" id="btn-styles-create-segment"><span class="styles-tag-dropdown-name">Style segment</span></button>
-            </div>
-          </div>
-          <button id="btn-add-style" class="btn-blue" style="flex-shrink:0">&#43; Add Style</button>
         </span>
       </div>
-      <div class="settings-btn-wrap">
-        <button id="btn-settings" title="About JMT Studio">&#9881;</button>
-        <span id="settings-update-dot" class="settings-update-dot"></span>
+      <!-- [NOTE-020] At the end of the action row, after a divider; the labels shorten when the row runs out of room. -->
+      <div id="sf-header-adds" class="sf-header-adds" style="display:none">
+        <div class="ui-divider hdr-adds-divider"></div>
+        <button id="btn-sf-create-shared-tracks" class="btn-blue" style="display:none" title="Create a shared tracks folder. Maps to /tracks/ at the SD card root, the universal track location ProffieOS scans for all presets."><span class="lbl-full">&#43; Create Shared Tracks</span><span class="lbl-short">&#43; Tracks</span></button>
+        <button id="btn-sf-import-toolbar" class="btn-blue" style="display:none" title="Import a sound font into your library. Bulk-import many at once is offered inside."><span class="lbl-full">&#43; Import Sound Font</span><span class="lbl-short">&#43; Import</span></button>
       </div>
+      <div id="styles-header-adds" class="sf-header-adds" style="display:none">
+        <div class="ui-divider hdr-adds-divider"></div>
+        <div class="styles-tag-filter-wrap styles-create-wrap" style="flex-shrink:0">
+          <button class="btn-neutral" id="btn-styles-create-menu" title="Create a helper or a style segment">Create &#9662;</button>
+          <div id="styles-create-dropdown" class="styles-tag-dropdown" style="display:none">
+            <button class="styles-tag-dropdown-item" id="btn-styles-create-helper"><span class="styles-tag-dropdown-name">Helper</span></button>
+            <button class="styles-tag-dropdown-item" id="btn-styles-create-segment"><span class="styles-tag-dropdown-name">Style segment</span></button>
+          </div>
+        </div>
+        <button id="btn-add-style" class="btn-blue" style="flex-shrink:0" title="Add a style to the library"><span class="lbl-full">&#43; Add Style</span><span class="lbl-short">&#43; Add</span></button>
+      </div>
+    </div>
+    <!-- Pinned to the top line's right corner at every width, so it never moves when the toolbar
+         wraps. [NOTE-020] -->
+    <div class="settings-btn-wrap settings-btn-pinned">
+      <button id="btn-settings" title="About JMT Studio">&#9881;</button>
+      <span id="settings-update-dot" class="settings-update-dot"></span>
     </div>
   </div>
   <div class="meta-bar">
@@ -5547,11 +5597,15 @@
       </div>
       <div class="sf-content-column">
         <div class="sf-search-bar">
+          <!-- [NOTE-021] The row wraps by group, never one button at a time. -->
+          <span class="filter-group fg-search">
           <div class="sf-search-input-wrap">
             <input type="text" id="sf-search" class="sf-search-input" placeholder="Search sound fonts…" autocomplete="off" spellcheck="false">
             <span id="sf-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
           </div>
           <span class="sf-search-count" id="sf-search-count"></span>
+          </span>
+          <span class="filter-group">
           <div class="styles-tag-filter-wrap">
             <!-- Sort sits FIRST and apart from the filter chips: it changes the
                  ORDER of everything, the chips change WHICH things. The button
@@ -5564,7 +5618,9 @@
               <div id="sf-sort-dropdown-list"></div>
             </div>
           </div>
-          <div class="ui-divider"></div>
+          </span>
+          <span class="filter-group">
+          <div class="ui-divider fg-divider"></div>
           <div class="styles-tag-filter-wrap">
             <button id="btn-sf-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
               <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="sf-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
@@ -5589,6 +5645,8 @@
               <div id="sf-effects-dropdown-list"></div>
             </div>
           </div>
+          </span>
+          <span class="filter-group">
           <button id="btn-sf-needs-review-filter" class="styles-tag-filter-btn" title="Only fonts with something to confirm" style="display:none">
             Needs review<span id="sf-needs-review-count" class="styles-tag-filter-badge" style="display:none">0</span>
           </button>
@@ -5618,6 +5676,7 @@
                It sits beside the count because that is where you are looking when you
                want it, and a <button> may not nest another, so it is a sibling. -->
 
+          </span>
         </div>
         <div id="sf-active-filters" class="styles-active-filters" style="display:none"></div>
         <div class="sf-grid-scroll">
@@ -5657,6 +5716,17 @@
           <!-- DOM order has to match column order. These are explicitly placed in grid columns 2
                and 3, and grid auto-placement does not run backwards: with the size written first
                it took row 1 and shunted the legend onto a second row. -->
+          <div id="sf-backup-wrap" class="styles-tag-filter-wrap">
+            <button id="btn-sf-backup-menu" class="btn-neutral sf-common-import-btn" title="Library backup">Backup &#9650;</button>
+            <div id="sf-backup-dropdown" class="styles-tag-dropdown" style="display:none;min-width:130px">
+              <button id="btn-sf-export-backup" class="styles-tag-dropdown-item" title="Export your entire Sound Font library as a single backup file">
+                <span class="styles-tag-dropdown-name">&#8599; Export Backup</span>
+              </button>
+              <button id="btn-sf-import-backup" class="styles-tag-dropdown-item" title="Restore from a previously exported Sound Font library backup">
+                <span class="styles-tag-dropdown-name">&#8601; Import Backup</span>
+              </button>
+            </div>
+          </div>
           <span id="sf-legend-items"></span>
           <span id="sf-lib-size"></span>
         </div>
@@ -5737,11 +5807,15 @@
     </div>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;min-height:0;">
       <div class="styles-search-bar" id="styles-visual-bar">
+        <!-- [NOTE-021] The row wraps by group, never one button at a time. -->
+        <span class="filter-group fg-search">
         <span style="position:relative;flex:1;max-width:320px;display:flex;align-items:center;">
           <input type="text" id="styles-search" class="styles-search-input" placeholder="Search styles…" autocomplete="off" spellcheck="false" style="max-width:unset;width:100%;padding-right:22px;">
           <span id="styles-search-clear" class="vp-search-clear" style="display:none" title="Clear">&#x2715;</span>
         </span>
         <span id="styles-search-count" class="styles-search-count"></span>
+        </span>
+        <span class="filter-group">
         <!-- The switch names where it goes, by its search as in Code view's row: a mode, not an action,
              so plain rather than blue. [B-582] -->
         <button class="styles-tag-filter-btn styles-view-switch" id="btn-styles-view-code" title="Switch to Code view">&#x3C;/&#x3E; Code</button>
@@ -5755,7 +5829,9 @@
             <div id="styles-sort-dropdown-list"></div>
           </div>
         </div>
-        <div class="ui-divider"></div>
+        </span>
+        <span class="filter-group">
+        <div class="ui-divider fg-divider"></div>
         <div class="styles-tag-filter-wrap">
           <button id="btn-styles-tag-filter" class="styles-tag-filter-btn" title="Filter by tag">
             <span class="styles-tag-filter-icon">&#9662;</span> Tags<span id="styles-tag-filter-badge" class="styles-tag-filter-badge" style="display:none">0</span>
@@ -5806,6 +5882,8 @@
           </div>
         </div>
         <!-- [B-286] In use / Not in use, as on Sound Fonts: the inverse shows once either is on. -->
+        </span>
+        <span class="filter-group">
         <button id="btn-styles-in-use-filter" class="styles-tag-filter-btn" title="Only styles used by the open config" style="display:none">
           In use<span id="styles-in-use-count" class="styles-tag-filter-badge" style="display:none">0</span>
         </button>
@@ -5815,6 +5893,7 @@
         <button id="btn-styles-selected-filter" class="styles-tag-filter-btn" title="Only the selected styles" style="display:none">
           Selected<span id="styles-selected-count" class="styles-tag-filter-badge">0</span>
         </button>
+        </span>
       </div>
       <div id="styles-active-filters" class="styles-active-filters" style="display:none"></div>
       <div class="styles-visual-main">
@@ -7894,6 +7973,21 @@
       <button class="modal-btn-primary" id="sf-dupfont-open">Open existing</button>
       <button class="modal-btn-cancel"  id="sf-dupfont-import">Import anyway under a new name</button>
       <button class="modal-btn-cancel"  id="sf-dupfont-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- [BUG-030] A single folder nearly identical to a font you have, whose source holds only that font: the
+     same choice the duplicate-source dialog gives an identical folder. -->
+<div class="modal-overlay" id="modal-sf-version-offer">
+  <div class="modal">
+    <h2>A version of a font you have</h2>
+    <p id="sf-verof-body">…</p>
+    <p>What would you like to do?</p>
+    <div class="sf-dup-btn-stack">
+      <button class="modal-btn-primary" id="sf-verof-add">Add as a version</button>
+      <button class="modal-btn-cancel"  id="sf-verof-new">Import as a new source</button>
+      <button class="modal-btn-cancel"  id="sf-verof-cancel">Cancel</button>
     </div>
   </div>
 </div>
@@ -18598,7 +18692,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // [B-643] Unticked when nothing on the card is new to the library (fullyOwned includes a
         // copy whose extra files are all in the library); ticked when anything is, so nothing on
         // the card is lost. The same flag quick import reads, so the two agree.
-        if (m.fullyOwned && row.checkbox && row.checkbox.checked
+        // [BUG-030] Only an identical copy: a curated one is a version and stays ticked, to land beside it.
+        if (m.identical && row.checkbox && row.checkbox.checked
             && row.el.dataset.touched !== 'true' && !row.el.classList.contains('g-corrupt')) {
           row.checkbox.checked = false;
           row.el.classList.add('excluded');
@@ -22747,7 +22842,7 @@ function _switchStylesView(mode) {
   // Undo and Redo in both: Monaco's in Code view, a step per action in Visual.
   document.getElementById('btn-styles-undo').style.display           = '';
   document.getElementById('btn-styles-redo').style.display           = '';
-  document.getElementById('divider-undoredo').style.display  = '';
+  _fitUndoRedoDivider();
   // Code view's edits are one Visual step, so an undo there never quietly drops them.
   if (showCode) _stylesCodeViewBase = _stylesEditorInstance?.getValue() ?? null;
   else if (_stylesCodeViewBase !== null && _stylesEditorInstance && _stylesEditorInstance.getValue() !== _stylesCodeViewBase) {
@@ -27940,6 +28035,22 @@ function _syncStylesBulkBar() {
   show('divider-styles-bulk', visual && (n > 0 || cards.length > 0));
   const lib = document.getElementById('styles-library-btns');
   if (lib) lib.style.display = n > 0 ? 'none' : 'contents';
+  _fitUndoRedoDivider();
+}
+// The divider after Undo / Redo shows only while something visible follows it.
+function _fitUndoRedoDivider() {
+  const d = document.getElementById('divider-undoredo');
+  if (!d) return;
+  d.style.display = '';
+  const shown = (el) => {
+    const disp = getComputedStyle(el).display;
+    if (disp === 'none') return false;
+    if (disp === 'contents') return [...el.children].some(shown);
+    return true;
+  };
+  let el = d.nextElementSibling;
+  while (el && !shown(el)) el = el.nextElementSibling;
+  if (!el) d.style.display = 'none';
 }
 // The selected styles as they are in the library now, in file order.
 function _stylesSelectedEntries() {
@@ -29781,7 +29892,10 @@ async function switchTab(name) {
   document.getElementById('tab-btns-config').style.display     = name === 'config'     ? 'flex' : 'none';
   document.getElementById('tab-btns-versions').style.display   = name === 'versions'   ? 'flex' : 'none';
   document.getElementById('tab-btns-styles').style.display     = name === 'styles'     ? 'flex' : 'none';
+  { const _sa = document.getElementById('styles-header-adds'); if (_sa) _sa.style.display = name === 'styles' ? 'flex' : 'none'; }
   document.getElementById('tab-btns-soundfonts').style.display = name === 'soundfonts' ? 'flex' : 'none';
+  { const _adds = document.getElementById('sf-header-adds'); if (_adds) _adds.style.display = name === 'soundfonts' ? 'flex' : 'none'; }
+  window._fitHeaderLines?.();
 
   const showConfig = name === 'config';
   _configOnlyEls.forEach(id => {
@@ -31703,6 +31817,143 @@ require(['vs/editor/editor.main'], function () {
         }
         itemsEl.innerHTML = items.join('');
       };
+      // [NOTE-019] One line while the key and the size fit side by side; otherwise the size drops to its
+      // own line under the centred key.
+      (() => {
+        const fit = () => {
+          const bar = document.getElementById('sf-legend');
+          const keys = document.getElementById('sf-legend-items');
+          const size = document.getElementById('sf-lib-size');
+          if (!bar || !keys || !size) return;
+          const cs = getComputedStyle(bar);
+          const room = bar.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+          // The key's natural width, item by item: its own box shrinks and wraps when squeezed.
+          const items = [...keys.children];
+          const keyW = items.reduce((w, el) => w + el.getBoundingClientRect().width, 0) + Math.max(0, items.length - 1) * 16;
+          const bk = document.getElementById('sf-backup-wrap');
+          const bkW = bk ? bk.getBoundingClientRect().width : 0;
+          const need = bkW + keyW + size.scrollWidth + 32;
+          bar.classList.toggle('sf-legend-stacked', need > room);
+        };
+        const start = () => {
+          const bar = document.getElementById('sf-legend');
+          if (!bar || bar._sfFitWatched) return;
+          bar._sfFitWatched = true;
+          new ResizeObserver(fit).observe(bar);
+          new MutationObserver(fit).observe(bar, { childList: true, subtree: true, characterData: true });
+          fit();
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+      })();
+      // [NOTE-020] The header's lines. Everything on the tab line when it fits; otherwise the action row,
+      // adds included, takes the line below as a whole (right-aligned), and its labels shorten only when
+      // that line runs out too.
+      (() => {
+        const widthOf = (el) => (el && getComputedStyle(el).display !== 'none') ? el.getBoundingClientRect().width : 0;
+        const fit = () => {
+          const hdr = document.querySelector('.header-top');
+          const adds = [...(hdr ? hdr.querySelectorAll('.sf-header-adds') : [])]
+            .find(el => getComputedStyle(el).display !== 'none') || null;
+          const acts = hdr && hdr.querySelector(':scope > .hdr-actions');
+          if (!hdr || !acts) return;
+          hdr.classList.remove('hdr-actions-own-line', 'sf-adds-compact', 'sf-adds-compact-1');
+          // The actions' labels, kept whole until the line runs out, then shortened one step at a time,
+          // left to right, each step kept while the next is added: Config Manager's words and Save arrows,
+          // then the long words, then each count, then the adds; Clear selection's count goes last of all. Stops once the row fits.
+          // A label the app rewrote since is taken as the new whole one.
+          const actBtns = [...acts.querySelectorAll('.tab-btns button')];
+          const WORDS = [[/Show Changes/, 'Changes'], [/Compare File/, 'Compare'], [/Favorites/, 'Favs.'],
+            [/^↓\s*Save As$/, 'Save As'], [/^↓\s*Save$/, 'Save'],
+            [/Clear selection/, 'Clear sel.'], [/Segments/, 'Sgmnts'], [/Duplicate/, 'Dup.']];
+          let steps = WORDS.map(([re, w]) => ({ re, w }));
+          const label = (lvl) => actBtns.forEach((b) => {
+            if (b.dataset.shownHtml !== b.innerHTML) b.dataset.fullHtml = b.innerHTML;
+            let h = b.dataset.fullHtml;
+            for (const st of steps.slice(0, lvl)) if (!st.btn || st.btn === b) h = h.replace(st.re, st.w);
+            if (b.innerHTML !== h) b.innerHTML = h;
+            b.dataset.shownHtml = h;
+            // A count taken off the label goes on the end of the tooltip.
+            if (b.dataset.shownTitle !== b.title) b.dataset.fullTitle = b.title;
+            const cnt = (b.dataset.fullHtml.match(/\((\d+)\)/) || [])[1];
+            const t = cnt && !/\(\d+\)/.test(h) ? `${b.dataset.fullTitle} (${cnt})`.trim() : b.dataset.fullTitle;
+            if (b.title !== t) b.title = t;
+            b.dataset.shownTitle = t;
+          });
+          label(0);
+          steps = steps.concat(actBtns
+            .filter(b => b.getClientRects().length && /\(\d+\)/.test(b.dataset.fullHtml) && !/Clear selection/.test(b.dataset.fullHtml))
+            .map(b => ({ btn: b, re: /\s*\(\d+\)/, w: '' })));
+          const lastSteps = actBtns.filter(b => /Clear selection/.test(b.dataset.fullHtml))
+            .map(b => ({ btn: b, re: /\s*\(\d+\)/, w: '' }));
+          const cs = getComputedStyle(hdr);
+          const room = hdr.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+          const gap = parseFloat(cs.columnGap || cs.gap || 12) || 12;
+          const lead = [...hdr.children].filter(el => el !== acts && !el.classList.contains('sf-header-adds')
+            && getComputedStyle(el).position !== 'absolute' && getComputedStyle(el).display !== 'none');
+          const leadW = lead.reduce((w, el) => w + el.getBoundingClientRect().width + gap, 0);
+          // The actions' natural width: their visible buttons side by side.
+          const btns = [...acts.querySelectorAll('.tab-btns')].filter(el => getComputedStyle(el).display !== 'none');
+          // The adds close the row after a divider, which goes when no action shows before it.
+          const actsGap = parseFloat(getComputedStyle(acts).columnGap || 8) || 8;
+          const addsDiv = adds && adds.querySelector('.hdr-adds-divider');
+          const btnsW = btns.reduce((w, el) => w + el.scrollWidth, 0);
+          if (addsDiv) { const d = btnsW > 0 ? '' : 'none'; if (addsDiv.style.display !== d) addsDiv.style.display = d; }
+          const addsTail = () => { const w = widthOf(adds); return w ? w + (btnsW > 0 ? actsGap : 0) : 0; };
+          const actsW = btnsW + addsTail();
+          if (leadW + actsW <= room) { mo && mo.takeRecords(); return; }
+          hdr.classList.add('hdr-actions-own-line');
+          const lineRoom = room + 36;   // the own line reaches the normal edge (see the CSS)
+          // Measured from the buttons themselves: a right-aligned row that overflows does so to the left,
+          // which its own scrollWidth does not count.
+          const natural = () => btns.reduce((w, el) => {
+            const flat = (node) => [...node.children].flatMap((k) => {
+              const d = getComputedStyle(k).display;
+              if (d === 'none') return [];
+              return (d === 'contents' || k.classList.contains('sf-toolbar-group')) ? flat(k) : [k];
+            });
+            const kids = flat(el);
+            const g = parseFloat(getComputedStyle(el).columnGap || 6) || 6;
+            return w + kids.reduce((a, k) => a + k.getBoundingClientRect().width + g, 0);
+          }, 0);
+          for (let lvl = 1; lvl <= steps.length && natural() + addsTail() > lineRoom; lvl++) label(lvl);
+          // Then the adds, one at a time, the last button (Import, Add Style) last.
+          if (natural() + addsTail() > lineRoom) hdr.classList.add('sf-adds-compact-1');
+          if (natural() + addsTail() > lineRoom) hdr.classList.add('sf-adds-compact');
+          if (natural() + addsTail() > lineRoom && lastSteps.length) { steps = steps.concat(lastSteps); label(steps.length); }
+          mo && mo.takeRecords();
+        };
+        let mo = null;
+        window._fitHeaderLines = fit;
+        // [NOTE-021] Filter-row dividers: shown between groups on one line, hidden on a group that wrapped.
+        const fitDividers = (bar) => {
+          const groups = [...bar.querySelectorAll(':scope > .filter-group')];
+          groups.forEach((g) => g.querySelector(':scope > .fg-divider')?.classList.remove('fg-divider-off'));
+          groups.forEach((g, i) => {
+            const d = g.querySelector(':scope > .fg-divider');
+            if (!d || i === 0) return;
+            const prev = groups.slice(0, i).reverse().find(p => p.getBoundingClientRect().width > 0);
+            // Wrapped means below the previous group entirely; groups of different heights are centred, so their tops differ on one line.
+            if (prev && g.getBoundingClientRect().top >= prev.getBoundingClientRect().bottom - 2) d.classList.add('fg-divider-off');
+          });
+        };
+        const watchBars = () => document.querySelectorAll('.sf-search-bar, #styles-visual-bar').forEach((bar) => {
+          if (bar._fgWatched) return;
+          bar._fgWatched = true;
+          new ResizeObserver(() => fitDividers(bar)).observe(bar);
+          fitDividers(bar);
+        });
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchBars); else watchBars();
+        const start = () => {
+          const hdr = document.querySelector('.header-top');
+          if (!hdr || hdr._fitWatched) return;
+          hdr._fitWatched = true;
+          new ResizeObserver(() => fit()).observe(hdr);
+          mo = new MutationObserver(() => fit());
+          mo.observe(hdr, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['style'] });
+          fit();
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+      })();
       // ── Common folder sidecar ────────────────────────────
       // State:
       //   _sfCommons              — cached list from backend
@@ -36063,7 +36314,9 @@ require(['vs/editor/editor.main'], function () {
         if (!cands.length) return null;
         if (!matchRes || !matchRes.ok || !Array.isArray(matchRes.results)) return null;
         if (matchRes.results.length !== cands.length) return null;
-        if (!matchRes.results.every(x => x && x.fullyOwned)) return null;
+        // A copy whose extra files are all elsewhere in the library, or one with sounds taken out, has every
+        // sound but is not the same font: one font alone is offered as a version instead. [BUG-030]
+        if (!matchRes.results.every(x => x && x.fullyOwned && (x.identical || matchRes.results.length > 1) && !x.ownedElsewhere)) return null;
         return matchRes.results;
       }
 
@@ -36076,6 +36329,65 @@ require(['vs/editor/editor.main'], function () {
       // download of the same font, or the same one renamed. Saying only "you
       // have this" invites the reply "no I don't, mine is called something
       // else". So: what arrived, and what it matched.
+      // [BUG-030] A near match from one folder of one font, to a font whose source holds only it, is
+      // offered as a version of that font, as an identical folder is on the duplicate-source dialog.
+      // Null when it does not apply: a zip, several fonts, an owned copy (the dialog below), a bundle.
+      async function _sfVersionOfferFor(matchRes, sourcePath) {
+        const cands = (_sfImport && _sfImport.candidates) || [];
+        if (cands.length !== 1 || /\.zip$/i.test(String(sourcePath || ''))) return null;
+        if (!matchRes || !matchRes.ok || !Array.isArray(matchRes.results) || matchRes.results.length !== 1) return null;
+        const x = matchRes.results[0];
+        if (!x || x.identical || !x.matchName || (x.verdict !== 'have_it' && x.verdict !== 'version')) return null;
+        const entry = (_sfAllEntries || []).find((e) => e && e.name === x.matchName);
+        const srcUuid = entry && entry.meta && entry.meta.sourceUuid;
+        if (!srcUuid) return null;
+        if ((_sfAllEntries || []).filter((e) => e && e.meta && e.meta.sourceUuid === srcUuid).length !== 1) return null;
+        try {
+          const ins = await window.electronAPI.inspectFontFolder({ folderPath: sourcePath });
+          if (!ins || !ins.ok || ins.verdict === 'contains' || ins.verdict === 'not-a-font') return null;
+        } catch { return null; }
+        return { name: String(x.name || cands[0].name || ''), matchName: x.matchName, label: x.label || '', srcUuid };
+      }
+      // Resolves true to carry on to the review (Import as a new source), false when the import is over.
+      function _sfShowVersionOffer(vo, sourcePath) {
+        return new Promise((resolve) => {
+          const modal = document.getElementById('modal-sf-version-offer');
+          const body = document.getElementById('sf-verof-body');
+          const addBtn = document.getElementById('sf-verof-add');
+          const newBtn = document.getElementById('sf-verof-new');
+          const cancelBtn = document.getElementById('sf-verof-cancel');
+          if (!modal || !addBtn || !newBtn || !cancelBtn) { resolve(true); return; }
+          const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          if (body) body.innerHTML = `<strong>${esc(vo.name)}</strong>: ${esc(String(vo.label).replace(/\.\s*$/, ''))}.`;
+          addBtn.textContent = `Add as a version of ${vo.matchName}`;
+          const importModal = _sfImportEls.modal;
+          const importWasActive = !!importModal?.classList.contains('active');
+          if (importWasActive) importModal.classList.remove('active');
+          modal.classList.add('active');
+          const cleanup = () => {
+            modal.classList.remove('active');
+            if (importWasActive) importModal.classList.add('active');
+            addBtn.removeEventListener('click', onAdd);
+            newBtn.removeEventListener('click', onNew);
+            cancelBtn.removeEventListener('click', onCancel);
+          };
+          const onAdd = async () => {
+            cleanup();
+            window._sfReturnToSdBrowser = false;
+            _sfCloseImport();   // discards the source this import stored
+            await window.refreshSoundFontsView();
+            await _sfOpenSourceDetail(vo.srcUuid);
+            if (window._sfAddFontFromFolder) await window._sfAddFontFromFolder(vo.matchName, sourcePath);
+            resolve(false);
+          };
+          const onNew = () => { cleanup(); resolve(true); };
+          const onCancel = () => { cleanup(); _sfCloseImport(); resolve(false); };
+          addBtn.addEventListener('click', onAdd);
+          newBtn.addEventListener('click', onNew);
+          cancelBtn.addEventListener('click', onCancel);
+        });
+      }
+
       function _sfShowDuplicateFont(matched) {
         return new Promise((resolve) => {
           const els = _sfDupFontEls;
@@ -37870,6 +38182,14 @@ require(['vs/editor/editor.main'], function () {
           const goAnyway = await _sfShowDuplicateFont(_allOwned);
           if (!goAnyway) return;                       // closed by the dialog
           if (!_sfImport || _sfImport.runId !== myRun) return;
+        } else if (!forceNewSource) {
+          const _vo = await _sfVersionOfferFor(_preMatch, sourcePath);
+          if (!_sfImport || _sfImport.runId !== myRun) return;
+          if (_vo) {
+            const goOn = await _sfShowVersionOffer(_vo, sourcePath);
+            if (!goOn) return;                         // added as a version, or cancelled
+            if (!_sfImport || _sfImport.runId !== myRun) return;
+          }
         }
         // A THROW IN THE REVIEW RENDER MUST NOT LOOK LIKE A HANG (2026-09-10).
         // The progress modal is still up at this point, and its elapsed ticker has
@@ -38777,7 +39097,7 @@ require(['vs/editor/editor.main'], function () {
               if (check && hit.tip) check.title = hit.tip;
               // A RE-IMPORT KEEPS THEM TICKED: the user chose "Re-import as a new source" on the
               // dialog that named this match, so unticking it again asks the same question twice. [B-643]
-              if (hit.fullyOwned && !_sfImport.reimport && row.dataset.already !== '1'
+              if (hit.identical && !_sfImport.reimport && row.dataset.already !== '1'
                   && !(_sidecarImported && _sidecarImported.has(String(c.path || '')))
                   && row.dataset.touched !== 'true' && row.dataset.edited !== 'true') {
                 if (check && check.checked) {
@@ -44474,7 +44794,10 @@ require(['vs/editor/editor.main'], function () {
         // numbering the raw name would walk collisions against names the library
         // cannot hold - and the dialog below would state a name the app then
         // does not use.
-        const newName = _sfSuggestCopyEntryName(_sfSanitizeName(r.name) || 'font');
+        // The folder's own name when it is free; numbered only when it clashes. [BUG-030]
+        const _base = _sfSanitizeName(r.name) || 'font';
+        const newName = (_sfAllEntries || []).some(e => String(e.name).toLowerCase() === _base.toLowerCase())
+          ? _sfSuggestCopyEntryName(_base) : _base;
         // THERE IS NO CONFIRM HERE, AND ITS REMOVAL IS THE POINT. [B-443, 2026-10-04]
         //
         // A dialog titled "Add this folder as a version" used to sit here asking Add font /
@@ -44648,8 +44971,13 @@ require(['vs/editor/editor.main'], function () {
         // `_sfFinishEntryDuplicate` refreshes and then opens the new row's NAME FOR EDITING. A
         // modal opening on top of that would take the focus straight back off the field the app
         // just invited the user to type in - so the summary is read first, and dismissing it
-        // lands them on an editable name. The folder's name is a starting point, not a decision.
-        await _sfFinishEntryDuplicate(res.name || newName);
+        // lands them on an editable name. Opened for renaming only when it had to be numbered; a font that
+        // kept its folder's name just shows. [BUG-030]
+        if ((res.name || newName) !== _base) await _sfFinishEntryDuplicate(res.name || newName);
+        else {
+          try { await window.refreshSoundFontsView(); } catch {}
+          if (_sfSourceOriginalUuid) await _sfRenderSourceEntries(_sfSourceOriginalUuid);
+        }
       };
       window._sfAddFontFromFolder = (...a) => _sfAddFontFromFolder(...a);   // [B-643] the re-import door
       _sfSourceDetailEls.addMoreBtn?.addEventListener('click', async () => {
@@ -56028,6 +56356,13 @@ require(['vs/editor/editor.main'], function () {
         if (!arr.presets.length) {
           await _insertInto(arr, activeIdx, result.bladeCount || 1);
           setTimeout(() => _sfPatchFreshPresetFont(activeIdx, 0, fontName), 80);
+          _seedRest();
+          return;
+        }
+        // A placeholder preset (no font, no track, Black) is filled rather than added after. [BUG-026]
+        const _ph = typeof window._placeholderPresetIndex === 'function' ? window._placeholderPresetIndex(arr) : -1;
+        if (_ph >= 0) {
+          await _sfPatchFreshPresetFont(activeIdx, _ph, fontName);
           _seedRest();
           return;
         }
@@ -68914,10 +69249,19 @@ function _getFreshFieldRange(fieldName) {
       const to = _matchColorOf(tgtB1);
       if (!from || !to || _sameRgb(from, to)) return t;
       const one = (presetParser.extractStyleSlots(t) || [])[0];
-      if (!one || one.colorArg == null) return t;
-      const np = window.proffieArgs?.rematchColors(one.colorArg, from, to) ?? null;
-      const at = np === null ? -1 : t.lastIndexOf(`"${one.colorArg}"`);
-      return at < 0 ? t : t.slice(0, at) + `"${np}"` + t.slice(at + one.colorArg.length + 2);
+      if (!one) return t;
+      if (one.colorArg != null) {
+        const np = window.proffieArgs?.rematchColors(one.colorArg, from, to) ?? null;
+        const at = np === null ? -1 : t.lastIndexOf(`"${one.colorArg}"`);
+        if (at >= 0) return t.slice(0, at) + `"${np}"` + t.slice(at + one.colorArg.length + 2);
+      }
+      // A base colour left at its default that equals the source's B1 is matched too (BUG-025):
+      // it arrives written as the target's B1.
+      if (!_takesBaseColor(one.expr)) return t;
+      const cur = window.proffieArgs?.readRegistryArg('BASE_COLOR_ARG', one.colorArg || '');
+      if (cur && !cur.isDefault) return t;
+      if (!_sameRgb(_matchColorOf(one) || [], from)) return t;
+      return _withColorArg(t, one, window.proffieArgs.writeRegistryArg('BASE_COLOR_ARG', to, one.colorArg || ''));
     }
 
     function _copyWrapperFor(srcText, srcBladeExpr, srcB1Expr, tgtB1Expr) {
@@ -69885,11 +70229,32 @@ function _getFreshFieldRange(fieldName) {
     // pattern (_newPresetSlotTexts). Replace: the style onto the chosen blade as copy-to writes it, so
     // the preset keeps its colour and its wrappers and matched colours follow.
     // `styleName` may be a list: one preset each, in one edit.
+    // A placeholder preset: no font folder of its own (a shared folder after the ';' is what + seeds),
+    // no track, every blade Black or empty. Add to config fills the first one in the bank instead of
+    // adding after it. [BUG-026]
+    function _isPlaceholderPreset(p) {
+      if (!p || p.disabled) return false;
+      if (String(p.font || '').split(';')[0].trim() || String(p.track || '').trim()) return false;
+      return (p.styles || []).every(s => !s || !s.startLine || !String(s.expr || '').trim()
+        || (!s.colorArg && presetParser.sameExpr(s.expr, 'Black')));
+    }
+    window._placeholderPresetIndex = (arr) => (arr?.presets || []).findIndex(_isPlaceholderPreset);
+
     window._addPresetWithStyle = async (arrayIdx, styleName) => {
       const names = (Array.isArray(styleName) ? styleName : [styleName]).filter(Boolean);
       if (!editor || !names.length) return;
       const r = presetParser.parsePresets(editor.getValue());
       const arr = r.arrays[arrayIdx];
+      const ph = arr ? window._placeholderPresetIndex(arr) : -1;
+      if (ph >= 0) {
+        window._replaceBladeWithStyle(arrayIdx, ph, 1, names[0]);
+        names.shift();
+        if (!names.length) return;
+        const r2 = presetParser.parsePresets(editor.getValue());
+        await _addPreset(arrayIdx, _jmtAppendPresetIndex(editor.getValue(), r2.arrays[arrayIdx].presets.length),
+                         names.map(_jmtStyleSlotExpr), { quiet: true });
+        return;
+      }
       await _addPreset(arrayIdx, arr ? _jmtAppendPresetIndex(editor.getValue(), arr.presets.length) : 0,
                        names.map(_jmtStyleSlotExpr), { quiet: true });
     };
