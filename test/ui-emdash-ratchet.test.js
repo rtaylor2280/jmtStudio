@@ -96,6 +96,21 @@ ok(`em dashes in user-facing strings: ${all.length} (baseline ${BASELINE})`,
    + ` app's chrome is public surface now. Newest first is usually the culprit:\n       `
    + all.slice(BASELINE).join('\n       '));
 
+// The entity forms paint the same dash and slipped past the literal scan: seven of them on 2026-11-18,
+// in markup and template strings alike. None allowed.
+const ENT = /&mdash;|&#8212;|&#x2014;/i;
+const entHits = [];
+for (const rel of FILES) {
+  const abs = path.join(ROOT, rel);
+  if (!fs.existsSync(abs)) continue;
+  fs.readFileSync(abs, 'utf8').split('\n').forEach((line, i) => {
+    const t = line.trimStart();
+    if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
+    if (ENT.test(line)) entHits.push(`${rel}:${i + 1}: ${t.slice(0, 90)}`);
+  });
+}
+ok(`em dash entities in UI text: ${entHits.length}`, entHits.length === 0, entHits.join('\n       '));
+
 if (all.length < BASELINE) {
   console.log(`  note  down to ${all.length} - lower BASELINE to match, so the ratchet keeps its grip`);
 }

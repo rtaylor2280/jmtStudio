@@ -21,10 +21,13 @@ if ((process.argv || []).includes('--jmt-download-wait')) {
     if (!bar) {
       bar = document.createElement('div');
       bar.setAttribute('role', 'status');
+      // In the app's colours: light mode when Studio passed --jmt-light.
+      const light = (process.argv || []).includes('--jmt-light');
       bar.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;'
-        + 'padding:10px 14px;border-radius:6px;background:#1f2a36;color:#ffffff;'
-        + 'font:14px/1.4 "Segoe UI",system-ui,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.4);'
-        + 'pointer-events:none';
+        + 'padding:10px 14px;border-radius:6px;'
+        + (light ? 'background:#ffffff;color:#333333;border:1px solid #b0b0b0;box-shadow:0 2px 10px rgba(0,0,0,.15);'
+                 : 'background:#1f2a36;color:#ffffff;box-shadow:0 2px 10px rgba(0,0,0,.4);')
+        + 'font:14px/1.4 "Segoe UI",system-ui,sans-serif;pointer-events:none';
       (document.body || document.documentElement).appendChild(bar);
     }
     bar.textContent = text;

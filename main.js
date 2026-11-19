@@ -5969,6 +5969,9 @@ const DROPBOX_DOWNLOAD_ONLY = `(() => {
 const _findBars = new Map();   // find bar webContents id -> { bar, page }
 function _attachFindBar(page) {
   let bar = null;
+  // The bar follows the app's light or dark mode, read when the browser opens.
+  let light = false;
+  _appBackground().then((bg) => { light = bg === '#f2f2f2'; }).catch(() => {});
   const W = 480, H = 40;
   const place = () => {
     if (!bar || bar.isDestroyed() || page.isDestroyed()) return;
@@ -5980,12 +5983,12 @@ function _attachFindBar(page) {
     bar = new BrowserWindow({
       parent: page, frame: false, resizable: false, movable: false, minimizable: false,
       maximizable: false, skipTaskbar: true, show: false, width: W, height: H,
-      backgroundColor: '#222222', ...WINDOW_ICON,
+      backgroundColor: light ? '#ffffff' : '#222222', ...WINDOW_ICON,
       webPreferences: { preload: path.join(__dirname, 'findBarPreload.js'), sandbox: true, contextIsolation: true },
     });
     const id = bar.webContents.id;
     _findBars.set(id, { bar, page });
-    bar.loadFile(path.join(__dirname, 'renderer', 'find-bar.html'));
+    bar.loadFile(path.join(__dirname, 'renderer', 'find-bar.html'), light ? { query: { theme: 'light' } } : {});
     bar.once('ready-to-show', () => {
       place(); bar.show(); bar.focus();
       const ctx = _findBarContext.get(page.webContents.id);
@@ -6078,6 +6081,9 @@ async function _pdfAllowed(page) {
 function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', onSave, onUndo = null, images = null, linkPerFont = null, nameOneFont = null }) {
   const { Menu, clipboard } = require('electron');
   const shown = new Map();   // row key -> { label, hint, value }, most recently saved first
+  // The strip follows the app's light or dark mode, read when the browser opens.
+  let light = false;
+  _appBackground().then((bg) => { light = bg === '#f2f2f2'; }).catch(() => {});
   let strip = null;
   let stripReady = false;
   let proofPath = null;
@@ -6099,17 +6105,19 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
   const place = () => {
     if (!strip || strip.isDestroyed() || page.isDestroyed()) return;
     const b = page.getContentBounds();
-    const h = 18 + Math.min(shown.size, 4) * 34;   // padding and border, four rows, then the strip scrolls
+    // Padding and border, four rows, then the strip scrolls; one row's height even when empty, so a message
+    // shown with nothing saved can be read.
+    const h = 18 + Math.min(Math.max(shown.size, 1), 4) * 34;
     strip.setBounds({ x: b.x + 8, y: b.y + b.height - h - 8, width: Math.max(200, b.width - 16), height: h });
   };
   const show = (toast) => {
     if (page.isDestroyed()) return;
-    const push = () => { place(); strip.showInactive(); strip.webContents.send('linkpicks:update', { rows: rows(), toast }); };
+    const push = () => { place(); strip.showInactive(); strip.webContents.send('linkpicks:update', { rows: rows(), toast, light }); };
     if (strip && !strip.isDestroyed()) { if (stripReady) push(); return; }
     strip = new BrowserWindow({
       parent: page, frame: false, resizable: false, movable: false, minimizable: false,
       maximizable: false, skipTaskbar: true, show: false, focusable: false, width: 400, height: 48,
-      backgroundColor: '#222222', ...WINDOW_ICON,
+      backgroundColor: light ? '#ffffff' : '#222222', ...WINDOW_ICON,
       webPreferences: { preload: path.join(__dirname, 'linkPicksPreload.js'), sandbox: true, contextIsolation: true },
     });
     strip.loadFile(path.join(__dirname, 'renderer', 'link-picks.html'));
@@ -6157,8 +6165,11 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       save('proof', 'Proof of purchase', { filePath, fileName }, fileName, 'Saved as proof of purchase', 'Your receipt, kept with the source');
     } catch (e) {
       dropPending();
-      if (!shown.size) { try { strip.hide(); } catch {} }
+      console.error('[proof pdf] save failed:', e);
       show(`Could not save the page as PDF: ${String(e && e.message || e)}`);
+      // With nothing saved the strip is only there to carry the message: it goes once the message has
+      // been read, never left as an empty bar.
+      if (!shown.size) setTimeout(() => { if (!shown.size) { try { strip.hide(); } catch {} } }, 6000);
     }
   };
   page.webContents.on('context-menu', async (_e, params) => {
@@ -6574,7 +6585,7 @@ ipcMain.handle('linkImport:browser', async (event, { url, autoHidden, title, sav
       // The import window waits on a download, so its pages show a bar between a Download click
       // and the download starting. [BUG-029]
       webPreferences: { partition: 'persist:jmt-linkimport', sandbox: true, preload: path.join(__dirname, 'browserPreload.js'),
-        additionalArguments: ['--jmt-download-wait'] },
+        additionalArguments: ['--jmt-download-wait', ...(backgroundColor === '#f2f2f2' ? ['--jmt-light'] : [])] },
     });
     _keepWithStudio(bw);
     _attachFindBar(bw);

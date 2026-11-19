@@ -8,13 +8,16 @@
   /* The find bar docked to the in-app browser window. Colours are the app's dark tokens. */
   :root {
     --jmt-blue: #025192; --c-bg-card: #222222; --c-border-heavy: #3a3a3a;
-    --c-text: #cccccc; --c-text-muted: #888888; --c-bad: #e5534b;
+    --c-text: #cccccc; --c-text-muted: #888888; --c-bad: #e5534b; --c-input-bg: #111111;
   }
   html, body { margin: 0; height: 100%; background: var(--c-bg-card); color: var(--c-text);
     font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
   body { display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box;
     border: 1px solid var(--c-border-heavy); border-radius: 6px; }
-  input { flex: 1; min-width: 0; background: #111111; color: var(--c-text); border: 1px solid var(--c-border-heavy);
+  /* The app in light mode (index.html's light-mode tokens). */
+  :root.light { --c-bg-card: #ffffff; --c-border-heavy: #b0b0b0; --c-text: #333333; --c-text-muted: #777777;
+    --c-input-bg: #fafafa; }
+  input { flex: 1; min-width: 0; background: var(--c-input-bg); color: var(--c-text); border: 1px solid var(--c-border-heavy);
     border-radius: 4px; padding: 4px 6px; font: inherit; outline: none; }
   input:focus { border-color: var(--jmt-blue); }
   input.none { border-color: var(--c-bad); }
@@ -34,6 +37,7 @@
   <button id="thread" hidden title="Search every post in this thread with the forum's own search">Whole thread</button>
   <button id="close" title="Close (Esc)">&#10005;</button>
 <script>
+  if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');
   const q = document.getElementById('q');
   const count = document.getElementById('count');
   // `fresh` starts a new search (typing); without it the search moves to the next or previous match.

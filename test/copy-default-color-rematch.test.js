@@ -59,7 +59,7 @@ const colourOf = (text) => {
 };
 const eq = (a, b) => !!a && !!b && a.every((v, i) => (v || 0) === (b[i] || 0));
 
-// His case: Talzin (B1 green) B3 AccentStyle at its default green, copied to Kannan (B1 blue).
+// The case: Talzin (B1 green) B3 AccentStyle at its default green, copied to Kannan (B1 blue).
 const src = 'StylePtr<AccentStyle>()';
 const out = sandbox._copyTextFor(src, 'AccentStyle', slot('GreenStyle'), slot('BlueStyle'), 3);
 check('a default colour equal to the source B1 arrives as the target B1', eq(colourOf(out), BLUE), out);

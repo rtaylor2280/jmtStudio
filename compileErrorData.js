@@ -5,8 +5,8 @@
 
 module.exports = {
   "schema": 1,
-  "version": 3,
-  "updated": "2026-11-05",
+  "version": 4,
+  "updated": "2026-11-18",
   "signatures": [
     {
       "id": "unquoted-preset-name",

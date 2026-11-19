@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DataRail, problemWith, patternIsSafe, DATASET } = require('../dataRail');
+const { DataRail, problemWith, patternIsSafe, DATASET, RELEASE_BASE } = require('../dataRail');
 const matrix = require('../compileErrorMatrix');
 const bundled = require('../compileErrorData');
 
@@ -96,7 +96,17 @@ const site = (data, entry = {}) => {
     fs.writeFileSync(again.file, 'not json');
     const broken = new DataRail({ ...first.rail.opts });
     broken.loadKept();
-    ok('a damaged kept copy falls back to the shipped data', broken.status().version === bundled.version);
+    ok('a damaged kept copy falls back to the shipped data', broken.status().updated === bundled.updated);
+  }
+  {
+    const files = site(newer());
+    const { rail } = rig(files);
+    rail.opts.catalogue = { current: { version: RELEASE_BASE - bundled.version, updated: '2026-01-01' }, check: async () => 'current' };
+    ok('the shipped data reads 1.0', rail.status().version === '1.0', rail.status().version);
+    await rail.check();
+    ok('one dataset moving up by one reads 1.1', rail.status().version === '1.1', rail.status().version);
+    rail.opts.catalogue.current.version++;
+    ok('the other moving up too reads 1.2', rail.status().version === '1.2', rail.status().version);
   }
 
   const original = matrix.SIGNATURES.length;

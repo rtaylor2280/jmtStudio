@@ -20,6 +20,9 @@ const MAX_PATTERN = 300;
 const MAX_SIGNATURES = 2000;
 const MAX_TEXT = 1000;
 const PATTERN_BUDGET_MS = 50;
+// About shows SCHEMA.n, where n is the dataset versions added together less this base, so the data 1.8
+// shipped with (error messages 4, catalogue 7) reads 1.0 and each dataset publish adds one.
+const RELEASE_BASE = 11;
 
 const SAMPLES = ['a'.repeat(2000), `'${'a'.repeat(1000)}' was not declared in this scope`, ' '.repeat(2000),
                  `${'<'.repeat(1000)}${'>'.repeat(1000)}`];
@@ -118,13 +121,14 @@ class DataRail {
     } catch { return 'failed'; }
   }
 
-  // One number for About: the versions added, so it rises when either dataset does.
+  // About shows SCHEMA.n (see RELEASE_BASE) and the newest date across the datasets.
   status() {
     const catalogue = this.opts.catalogue && this.opts.catalogue.current;
-    const version = this.current.version + (catalogue ? catalogue.version : 0);
+    const n = Math.max(0, this.current.version + (catalogue ? catalogue.version : 0) - RELEASE_BASE);
+    const version = `${SCHEMA}.${n}`;
     const updated = catalogue && catalogue.updated > this.current.updated ? catalogue.updated : this.current.updated;
     return { version, updated, lastCheck: this.lastCheck };
   }
 }
 
-module.exports = { DataRail, problemWith, patternIsSafe, DATASET, SCHEMA };
+module.exports = { DataRail, problemWith, patternIsSafe, DATASET, SCHEMA, RELEASE_BASE };

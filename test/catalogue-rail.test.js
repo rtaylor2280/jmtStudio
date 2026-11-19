@@ -9,7 +9,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { CatalogueRail, catalogueFiles, catalogueProblem, headOf, INDEX_PATH } = require('../catalogueRail');
-const { DataRail } = require('../dataRail');
+const { DataRail, RELEASE_BASE } = require('../dataRail');
 const compileErrorData = require('../compileErrorData');
 
 let failed = 0;
@@ -116,9 +116,9 @@ function rig(shipped, published, over = {}) {
   const catalogueRail = new CatalogueRail({ bundled: bundledFile, kept: path.join(dir, 'kept.json'), apply: (d) => { got = d; }, get });
   const rail = new DataRail({ userData: dir, appVersion: '1.8.0', bundled: compileErrorData, apply: () => {}, get, catalogue: catalogueRail,
     isAtLeast: (have, want) => have.localeCompare(want, undefined, { numeric: true }) >= 0 });
-  ok('before: the two versions added', rail.status().version === compileErrorData.version + 1, String(rail.status().version));
+  ok('before: the two versions added, less the base', rail.status().version === `1.${Math.max(0, compileErrorData.version + 1 - RELEASE_BASE)}`, String(rail.status().version));
   ok('a newer catalogue updates through the same check', await rail.check() === 'updated' && !!got);
-  ok('after: the number went up, so About shows it', rail.status().version === compileErrorData.version + 2, String(rail.status().version));
+  ok('after: the catalogue counts in the number', rail.status().version === `1.${Math.max(0, compileErrorData.version + 2 - RELEASE_BASE)}`, String(rail.status().version));
   ok('and shows the later date', rail.status().updated === '2030-01-02', rail.status().updated);
 
   const held = new CatalogueRail({ bundled: bundledFile, kept: path.join(dir, 'other.json'), apply: () => {}, get });

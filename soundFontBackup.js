@@ -344,12 +344,14 @@ function applySkipAdjustment(survey, { skipped = [], skippedItems = [] } = {}) {
   }
   const totals = { ...(survey.totals || {}) };
   let totalBytes = survey.totalBytes || 0;
+  let filesBytes = survey.filesBytes || totalBytes;
   for (const b of Object.keys(bytesByBucket)) {
     const n = bytesByBucket[b];
     if (totals[b] != null) totals[b] = Math.max(0, totals[b] - n);
     totalBytes = Math.max(0, totalBytes - n);
+    filesBytes = Math.max(0, filesBytes - n);
   }
-  return { counts, totals, totalBytes };
+  return { counts, totals, totalBytes, filesBytes };
 }
 
 // What agreeing to the skip would actually cost, so the question can state it. [B-478]
@@ -453,6 +455,39 @@ function _dirBytes(dir, unreadable, where, links) {
   };
   walk(dir);
   return total;
+}
+
+// [BUG-031] The footer's "of files" rule for the whole library: every name under the sound fonts
+// folder, including the content pool and the library's own bookkeeping, which the bucket totals
+// leave out. Display only; the bar and the fit check keep their own figures.
+function _filesBytes(userData, bucketBytes) {
+  const root = _soundFontsRoot(userData);
+  let extra = 0;
+  let names;
+  try { names = fs.readdirSync(root, { withFileTypes: true }); } catch { return bucketBytes; }
+  for (const d of names) {
+    const abs = path.join(root, d.name);
+    if (d.isDirectory()) {
+      if (d.name === 'sharedTracks') {
+        let st;
+        try { st = fs.readdirSync(abs, { withFileTypes: true }); } catch { st = []; }
+        for (const e of st) {
+          if (e.isFile() && !/\.wav$/i.test(e.name)) { try { extra += fs.statSync(path.join(abs, e.name)).size; } catch {} }
+          else if (e.isDirectory()) extra += _dirBytes(path.join(abs, e.name));
+        }
+      } else if (!['sources', 'library', 'common', 'attachments'].includes(d.name)) {
+        extra += _dirBytes(abs);
+      } else {
+        // Markers at a bucket's top level; the bucket totals walk only its folders.
+        let top;
+        try { top = fs.readdirSync(abs, { withFileTypes: true }); } catch { top = []; }
+        for (const e of top) if (e.isFile()) { try { extra += fs.statSync(path.join(abs, e.name)).size; } catch {} }
+      }
+    } else if (d.isFile()) {
+      try { extra += fs.statSync(abs).size; } catch {}
+    }
+  }
+  return bucketBytes + extra;
 }
 
 // Survey what's in the library — count + size per bucket. Bucket keys
@@ -566,7 +601,8 @@ async function surveyLibraryAsync(userData, opts) {
   }
   // onDiskBytes: what the archive will hold, each linked file once. The fit check asks for this.
   const onDiskBytes = Math.max(0, totalBytes - links.repeatBytes);
-  return { counts, totals, totalBytes, onDiskBytes, fileCount: links.files, itemBytes,
+  const filesBytes = _filesBytes(userData, totalBytes);
+  return { counts, totals, totalBytes, filesBytes, onDiskBytes, fileCount: links.files, itemBytes,
            unreadable: unreadable || [] };
 }
 
@@ -612,7 +648,7 @@ function surveyLibrary(userData) {
     }
   }
   const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks + totals.attachments;
-  return { counts, totals, totalBytes };
+  return { counts, totals, totalBytes, filesBytes: _filesBytes(userData, totalBytes) };
 }
 
 // Throughput benchmark for the destination path. Writes a small temp file
@@ -1118,8 +1154,8 @@ async function exportBackup({
   // COUNTS ARE PER ITEM FOR EVERY BUCKET EXCEPT sharedTracks, which counts wav files. So a
   // skipped file inside a font does not change `counts.library` - the font is still in the
   // archive, one file lighter - while a skipped track does reduce `counts.sharedTracks`.
-  const { counts: _manifestCounts, totals: _manifestTotals, totalBytes: _manifestTotalBytes } =
-    applySkipAdjustment(survey, { skipped, skippedItems });
+  const { counts: _manifestCounts, totals: _manifestTotals, totalBytes: _manifestTotalBytes,
+          filesBytes: _manifestFilesBytes } = applySkipAdjustment(survey, { skipped, skippedItems });
   // THE BAR'S DENOMINATOR IS WHAT WILL BE WRITTEN. [2026-10-15] A dropped item is never walked by
   // the archive loop, so its bytes can never arrive - a bar measured against the raw survey stops
   // short of its own total by exactly the weight of what the user agreed to leave out. It also
@@ -1139,7 +1175,7 @@ async function exportBackup({
     counts: _manifestCounts,
     // onDiskBytes: what the library takes on disk, each shared file once - the footer's second
     // figure, and the bytes this archive actually holds before compression. [B-498]
-    totals: { ..._manifestTotals, totalBytes: _manifestTotalBytes, onDiskBytes: _archiveTotalBytes },
+    totals: { ..._manifestTotals, totalBytes: _manifestTotalBytes, filesBytes: _manifestFilesBytes, onDiskBytes: _archiveTotalBytes },
     settings: _captureLibrarySettings(prefs),
     // Per-item canonical content hashes, see soundFontFileHash.js for
     // what's included and excluded. Backups without this field fall

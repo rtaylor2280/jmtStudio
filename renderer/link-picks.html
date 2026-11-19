@@ -9,6 +9,12 @@
   :root {
     --jmt-blue: #025192; --c-bg-card: #222222; --c-border-heavy: #3a3a3a;
     --c-text: #cccccc; --c-text-muted: #888888; --c-ok: #3fb950; --c-border-strong: #333333;
+    --c-value-bg: #111111;
+  }
+  /* The app in light mode (index.html's light-mode tokens). */
+  :root.light {
+    --c-bg-card: #ffffff; --c-border-heavy: #b0b0b0; --c-text: #333333; --c-text-muted: #777777;
+    --c-border-strong: #c0c0c0; --c-value-bg: #fafafa;
   }
   html, body { margin: 0; height: 100%; background: var(--c-bg-card); color: var(--c-text);
     font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
@@ -18,7 +24,7 @@
     grid-auto-rows: 34px; align-items: center; height: 100%; overflow-y: auto; }
   .row { display: contents; }
   .label { color: var(--c-text); }
-  .value { min-width: 0; background: #111111; border: 1px solid var(--c-border-heavy); border-radius: 4px;
+  .value { min-width: 0; background: var(--c-value-bg); border: 1px solid var(--c-border-heavy); border-radius: 4px;
     padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
   /* Undo on a row: the app's primary button (.modal-btn-primary), sized to the row. */
   .undo { background: var(--jmt-blue); color: #ffffff; border: 1px solid #036bb8; border-radius: 4px;
@@ -51,7 +57,8 @@
   const rowsEl = document.getElementById('rows');
   const toast = document.getElementById('toast');
   let hideTimer = null;
-  window.linkPicks.onUpdate(({ rows, toast: msg }) => {
+  window.linkPicks.onUpdate(({ rows, toast: msg, light }) => {
+    document.documentElement.classList.toggle('light', !!light);
     rowsEl.replaceChildren(...rows.map(({ key, label, hint, value, undo, pending }) => {
       const row = document.createElement('div');
       row.className = 'row';
@@ -80,7 +87,7 @@
       toast.textContent = msg;
       toast.classList.add('show');
       clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+      hideTimer = setTimeout(() => toast.classList.remove('show'), rows.length ? 2200 : 5500);
     }
   });
 </script>

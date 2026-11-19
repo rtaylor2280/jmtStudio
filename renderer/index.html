@@ -2128,6 +2128,15 @@
   .sf-header-adds { display: flex; gap: 6px; align-items: center; }
   /* Every header toolbar moves as one group: the labels shorten instead of a button wrapping. */
   .hdr-actions .tab-btns { flex-wrap: nowrap; }
+  /* [B-699] Config setup links beside the gear: after the actions on one line, at the tab line's end when the
+     actions take the line below, under everything when even the short labels do not fit beside the tabs. */
+  .hdr-links { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+  .header-top.hdr-actions-own-line .hdr-links { margin-left: auto; }
+  .header-top.hdr-actions-own-line #divider-styles-ctrl { display: none !important; }
+  .header-top.hdr-links-tight .hdr-links { gap: 3px; }
+  .header-top.hdr-links-tight .hdr-links button { padding-left: 6px; padding-right: 6px; }
+  .header-top.hdr-links-down .hdr-links { order: 4; flex-basis: calc(100% + 36px); margin-right: -36px; justify-content: flex-end; }
+  .header-top.hdr-actions-wrap .hdr-actions .tab-btns { flex-wrap: wrap; justify-content: flex-end; flex: 1 1 auto; min-width: 0; }
   .sf-header-adds .lbl-short { display: none; }
   .header-top.sf-adds-compact .sf-header-adds .lbl-full { display: none; }
   .header-top.sf-adds-compact .sf-header-adds .lbl-short { display: inline; }
@@ -2619,6 +2628,10 @@
   .styles-search-count { white-space: nowrap; }
   /* A group's leading divider shows while it sits beside the group before it, and hides when it starts a line. */
   .fg-divider.fg-divider-off { display: none; }
+  /* Linux serial / udev notices carry inline dark-amber colours; in light mode they take a light amber. */
+  .light-mode #linux-serial-notice, .light-mode #linux-udev-notice { background: #fff6e0 !important; border-color: #e0b060 !important; color: #6b4a00 !important; }
+  .light-mode #linux-serial-cmd, .light-mode #linux-udev-cmd { color: #8a5a00 !important; }
+  .light-mode #linux-serial-copy, .light-mode #linux-udev-copy { color: #8a5a00 !important; }
   .sf-search-input { flex: 1; background: var(--c-bg-inset); border: 1px solid var(--c-border-input); border-radius: 4px; color: var(--c-text); padding: 5px 10px; font-size: 0.8rem; outline: none; max-width: unset; width: 100%; padding-right: 22px; }
   .sf-search-input:focus { border-color: var(--jmt-blue); }
   .sf-search-count { font-size: 0.72rem; color: var(--c-text-dim); white-space: nowrap; }
@@ -5376,13 +5389,6 @@
         <button id="btn-save"     class="btn-green js-config-only" style="display:none">&#8595; Save</button>
         <button id="btn-saveas"   class="btn-green js-config-only" style="display:none">&#8595; Save As</button>
         <button id="btn-download" class="btn-green" style="display:none">&#8595; Download</button>
-        <div class="ui-divider" id="divider-styles-ctrl" style="display:none"></div>
-        <button id="btn-styles-create" class="btn-blue"  style="display:none" title="Create or import a Style Library">&#43; Create Style Library</button>
-        <button id="btn-styles-link"   class="btn-blue"  style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
-        <!-- Label and title are set at runtime by _updateJmtLinkBtn: this slot is
-             "Link JMT Add-ons" when the selected version has them, and "Link Prop"
-             when the config names no prop at all. Do not rely on the markup below. -->
-        <button id="btn-jmt-link"      class="btn-blue"  style="display:none" title='Adds the JMT Prop Addons include to your config so the wrapper features can be opted in via #defines'>&#128279; Link JMT Add-ons</button>
       </div>
       <div class="tab-btns" id="tab-btns-versions">
         <button id="btn-vp-download" class="btn-neutral" title="Download an official ProffieOS version from GitHub">&#8595; Download Version</button>
@@ -5478,6 +5484,17 @@
         </div>
         <button id="btn-add-style" class="btn-blue" style="flex-shrink:0" title="Add a style to the library"><span class="lbl-full">&#43; Add Style</span><span class="lbl-short">&#43; Add</span></button>
       </div>
+    </div>
+    <!-- [B-699] Setting up the open config: on the tab line beside the gear, short labels when tight, the
+         line below as the last group when even those do not fit. Shown on Config Manager only. -->
+    <div id="cfg-header-links" class="hdr-links">
+      <div class="ui-divider" id="divider-styles-ctrl" style="display:none"></div>
+      <button id="btn-styles-create" class="btn-blue"  style="display:none" title="Create or import a Style Library">&#43; Create Style Library</button>
+      <button id="btn-styles-link"   class="btn-blue"  style="display:none" title='Adds #include "my_styles.h" to your config so ProffieOS can use your saved styles'>&#128279; Link Style Library</button>
+      <!-- Label and title are set at runtime by _updateJmtLinkBtn: this slot is
+           "Link JMT Add-ons" when the selected version has them, and "Link Prop"
+           when the config names no prop at all. Do not rely on the markup below. -->
+      <button id="btn-jmt-link"      class="btn-blue"  style="display:none" title='Adds the JMT Prop Addons include to your config so the wrapper features can be opted in via #defines'>&#128279; Link JMT Add-ons</button>
     </div>
     <!-- Pinned to the top line's right corner at every width, so it never moves when the toolbar
          wraps. [NOTE-020] -->
@@ -7141,7 +7158,7 @@
     </div>
     <div class="sf-pop-add-field">
       <label class="sf-pop-add-label">Display name <span class="sf-pop-add-opt">(optional)</span></label>
-      <input type="text" id="sf-pop-add-name" class="sf-edit-input" placeholder="How it shows in the list &mdash; defaults to the file name" maxlength="80">
+      <input type="text" id="sf-pop-add-name" class="sf-edit-input" placeholder="How it shows in the list (defaults to the file name)" maxlength="80">
     </div>
     <div class="sf-pop-add-field">
       <label class="sf-pop-add-label">Attach to sources</label>
@@ -7280,12 +7297,12 @@
     <div class="sf-voicepack-more-panel" id="sf-voicepack-more-panel" style="display:none">
       <p class="sf-voicepack-help" style="margin-top:0">Community-made voicepacks and other external sources. Open a link in JMT Studio and your download imports automatically, or open it in your own browser.</p>
       <div class="sf-voicepack-more-item">
-        <div class="sf-voicepack-more-name">Additional Voicepacks &mdash; Brian Conner (NoSloppy)</div>
+        <div class="sf-voicepack-more-name">Additional Voicepacks: Brian Conner (NoSloppy)</div>
         <div class="sf-voicepack-more-desc">60+ character voicepacks (Vader, Yoda, GLaDOS, K.I.T.T., HK-47, many more) plus the V2 update of the official defaults. Free, donations welcome.</div>
         <a class="sf-voicepack-more-link" href="#" data-href="https://crucible.hubbe.net/t/additional-voicepacks/4227">The Crucible &rarr; Additional Voicepacks</a>
       </div>
       <div class="sf-voicepack-more-item">
-        <div class="sf-voicepack-more-name">Darkwolf Sabers &mdash; Sound Board Voice Packs</div>
+        <div class="sf-voicepack-more-name">Darkwolf Sabers: Sound Board Voice Packs</div>
         <div class="sf-voicepack-more-desc">Curated voicepack collection from Darkwolf Sabers, including Brian Conner's free packs plus a few Xeno/Golden Harvest options.</div>
         <a class="sf-voicepack-more-link" href="#" data-href="https://darkwolfsabers.com/sound-board-voice-packs" data-browser-only>darkwolfsabers.com/sound-board-voice-packs</a>
       </div>
@@ -8968,6 +8985,27 @@ window.promptError = promptError;
 // shared builder ([B-403] `_sfDestDisplay`). Every one of this function's call sites already
 // awaited it, so nothing changes for them.
 async function _sfShowPartialFailures(title, failed) {
+  // Never drawn over the export's progress window.
+  try { await window._sfDeleteProgress?.hide(); } catch {}
+  // THE CARD IS GONE. A folder that could not be made because the drive ROOT is gone means the card
+  // dropped away mid-export; the other failures in the same run are that event too, in a syscall's
+  // words. Says only what is known: the card cannot be reached, and these fonts did not finish.
+  // [L30, 2026-11-18]
+  const _rootGone = (failed || []).some((f) => {
+    const t = String((f && f.error) || '');
+    return /ENOENT/i.test(t) && /mkdir\s+'([A-Za-z]:[\\/]?|\/Volumes\/[^/']+\/?|\/media\/[^']+)'/.test(t);
+  });
+  if (_rootGone) {
+    const items = (failed || []).map(f => f.source || f.name || '?');
+    const shown = items.length > 7 ? items.slice(0, 6) : items;
+    const names = shown.map(n => ` • ${n}`).join('\n') + (items.length > shown.length ? `\n • and ${items.length - shown.length} more` : '');
+    return promptConfirm({
+      title: 'The card can no longer be reached',
+      message: `The computer lost the card during the export. These sound fonts may be missing from the card or only partly written:\n${names}`
+        + '\n\nCheck the card before you use it.',
+      confirmText: 'OK', confirmKind: 'danger', hideCancel: true,
+    });
+  }
   // RAN OUT OF ROOM IS NOT A LIST OF FILENAMES. When the destination filled up, every
   // remaining file reports the same ENOSPC and the modal becomes five identical lines of
   // "no space left on device, write" - which says the same thing five times and never says
@@ -9767,6 +9805,8 @@ async function _sfExportStoppedNotice({ wrote = 0, removedPartial = false, what 
   for (const l of lines) {
     (/do not delete it|safe to delete/i.test(l) ? _actions : _narration).push(l);
   }
+  // The notice replaces the export's progress window; it is never drawn over it.
+  try { await window._sfDeleteProgress?.hide(); } catch {}
   await promptConfirm({
     title: 'Export stopped',
     message: [_narration.join(' '), ..._actions].filter(Boolean).join('\n\n'),
@@ -19344,8 +19384,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         const _removed = _progAll.concat(_macroAll);
         const _shown = _removed.slice(0, 5).map(x =>
           `<li>${escapeHtml(x.font)} &middot; ${escapeHtml(x.rel)}`
-          + (x.disguised ? ` <span style="opacity:.85;">&mdash; a program disguised as a sound file</span>`
-             : x.kind === 'macro' ? ` <span style="opacity:.85;">&mdash; a document that can contain macros</span>` : '')
+          + (x.disguised ? ` <span style="opacity:.85;">(a program disguised as a sound file)</span>`
+             : x.kind === 'macro' ? ` <span style="opacity:.85;">(a document that can contain macros)</span>` : '')
           + `</li>`).join('');
         const _more = _removed.length > 5 ? `<li>and ${_removed.length - 5} more</li>` : '';
         html += `<ul class="br-fail-list" style="color:#e5534b;">${_shown}${_more}</ul>`;
@@ -20051,10 +20091,24 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // [B-281]
     const _hadFontWork = runPlan.sources.length > 0;
     if (_hadFontWork) {
-      text += `<strong>${sourceCount}</strong> source${sourceCount === 1 ? '' : 's'} imported`;
-      if (fontCount !== sourceCount) {
-        text += ` (<strong>${fontCount}</strong> font${fontCount === 1 ? '' : 's'})`;
+      // A font that came in beside the one it matched went into that font's source, so it is counted as a
+      // font added there, never as a source imported. [BUG-030]
+      const _beside = sum.imported.filter(imp => imp && imp.besideOf);
+      const _besideFonts = _beside.reduce((n, imp) => n + (imp.entries || []).filter(e => e && e.ok).length, 0);
+      const _newSources = sourceCount - _beside.length;
+      const _newFonts = fontCount - _besideFonts;
+      const _parts = [];
+      if (_newSources > 0 || !_beside.length) {
+        let t = `<strong>${_newSources}</strong> source${_newSources === 1 ? '' : 's'} imported`;
+        if (_newFonts !== _newSources) t += ` (<strong>${_newFonts}</strong> font${_newFonts === 1 ? '' : 's'})`;
+        _parts.push(t);
       }
+      if (_besideFonts > 0) {
+        _parts.push(_besideFonts === 1
+          ? '<strong>1</strong> font added as a version of an existing font'
+          : `<strong>${_besideFonts}</strong> fonts added as versions of existing fonts`);
+      }
+      text += _parts.join(', ');
     }
     if (sum.skipped.length) text += `, <strong>${sum.skipped.length}</strong> already in library (skipped)`;
     if (sum.failed.length)  text += `, <strong>${sum.failed.length}</strong> failed`;
@@ -20230,7 +20284,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         `<div class="sf-bulk-failure-row" title="${escapeHtml(x.reason || '')}">`
           + `<span class="sf-bulk-failure-name">${escapeHtml(g.name)}</span>`
           + `<span class="sf-bulk-failure-reason">${escapeHtml(x.relPath)}`
-          + (x.disguised ? ' &mdash; disguised as a sound file' : '')
+          + (x.disguised ? ' (disguised as a sound file)' : '')
           + `</span></div>`)).join('');
       const _p = refusedGroups.flatMap(g => g.files).filter(x => (x.kind || 'program') === 'program').length;
       const _m = refusedTotal - _p;
@@ -29890,6 +29944,7 @@ async function switchTab(name) {
     t.classList.toggle('active', t.dataset.tab === name));
 
   document.getElementById('tab-btns-config').style.display     = name === 'config'     ? 'flex' : 'none';
+  { const _cl = document.getElementById('cfg-header-links'); if (_cl) _cl.style.display = name === 'config' ? 'flex' : 'none'; }
   document.getElementById('tab-btns-versions').style.display   = name === 'versions'   ? 'flex' : 'none';
   document.getElementById('tab-btns-styles').style.display     = name === 'styles'     ? 'flex' : 'none';
   { const _sa = document.getElementById('styles-header-adds'); if (_sa) _sa.style.display = name === 'styles' ? 'flex' : 'none'; }
@@ -31856,7 +31911,18 @@ require(['vs/editor/editor.main'], function () {
             .find(el => getComputedStyle(el).display !== 'none') || null;
           const acts = hdr && hdr.querySelector(':scope > .hdr-actions');
           if (!hdr || !acts) return;
-          hdr.classList.remove('hdr-actions-own-line', 'sf-adds-compact', 'sf-adds-compact-1');
+          hdr.classList.remove('hdr-actions-own-line', 'sf-adds-compact', 'sf-adds-compact-1', 'hdr-actions-wrap', 'hdr-links-tight', 'hdr-links-down');
+          // The config setup links, shortened only when they do not fit beside the tabs. [B-699]
+          const links = hdr.querySelector(':scope > .hdr-links');
+          const LINK_SHORT = [[/Link Style Library/, 'Styles'], [/Link JMT Add-ons/, 'Add-ons'], [/Link Prop/, 'Prop']];
+          const linkLabels = (short) => (links ? [...links.querySelectorAll('button')] : []).forEach((b) => {
+            if (b.dataset.shownHtml !== b.innerHTML) b.dataset.fullHtml = b.innerHTML;
+            let h = b.dataset.fullHtml;
+            if (short) for (const [re, w] of LINK_SHORT) h = h.replace(re, w);
+            if (b.innerHTML !== h) b.innerHTML = h;
+            b.dataset.shownHtml = h;
+          });
+          linkLabels(false);
           // The actions' labels, kept whole until the line runs out, then shortened one step at a time,
           // left to right, each step kept while the next is added: Config Manager's words and Save arrows,
           // then the long words, then each count, then the adds; Clear selection's count goes last of all. Stops once the row fits.
@@ -31888,7 +31954,7 @@ require(['vs/editor/editor.main'], function () {
           const cs = getComputedStyle(hdr);
           const room = hdr.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
           const gap = parseFloat(cs.columnGap || cs.gap || 12) || 12;
-          const lead = [...hdr.children].filter(el => el !== acts && !el.classList.contains('sf-header-adds')
+          const lead = [...hdr.children].filter(el => el !== acts && el !== links && !el.classList.contains('sf-header-adds')
             && getComputedStyle(el).position !== 'absolute' && getComputedStyle(el).display !== 'none');
           const leadW = lead.reduce((w, el) => w + el.getBoundingClientRect().width + gap, 0);
           // The actions' natural width: their visible buttons side by side.
@@ -31900,7 +31966,8 @@ require(['vs/editor/editor.main'], function () {
           if (addsDiv) { const d = btnsW > 0 ? '' : 'none'; if (addsDiv.style.display !== d) addsDiv.style.display = d; }
           const addsTail = () => { const w = widthOf(adds); return w ? w + (btnsW > 0 ? actsGap : 0) : 0; };
           const actsW = btnsW + addsTail();
-          if (leadW + actsW <= room) { mo && mo.takeRecords(); return; }
+          const linksW = widthOf(links);
+          if (leadW + actsW + (linksW ? linksW + gap : 0) <= room) { mo && mo.takeRecords(); return; }
           hdr.classList.add('hdr-actions-own-line');
           const lineRoom = room + 36;   // the own line reaches the normal edge (see the CSS)
           // Measured from the buttons themselves: a right-aligned row that overflows does so to the left,
@@ -31920,6 +31987,15 @@ require(['vs/editor/editor.main'], function () {
           if (natural() + addsTail() > lineRoom) hdr.classList.add('sf-adds-compact-1');
           if (natural() + addsTail() > lineRoom) hdr.classList.add('sf-adds-compact');
           if (natural() + addsTail() > lineRoom && lastSteps.length) { steps = steps.concat(lastSteps); label(steps.length); }
+          // Still too wide with every step taken: the row may wrap rather than run off the edge.
+          if (natural() + addsTail() > lineRoom) hdr.classList.add('hdr-actions-wrap');
+          // The setup links stay on the tab line: short when they do not fit there, then tighter, below
+          // everything only when even the tight short labels do not. [B-699]
+          if (links && widthOf(links) && leadW + widthOf(links) > room) {
+            linkLabels(true);
+            if (leadW + widthOf(links) > room) hdr.classList.add('hdr-links-tight');
+            if (leadW + widthOf(links) > room) hdr.classList.replace('hdr-links-tight', 'hdr-links-down');
+          }
           mo && mo.takeRecords();
         };
         let mo = null;
@@ -38603,7 +38679,7 @@ require(['vs/editor/editor.main'], function () {
             // card view (which uses _sdEsc) shows it honestly. Same rule, both screens.
             const _rows = _ref.slice(0, _lim).map(x =>
               `<li>${_sfEscape(x.relPath)}`
-              + (x.disguised ? ` <span style="opacity:.85;">&mdash; a program disguised as a sound file</span>` : '')
+              + (x.disguised ? ` <span style="opacity:.85;">(a program disguised as a sound file)</span>` : '')
               + `</li>`).join('');
             const _more = _ref.length > _lim ? `<li>and ${_ref.length - _lim} more</li>` : '';
             const _hidden = _prog.filter(x => x.disguised).length;
@@ -50527,9 +50603,13 @@ require(['vs/editor/editor.main'], function () {
           if (d) { d.textContent = detail || ''; if (d.textContent) d.closest('.modal-overlay')?.classList.add('sf-prog-detail-used'); }
           // Section + elapsed lines are the setPhase() layout — reset them so
           // the simpler flows (delete, common-folder ops) don't inherit them.
+          // Only on an OPENING show(): a retitle of a window already up keeps its lines, so it does not
+          // shrink and grow back between phases.
           const l = this.labelEl(), e = this.elapsedEl();
-          if (l) { l.textContent = ''; l.style.display = 'none'; }
-          if (e) { e.textContent = ''; e.style.display = 'none'; }
+          if (!(m && m.classList.contains('active'))) {
+            if (l) { l.textContent = ''; l.style.display = 'none'; }
+            if (e) { e.textContent = ''; e.style.display = 'none'; }
+          }
           // Determinate when a fraction is passed. Otherwise the bar goes
           // INDETERMINATE rather than painting a fixed 50%: an operation with
           // no measurable progress is a different thing from one that is half
@@ -57595,7 +57675,7 @@ require(['vs/editor/editor.main'], function () {
                 const _ident = _skipped.filter((x) => x.mode === 'identical').length;
                 const _kept  = _skipped.length - _ident;
                 const _bits = [];
-                if (_ident) _bits.push(`${_ident} already matched your library`);
+                if (_ident) _bits.push(`${_ident} ${_ident === 1 ? 'was' : 'were'} already there and identical`);
                 if (_kept)  _bits.push(`${_kept} ${_kept === 1 ? 'was' : 'were'} kept as ${_kept === 1 ? 'it is' : 'they are'}`);
                 lines.push(`${_bits.join(', and ')}.`);
               }
@@ -58948,7 +59028,7 @@ require(['vs/editor/editor.main'], function () {
         // show it: a deduped library's backup is a third of its name total, and "50 GB" alone
         // reads as not fitting on a 30 GB drive. Left off when files were dropped, because the
         // survey's on-disk figure still counts them.
-        summaryEl.textContent = _sfLibrarySummary(_bkFigure.counts, _bkFigure.totalBytes,
+        summaryEl.textContent = _sfLibrarySummary(_bkFigure.counts, _bkFigure.filesBytes || _bkFigure.totalBytes,
           { onDiskBytes: _bkFigure === survey ? survey.onDiskBytes : undefined });
         startBtn.disabled = false;
         await new Promise((resolve) => {
@@ -59261,9 +59341,9 @@ require(['vs/editor/editor.main'], function () {
             // The survey remains the fallback for an archive with no manifest.
             const _mf = r.manifest || null;
             const summaryLine = (_mf && _mf.counts)
-              ? _sfLibrarySummary(_mf.counts, _mf.totals && _mf.totals.totalBytes,
+              ? _sfLibrarySummary(_mf.counts, _mf.totals && (_mf.totals.filesBytes || _mf.totals.totalBytes),
                   { onDiskBytes: _mf.totals && _mf.totals.onDiskBytes, zipBytes: r.zipBytes })
-              : (cs ? _sfLibrarySummary(cs, survey ? survey.totalBytes : 0) : '');
+              : (cs ? _sfLibrarySummary(cs, survey ? (survey.filesBytes || survey.totalBytes) : 0) : '');
             const message = [
               `Backup written to:\n${r.destPath || destPath}`,
               summaryLine,
@@ -59497,7 +59577,7 @@ require(['vs/editor/editor.main'], function () {
         // matching the pre-rework wording exactly. This is the only
         // measurement the original modal carried; restored to the
         // bottom of the layout where it's always lived.
-        const bytesStr = `${_sfFormatBytesShort(processed)} of ${_sfFormatBytesShort(totalBytes)} (${pctInt}%)`;
+        const bytesStr = `${_sfFormatBytes(processed)} of ${_sfFormatBytes(totalBytes)} (${pctInt}%)`;
         const elapsedStr = `${_sfFormatDuration(elapsedSec)} elapsed`;
         if (els.detail) els.detail.textContent = `${bytesStr} · ${elapsedStr}`;
         if (els.bar) els.bar.style.width = `${pct}%`;
@@ -60562,7 +60642,7 @@ require(['vs/editor/editor.main'], function () {
         // top, comparison on the bottom — the user reads the comparison
         // and then picks Replace or Merge with the consequences visible.
         const cs = observed.counts;
-        const totalSize = `${_sfFormatBytes(observed.totals.totalBytes)} of files`
+        const totalSize = `${_sfFormatBytes((manifest.totals && manifest.totals.filesBytes) || observed.totals.totalBytes)} of files`
           + (manifest.totals && manifest.totals.onDiskBytes ? `, ${_sfFormatBytes(manifest.totals.onDiskBytes)} on disk` : '');
         const exportedAt = manifest.exportedAt ? new Date(manifest.exportedAt).toLocaleString() : '';
         const summaryEl = document.getElementById('sf-backup-import-summary');
@@ -60831,7 +60911,7 @@ require(['vs/editor/editor.main'], function () {
           : opt('sf-sdx-cfg', false, true, `Config ${dim('none open')}`, TIP.cfgNone);
         html += `</div>`;
         // The card. Drawn by renderCards() below, because the list can change while the dialog is open.
-        html += `<div id="sf-sdx-cardsec" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border,#333);"></div>`;
+        html += `<div id="sf-sdx-cardsec" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--c-border);"></div>`;
         const p = promptConfirm({ title: 'SD Export', messageHtml: html, confirmText: 'Export', confirmKind: 'primary', cancelText: 'Cancel' });
         // promptConfirm builds its DOM synchronously, so its controls are ours from here.
         const $ = (id) => document.getElementById(id);
