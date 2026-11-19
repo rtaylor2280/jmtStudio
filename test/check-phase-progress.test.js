@@ -34,7 +34,9 @@ const rStart = H.indexOf('const _sfRunExport = async (door = {}) => {');
 const runner = rStart > 0 ? H.slice(rStart, H.indexOf('out.decisions = decisions;', rStart)) : '';
 ok('the runner was located', runner.length > 0);
 ok('the plan gets the reporter', /await door\.plan\(_check\)/.test(runner));
-ok('and a cancelled plan stops the export', /if \(_check\.cancelled\) \{ await _dropRaised\(\); return out; \}/.test(runner));
+ok('and a cancelled plan stops the export', /if \(_check\.cancelled\) return _stoppedInCheck\(\);/.test(runner));
+ok('with the stopped notice, after the progress window is down',
+  /_stoppedInCheck = async \(\) => \{\s*await _dropRaised\(\);\s*await promptConfirm\(\{ title: 'Export stopped', message: 'Nothing was copied\.'/.test(runner));
 ok('the compare gets it too', /await door\.compare\(plan, destDir, _check\)/.test(runner));
 ok('and a cancelled compare goes down the cancel path', /if \(_check\.cancelled\) decisions = null;/.test(runner));
 

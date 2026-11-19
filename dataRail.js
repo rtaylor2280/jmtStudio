@@ -161,7 +161,7 @@ class DataRail {
       fs.writeFileSync(`${this.file}.tmp`, text);
       fs.renameSync(`${this.file}.tmp`, this.file);
       return 'updated';
-    } catch { return 'failed'; }
+    } catch (e) { console.warn('[data rail] error messages:', e && e.message); return 'failed'; }
   }
 
   // About shows SCHEMA.n (see RELEASE_BASE) and the newest date across the datasets.

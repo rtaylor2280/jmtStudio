@@ -26,7 +26,7 @@ const skipped = fileStatesAgainstSource(live, source, 'pack', { skip: (k) => k =
 check('skip leaves a file out of removed', !skipped.files.some(f => f.path === 'gone.wav'));
 
 check('fonts and commons share the comparison', /fileStatesAgainstSource\(em\.records, sm\.records, meta\.candidatePath/.test(entries)
-  && /fh\.fileStatesAgainstSource\(cm\.records, sm\.records, meta\.sourceSubPath/.test(common));
+  && /fh\.fileStatesAgainstSource\(cm\.records, _sourceRecordsWithoutMarkers\(sm\.records, meta\), meta\.sourceSubPath/.test(common));
 check('the common tree asks for its states', /window\.electronAPI\.commonFileStates\(\{ uuid: _sfSelectedCommonUuid \}\)/.test(html));
 check('the same colours and hover, in the common\'s words', /\.sf-tree-row \.sf-tree-name\.sf-file-state-custom/.test(html) && /_sfFileStateTip\(st, 'common folder'\)/.test(html));
 check('a removed file adds back from its right-click', /window\.electronAPI\.restoreCommonFile\(\{ uuid: _sfSelectedCommonUuid, path: absentRow\.dataset\.absentPath \}\)/.test(html));

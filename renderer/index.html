@@ -9001,7 +9001,7 @@ async function _sfShowPartialFailures(title, failed) {
   const _rootGone = (failed || []).some((f) => {
     const t = String((f && f.error) || '');
     return /ENOENT/i.test(t) && /mkdir\s+'([A-Za-z]:[\\/]?|\/Volumes\/[^/']+\/?|\/media\/[^']+)'/.test(t);
-  });
+  }) || (failed && failed.length && await _sfDestinationGone(failed[0].error));
   if (_rootGone) {
     const items = (failed || []).map(f => f.source || f.name || '?');
     const shown = items.length > 7 ? items.slice(0, 6) : items;
@@ -9394,17 +9394,27 @@ window._sfSlowWriteDialog = _sfSlowWriteDialog;
 // everything after.
 async function _sfPickExportDir(params) {
   const P = window._sfDeleteProgress;
-  let raised = false;
+  let raised = false, opened = false, timer = null, off = null;
+  const lower = () => { if (raised) { raised = false; try { P.hideNow(); } catch {} } };
   try {
     const m = document.getElementById('modal-sf-bulk-progress');
     if (P && !(m && m.classList.contains('active'))) {
-      P.show('Choose a destination', 'Opening the folder picker…');
-      try { const b = P.barEl(); if (b) b.classList.add('indeterminate'); } catch {}
-      raised = true;
+      // Only for a picker slow to appear, and only until it is on screen.
+      off = window.electronAPI.onExportPickerOpened?.(() => { opened = true; clearTimeout(timer); lower(); });
+      timer = setTimeout(() => {
+        if (opened) return;
+        P.show('Choose a destination', 'Opening the folder picker…');
+        try { const b = P.barEl(); if (b) b.classList.add('indeterminate'); } catch {}
+        raised = true;
+      }, 700);
     }
   } catch {}
-  try { return await window.electronAPI.pickExportDir(params); }
-  finally { if (raised) { try { P.hideNow(); } catch {} } }
+  try {
+    const r = await window.electronAPI.pickExportDir(params);
+    if (r && r.ok && r.destDir) window._sfLastExportDest = r.destDir;
+    return r;
+  }
+  finally { clearTimeout(timer); try { off && off(); } catch {} lower(); }
 }
 window._sfPickExportDir = _sfPickExportDir;
 
@@ -9962,6 +9972,9 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
         if (lbl) { lbl.textContent = ''; lbl.style.display = 'none'; }
         const el = window._sfDeleteProgress.elapsedEl();
         if (el) { el.textContent = ''; el.style.display = 'none'; }
+        // The comparing that follows fills these rows, so they are held now and the window keeps
+        // its size between the two.
+        window._sfDeleteProgress.reserveRows();
       }
     } catch {}
 
@@ -10060,7 +10073,10 @@ async function _sfPreflightDestination({ destDir, fileSizes = null, totalBytes =
       // Whoever takes the screen gives it back. `hidForDialog` still reports what happened,
       // so a door with a better subtitle can still retitle - but no door has to.
       if (out.hidForDialog) {
-        try { window._sfDeleteProgress.show('Checking the destination…', 'Checking free space…'); } catch {}
+        try {
+          window._sfDeleteProgress.show('Checking the destination…', 'Checking free space…');
+          window._sfDeleteProgress.reserveRows();
+        } catch {}
       }
     }
     return out;
@@ -10196,8 +10212,31 @@ async function _sfExportFailed(err) {
     });
     return true;
   }
+  // THE CARD DROPPED AWAY. A whole-export failure on a path whose drive can no longer be reached
+  // is the card leaving, whatever the syscall called it (UNKNOWN on open, EIO, ENOENT). [L30]
+  if (await _sfDestinationGone(err)) {
+    promptConfirm({
+      title: 'The card can no longer be reached',
+      message: 'The computer lost the card during the export, so the export did not finish. '
+        + 'Sound fonts it was writing may be missing from the card or only partly written.'
+        + '\n\nCheck the card before you use it.',
+      confirmText: 'OK', confirmKind: 'danger', hideCancel: true,
+    });
+    return true;
+  }
   promptError('Export failed', String((err && err.message) || err || 'unknown error'));
   return false;
+}
+// True when an error names a path whose drive is no longer there.
+async function _sfDestinationGone(err) {
+  // The path the error names, or (a write error can name none) the destination picked for this export.
+  const m = String((err && err.message) || err || '').match(/'([A-Za-z]:[\\/]|\/Volumes\/[^/']+|\/media\/[^/']+\/[^/']+)/);
+  const dir = m ? m[1] : window._sfLastExportDest;
+  if (!dir) return false;
+  try {
+    const r = await window.electronAPI.exportDestReachable({ dir });
+    return !!(r && r.reachable === false);
+  } catch { return false; }
 }
 window._sfIsOutOfSpace = _sfIsOutOfSpace;
 window._sfIsFolderCreateFailure = _sfIsFolderCreateFailure;
@@ -33319,6 +33358,8 @@ require(['vs/editor/editor.main'], function () {
         // package of packages opens every inner zip. One zip of plain folders holding several
         // <Pack>/common folders is fine: each pack becomes its own common folder.
         let _packs = 0;
+        // A pack Studio exported carries its name in its marker; that name is offered first.
+        let _markerName = null;
         if (mode === 'zip') {
           let _zi = null;
           try { _zi = await window.electronAPI.inspectIncomingCommonZip({ zipPath: pick.filePath }); } catch {}
@@ -33329,8 +33370,13 @@ require(['vs/editor/editor.main'], function () {
             return;
           }
           _packs = (_zi && _zi.ok && _zi.packs) || 0;
+          _markerName = (_zi && _zi.ok && _zi.markerName) || null;
         } else {
-          try { const _fi = await window.electronAPI.inspectIncomingCommonFolder({ folderPath: pick.filePath }); _packs = (_fi && _fi.ok && _fi.packs) || 0; } catch {}
+          try {
+            const _fi = await window.electronAPI.inspectIncomingCommonFolder({ folderPath: pick.filePath });
+            _packs = (_fi && _fi.ok && _fi.packs) || 0;
+            _markerName = (_fi && _fi.ok && _fi.markerName) || null;
+          } catch {}
         }
         // Several packs: each common folder is named from its pack, so the one name asked for is
         // the source's. Asked plainly as that, and not checked against common folder names.
@@ -33342,7 +33388,7 @@ require(['vs/editor/editor.main'], function () {
         // Guarded on an actual collision: _jmtNumberedName always appends, so an
         // unguarded call would name every first import "<folder>_1".
         const _cmnNames = _sfCommons.map(x => (x.meta?.name || ''));
-        const _cmnBase = _sfDefaultCommonName(pick.filePath);
+        const _cmnBase = _markerName || _sfDefaultCommonName(pick.filePath);
         const defaultName = _cmnNames.some(n => n.toLowerCase() === _cmnBase.toLowerCase())
           ? _jmtNumberedName(_cmnBase, _cmnNames)
           : _cmnBase;
@@ -37047,6 +37093,7 @@ require(['vs/editor/editor.main'], function () {
             let _off = null;
             let _planned = false;
             _sfDeleteProgress.show('Checking the destination…', 'Comparing with your library…');
+            _sfDeleteProgress.reserveRows();
             try {
               // Indeterminate until the first tick says how many there are: the count is not
               // known before the plan starts, and a bar at a fixed fraction reads as a hang.
@@ -46529,7 +46576,7 @@ require(['vs/editor/editor.main'], function () {
             // valid tree, so nothing downstream needs to know the difference.
             const r = await window.electronAPI.sharedTracksListFiles();
             _sfLibPickTree = ((r && r.ok && r.files) || [])
-              .map(f => ({ name: f.name, isDir: false, size: f.size }));
+              .map(f => ({ name: f.name, path: f.name, isDir: false, size: f.size }));
           }
         } catch { _sfLibPickTree = []; }
         const _names = kind === 'source' ? _sfSourceNames(_sfAllSourcesByUuid[id] && _sfAllSourcesByUuid[id].meta)
@@ -46862,10 +46909,11 @@ require(['vs/editor/editor.main'], function () {
           parent.appendChild(it);
         };
         // Each group is a section, so its sticky heading stays in view only while its own items scroll
-        // past. An option outside any group (Shared Tracks) is a group of its own, named after it.
+        // past. An option outside any group (Shared Tracks) is one entry, picked with one click.
         for (const child of Array.from(sel.children)) {
-          const opts = child.tagName === 'OPTION' ? [child] : Array.from(child.children);
-          const label = child.tagName === 'OPTION' ? child.textContent : child.label;
+          if (child.tagName === 'OPTION') { addItem(drop, child); continue; }
+          const opts = Array.from(child.children);
+          const label = child.label;
           const section = document.createElement('div');
           const head = document.createElement('div');
           head.className = 'sf-libpick-browse-head';
@@ -50541,8 +50589,18 @@ require(['vs/editor/editor.main'], function () {
         // the same surface, and a row that came back for each phase would jump at every handover.
         // It is released only when the modal actually goes down, so the next thing to open this
         // surface starts with no dead row under it.
+        // Holds the rows a check-then-copy flow will fill (label, file line, elapsed, Cancel) from
+        // its first frame, so the window opens at the size it keeps. Released with the modal.
+        reserveRows() {
+          this.modal()?.classList.add('sf-prog-reserve');
+          const b = this.cancelEl();
+          if (b && !this.cancelReserved) { b.style.display = ''; b.style.visibility = 'hidden'; }
+          this.cancelReserved = true;
+          this._syncActions();
+        },
         _retireReservations() {
           this.cancelReserved = false;
+          this.modal()?.classList.remove('sf-prog-reserve');
           const b = this.cancelEl();
           if (b) { b.style.display = 'none'; b.style.visibility = ''; }
           // The detail row's reservation is released here too, and for the same reason: held
@@ -51223,6 +51281,8 @@ require(['vs/editor/editor.main'], function () {
         let ending = door.ending || _sfExportEnding(kind);
         if (ending === 'summary' && typeof door.onCompleted !== 'function') ending = 'toast';
         const destDir = door.destDir || '';
+        // Kept so a failure whose error names no path can still ask whether this drive is gone.
+        if (destDir) window._sfLastExportDest = destDir;
         const out = { ok: false, canceled: false, ending, kind };
         if (!destDir) return out;
 
@@ -51334,8 +51394,16 @@ require(['vs/editor/editor.main'], function () {
           return out;
         }
         finally { _check.done(); }
-        if (plan === null && door.plan) { await _dropRaised(); return out; }   // refused or cancelled
-        if (_check.cancelled) { await _dropRaised(); return out; }
+        // A Cancel pressed while the destination was being checked ends the way a Cancel during
+        // the copy does, with the stopped notice, so it never looks unanswered.
+        const _stoppedInCheck = async () => {
+          await _dropRaised();
+          await promptConfirm({ title: 'Export stopped', message: 'Nothing was copied.',
+            confirmText: 'OK', confirmKind: 'cancel', hideCancel: true });
+          return out;
+        };
+        if (_check.cancelled) return _stoppedInCheck();
+        if (plan === null && door.plan) { await _dropRaised(); return out; }   // refused or backed out
 
         // AN ARCHIVE WRITES ONE FILE TO THE CARD, WHATEVER IS INSIDE IT. The slow-write
         // threshold's file limb exists because the Proffieboard's USB bridge costs ~773 ms PER
@@ -57570,9 +57638,14 @@ require(['vs/editor/editor.main'], function () {
                 // about the copies already at the destination. Backing out is the honest
                 // answer: the runner reads null as the user declining and abandons the export.
                 console.warn('[B-425] destination check failed for the export selection:', err);
-                await promptError('Could not check the destination',
-                  'The fonts already at that folder could not be compared with your library, '
-                  + 'so nothing was exported.');
+                // Never drawn over the check's progress window.
+                try { await _sfDeleteProgress.hide(); } catch {}
+                // A card that dropped away is told in the words the other doors use for it.
+                await promptError('Could not check the destination', (await _sfDestinationGone(err))
+                  ? 'The card stopped responding while its fonts were being compared with your library, '
+                    + 'so nothing was exported.'
+                  : 'The fonts already at that folder could not be compared with your library, '
+                    + 'so nothing was exported.');
                 return null;
               }
             },

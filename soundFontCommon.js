@@ -581,6 +581,7 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
     // source keeps its own; edit paths replace files, never write in place,
     // so the pool is never written through.
     await srcObj.extractTo(subPath, filesDir, null, { link: true });
+    const _markers = _dropOurMarkers(filesDir);
     const meta = {
       schemaVersion: 1,
       uuid,
@@ -593,6 +594,7 @@ async function _importCommonAsSource(userData, sourcePath, name, onProgress, sho
       // Where in the source tree this working copy came from, so a future
       // compare/reset knows its baseline.
       sourceSubPath: subPath,
+      ...(_markers.length ? { markerFiles: _markers } : {}),
     };
     // ── WHAT THE PACK'S OWN README SAYS ──────────────────────── [B-493, 2026-10-19]
     //
@@ -783,13 +785,27 @@ async function inspectIncomingCommonZip(zipPath) {
         if (m) packDirs.add(m[1].toLowerCase());
       }
     }
-    return { ok: true, zipOfZips: innerZips >= 2 && wavs === 0, innerZips, packs: packDirs.size };
+    // The pack name an export's marker carries: a small .txt at the top level or beside the wavs.
+    let markerName = null;
+    for (const e of entries) {
+      if (markerName) break;
+      if (e.isDirectory || !/[.]txt$/i.test(e.name) || e.size > 4096) continue;
+      if (e.name.split('/').length > 3) continue;
+      try {
+        const body = (await zip.entryData(e.name)).toString('utf8');
+        if (body.includes(_COMMON_README_MARK)) markerName = (body.split(/\r?\n/)[0] || '').trim() || null;
+      } catch {}
+    }
+    return { ok: true, zipOfZips: innerZips >= 2 && wavs === 0, innerZips, packs: packDirs.size, markerName };
   } finally { try { await zip.close(); } catch {} }
 }
 
 // The same count for a picked folder: `common` folders under it that hold audio.
 function inspectIncomingCommonFolder(folderPath) {
-  return { ok: true, packs: _findCommonSubfolders(folderPath).filter((d) => _hasAnyWav(d)).length };
+  const packs = _findCommonSubfolders(folderPath).filter((d) => _hasAnyWav(d));
+  let markerName = _markerNameIn(folderPath);
+  for (const d of packs) { if (markerName) break; markerName = _markerNameIn(d); }
+  return { ok: true, packs: packs.length, markerName: markerName || null };
 }
 
 // Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
@@ -1761,6 +1777,41 @@ function _isOurMarkerAt(absPath, name) {
 
 // filter(relPath) => truthy to INCLUDE, matching soundFontFileHash's contract.
 // Only root-level .txt files can be ours; nested ones are real content.
+// The marker an export writes into a common folder is Studio's note, not part of the pack: an
+// import leaves it out of the library copy and remembers its name, so the copy is not called
+// customized for lacking it. Returns the names removed.
+function _dropOurMarkers(filesDir) {
+  const out = [];
+  try {
+    for (const e of fs.readdirSync(filesDir, { withFileTypes: true })) {
+      if (!e.isFile() || !_isOurMarkerAt(path.join(filesDir, e.name), e.name)) continue;
+      try { fs.unlinkSync(path.join(filesDir, e.name)); out.push(e.name); } catch {}
+    }
+  } catch {}
+  return out;
+}
+
+// A source's records without the marker files its common was imported without.
+function _sourceRecordsWithoutMarkers(records, meta) {
+  const names = Array.isArray(meta && meta.markerFiles) ? meta.markerFiles : [];
+  if (!names.length) return records;
+  const pfx = meta.sourceSubPath ? meta.sourceSubPath + '/' : '';
+  const skip = new Set(names.map((n) => pfx + n));
+  return records.filter((r) => !(r && skip.has(String(r.relPath || ''))));
+}
+
+// The pack name an export's marker carries, from a folder holding the pack's files, or null.
+function _markerNameIn(dir) {
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isFile() || !_isOurMarkerAt(path.join(dir, e.name), e.name)) continue;
+      const first = (fs.readFileSync(path.join(dir, e.name), 'utf8').split(/\r?\n/)[0] || '').trim();
+      if (first) return first;
+    }
+  } catch {}
+  return null;
+}
+
 function _excludeOurMarkers(root) {
   return (relPath) => {
     if (relPath.includes('/')) return true;
@@ -2444,6 +2495,7 @@ function createCommonFromFolder(userData, { folderPath, name, sourceUuid, source
   try {
     fs.mkdirSync(dir, { recursive: true });
     _linkOrCopyDirRecursive(folderPath, path.join(dir, 'files'));
+    const _markers = _dropOurMarkers(path.join(dir, 'files'));
     const extra = { ...(metadata || {}) };
     delete extra.name;
     const meta = {
@@ -2456,6 +2508,7 @@ function createCommonFromFolder(userData, { folderPath, name, sourceUuid, source
       importedFrom: 'Restored from source archive',
       ...extra,
       ...(sourceUuid ? { sourceUuid, sourceSubPath: sourceSubPath || '' } : {}),
+      ...(_markers.length ? { markerFiles: _markers } : {}),
     };
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
     try { recomputeCommonContentHash(userData, uuid); } catch {}
@@ -2550,7 +2603,7 @@ function getCommonCustomization(userData, uuid) {
     || fh.readFileHashManifest(fh.fileHashManifestPath(userData, 'sources', meta.sourceUuid));
   if (!sm || !Array.isArray(sm.records)) return unknown;
 
-  const d = fh.diffAgainstSource(cm.records, sm.records, meta.sourceSubPath);
+  const d = fh.diffAgainstSource(cm.records, _sourceRecordsWithoutMarkers(sm.records, meta), meta.sourceSubPath);
   if (!d.known) return unknown;
   return stamp({ ok: true, known: true, customized: (d.added + d.removed + d.changed) > 0,
                  added: d.added, removed: d.removed, changed: d.changed });
@@ -2574,7 +2627,7 @@ function getCommonFileStates(userData, uuid) {
     || fh.readFileHashManifest(fh.fileHashManifestPath(userData, 'sources', meta.sourceUuid));
   if (!cm || !sm || !Array.isArray(cm.records) || !Array.isArray(sm.records)) return unknown;
   const inSource = (k) => fs.existsSync(path.join(sDir, 'source', ...(meta.sourceSubPath ? [meta.sourceSubPath] : []), ...k.split('/')));
-  const st = fh.fileStatesAgainstSource(cm.records, sm.records, meta.sourceSubPath, { inSource });
+  const st = fh.fileStatesAgainstSource(cm.records, _sourceRecordsWithoutMarkers(sm.records, meta), meta.sourceSubPath, { inSource });
   if (!st) return unknown;
   return { ok: true, known: true, files: st.files, sourceDirs: st.sourceDirs };
 }

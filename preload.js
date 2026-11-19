@@ -396,6 +396,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // because the finished ones are removed too.
   exportManySourcesToDownloads: (params) => ipcRenderer.invoke('sources:exportManyToDownloads', params),
   pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
+  onExportPickerOpened:    (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('dialog:exportPickerOpened', handler);
+    return () => ipcRenderer.removeListener('dialog:exportPickerOpened', handler);
+  },
   // [B-420] The single-FILE twin, so the renderer owns that picker too and the shared runner
   // can own everything after it. Returns { ok, destFile } or { ok:false, canceled }.
   pickExportFilePath:      (params)   => ipcRenderer.invoke('dialog:pickExportFilePath', params),
@@ -489,6 +494,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // same fact for 1/20th of the time, and buying the walk to get it was why several doors
   // quietly never offered a safe eject.
   classifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:classify', params),
+  exportDestReachable:   (params)     => ipcRenderer.invoke('exportDest:reachable', params),
   // [B-005 item 4] "What have we just been handed?" ~85ms, no PowerShell. Returns
   // { removable, kind } or null for "cannot tell". Cheap enough to sit on a write path.
   identifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:identify', params),

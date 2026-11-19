@@ -77,17 +77,20 @@ const prevented = mousedown(sel);
 flush();
 check('a click on Browse opens the list, not the browser\'s', prevented && ctx.isOpen());
 const d = ctx.drop();
-const allHeads = d.children.map((s) => s.children[0]);
+const tracksItem = d.children[0];
+check('Shared Tracks is one entry at the top, no heading over it, picked with one click',
+  tracksItem.classList.contains('sf-libpick-browse-item') && tracksItem.textContent === 'Shared Tracks',
+  tracksItem.className + ' ' + tracksItem.textContent);
+const sections = d.children.slice(1);
+const heads = sections.map((s) => s.children[0]);
 check('each group is its own section, heading first (so the heading sticks within it)',
-  d.children.length === 4 && allHeads.every((h) => h.classList.contains('sf-libpick-browse-head')));
-check('one heading per group with its count, Shared Tracks first as a group of its own',
-  allHeads.map((h) => h.textContent).join('|') === 'Shared Tracks (1)|Sources (2)|Fonts (3)|Common folders (1)',
-  allHeads.map((h) => h.textContent).join('|'));
-const heads = allHeads.slice(1);
+  sections.length === 3 && heads.every((h) => h.classList.contains('sf-libpick-browse-head')));
+check('one heading per group with its count',
+  heads.map((h) => h.textContent).join('|') === 'Sources (2)|Fonts (3)|Common folders (1)',
+  heads.map((h) => h.textContent).join('|'));
 const bodyOf = (h) => h.parent.children[1];
-check('the group holding the current choice is open, the others closed (Shared Tracks too)',
-  allHeads[0].classList.contains('collapsed')
-  && !heads[0].classList.contains('collapsed') && bodyOf(heads[0]).style.display !== 'none'
+check('the group holding the current choice is open, the others closed',
+  !heads[0].classList.contains('collapsed') && bodyOf(heads[0]).style.display !== 'none'
   && heads[1].classList.contains('collapsed') && bodyOf(heads[1]).style.display === 'none'
   && heads[2].classList.contains('collapsed'));
 check('the headings stick to the top of the list', /\.sf-libpick-browse-head \{[^}]*position: sticky; top: 0;/.test(html));

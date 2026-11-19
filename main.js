@@ -4028,6 +4028,10 @@ ipcMain.handle('exportDest:preflight', async (_, args = {}) => {
 
 // Slow, and deliberately separate. Start it when a destination is chosen and read it
 // later; never await it between a user's click and the work starting.
+// Whether the drive a failed export was writing to can still be reached, so a card that dropped
+// away is told as that rather than as the syscall error it surfaced as.
+ipcMain.handle('exportDest:reachable', async (_, { dir } = {}) => ({ reachable: !!(await liveDirSafe(dir)) }));
+
 ipcMain.handle('exportDest:classify', async (_, { destDir } = {}) => {
   try {
     const r = await require('./exportDestination').describe(destDir, { classify: true });
@@ -5881,14 +5885,24 @@ ipcMain.handle('dialog:pickExportDir', async (_, { title } = {}) => {
     // A last location that is gone (card out, drive unplugged) is not opened either, and the
     // check that says so must not hang on a dead reader: liveDirSafe, not liveDir.
     const stored = await liveDirSafe(Store.get('lastExportDir'));
+    // After a board card, the picker starts in Downloads: listing a board card is slow, and
+    // Windows refuses a shell: name as a starting folder ("You can't open this location").
     const lastDir = stored && (await _lastDirMayBeBoardCard(stored))
-      ? 'shell:MyComputerFolder'
+      ? app.getPath('downloads')
       : (stored || app.getPath('downloads'));
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-      title: title || 'Choose export destination…',
-      defaultPath: lastDir,
-      properties: ['openDirectory', 'createDirectory'],
-    });
+    // The picker taking focus from Studio is the moment it is on screen; the renderer's
+    // "Opening the folder picker" cover closes then.
+    const onOpened = () => { try { win.webContents.send('dialog:exportPickerOpened'); } catch {} };
+    win.once('blur', onOpened);
+    let picked;
+    try {
+      picked = await dialog.showOpenDialog(win, {
+        title: title || 'Choose export destination…',
+        defaultPath: lastDir,
+        properties: ['openDirectory', 'createDirectory'],
+      });
+    } finally { win.removeListener('blur', onOpened); }
+    const { canceled, filePaths } = picked;
     if (canceled || !filePaths?.length) return { ok: false, canceled: true };
     Store.set('lastExportDir', filePaths[0]);
     return { ok: true, destDir: filePaths[0] };
