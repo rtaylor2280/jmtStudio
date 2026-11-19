@@ -1,9 +1,12 @@
-// Data Studio can pick up between releases, from the jmt-studio-data repo.
+// Data Studio can pick up between releases, from the jmt-studio-data-public repo.
 //
 // The app always has the copy it shipped with, so this only ever adds to it. A failed fetch, a bad
 // checksum or a file that does not validate changes no data and interrupts nobody; the About row is
 // the only place it shows. Nothing ever waits on it. A copy that passes is kept in userData and
 // loaded at the next start.
+//
+// The error messages are locked (errorDataLock.js), the shipped copy and every update alike, and are
+// kept locked on disk. opts.unlock opens one, asking the key service for its key the first time.
 
 'use strict';
 
@@ -11,8 +14,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { lockedProblem } = require('./errorDataLock');
 
-const BASE_URL = 'https://raw.githubusercontent.com/rtaylor2280/jmt-studio-data/main/';
+const BASE_URL = 'https://raw.githubusercontent.com/rtaylor2280/jmt-studio-data-public/main/';
 const SCHEMA = 1;
 const DATASET = 'error-messages';
 const CATALOGUE_DATASET = 'font-catalogue';
@@ -21,8 +25,8 @@ const MAX_SIGNATURES = 2000;
 const MAX_TEXT = 1000;
 const PATTERN_BUDGET_MS = 50;
 // About shows SCHEMA.n, where n is the dataset versions added together less this base, so the data 1.8
-// shipped with (error messages 4, catalogue 7) reads 1.0 and each dataset publish adds one.
-const RELEASE_BASE = 11;
+// shipped with (error messages 4, locked catalogue 8) reads 1.0 and each dataset publish adds one.
+const RELEASE_BASE = 12;
 
 const SAMPLES = ['a'.repeat(2000), `'${'a'.repeat(1000)}' was not declared in this scope`, ' '.repeat(2000),
                  `${'<'.repeat(1000)}${'>'.repeat(1000)}`];
@@ -61,22 +65,53 @@ function problemWith(data) {
 const _sha256 = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 
 class DataRail {
-  // opts: userData, appVersion, bundled, apply(data), get(url) -> Promise<string>, catalogue (optional)
+  // opts: userData, appVersion, bundled (the locked shipped copy), unlock(locked) -> Promise<data>,
+  //       apply(data), get(url) -> Promise<string>, isAtLeast(have, want), catalogue (optional)
   constructor(opts) {
     this.opts = opts;
     this.current = { version: opts.bundled.version, updated: opts.bundled.updated };
+    this.unlocked = false;
     this.lastCheck = null;
-    this.file = path.join(opts.userData, 'studio-data', `${DATASET}.json`);
+    this.file = path.join(opts.userData, 'studio-data', `${DATASET}.locked.json`);
+    try { fs.rmSync(path.join(opts.userData, 'studio-data', `${DATASET}.json`), { force: true }); } catch {}
   }
 
-  // The newer of the shipped copy and the last one kept.
-  loadKept() {
+  _keptLocked() {
     try {
-      const data = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      if (problemWith(data) || data.version <= this.current.version) return;
-      this.opts.apply(data);
-      this.current = { version: data.version, updated: data.updated };
+      const locked = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      // A kept copy is only ever written after it opened, so the same version as the shipped one is a
+      // repair of a shipped copy that would not open.
+      if (!lockedProblem(locked) && locked.version >= this.opts.bundled.version) return locked;
     } catch {}
+    return null;
+  }
+
+  async _open(locked) {
+    const data = await this.opts.unlock(locked);
+    if (problemWith(data) || data.version !== locked.version) throw new Error('invalid');
+    return data;
+  }
+
+  // Opens the newer of the shipped copy and the last one kept. Safe to call again: it does nothing
+  // once the messages are open, and a call that cannot reach the key service changes nothing.
+  async start() {
+    if (this.unlocked) return true;
+    if (!this._starting) {
+      this._starting = (async () => {
+        for (const locked of [this._keptLocked(), this.opts.bundled]) {
+          if (!locked) continue;
+          try {
+            const data = await this._open(locked);
+            this.opts.apply(data);
+            this.current = { version: data.version, updated: data.updated };
+            this.unlocked = true;
+            return true;
+          } catch {}
+        }
+        return false;
+      })().finally(() => { this._starting = null; });
+    }
+    return this._starting;
   }
 
   async check() {
@@ -106,14 +141,22 @@ class DataRail {
 
   async _checkErrors(entry) {
     try {
-      if (!(entry.version > this.current.version)) return 'current';
+      if (!this.unlocked) await this.start();
+      // A shipped copy that will not open (damaged on disk) is replaced by the published one, even at
+      // the same version, so it mends at the next check instead of the next release.
+      const repair = !this.unlocked;
+      if (repair ? entry.version < this.opts.bundled.version : !(entry.version > this.current.version)) {
+        return repair ? 'failed' : 'current';
+      }
       if (this._tooNew(entry)) return 'current';
       const text = await this.opts.get(`${BASE_URL}${entry.file}`);
       if (_sha256(text) !== entry.sha256) return 'failed';
-      const data = JSON.parse(text);
-      if (problemWith(data) || data.version <= this.current.version) return 'failed';
+      const locked = JSON.parse(text);
+      if (lockedProblem(locked) || locked.version !== entry.version) return 'failed';
+      const data = await this._open(locked);
       this.opts.apply(data);
       this.current = { version: data.version, updated: data.updated };
+      this.unlocked = true;
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       fs.writeFileSync(`${this.file}.tmp`, text);
       fs.renameSync(`${this.file}.tmp`, this.file);
@@ -127,7 +170,7 @@ class DataRail {
     const n = Math.max(0, this.current.version + (catalogue ? catalogue.version : 0) - RELEASE_BASE);
     const version = `${SCHEMA}.${n}`;
     const updated = catalogue && catalogue.updated > this.current.updated ? catalogue.updated : this.current.updated;
-    return { version, updated, lastCheck: this.lastCheck };
+    return { version, updated, lastCheck: this.lastCheck, unlocked: this.unlocked };
   }
 }
 

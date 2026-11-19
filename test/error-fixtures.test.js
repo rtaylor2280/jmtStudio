@@ -15,6 +15,7 @@ const path = require('path');
 const preflight = require('../renderer/preflight.js');
 require('../renderer/preflight-checks.js');
 const { SIGNATURES, resolve } = require('../compileErrorMatrix');
+require('./plain-error-data').useOrSkip('error fixtures');
 const { extractCompileError } = require('../compileErrors');
 const { BASE, FAULTS, ALL_AT_ONCE, TEST_ORDER, apply } = require('./error-fixtures/faults');
 

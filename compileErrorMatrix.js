@@ -14,8 +14,6 @@
 
 'use strict';
 
-const bundled = require('./compileErrorData');
-
 // Compiler lines can run to thousands of characters of template arguments. Every signature
 // reads the start of a line, and clipping bounds what a pattern can be made to do.
 const MAX_LINE = 2000;
@@ -161,10 +159,16 @@ function _selectedBoard(ctx, g) {
   return true;
 }
 
-// A name sitting bare where a preset's font or track goes.
+// A name sitting bare where a preset's font or track goes. A font with folders after it
+// (ChargeFont;common) is one name to the user, so g.symbol becomes the whole of it.
 function _unquotedName(ctx, g) {
   const src = String(ctx.configText || '').split(/\bBladeConfig\b/)[0];
-  return new RegExp(`\\{\\s*${g.symbol}\\s*,|\\{\\s*"[^"]*"\\s*,\\s*${g.symbol}\\s*,`).test(src);
+  const font = src.match(new RegExp(`\\{\\s*${g.symbol}((?:;[^,"{}\\r\\n]*)?)\\s*,`));
+  if (font) {
+    if (font[1]) g.symbol = `${g.symbol}${font[1].trim()}`;
+    return true;
+  }
+  return new RegExp(`\\{\\s*"[^"]*"\\s*,\\s*${g.symbol}\\s*,`).test(src);
 }
 
 // Logic a signature can name. Data travels without code, so an entry naming a function this
@@ -203,9 +207,10 @@ function _hydrate(list, appVersion) {
   return out;
 }
 
-const SIGNATURES = _hydrate(bundled.signatures);
+// Empty until the locked messages are opened (dataRail.start).
+const SIGNATURES = [];
 
-// Swaps in a newer set of messages, already validated by dataRail.
+// Swaps in a set of messages, already validated by dataRail.
 function setSignatures(list, appVersion) {
   const next = _hydrate(list, appVersion);
   SIGNATURES.length = 0;

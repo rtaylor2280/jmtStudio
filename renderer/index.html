@@ -3135,9 +3135,9 @@
   .sf-voicepack-status.error { color: #e88; }
   .sf-voicepack-status.success { color: #6c6; }
   .sf-voicepack-actions { margin-top: 4px; }
-  .sf-voicepack-attribution { margin: 8px 0 0 0; padding-top: 10px; border-top: 1px solid var(--c-border-faint); font-size: 0.7rem; color: var(--c-text-dim); line-height: 1.5; }
-  .sf-voicepack-attribution a { color: var(--c-text-muted); text-decoration: underline; }
-  .sf-voicepack-attribution a:hover { color: var(--c-text); }
+  .sf-voicepack-attribution, .modal-attribution { margin: 8px 0 0 0; padding-top: 10px; border-top: 1px solid var(--c-border-faint); font-size: 0.7rem; color: var(--c-text-dim); line-height: 1.5; }
+  .sf-voicepack-attribution a, .modal-attribution a { color: var(--c-text-muted); text-decoration: underline; }
+  .sf-voicepack-attribution a:hover, .modal-attribution a:hover { color: var(--c-text); }
   /* "More" tab: links out to community sources. Card-style list with
      name, short description, and an external link per item. */
   .sf-voicepack-more-panel { display: flex; flex-direction: column; gap: 10px; }
@@ -8088,6 +8088,13 @@
       <button class="modal-btn-cancel"  id="dl-cancel-btn">Cancel</button>
       <button class="modal-btn-primary" id="dl-confirm-btn" disabled>Download</button>
     </div>
+    <p class="modal-attribution" id="dl-attribution">
+      ProffieOS is created by Fredrik Hubinette (profezzorn) and released under
+      <a href="#" data-href="https://www.gnu.org/licenses/gpl-3.0.html">GPL v3</a>.
+      JMT Studio never bundles it: each version downloads on demand from his
+      <a href="#" data-href="https://github.com/profezzorn/ProffieOS/releases">official GitHub releases</a>.
+      Learn more at <a href="#" data-href="https://fredrik.hubbe.net/lightsaber/proffieos.html">fredrik.hubbe.net</a>.
+    </p>
   </div>
 </div>
 
@@ -8347,7 +8354,7 @@
       &copy; 2026 Ryan Taylor. All rights reserved.<br>
       JMT Studio may be used for personal and commercial purposes, including managing, configuring, and building lightsabers using ProffieOS.<br>
       Unauthorized copying, modification, distribution, or resale is prohibited. Application code and assets may not be extracted or reused in other projects.<br>
-      This tool does not include ProffieOS. Users must supply their own copy.<br>
+      JMT Studio does not include ProffieOS. ProffieOS is created by Fredrik Hubinette (profezzorn) and released under the GNU General Public License v3. Each version is downloaded on demand from its official GitHub releases, or you may supply your own copy.<br>
       Generated configurations remain fully accessible and editable by the user.</span>
       <button class="about-license-toggle" id="about-license-toggle">View License</button>
       <div class="about-license-body" id="about-license-body"></div>
@@ -16298,11 +16305,13 @@ You may not:
 
 This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose. In no event shall Ryan Taylor be liable for any claim, damages, or other liability arising from the use of this software.
 
-JMT Studio is a JMT product and is not affiliated with or endorsed by ProffieOS or its contributors.
+JMT Studio is a JMT product and is not affiliated with or endorsed by ProffieOS, its creator Fredrik Hubinette (profezzorn), its contributors, or any other creator, maker or tool it names or links to.
 
-This tool does not include ProffieOS. Users must supply their own copy.
+JMT Studio does not include ProffieOS. ProffieOS is created by Fredrik Hubinette (profezzorn) and released under the GNU General Public License v3. Each version is downloaded on demand from its official GitHub releases, or you may supply your own copy.
 
 Generated configurations remain fully accessible and editable by the user.
+
+Third-party software. JMT Studio includes separate programs and libraries by other authors, among them arduino-cli, dfu-util, libusb, koffi, serialport and a patched build of the Proffieboard Arduino core's system library (not ProffieOS, which JMT Studio does not include). They are not covered by this licence: each is provided under its own licence, and nothing here limits the rights those licences give you. Their licence texts, notices and source information are in the licenses folder installed with JMT Studio (THIRD-PARTY-NOTICES.txt).
 
 Copyright © 2026 Ryan Taylor. All rights reserved.`;
 
@@ -20818,6 +20827,12 @@ document.getElementById('btn-vp-download')?.addEventListener('click', openDownlo
 document.getElementById('bp-btn-get-proffieos')?.addEventListener('click', openDownloadVersionModal);
 // buildPanel.js is injected after this script, so it reaches the modal here.
 window.openDownloadVersionModal = openDownloadVersionModal;
+document.querySelectorAll('#dl-attribution a[data-href]').forEach(a => {
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.electronAPI?.openExternal?.(a.getAttribute('data-href'));
+  });
+});
 
 document.getElementById('dl-cancel-btn').addEventListener('click', () => {
   document.getElementById('modal-download-version').classList.remove('active');

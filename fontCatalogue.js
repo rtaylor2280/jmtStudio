@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { segmentCandidateRecords, setsFromRecords } = require('./soundFontCompare');
+const lock = require('./catalogueLock');
 
 const FILL_AT = 0.70;
 const NAME_AT = 0.55;
@@ -22,9 +23,15 @@ class FontCatalogue {
   constructor(data) {
     this.fonts = [];
     this.byHash = new Map();
+    // The locked form: boxes opened by the sounds themselves (catalogueLock.js).
+    if (data && data.schema === lock.SCHEMA) {
+      this.locked = { salt: Buffer.from(data.salt, 'base64'), boxes: data.boxes || {}, fonts: data.fonts || [] };
+      return;
+    }
     for (const creator of (data && data.creators) || []) {
       for (const font of creator.fonts || []) {
         const entry = { font, creator, total: font.sounds.length };
+        entry.key = entry;
         this.fonts.push(entry);
         for (const [, hash] of font.sounds) {
           if (!this.byHash.has(hash)) this.byHash.set(hash, []);
@@ -34,14 +41,35 @@ class FontCatalogue {
     }
   }
 
+  // The fonts that hold this sound. Locked, each comes with its share of the font's two keys.
+  _entriesFor(h) {
+    if (!this.locked) return this.byHash.get(h) || [];
+    const { salt, boxes } = this.locked;
+    const sealed = boxes[lock.boxIndex(salt, h)];
+    const box = sealed ? lock.open(lock.boxKey(salt, h), sealed) : null;
+    return Array.isArray(box) ? box.map(([ref, total, x, m, f]) => ({ key: ref, ref, total, share: [x, m, f] })) : [];
+  }
+
+  // A font's maker ('m') or details ('f'), or null when its sounds found are not enough to open them.
+  _unlock(best, which) {
+    const sealed = this.locked.fonts[best.ref] && this.locked.fonts[best.ref][which];
+    if (!sealed) return null;
+    const shares = best.shares.map(([x, m, f]) => [x, lock.shareOf(which === 'm' ? m : f)]);
+    return lock.open(lock.keyOf(lock.combine(shares)), sealed);
+  }
+
   // hashes: the sounds found, full or shortened. Null when nothing reaches a suggestion.
   identify(hashes) {
     const found = new Map();
     for (const h of new Set([...hashes].map(x => String(x).slice(0, HASH_CHARS)))) {
-      for (const entry of this.byHash.get(h) || []) found.set(entry, (found.get(entry) || 0) + 1);
+      for (const entry of this._entriesFor(h)) {
+        const had = found.get(entry.key);
+        if (had) { had.matched++; had.shares.push(entry.share); }
+        else found.set(entry.key, { entry, matched: 1, shares: entry.share ? [entry.share] : [] });
+      }
     }
-    const scored = [...found]
-      .map(([entry, matched]) => ({ ...entry, matched, share: matched / entry.total }))
+    const scored = [...found.values()]
+      .map(({ entry, matched, shares }) => ({ ...entry, shares, matched, share: matched / entry.total }))
       .filter(s => s.matched >= MIN_SOUNDS && s.share >= CREATOR_AT);
     if (!scored.length) return null;
 
@@ -58,6 +86,14 @@ class FontCatalogue {
     let tier = 'creator';
     if (best.share >= FILL_AT && !tied) tier = 'fill';
     else if (best.share >= NAME_AT && leads) tier = 'name';
+
+    if (this.locked) {
+      const creator = this._unlock(best, 'm');
+      if (!creator) return null;
+      const font = tier === 'creator' ? null : this._unlock(best, 'f');
+      if (tier !== 'creator' && !font) tier = 'creator';
+      Object.assign(best, { creator, font });
+    }
 
     return {
       tier,
@@ -143,4 +179,7 @@ function applyToEnrichment(e, result) {
   }
 }
 
-module.exports = { FontCatalogue, current, useFile, setData, mergeDetection, applyToEnrichment, FILL_AT, NAME_AT, CREATOR_AT };
+// What the locked form needs to open at the same lines this file names a maker and a font.
+const LOCK_THRESHOLDS = { maker: CREATOR_AT, font: NAME_AT, floor: MIN_SOUNDS };
+
+module.exports = { FontCatalogue, current, useFile, setData, mergeDetection, applyToEnrichment, FILL_AT, NAME_AT, CREATOR_AT, LOCK_THRESHOLDS };

@@ -9,6 +9,9 @@
 const { FontCatalogue, mergeDetection } = require('../fontCatalogue');
 let shipped = null;
 try { shipped = require('../fontCatalogueData.json'); } catch {}
+// The working copy the shipped file is locked from (local/, private).
+let plain = null;
+try { plain = require('../local/fontCatalogue.plain.json'); } catch {}
 
 let failed = 0;
 const ok = (name, pass, detail = '') => {
@@ -65,18 +68,20 @@ ok('a suggestion carries no store link', mergeDetection({ vendor: null }, hint).
 ok('no match changes nothing', mergeDetection(named, { byPath: {}, best: null }).vendor === 'From the readme');
 
 ok('an empty catalogue matches nothing', new FontCatalogue(null).identify(big) === null);
-if (shipped) {
-ok('the shipped catalogue has no personal share links',
-  !JSON.stringify(shipped).match(/drive\.google|dropbox\.com/));
+if (shipped && plain) {
+ok('the shipped catalogue is the locked one', shipped.schema === require('../catalogueLock').SCHEMA && !shipped.creators);
+ok('the catalogue has no personal share links',
+  !JSON.stringify(plain).match(/drive\.google|dropbox\.com/));
 const full = new FontCatalogue(shipped);
+const fonts = plain.creators.flatMap(c => c.fonts);
 let right = 0;
-for (const e of full.fonts) {
-  const r = full.identify(e.font.sounds.map(s => s[1]));
-  if (r && r.tier === 'fill' && r.font.name === e.font.name) right++;
+for (const f of fonts) {
+  const r = full.identify(f.sounds.map(s => s[1]));
+  if (r && r.tier === 'fill' && r.font.name === f.name) right++;
 }
-const sample = full.fonts[0].font.sounds.map(x => x[1]);
+const sample = fonts[0].sounds.map(x => x[1]);
 ok('full length hashes match too', full.identify(sample.map(h => h.padEnd(64, '0'))).tier === 'fill');
-ok('the shipped fonts recognize themselves', right >= full.fonts.length - 1, `${right} of ${full.fonts.length}`);
+ok('the shipped fonts recognize themselves', right >= fonts.length - 1, `${right} of ${fonts.length}`);
 }
 
 {

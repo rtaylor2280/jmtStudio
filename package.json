@@ -72,6 +72,7 @@
     "files": [
       "*.js",
       "fontCatalogueData.json",
+      "compileErrorData.locked.json",
       "renderer/**/*",
       "assets/**/*",
       "LICENSE.txt"

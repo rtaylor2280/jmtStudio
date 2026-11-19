@@ -9,7 +9,16 @@ const proffie     = require('./proffieos');
 const { DataRail } = require('./dataRail');
 const { CatalogueRail } = require('./catalogueRail');
 const compileMatrix = require('./compileErrorMatrix');
-const compileErrorData = require('./compileErrorData');
+const { ErrorKeys, postJson } = require('./errorDataLock');
+// The locked messages Studio shipped with. A damaged copy leaves compile errors untranslated; it
+// never stops Studio starting.
+const compileErrorData = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'compileErrorData.locked.json'), 'utf8'));
+  } catch {
+    return { version: 0, updated: '' };
+  }
+})();
 const fontCatalogue = require('./fontCatalogue');
 const cacheManager = require('./cacheManager');
 const coreVersions = require('./coreVersions');
@@ -266,16 +275,30 @@ app.whenReady().then(() => {
       get,
     });
     fontCatalogue.useFile(catalogue.file);
+    // The error messages ship locked; the first start online collects this install's key for them.
+    const { safeStorage } = require('electron');
+    const errorKeys = new ErrorKeys({
+      dir: path.join(app.getPath('userData'), 'studio-data'),
+      protect: safeStorage.isEncryptionAvailable()
+        ? { encrypt: b => safeStorage.encryptString(b.toString('base64')),
+            decrypt: b => Buffer.from(safeStorage.decryptString(b), 'base64') }
+        : null,
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      post: postJson,
+      registered: { get: () => Store.get('registeredInstallId'), set: id => Store.set('registeredInstallId', id) },
+    });
     dataRail = new DataRail({
       userData: app.getPath('userData'),
       appVersion: app.getVersion(),
       bundled: compileErrorData,
+      unlock: locked => errorKeys.unlock(locked),
       apply: data => compileMatrix.setSignatures(data.signatures, app.getVersion()),
       isAtLeast: (have, want) => have.localeCompare(want, undefined, { numeric: true }) >= 0,
       get,
       catalogue,
     });
-    dataRail.loadKept();
+    dataRail.start().catch(() => {});
     if (Store.get('settings.dataUpdatesEnabled') !== false) setTimeout(() => dataRail.check(), 10000);
     // [B-687] Counts this version's first run on this computer by downloading one file. Installed
     // builds only, and off when the user has turned online data updates off. Never awaited.
@@ -1006,10 +1029,11 @@ ipcMain.handle('styles:replace', async () => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
-ipcMain.handle('dataRail:status', () => (dataRail ? dataRail.status() : compileErrorData));
+const _dataRailFallback = () => ({ version: compileErrorData.version, updated: compileErrorData.updated });
+ipcMain.handle('dataRail:status', () => (dataRail ? dataRail.status() : _dataRailFallback()));
 ipcMain.handle('dataRail:check', async () => ({
   result: dataRail ? await dataRail.check() : 'failed',
-  status: dataRail ? dataRail.status() : compileErrorData,
+  status: dataRail ? dataRail.status() : _dataRailFallback(),
 }));
 ipcMain.handle('store:getSetting', (_, key, def) => {
   const val = Store.get(`settings.${key}`);
@@ -1051,6 +1075,9 @@ ipcMain.handle('toolchain:initialize', async () => {
   }
 
   const result = await toolchain.initialize(log);
+  // Setup is online, so it is also when an install that has not yet collected the key for the
+  // error messages gets it.
+  if (result.ok && dataRail) dataRail.start().catch(() => {});
   if (win && !win.isDestroyed()) {
     // When the toolchain itself is ready but no ProffieOS version is present,
     // we surface that as an error-state next-action message in the same status

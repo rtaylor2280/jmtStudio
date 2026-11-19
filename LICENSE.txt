@@ -17,10 +17,13 @@ implied, including but not limited to the warranties of merchantability and
 fitness for a particular purpose. In no event shall Ryan Taylor be liable
 for any claim, damages, or other liability arising from the use of this software.
 
-JMT Studio is a JMT product and is not affiliated with or
-endorsed by ProffieOS or its contributors.
+JMT Studio is a JMT product and is not affiliated with or endorsed by ProffieOS, its creator
+Fredrik Hubinette (profezzorn), its contributors, or any other creator, maker or tool it names
+or links to.
 
-This tool does not include ProffieOS. Users must supply their own copy.
+JMT Studio does not include ProffieOS. ProffieOS is created by Fredrik Hubinette (profezzorn)
+and released under the GNU General Public License v3. Each version is downloaded on demand from
+its official GitHub releases, or you may supply your own copy.
 
 Generated configurations remain fully accessible and editable by the user.
 

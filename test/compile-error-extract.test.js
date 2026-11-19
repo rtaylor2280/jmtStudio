@@ -36,6 +36,7 @@ const {
   extractCompileError,
   _stripAnsi,
 } = require('../compileErrors');
+require('./plain-error-data').useOrSkip('compile error extract');
 
 // ── harness ────────────────────────────────────────────────────────────────
 let failures = 0;

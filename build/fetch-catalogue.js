@@ -1,8 +1,8 @@
 // Brings fontCatalogueData.json up to the published catalogue before a build packs the app.
 //
 // The file is not in git, because the catalogue is published on purpose rather than by a commit, so a
-// machine building from main has no copy or an old one. Built without it, an install knows no fonts
-// until it can download them, and nothing says so. Every platform goes through here, so all of them
+// machine building from main has no copy, an old one, or the plain one. Only the locked form ships.
+// Built without it, an install knows no fonts until it can download them, and nothing says so. Every platform goes through here, so all of them
 // ship the published catalogue, and a build that cannot get it stops.
 
 'use strict';
@@ -11,9 +11,10 @@ const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const path = require('path');
-const { CatalogueRail, INDEX_PATH, headOf } = require('../catalogueRail');
+const { CatalogueRail, LOCKED_PATH, headOf } = require('../catalogueRail');
+const lock = require('../catalogueLock');
 
-const BASE_URL = 'https://raw.githubusercontent.com/rtaylor2280/jmt-studio-data/main/';
+const BASE_URL = 'https://raw.githubusercontent.com/rtaylor2280/jmt-studio-data-public/main/';
 const ROOT = path.join(__dirname, '..');
 
 function httpsGet(url) {
@@ -33,17 +34,21 @@ async function ensureCatalogue({ root = ROOT, get = httpsGet, log = console.log 
   let entry;
   try { entry = JSON.parse(await get(`${BASE_URL}index.json`)).datasets['font-catalogue']; }
   catch (e) { throw stop(`could not read what is published (${e.message}).`); }
-  if (!entry || entry.file !== INDEX_PATH) throw stop('the published index has no catalogue.');
+  if (!entry || entry.file !== LOCKED_PATH) throw stop('the published index has no locked catalogue.');
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-catalogue-'));
   try {
     const kept = path.join(temp, 'font-catalogue.json');
-    const rail = new CatalogueRail({ bundled: target, kept, apply: () => {}, get });
+    // A plain copy left on this machine never ships: the build fetches the locked one in its place.
+    const held = headOf(target);
+    const bundled = held && held.schema === lock.SCHEMA ? target : path.join(temp, 'none.json');
+    const rail = new CatalogueRail({ bundled, kept, apply: () => {}, get });
     const result = await rail.check(BASE_URL, entry);
     if (result === 'failed') throw stop(`version ${entry.version} did not download whole.`);
     if (result === 'updated') fs.copyFileSync(kept, target);
     const have = headOf(target);
-    if (!have || have.version < entry.version) throw stop(`this copy is not version ${entry.version}.`);
+    if (!have || have.schema !== lock.SCHEMA) throw stop('this copy is not the locked catalogue.');
+    if (have.version < entry.version) throw stop(`this copy is not version ${entry.version}.`);
     log(`  • font catalogue version ${have.version}${have.version > entry.version ? ` (published is ${entry.version})` : ''}`);
     return have.version;
   } finally {
