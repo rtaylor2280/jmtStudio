@@ -8925,6 +8925,32 @@ function _jmtFitViewerImage(modalEl, img) {
   if (img.complete && img.naturalWidth) fit(); else img.addEventListener('load', fit, { once: true });
 }
 window._jmtFitViewerImage = _jmtFitViewerImage;
+// macOS: while an app browser shows over Studio, Studio takes no clicks or keys. A click brings the browser
+// forward, as on Windows, where the window itself is disabled instead. Clear, so nothing on screen changes.
+// [QA09 M24]
+{
+  let _lockLayer = null;
+  const _lockKeys = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
+  window.electronAPI?.onAppBrowserLock?.(({ locked } = {}) => {
+    if (locked && !_lockLayer) {
+      _lockLayer = document.createElement('div');
+      _lockLayer.id = 'app-browser-lock';
+      _lockLayer.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:transparent';
+      const front = (e) => { e.preventDefault(); e.stopPropagation(); window.electronAPI.appBrowserFront(); };
+      _lockLayer.addEventListener('mousedown', front);
+      _lockLayer.addEventListener('contextmenu', front);
+      document.body.appendChild(_lockLayer);
+      try { document.activeElement?.blur?.(); } catch {}
+      window.addEventListener('keydown', _lockKeys, true);
+      window.addEventListener('keypress', _lockKeys, true);
+    } else if (!locked && _lockLayer) {
+      _lockLayer.remove();
+      _lockLayer = null;
+      window.removeEventListener('keydown', _lockKeys, true);
+      window.removeEventListener('keypress', _lockKeys, true);
+    }
+  });
+}
 // A press that starts inside a dialog and is released on its backdrop (selecting text off the side of a
 // field, say) lands as a click on the backdrop. Every backdrop closes on click, so that click is dropped
 // here, before any of them sees it: a backdrop closes only when the press began on it too. [B-559]
@@ -10229,6 +10255,9 @@ async function _sfExportFailed(err) {
 }
 // True when an error names a path whose drive is no longer there.
 async function _sfDestinationGone(err) {
+  // ENXIO (no such device) means the device itself is gone. macOS can still show the volume's folder for a
+  // moment after the card leaves, so the reachability check below would call it there.
+  if ((err && err.code === 'ENXIO') || /^ENXIO\b/.test(String((err && err.message) || err || ''))) return true;
   // The path the error names, or (a write error can name none) the destination picked for this export.
   const m = String((err && err.message) || err || '').match(/'([A-Za-z]:[\\/]|\/Volumes\/[^/']+|\/media\/[^/']+\/[^/']+)/);
   const dir = m ? m[1] : window._sfLastExportDest;
@@ -15091,7 +15120,8 @@ async function _sdImportFontsFromCard() {
   const label = _sdReport.card ? _sdDriveLabel(_sdReport.card) : null;
   // No pre-walk of the card ([B-361]): the analyze's own read finds and drops
   // damaged files, so the review's flags no longer depend on a completed map.
-  window._sfBulkImportFromPath(root, label);
+  const _exec = _sdReport.card && _sdReport.card._execScan;
+  window._sfBulkImportFromPath(root, label, { programFound: !!(_exec && _exec.files && _exec.files.length) });
 }
 async function _sdRenderList() {
   _sdReport.textView = false;
@@ -17179,7 +17209,12 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     if (els.explainAutoWrap) {
       els.explainAutoWrap.style.display = phase === 'explain' ? '' : 'none';
     }
-    if (els.startBtn)  els.startBtn.style.display  = phase === 'review' ? '' : 'none';
+    // A card that carries a program file offers no Quick import, so neither the button nor the line
+    // that describes it is shown. (_execStance is only read on the review screen, after it is set.)
+    const _quickOffered = phase === 'review' && !_execStance;
+    if (els.startBtn)  els.startBtn.style.display  = _quickOffered ? '' : 'none';
+    const _quickLine = document.getElementById('sf-bulk-import-review-quickline');
+    if (_quickLine) _quickLine.style.display = phase === 'review' && _execStance ? 'none' : '';
     if (els.reviewBtn) els.reviewBtn.style.display = phase === 'review' ? '' : 'none';
     // No Back on the guided view: you've already passed the stats/fork and the
     // analyze has run — from here it's Import or Cancel (out to the card browser).
@@ -17199,7 +17234,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // `runInFlight` too, not phase alone: the import RUN reuses the 'progress' phase, and by
     // then there is no review left to skip, so the offer would describe a choice that is gone.
     if (els.progAutoWrap) {
-      els.progAutoWrap.style.display = (phase === 'progress' && !runInFlight) ? '' : 'none';
+      els.progAutoWrap.style.display = (phase === 'progress' && !runInFlight && !_quickWithheld) ? '' : 'none';
     }
     // [B-424] Driven from HERE for the reason the note above gives: the one control in this
     // dialog that was not phase-driven from this function was the one that leaked onto a screen
@@ -17429,6 +17464,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
     // path, so it covers the X, Esc and Done rather than one button's handler.
     // Only the flag is cleared, not the checkbox - showPhase seeds the box from the flag, and a
     // second assignment is how a one-place rule quietly becomes a two-place rule.
+    _quickWithheld = false;
     _bulkAutoContinue = false;
   };
 
@@ -19111,6 +19147,10 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // flag rather than a stored preference ON PURPOSE: "walk away from THIS import" is a decision
   // about one folder and one evening, not a standing choice about how the app behaves.
   let _bulkAutoContinue = false;
+  // True for an import from a card already known to carry a program file. Quick import is never
+  // offered there, so the analyze does not offer to continue to it either. Set by each card
+  // import; cleared by closeModal.
+  let _quickWithheld = false;
 
   const showReview = async (plan) => {
     _execStance = false;
@@ -19671,7 +19711,8 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
   // Same as startScan but with a caller-supplied root (an SD card / folder), skipping the
   // OS folder-picker. Lets the SD-card browser reuse this whole proven modal — review
   // breakdown, dedup, progress, elapsed clock, cancel, summary — instead of a parallel flow.
-  const startScanWithRoot = async (rootDir, displayName) => {
+  const startScanWithRoot = async (rootDir, displayName, { programFound = false } = {}) => {
+    _quickWithheld = !!programFound;
     showPhase('scan');
     els.modal?.classList.add('active');
     els.scanDetail.textContent = displayName || rootDir || '';
@@ -29812,10 +29853,14 @@ window.initStylesPanel = function() {
     }
     _updateStyleErrorDecorations();
   });
-  _stylesEditorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
-    () => window.saveStylesFile());
+  // Shortcuts are actions, not addCommand: Monaco keeps an action's keys on its own editor, while
+  // addCommand's keys answer in every editor and the last one registered wins. This one's Ctrl+S and
+  // Ctrl+F were running in the config text. [QA09 M31]
+  _stylesEditorInstance.addAction({ id: 'jmt.styles.save', label: 'Save styles',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], run: () => window.saveStylesFile() });
   // One search per view: Ctrl+F goes to Code view's row, and the matches follow edits. [B-582]
-  _stylesEditorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, () => _stylesCodeFindFocus());
+  _stylesEditorInstance.addAction({ id: 'jmt.styles.find', label: 'Find in styles',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF], run: () => _stylesCodeFindFocus() });
   _stylesEditorInstance.onDidChangeModelContent(() => { if (_stylesCodeFind.q) _stylesCodeFindRun(false); });
   window._stylesEditor = _stylesEditorInstance;
   window._initMinimapJumpBars?.(
@@ -29829,6 +29874,10 @@ window.initStylesPanel = function() {
       lineNumbers: 'off', minimap: { enabled: false }, folding: true,
       foldingStrategy: 'indentation', showFoldingControls: 'always' });
   _installFoldBar(_stylesDetailEditor, 'style-detail-editor');
+  // Ctrl+S in a style's code saves it, as the Save button does (which stays the one save path). [QA09 M31]
+  _stylesDetailEditor.addAction({ id: 'jmt.styleDetail.save', label: 'Save style',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+    run: () => { const b = document.getElementById('btn-style-detail-save'); if (b && !b.disabled) b.click(); } });
   _stylesDetailEditor.onDidChangeModelContent(() => {
     if (_detailEntry) _setDetailDirty(true);
     else _updateDetailErrorMarkers();
@@ -29878,6 +29927,10 @@ window.initStylesPanel = function() {
       foldingStrategy: 'indentation', showFoldingControls: 'always',
       scrollBeyondLastLine: false, wordWrap: 'off' });
   _installFoldBar(_stylesHelperEditor, 'styles-helper-monaco');
+  // Ctrl+S in a helper's code saves it, as its Save button does. [QA09 M31]
+  _stylesHelperEditor.addAction({ id: 'jmt.helper.save', label: 'Save helper',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+    run: () => { const b = document.getElementById('btn-helper-save'); if (b && !b.disabled) b.click(); } });
   _stylesHelperEditor.onDidChangeModelContent(() => {
     if (!_stylesHelperEditor) return;
     const nameInput = document.getElementById('styles-helper-editor-name');
@@ -30610,8 +30663,10 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('stat-sel').textContent = ''; }
   });
 
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
-    () => fileIsOpen && (isElectron ? doSave() : doDownload()));
+  // An action, so its keys stay on this editor (see the Style Library's shortcuts). [QA09 M31]
+  editor.addAction({ id: 'jmt.config.save', label: 'Save config',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+    run: () => { if (fileIsOpen) isElectron ? doSave() : doDownload(); } });
 
   // ── Startup ──
   (async () => {

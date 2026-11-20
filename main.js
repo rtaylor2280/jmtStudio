@@ -6409,8 +6409,21 @@ async function _captureYoutubeFrame(page, found) {
 // Studio takes no clicks while one is showing (a click on it brings the browser forward). Studio is
 // enabled again whenever the browser hides, closes or is destroyed, and closing it gives Studio the focus,
 // so another app never comes forward in its place. [B-566]
+// The browser windows showing over Studio, newest last; a click on blocked Studio brings the newest forward.
+const _keptBrowsers = [];
 function _keepWithStudio(bw) {
-  const studio = (on) => { try { if (win && !win.isDestroyed()) win.setEnabled(on); } catch {} };
+  // On macOS, setEnabled(false) attaches a translucent sheet to Studio, and a sheet stacks above Studio's
+  // child windows: the browser went dim and took no clicks or keys at all. [QA09 M24] There the page blocks
+  // itself instead (appBrowser:lock), and a child window already stays above Studio.
+  const studio = (on) => {
+    try {
+      if (!win || win.isDestroyed()) return;
+      if (process.platform === 'darwin') win.webContents.send('appBrowser:lock', { locked: !on });
+      else win.setEnabled(on);
+    } catch {}
+  };
+  _keptBrowsers.push(bw);
+  bw.on('closed', () => { const i = _keptBrowsers.indexOf(bw); if (i >= 0) _keptBrowsers.splice(i, 1); });
   try { bw.setSkipTaskbar(true); } catch {}
   if (bw.isVisible()) studio(false);
   bw.on('show', () => studio(false));
@@ -6418,6 +6431,12 @@ function _keepWithStudio(bw) {
   bw.on('close', () => { studio(true); try { if (win && !win.isDestroyed()) win.focus(); } catch {} });
   bw.on('closed', () => studio(true));
 }
+ipcMain.on('appBrowser:front', () => {
+  for (let i = _keptBrowsers.length - 1; i >= 0; i--) {
+    const b = _keptBrowsers[i];
+    try { if (!b.isDestroyed() && b.isVisible()) { b.focus(); return; } } catch {}
+  }
+});
 // Where a YouTube player on the page is in its video, as a link that opens at that moment. Reads the
 // page itself and any embedded player frame; a playing video wins over a paused one. Null when there
 // is no YouTube video or it is still at the start.

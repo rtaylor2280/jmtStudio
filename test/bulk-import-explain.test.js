@@ -167,10 +167,23 @@ function ok(label, cond, detail) {
      + ' assignments; scattering this rule is what let the review phase forget it');
 
   ok('it is shown only on the progress phase, and only before the run starts',
-     /els\.progAutoWrap\.style\.display\s*=\s*\(phase === 'progress' && !runInFlight\) \? '' : 'none';/
+     /els\.progAutoWrap\.style\.display\s*=\s*\(phase === 'progress' && !runInFlight && !_quickWithheld\) \? '' : 'none';/
        .test(html),
      'the offer must be absent on explain/scan/review/guided/summary - on review the question is '
      + 'already being asked by the buttons, and during the run there is no review left to skip');
+
+  // QA09 M21: a card known to carry a program file never gets Quick import, so its analyze does not
+  // offer to continue to it. The card says so when it starts the import; each start sets it both
+  // ways and closing clears it, so it cannot carry into the next import.
+  ok('a card with a program file starts its import saying so',
+     /window\._sfBulkImportFromPath\(root, label, \{ programFound: !!\(_exec && _exec\.files && _exec\.files\.length\) \}\);/.test(html),
+     'the card import must pass what its own program-file scan found');
+  ok('each card import sets the withheld flag both ways',
+     /const startScanWithRoot = async \(rootDir, displayName, \{ programFound = false \} = \{\}\) => \{\s*\n\s*_quickWithheld = !!programFound;/.test(html),
+     'a flag only ever set to true would carry a program card\'s stance into a clean one');
+  ok('closing the import clears it',
+     /_quickWithheld = false;\s*\n\s*_bulkAutoContinue = false;\s*\n\s*\};/.test(html),
+     'closeModal is the abandon-everything path');
 
   // Seeded from the explain screen, so a box already ticked stays ticked. Resetting it would
   // silently undo a decision the user already made one screen earlier.

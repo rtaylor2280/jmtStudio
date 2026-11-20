@@ -63,7 +63,7 @@ console.log('1. finding');
 }
 
 console.log('2. wiring');
-check('Ctrl+F in the code goes to the row', /addCommand\(monaco\.KeyMod\.CtrlCmd \| monaco\.KeyCode\.KeyF, \(\) => _stylesCodeFindFocus\(\)\)/.test(html));
+check('Ctrl+F in the code goes to the row', /id: 'jmt\.styles\.find'[^}]*keybindings: \[monaco\.KeyMod\.CtrlCmd \| monaco\.KeyCode\.KeyF\], run: \(\) => _stylesCodeFindFocus\(\)/.test(html));
 check('edits re-run it', /onDidChangeModelContent\(\(\) => \{ if \(_stylesCodeFind\.q\) _stylesCodeFindRun\(false\); \}\)/.test(html));
 check('Enter, Shift+Enter and Esc', /if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); _stylesCodeFindStep\(e\.shiftKey \? -1 : 1\); \}/.test(html) && /e\.key === 'Escape'\) \{[^}]*_stylesCodeFindClear\(\);/.test(html));
 check('one switch per view, naming where it goes, plain not blue',

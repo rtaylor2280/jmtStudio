@@ -582,7 +582,18 @@ async function surveyLibraryAsync(userData, opts) {
       // be read is a separate question, and the exclusion happens downstream once the user has
       // answered it.
       const stAbs = path.join(stRoot, e.name);
-      try { totals.sharedTracks += fs.statSync(stAbs).size; } catch {}
+      // A shared track is often the same stored file as a track inside a font, so it takes the same
+      // once-only rule as every other bucket: without it the on-disk figure counted those bytes
+      // twice (QA09 M28: 1.48 GB before the backup, 1.35 GB after).
+      try {
+        const st = fs.statSync(stAbs, { bigint: true });
+        totals.sharedTracks += Number(st.size);
+        if (st.nlink > 1n) {
+          const id = `${st.dev}:${st.ino}`;
+          if (links.ids.has(id)) links.repeatBytes += Number(st.size);
+          else links.ids.add(id);
+        }
+      } catch {}
       if (unreadable) {
         const code = _probeReadable(stAbs);
         // sharedTracks is a flat bucket with no top-level item, so there is nothing to name

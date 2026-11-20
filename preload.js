@@ -372,6 +372,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('linkCapture:pick', h);
     return () => ipcRenderer.removeListener('linkCapture:pick', h);
   },
+  // macOS: Studio is blocked by the page while an app browser shows over it. [QA09 M24]
+  onAppBrowserLock: (cb) => {
+    const h = (_e, p) => cb(p);
+    ipcRenderer.on('appBrowser:lock', h);
+    return () => ipcRenderer.removeListener('appBrowser:lock', h);
+  },
+  appBrowserFront: () => ipcRenderer.send('appBrowser:front'),
   onLinkCaptureUndo: (cb) => {
     const h = (_e, p) => cb(p);
     ipcRenderer.on('linkCapture:undo', h);

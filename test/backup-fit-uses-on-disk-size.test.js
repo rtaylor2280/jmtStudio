@@ -60,6 +60,21 @@ function font(ud, name) {
       s.totalBytes - s.onDiskBytes === 2 * HUM,
       `total=${s.totalBytes} onDisk=${s.onDiskBytes} diff=${s.totalBytes - s.onDiskBytes}`);
 
+    // A shared track that is the same stored file as a font's track counts once too. [QA09 M28:
+    // the backup's start screen said 1.48 GB on disk, the finished backup and the footer 1.35]
+    const ud3 = mkUd();
+    const e = font(ud3, 'Font_E');
+    const TRK = 70000;
+    fs.mkdirSync(path.join(e, 'tracks'), { recursive: true });
+    fs.writeFileSync(path.join(e, 'tracks', 'theme.wav'), Buffer.alloc(TRK, 9));
+    const stDir = path.join(ud3, 'soundFonts', 'sharedTracks');
+    fs.mkdirSync(stDir, { recursive: true });
+    fs.linkSync(path.join(e, 'tracks', 'theme.wav'), path.join(stDir, 'theme.wav'));
+    const s3 = await backup.surveyLibraryAsync(ud3, { probeReadability: true });
+    ok('a shared track that is also a font track counts once on disk',
+      s3.totalBytes - s3.onDiskBytes === TRK,
+      `total=${s3.totalBytes} onDisk=${s3.onDiskBytes} diff=${s3.totalBytes - s3.onDiskBytes}`);
+
     // Plain: no shared files, the two figures agree.
     const ud2 = mkUd();
     const d = font(ud2, 'Font_D');

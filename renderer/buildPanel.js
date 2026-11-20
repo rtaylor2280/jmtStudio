@@ -29,6 +29,7 @@ let _flashTargetPort          = null;
 let _flashTargetSN            = null;
 let selectedFqbn              = null;
 let compileSuccess      = false;   // true after successful compile this session
+let _flashFollowsCompile = false;   // true from a compile that goes on to flash until that flash shows its timers
 let cacheCheckPending   = false;   // true while cache check is in flight
 // WHERE the current build lives on disk, or null if there isn't one.
 //
@@ -631,6 +632,7 @@ async function initBuildPanel() {
   document.getElementById('input-version').addEventListener('change', onOsVersionChange);
   document.getElementById('bm-close').addEventListener('click', () => {
     stopPortWatch();
+    _flashFollowsCompile = false;
     document.getElementById('build-modal').style.display = 'none';
   });
   document.getElementById('bm-v1-feedback-link').addEventListener('click', e => {
@@ -1118,6 +1120,7 @@ async function doFlash() {
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
+  showFlashedBuildCompileTime();
 
   // Optional first stage: board forensics, in this modal; the flash follows in the same one.
   if (_bfAnswer === 'record') {
@@ -2599,6 +2602,7 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       _currentBuildKey = null;
       updateCompileButton();
       const durationSec = _compileStartTime ? Math.round((Date.now() - _compileStartTime) / 1000) : null;
+      _flashFollowsCompile = !_compileOnly;
       if (window.setCompiledTimestamp) window.setCompiledTimestamp(undefined, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb, addonsVersion);
       stopCompileTimer();
       stopCompileHints();
@@ -2783,6 +2787,7 @@ function showBuildModal(title) {
   stopCompileHints();
   const modal = document.getElementById('build-modal');
   modal.style.display = 'flex';
+  _flashFollowsCompile = false;
   setBuildTitle(title, { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
@@ -4346,6 +4351,12 @@ function stopCompileTimer() {
   // Keep the frozen value visible — showBuildModal() hides it on next compile reset
 }
 
+// Compile Time shows during a flash only when that flash follows a compile in the same run.
+function showFlashedBuildCompileTime() {
+  if (!_flashFollowsCompile) document.getElementById('bm-timer-compile').style.display = 'none';
+  _flashFollowsCompile = false;
+}
+
 function startFlashTimer() {
   document.getElementById('bm-timer-flash').style.display = 'inline';
   document.getElementById('bm-timer-flash-val').textContent = '0:00';
@@ -5028,6 +5039,7 @@ async function doFlashDFU() {
   document.getElementById('build-modal').style.display = 'flex';
   if (!_dfuRecorded) document.getElementById('bm-log').innerHTML = '';
   startFlashTimer();
+  showFlashedBuildCompileTime();
   setBarMode('flash');
   window._isFlashing = true;
   await pauseSerialBeforeFlash();

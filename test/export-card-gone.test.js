@@ -28,6 +28,12 @@ ok('the check was found', src.length > 100, `length=${src.length}`);
   ok('control: a reachable drive is not called gone',
     await gone(new Error("EIO: i/o error, open 'C:\\x\\y.wav'")) === false && asked.pop() === 'C:\\');
 
+  ok('ENXIO is the card gone even while its volume folder still answers (macOS, QA09 M20)',
+    await gone(new Error("ENXIO: no such device or address, open '/Volumes/32kbTest/Echo_Of_Lumina/enddrag1.wav'")) === true
+    && asked.length === 0);
+  ok('control: a /Volumes path with another error is checked, and reachable is not gone',
+    await gone(new Error("EIO: i/o error, open '/Volumes/32kbTest/x.wav'")) === false && asked.pop() === '/Volumes/32kbTest');
+
   window._sfLastExportDest = 'L:\\';
   ok('an error naming no path checks the destination of this export instead',
     await gone(new Error('UNKNOWN: unknown error, write')) === true && asked.pop() === 'L:\\');
