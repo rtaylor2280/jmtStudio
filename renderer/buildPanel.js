@@ -366,7 +366,7 @@ function _platformFlashHint() {
   // 72 chars. `#bm-hint` is nowrap + overflow:hidden, so it CLIPS rather than wraps; the
   // longest hint already shipping in that line is 81, which is the budget this sits under.
   if (p === 'darwin' || p === 'linux') {
-    return "That erase is the board's firmware. Your SD card and fonts are untouched.";
+    return "Erase clears the old firmware first. Your SD card and fonts are untouched.";
   }
   return '';
 }
