@@ -21,7 +21,7 @@ ok('the check was found', src.length > 100, `length=${src.length}`);
 (async () => {
   const asked = [];
   const window = { electronAPI: { exportDestReachable: async ({ dir }) => { asked.push(dir); return { reachable: !/^L:/.test(dir) }; } } };
-  const gone = new Function('window', `${src}; return _sfDestinationGone;`)(window);
+  const gone = new Function('window', `${src}; _sfDestinationGone.settleMs = 5; return _sfDestinationGone;`)(window);
 
   ok('a path in the error is checked: the card at L: is gone',
     await gone(new Error("UNKNOWN: unknown error, open 'L:\\ObiWan_3\\swingh\\swingh04.wav'")) === true && asked.pop() === 'L:\\');
@@ -32,7 +32,26 @@ ok('the check was found', src.length > 100, `length=${src.length}`);
     await gone(new Error("ENXIO: no such device or address, open '/Volumes/32kbTest/Echo_Of_Lumina/enddrag1.wav'")) === true
     && asked.length === 0);
   ok('control: a /Volumes path with another error is checked, and reachable is not gone',
-    await gone(new Error("EIO: i/o error, open '/Volumes/32kbTest/x.wav'")) === false && asked.pop() === '/Volumes/32kbTest');
+    await gone(new Error("EIO: i/o error, open '/Volumes/32kbTest/x.wav'")) === false && asked.join() === '/Volumes/32kbTest,/Volumes/32kbTest');
+  asked.length = 0;
+
+  // macOS mid-unmount: the card's folder still answers the first ask, then is gone. [QA10 M20]
+  let answers = [];
+  window.electronAPI.exportDestReachable = async ({ dir }) => { asked.push(dir); return { reachable: answers.length ? answers.shift() : true }; };
+  answers = [true, false];
+  ok('a Mac card that still answered once is asked again after a settle, and then is gone',
+    await gone(new Error("EACCES: permission denied, mkdir '/Volumes/32kbTest/common'")) === true && asked.length === 2);
+  asked.length = 0; answers = [true, true];
+  ok('control: asked again and still there, it is not gone',
+    await gone(new Error("EACCES: permission denied, mkdir '/Volumes/32kbTest/common'")) === false && asked.length === 2);
+  asked.length = 0; answers = [true, false];
+  ok('control: a Windows path is asked once, with no settle',
+    await gone(new Error("EIO: i/o error, open 'C:\\x\\y.wav'")) === false && asked.length === 1);
+  asked.length = 0; answers = [true, false];
+  ok('control: a /Volumes error that is not the device kind is asked once',
+    await gone(new Error("ENOSPC: no space left on device, write '/Volumes/32kbTest/x.wav'")) === false && asked.length === 1);
+  asked.length = 0; answers = [];
+  window.electronAPI.exportDestReachable = async ({ dir }) => { asked.push(dir); return { reachable: !/^L:/.test(dir) }; };
 
   window._sfLastExportDest = 'L:\\';
   ok('an error naming no path checks the destination of this export instead',

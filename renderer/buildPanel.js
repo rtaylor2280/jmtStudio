@@ -1137,7 +1137,17 @@ async function doFlash() {
       return;
     }
   }
+  // The board restarts after the read, and a Mac lists its port again about a second after the read ends
+  // (Windows usually before). Wait for it before calling it gone. [QA10]
+  if (!selectedPort && _bfAnswer === 'record') {
+    const until = Date.now() + BOARD_BACK_WAIT_MS;
+    while (!selectedPort && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 500));
+      try { await refreshPorts(); } catch {}
+    }
+  }
   if (!selectedPort) {
+    stopFlashTimer();
     appendModalLog('The board did not come back on USB, so the flash cannot start. Unplug it and plug it back in.', true);
     showWaitForBoardInModal();
     startPortWatch('wait-flash');
@@ -1875,7 +1885,14 @@ async function refreshPorts() {
   // board re-enumerating after flash keeps filters (SN matches); a different
   // board taking over the dropdown clears them (SN differs).
 
-  stopPortWatch();
+  // A flash waiting for its board is handed the board this refresh found. Stopping the wait alone left the
+  // flash waiting with nothing watching, and plugging the board in again did nothing. [QA10, Mac: the board
+  // was back 0.7 s after the wait began] With several boards, or none, the wait goes on and asks as before.
+  if (_portWatchContext === 'wait-flash') {
+    if (result.autoSelected && result.port) { stopPortWatch(); _selectPortAndFlash(result.port, result); }
+  } else {
+    stopPortWatch();
+  }
 
   // Reconcile flash state with current port + compile state
   if (!compileSuccess) {
@@ -2862,6 +2879,8 @@ let _lastRawPortKey    = null;
 // A board plugged in soon after a compile is the one it was for. Hours later it may be any board,
 // and a flash cannot be undone, so the wait ends and the build waits for a click on Flash instead.
 const FLASH_WAIT_MS = 2 * 60 * 1000;
+// How long a flash waits for its board to come back after the board forensics read before saying it did not.
+const BOARD_BACK_WAIT_MS = 8000;
 let _flashWaitTimer = null;
 function _endFlashWait() {
   stopPortWatch();
@@ -4358,6 +4377,9 @@ function showFlashedBuildCompileTime() {
 }
 
 function startFlashTimer() {
+  // One clock: a flash that ended without stopping its own (the board did not come back) left it running,
+  // and two clocks then wrote Flash Time in turn. [QA10, 2026-11-20: 4:14 at 17% and jumping]
+  stopFlashTimer();
   document.getElementById('bm-timer-flash').style.display = 'inline';
   document.getElementById('bm-timer-flash-val').textContent = '0:00';
   // Don't show last-compile during a flash (no last-flash time tracked yet).

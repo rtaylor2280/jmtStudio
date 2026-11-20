@@ -10262,11 +10262,21 @@ async function _sfDestinationGone(err) {
   const m = String((err && err.message) || err || '').match(/'([A-Za-z]:[\\/]|\/Volumes\/[^/']+|\/media\/[^/']+\/[^/']+)/);
   const dir = m ? m[1] : window._sfLastExportDest;
   if (!dir) return false;
-  try {
-    const r = await window.electronAPI.exportDestReachable({ dir });
-    return !!(r && r.reachable === false);
-  } catch { return false; }
+  const reachable = async () => {
+    try { const r = await window.electronAPI.exportDestReachable({ dir }); return !(r && r.reachable === false); }
+    catch { return true; }
+  };
+  if (!(await reachable())) return true;
+  // A Mac card can still answer for a moment while macOS unmounts it, and the export's errors then read
+  // EIO, EACCES or ENOENT. Asked again after a short settle, the answer is the card's real state. [QA10 M20]
+  const text = String((err && err.code) || '') + ' ' + String((err && err.message) || err || '');
+  if (/^\/Volumes\//.test(dir) && /\b(EIO|EACCES|ENOENT)\b/.test(text)) {
+    await new Promise((r) => setTimeout(r, _sfDestinationGone.settleMs));
+    return !(await reachable());
+  }
+  return false;
 }
+_sfDestinationGone.settleMs = 1500;
 window._sfIsOutOfSpace = _sfIsOutOfSpace;
 window._sfIsFolderCreateFailure = _sfIsFolderCreateFailure;
 window._sfFailedDestinationLabel = _sfFailedDestinationLabel;

@@ -4030,7 +4030,21 @@ ipcMain.handle('exportDest:preflight', async (_, args = {}) => {
 // later; never await it between a user's click and the work starting.
 // Whether the drive a failed export was writing to can still be reached, so a card that dropped
 // away is told as that rather than as the syscall error it surfaced as.
-ipcMain.handle('exportDest:reachable', async (_, { dir } = {}) => ({ reachable: !!(await liveDirSafe(dir)) }));
+// On macOS a card's folder under /Volumes can outlive the card for a moment while it unmounts (empty,
+// root-owned, refusing writes with EACCES), so there it counts only while it is still a mounted volume:
+// a mount point sits on a different device from /Volumes itself. [QA10 M20]
+async function _destReachable(dir) {
+  if (!(await liveDirSafe(dir))) return false;
+  const m = process.platform === 'darwin' && /^\/Volumes\/[^/]+/.exec(String(dir));
+  if (!m) return true;
+  try {
+    const both = Promise.all([fs.promises.stat(m[0]), fs.promises.stat('/Volumes')]);
+    const timer = new Promise((r) => setTimeout(() => r(null), 1500));
+    const st = await Promise.race([both, timer]);
+    return !!st && st[0].dev !== st[1].dev;
+  } catch { return false; }
+}
+ipcMain.handle('exportDest:reachable', async (_, { dir } = {}) => ({ reachable: await _destReachable(dir) }));
 
 ipcMain.handle('exportDest:classify', async (_, { destDir } = {}) => {
   try {
