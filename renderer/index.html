@@ -18818,7 +18818,7 @@ document.getElementById('btn-settings').addEventListener('click', openAboutModal
         // "more complete" is comparative on purpose: it says the card's copy is
         // lesser without implying it is damaged, which is the corrupted row's word.
         if (m.fullyOwned && !m.ownedElsewhere) _txt += m.libHasMore
-          ? '; your copy is more complete.'
+          ? '; your copy is more complete. Ticked, it comes in as a version beside it.'
           : '; your copy is identical.';
         note.textContent = _txt;
         note.classList.toggle('have-it', !!m.fullyOwned);
