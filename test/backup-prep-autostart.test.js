@@ -107,8 +107,10 @@ ok('the countdown has a polite live region', /id="sf-backup-prep-auto"/.test(htm
    && /aria-live="polite"/.test(html.slice(html.indexOf('id="sf-backup-prep-auto"') - 200,
                                             html.indexOf('id="sf-backup-prep-auto"') + 200)));
 ok('it does not announce every tick',
-   /autoLeft === 15 \|\| autoLeft === 5/.test(win),
+   /if \(autoEl && autoLeft === 15\) \{/.test(win),
    'a status line that re-speaks each second makes the dialog unusable with a screen reader');
+ok('the sentence names no number, so it never disagrees with the count on the button',
+   win.includes("'Starts automatically when the count on Start export reaches 0. '") && !/Starting automatically in \$\{autoLeft\}/.test(win));
 
 // ── 6. The words match the code ─────────────────────────────────────────────
 // An instruction that does not work is worse than no instruction: the user follows it, nothing

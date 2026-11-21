@@ -609,6 +609,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('soundFonts:sizeUpdated', fn);
   },
   sharedTracksExists:    ()           => ipcRenderer.invoke('sharedTracks:exists'),
+  soundFontsIsEmpty:     ()           => ipcRenderer.invoke('soundFonts:isEmpty'),
   sharedTracksCreate:    ()           => ipcRenderer.invoke('sharedTracks:create'),
   sharedTracksListFiles: ()           => ipcRenderer.invoke('sharedTracks:listFiles'),
   sharedTracksAddFiles:  (params)     => ipcRenderer.invoke('sharedTracks:addFiles', params),

@@ -17,21 +17,23 @@ const src = at > -1 ? main.slice(at, main.indexOf('\n}\n', at) + 2) : '';
 check('the helper was located', src.length > 80, 're-anchor: an empty slice runs nothing');
 const log = [];
 const handlers = {};
-const bw = { setSkipTaskbar: (v) => log.push(`skip:${v}`), on: (ev, fn) => { handlers[ev] = fn; }, isVisible: () => true };
+const bw = { setSkipTaskbar: (v) => log.push(`skip:${v}`), on: (ev, fn) => { (handlers[ev] = handlers[ev] || []).push(fn); }, isVisible: () => true,
+  isDestroyed: () => true, destroy() {} };
+const fireW = (ev) => (handlers[ev] || []).forEach(fn => fn());
 const win = { isDestroyed: () => false, focus: () => log.push('studio-focus'), setEnabled: (v) => log.push(`studio-enabled:${v}`) };
 const WINDOWS = { platform: 'win32' }, MAC = { platform: 'darwin' };
 const load = (w, proc) => new Function('win', 'process', '_keptBrowsers', `${src}; return _keepWithStudio;`)(w, proc, []);
 load(win, WINDOWS)(bw);
 check('no taskbar button of its own', log.includes('skip:true'), log.join(' '));
 check('Studio takes no clicks while the browser shows', log.includes('studio-enabled:false'), log.join(' '));
-log.length = 0; handlers.hide();
+log.length = 0; fireW('hide');
 check('hidden: Studio works again', log.join(' ') === 'studio-enabled:true', log.join(' '));
-log.length = 0; handlers.show();
+log.length = 0; fireW('show');
 check('shown again: Studio blocked again', log.join(' ') === 'studio-enabled:false', log.join(' '));
-log.length = 0; handlers.close();
+log.length = 0; fireW('close');
 check('closing it enables Studio, THEN focuses it (a disabled window cannot take focus)',
   log.join(' ') === 'studio-enabled:true studio-focus', log.join(' '));
-log.length = 0; handlers.closed();
+log.length = 0; fireW('closed');
 check('and once more when the window is gone, so Studio can never stay disabled', log.join(' ') === 'studio-enabled:true', log.join(' '));
 const hidden = []; const hb = { setSkipTaskbar() {}, on() {}, isVisible: () => false };
 load({ isDestroyed: () => false, focus() {}, setEnabled: (v) => hidden.push(v) }, WINDOWS)(hb);

@@ -9026,7 +9026,11 @@ async function _sfShowPartialFailures(title, failed) {
   // [L30, 2026-11-18]
   const _rootGone = (failed || []).some((f) => {
     const t = String((f && f.error) || '');
-    return /ENOENT/i.test(t) && /mkdir\s+'([A-Za-z]:[\\/]?|\/Volumes\/[^/']+\/?|\/media\/[^']+)'/.test(t);
+    const mk = /ENOENT/i.test(t) && /mkdir\s+'([^']+)'/.exec(t);
+    if (!mk) return false;
+    // The folder it could not make is the card's own root: the drive or mount itself is gone.
+    const root = _sfFailureRoot(`'${mk[1]}'`);
+    return !!root && mk[1].replace(/[\\/]+$/, '').toUpperCase() === root.toUpperCase();
   }) || (failed && failed.length && await _sfDestinationGone(failed[0].error));
   if (_rootGone) {
     const items = (failed || []).map(f => f.source || f.name || '?');
@@ -10258,19 +10262,21 @@ async function _sfDestinationGone(err) {
   // ENXIO (no such device) means the device itself is gone. macOS can still show the volume's folder for a
   // moment after the card leaves, so the reachability check below would call it there.
   if ((err && err.code === 'ENXIO') || /^ENXIO\b/.test(String((err && err.message) || err || ''))) return true;
-  // The path the error names, or (a write error can name none) the destination picked for this export.
-  const m = String((err && err.message) || err || '').match(/'([A-Za-z]:[\\/]|\/Volumes\/[^/']+|\/media\/[^/']+\/[^/']+)/);
-  const dir = m ? m[1] : window._sfLastExportDest;
+  // The card the error names (its drive or mount root, read the same way on every platform), or, when
+  // a write error names none, the destination picked for this export.
+  const root = _sfFailureRoot(String((err && err.message) || err || ''));
+  const dir = root ? (/^[A-Z]:$/.test(root) ? root + '\\' : root) : window._sfLastExportDest;
   if (!dir) return false;
   const reachable = async () => {
     try { const r = await window.electronAPI.exportDestReachable({ dir }); return !(r && r.reachable === false); }
     catch { return true; }
   };
   if (!(await reachable())) return true;
-  // A Mac card can still answer for a moment while macOS unmounts it, and the export's errors then read
-  // EIO, EACCES or ENOENT. Asked again after a short settle, the answer is the card's real state. [QA10 M20]
+  // A card can still answer for a moment while the system lets go of it (about 1 s on macOS and on
+  // Linux), and the export's errors then read EIO, EACCES or ENOENT. Those are asked again after a short
+  // settle on every platform; the second answer is the card's real state. [QA10 M20, QA12 L22]
   const text = String((err && err.code) || '') + ' ' + String((err && err.message) || err || '');
-  if (/^\/Volumes\//.test(dir) && /\b(EIO|EACCES|ENOENT)\b/.test(text)) {
+  if (/\b(EIO|EACCES|ENOENT)\b/.test(text)) {
     await new Promise((r) => setTimeout(r, _sfDestinationGone.settleMs));
     return !(await reachable());
   }
@@ -54896,8 +54902,34 @@ require(['vs/editor/editor.main'], function () {
         // against, and one the user skipped is not written at all; both keep the whole-font
         // figure above, which is already right for them.
         const _plansByFont = new Map();
+        let _exportCanceledEarly = false;
+        // Preparing has the same lines as the phases either side of it (label, file, elapsed,
+        // Cancel) from its first frame, so it is the same box whether it lasts a blink or a minute.
+        // It reads the fonts set to Replace on the destination; that read reports each file.
+        const _toPlanNames = names.filter(n => (modeByName.get(n) || 'rename') === 'replace');
+        const _pT0 = Date.now();
+        let _pName = '', _pSub = 0;
+        const _pTick = () => {
+          const secs = Math.floor((Date.now() - _pT0) / 1000);
+          const dur = window._sfFormatDuration ? window._sfFormatDuration(secs) : `${secs}s`;
+          _sfDeleteProgress.setPhase(
+            _toPlanNames.length ? `Comparing what you chose to replace · ${_toPlanNames.length}` : 'Getting ready',
+            _pSub, _pName, `${dur} elapsed`);
+        };
+        _sfDeleteProgress.offerCancel(async () => {
+          _exportCanceledEarly = true;
+          await _sfExportCancelOpt.onCancel();
+        }, { stoppingNote: 'Stopping…' });
+        _pTick();
+        const _pTicker = setInterval(_pTick, 1000);
+        const _pOff = window.electronAPI.onSoundFontByteProgress((p) => {
+          if (!p) return;
+          if (typeof p.done === 'number' && typeof p.total === 'number' && p.total > 0) _pSub = p.done / p.total;
+          if (p.name) _pName = p.name;
+          _pTick();
+        });
         try {
-          const _toPlan = names.filter(n => (modeByName.get(n) || 'rename') === 'replace');
+          const _toPlan = _toPlanNames;
           if (_toPlan.length) {
             // HAND THE PLAN WHAT THE SCAN ALREADY HASHED. [B-005 item 7b, 2026-09-26]
             //
@@ -54914,7 +54946,7 @@ require(['vs/editor/editor.main'], function () {
               const obs = _scanObserved.get(n);
               if (Array.isArray(obs) && obs.length) _known[n] = obs;
             }
-            const pr = await window.electronAPI.planFolderWrites({ names: _toPlan, destDir, known: _known });
+            const pr = await window.electronAPI.planFolderWrites({ names: _toPlan, destDir, known: _known, reportProgress: true });
             if (pr && pr.ok && pr.plans) {
               for (const [nm, p] of Object.entries(pr.plans)) {
                 _plansByFont.set(nm, p);
@@ -54925,6 +54957,10 @@ require(['vs/editor/editor.main'], function () {
           }
         } catch { /* a door that cannot pre-plan keeps the whole-font sizing and the export
                      plans each font itself, exactly as it did before this existed */ }
+        finally {
+          clearInterval(_pTicker);
+          try { _pOff && _pOff(); } catch {}
+        }
         for (const cs of commonSlots) {
           if (_slotMode(cs) === 'skip') continue;
           const c = _sfCommons.find(x => x.uuid === cs.uuid);
@@ -54951,7 +54987,7 @@ require(['vs/editor/editor.main'], function () {
         // free-space line reused it, and that line actually re-measures with `_sfCheckFit`
         // because the whole point is the space left AFTER the export. A `let` with a writer and
         // no reader reads exactly like a wired-up feature.
-        let _exportCanceled = false;
+        let _exportCanceled = _exportCanceledEarly;
         let _sfExportLabel = '';
         let _sfExportT0 = 0;
         // Folders the destination could not dispose of after a successful replace. Reported by
@@ -59221,10 +59257,11 @@ require(['vs/editor/editor.main'], function () {
           };
           const paint = () => {
             startBtn.textContent = `${START_LABEL} (${autoLeft})`;
-            // Announced at the start and once near the end, never per tick - a status line that
-            // re-announces every second is what makes these dialogs unusable with a screen reader.
-            if (autoEl && (autoLeft === 15 || autoLeft === 5)) {
-              autoEl.textContent = `Starting automatically in ${autoLeft} seconds. `
+            // Set once, at the start, and never per tick: a status line that re-announces every
+            // second makes the dialog unusable with a screen reader. It names no number, so the one
+            // count on screen is the button's.
+            if (autoEl && autoLeft === 15) {
+              autoEl.textContent = 'Starts automatically when the count on Start export reaches 0. '
                 + 'Cancel if you do not want it.';
             }
           };
@@ -60710,11 +60747,10 @@ require(['vs/editor/editor.main'], function () {
         // beat is a lie ("wipe" implies something to wipe). Skip straight
         // to the restore path; _sfRunReplaceImport opens its own progress
         // modal so the user still sees the operation underway.
-        // sharedTracks is checked via IPC since the window cache only
-        // refreshes on tab switch / modal close.
-        const liveEntries  = (window._sfEntriesCache || []).length;
-        const liveCommons  = (_sfCommons || []).length;
-        const liveSources  = Object.keys(_sfAllSourcesByUuid || {}).length;
+        // The library is read from the disk: the window's lists can trail a delete, and a stale list
+        // here put the choice in front of a restore into an empty library. Shared tracks too.
+        let libraryEmpty = false;
+        try { const r = await window.electronAPI.soundFontsIsEmpty(); libraryEmpty = !!(r && r.ok && r.empty); } catch {}
         let liveSharedTracks = 0;
         try {
           const stRes = await window.electronAPI.sharedTracksExists();
@@ -60723,7 +60759,7 @@ require(['vs/editor/editor.main'], function () {
             liveSharedTracks = (filesRes && filesRes.ok && filesRes.files) ? filesRes.files.length : 0;
           }
         } catch {}
-        if (liveEntries === 0 && liveCommons === 0 && liveSources === 0 && liveSharedTracks === 0) {
+        if (libraryEmpty && liveSharedTracks === 0) {
           await _sfRunReplaceImport(zipPath, observed);
           return;
         }

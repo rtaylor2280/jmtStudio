@@ -4167,10 +4167,17 @@ async function restartBoardViaMonitor(portPath) {
     try { return (await window.electronAPI.listPortsRaw()).some(p => up(p.path) === up(portPath)); }
     catch { return null; }
   };
+  // A monitor connection that was open and closed without being asked counts as the board dropping:
+  // a fast restart can leave and come back between two port listings.
   const dropsWithin = async (ms) => {
     const t0 = Date.now();
-    while (Date.now() - t0 < ms) { if ((await listed()) === false) return true; await sleep(100); }
-    return false;
+    const wasOpen = _serialOpen;
+    while (Date.now() - t0 < ms) {
+      if (wasOpen && !_serialOpen) return true;
+      if ((await listed()) === false) return true;
+      await sleep(100);
+    }
+    return wasOpen && !_serialOpen;
   };
   if (!_serialOpen) { await openSerialMonitor(); if (!_serialOpen) return null; await sleep(500); }
   // LET THE BOARD SETTLE FIRST. Right after an eject the board takes its card back and rescans

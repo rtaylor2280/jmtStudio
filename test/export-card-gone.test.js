@@ -15,7 +15,9 @@ const ok = (name, cond, why) => {
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
 const at = html.indexOf('async function _sfDestinationGone(err) {');
-const src = at > 0 ? html.slice(at, html.indexOf('\n}\n', at) + 2) : '';
+const fr = html.indexOf('function _sfFailureRoot(s) {');
+const src = at > 0 && fr > 0
+  ? html.slice(fr, html.indexOf('\n}\n', fr) + 2) + html.slice(at, html.indexOf('\n}\n', at) + 2) : '';
 ok('the check was found', src.length > 100, `length=${src.length}`);
 
 (async () => {
@@ -26,7 +28,8 @@ ok('the check was found', src.length > 100, `length=${src.length}`);
   ok('a path in the error is checked: the card at L: is gone',
     await gone(new Error("UNKNOWN: unknown error, open 'L:\\ObiWan_3\\swingh\\swingh04.wav'")) === true && asked.pop() === 'L:\\');
   ok('control: a reachable drive is not called gone',
-    await gone(new Error("EIO: i/o error, open 'C:\\x\\y.wav'")) === false && asked.pop() === 'C:\\');
+    await gone(new Error("EIO: i/o error, open 'C:\\x\\y.wav'")) === false && asked.join() === 'C:\\,C:\\');
+  asked.length = 0;
 
   ok('ENXIO is the card gone even while its volume folder still answers (macOS, QA09 M20)',
     await gone(new Error("ENXIO: no such device or address, open '/Volumes/32kbTest/Echo_Of_Lumina/enddrag1.wav'")) === true
@@ -44,9 +47,20 @@ ok('the check was found', src.length > 100, `length=${src.length}`);
   asked.length = 0; answers = [true, true];
   ok('control: asked again and still there, it is not gone',
     await gone(new Error("EACCES: permission denied, mkdir '/Volumes/32kbTest/common'")) === false && asked.length === 2);
+  asked.length = 0; answers = [true, true];
+  // One rule on every platform: the device errors are asked again after a settle, whatever the path.
+  ok('control: a Windows drive that is still there after the settle is not gone',
+    await gone(new Error("EIO: i/o error, open 'C:\\x\\y.wav'")) === false && asked.length === 2);
   asked.length = 0; answers = [true, false];
-  ok('control: a Windows path is asked once, with no settle',
-    await gone(new Error("EIO: i/o error, open 'C:\\x\\y.wav'")) === false && asked.length === 1);
+  ok('a Linux card that still answered once is asked again after a settle, and then is gone (QA12 L22)',
+    await gone(new Error("EIO: i/o error, write '/run/media/user/QA_TESTING/Skoll/swng/swng1.wav'")) === true
+    && asked.length === 2 && asked[0] === '/run/media/user/QA_TESTING');
+  asked.length = 0; answers = [true, false];
+  window._sfLastExportDest = '/run/media/user/QA_TESTING';
+  ok('the Linux EIO that names no path, as seen on the Yoga, checks this export\'s card and finds it gone',
+    await gone(new Error('EIO: i/o error, write')) === true
+    && asked.join() === '/run/media/user/QA_TESTING,/run/media/user/QA_TESTING');
+  window._sfLastExportDest = undefined;
   asked.length = 0; answers = [true, false];
   ok('control: a /Volumes error that is not the device kind is asked once',
     await gone(new Error("ENOSPC: no space left on device, write '/Volumes/32kbTest/x.wav'")) === false && asked.length === 1);
