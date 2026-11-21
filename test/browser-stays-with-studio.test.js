@@ -55,6 +55,19 @@ check('a browser created hidden (Import from link\'s quiet download) does not bl
   mlog.length = 0; fire('close');
   check('Mac: closing unlocks, then focuses Studio', mlog.join(' ') === 'appBrowser:lock:false studio-focus', mlog.join(' '));
 }
+// Linux: with Studio's window disabled the browser took keys but no mouse input, and its X did nothing. [QA15]
+{
+  const llog = []; const lh = {};
+  const lbw = { setSkipTaskbar() {}, on: (ev, fn) => { (lh[ev] = lh[ev] || []).push(fn); }, isVisible: () => true };
+  const lwin = { isDestroyed: () => false, focus: () => llog.push('studio-focus'), setEnabled: (v) => llog.push(`studio-enabled:${v}`),
+    webContents: { send: (ch, p) => llog.push(`${ch}:${p && p.locked}`) } };
+  load(lwin, { platform: 'linux' })(lbw);
+  const fire = (ev) => (lh[ev] || []).forEach(fn => fn());
+  check('Linux: Studio is never disabled', !llog.some(x => x.startsWith('studio-enabled')), llog.join(' '));
+  check('Linux: showing the browser locks Studio\'s page', llog.join(' ') === 'appBrowser:lock:true', llog.join(' '));
+  llog.length = 0; fire('close');
+  check('Linux: closing unlocks, then focuses Studio', llog.join(' ') === 'appBrowser:lock:false studio-focus', llog.join(' '));
+}
 const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
 const lk = html.indexOf('onAppBrowserLock?.(');
 const lock = lk > 0 ? html.slice(lk, html.indexOf('\n}\n', lk)) : '';

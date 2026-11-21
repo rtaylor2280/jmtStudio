@@ -6455,13 +6455,13 @@ async function _captureYoutubeFrame(page, found) {
 // The browser windows showing over Studio, newest last; a click on blocked Studio brings the newest forward.
 const _keptBrowsers = [];
 function _keepWithStudio(bw) {
-  // On macOS, setEnabled(false) attaches a translucent sheet to Studio, and a sheet stacks above Studio's
-  // child windows: the browser went dim and took no clicks or keys at all. [QA09 M24] There the page blocks
-  // itself instead (appBrowser:lock), and a child window already stays above Studio.
+  // Only Windows disables Studio's window. On macOS setEnabled(false) is a translucent sheet that stacks
+  // above the browser [QA09 M24]; on Linux the browser then takes no mouse input at all, keys only, and its X
+  // does nothing [QA15]. There Studio's page blocks itself instead (appBrowser:lock).
   const studio = (on) => {
     try {
       if (!win || win.isDestroyed()) return;
-      if (process.platform === 'darwin') win.webContents.send('appBrowser:lock', { locked: !on });
+      if (process.platform !== 'win32') win.webContents.send('appBrowser:lock', { locked: !on });
       else win.setEnabled(on);
     } catch {}
   };

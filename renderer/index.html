@@ -8925,9 +8925,9 @@ function _jmtFitViewerImage(modalEl, img) {
   if (img.complete && img.naturalWidth) fit(); else img.addEventListener('load', fit, { once: true });
 }
 window._jmtFitViewerImage = _jmtFitViewerImage;
-// macOS: while an app browser shows over Studio, Studio takes no clicks or keys. A click brings the browser
-// forward, as on Windows, where the window itself is disabled instead. Clear, so nothing on screen changes.
-// [QA09 M24]
+// macOS and Linux: while an app browser shows over Studio, Studio takes no clicks or keys. A click brings the
+// browser forward, as on Windows, where the window itself is disabled instead. Clear, so nothing on screen
+// changes. [QA09 M24, QA15]
 {
   let _lockLayer = null;
   const _lockKeys = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };

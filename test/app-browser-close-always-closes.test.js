@@ -37,7 +37,7 @@ function fakeWindow({ hangs }) {
 (async () => {
   const studio = { enabled: [], isDestroyed: () => false, setEnabled(v) { this.enabled.push(v); }, focus() {} };
   const keep = new Function('win', '_keptBrowsers', 'process', `${src}\n_keepWithStudio.forceCloseMs = 30; return _keepWithStudio;`)(
-    studio, [], { platform: 'linux' });
+    studio, [], { platform: 'win32' });
 
   console.log('1. a page that never lets the close finish');
   {
