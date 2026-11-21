@@ -33373,6 +33373,9 @@ require(['vs/editor/editor.main'], function () {
           _sfCommonFilesAnchor = null;
         }
         await _sfRenderCommonList();
+        // The footer's library size: every change to common folders lands here, and the font view's refresh
+        // is not part of it. Not awaited, as there. [QA16]
+        window._sfRequestLibrarySize?.();
         // Keep the Config Manager's Common Folder meta-field in sync
         // with the latest library state (newly imported, deleted,
         // renamed, group reshuffled — all funnel through here).
@@ -36138,8 +36141,8 @@ require(['vs/editor/editor.main'], function () {
       window.refreshSoundFontsView = async () => {
         await _refreshSoundFontsToggleLock();
         // [B-318] Footer size. Deliberately NOT awaited: this hands back the last known figure
-        // and recomputes behind us, so the panel refresh never waits on the walk. Every path
-        // that changes the library ends here, which is why the readout needs no other hook.
+        // and recomputes behind us, so the panel refresh never waits on the walk. Common folders
+        // change through _sfRefreshCommons, which asks too.
         window._sfRequestLibrarySize?.();
         // The preset play buttons' file lookups are by font name, so any library change voids them. [B-561]
         window._presetPlayCachesClear?.();
@@ -56159,6 +56162,19 @@ require(['vs/editor/editor.main'], function () {
       document.getElementById('sf-cards')?.addEventListener('mousedown', (e) => {
         if ((e.shiftKey || e.ctrlKey || e.metaKey) && e.target.closest('.sf-card')) e.preventDefault();
       });
+      // The same for every other list a Shift or Ctrl click selects in: common folders and their files,
+      // shared tracks, a font's and a source's files, the card reader's folders, the presets sidebar. [QA16]
+      const _SELECT_ROWS = [
+        '#sf-common-list .sf-common-row-header', '[data-tree-file]', '[data-st-file]',
+        '#sf-entry-files-browser [data-file-path]', '#sf-entry-files-browser [data-dir-path]',
+        '#sf-source-files-browser [data-file-path]', '#sf-source-files-browser [data-dir-path]',
+        '.sf-entry-files-row[data-idx]', '.preset-row',
+      ].join(', ');
+      document.addEventListener('mousedown', (e) => {
+        if (!(e.shiftKey || e.ctrlKey || e.metaKey) || !e.target || !e.target.closest) return;
+        if (e.target.closest('input, textarea, [contenteditable="true"]')) return;   // a rename field keeps its text selection
+        if (e.target.closest(_SELECT_ROWS)) e.preventDefault();
+      }, true);
       document.getElementById('sf-cards')?.addEventListener('click', async (e) => {
         // Ctrl/Cmd-click on a card toggles selection regardless of what was
         // clicked within it (body, link, chip, delete glyph, etc.). The
