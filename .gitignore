@@ -4,7 +4,6 @@ out/
 .env
 local/
 renderer/vs/
-.claude/
 
 # macOS Finder metadata
 .DS_Store

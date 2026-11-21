@@ -22,7 +22,8 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 
 // `renderer/vs` is vendored Monaco - not ours to hold to this, and it carries its own hits.
-const SKIP_DIRS = new Set(['node_modules', '.git', 'local', 'qa', 'dist', 'staging', '.claude', 'vs']);
+// Dot folders are tooling and VCS state, except .github, which holds workflows.
+const SKIP_DIRS = new Set(['node_modules', 'local', 'qa', 'dist', 'staging', 'vs']);
 
 const PATTERN = /(\bTODO\b|\bFIXME\b|⏭|\bwhen (?:it|that|this|[0-9][0-9a-z.]*) lands\b|will be (?:built|added|wired|done)\b|\bis being built\b|\bnot yet built\b|\bsomeday\b)/i;
 
@@ -61,7 +62,7 @@ const keyOf = h => `${h.file}|${h.word.toLowerCase()}`;
 function walk(dir, out) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
+      if (SKIP_DIRS.has(e.name) || (e.name.startsWith('.') && e.name !== '.github')) continue;
       walk(path.join(dir, e.name), out);
     } else if (e.name.endsWith('.js') || e.name === 'index.html') {
       out.push(path.join(dir, e.name));

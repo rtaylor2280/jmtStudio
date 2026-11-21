@@ -94,6 +94,13 @@ function looksLikeProffieDir(absDir) {
 // is one named "common" (any case) whose direct content is .wav files OR
 // effect-name subdirs containing .wav files. We're permissive on shape
 // because users name common folders by intent, not pattern.
+// A common folder Studio exported carries a marker whose first line is the pack's name; it names the
+// import, so a card's "common" comes back as the pack it is. Without a marker the folder name stands.
+function _commonImportName(absPath, folderName) {
+  const m = soundFontCommon.readCommonMarkerAt(path.dirname(absPath), path.basename(absPath));
+  return (m && m.name) || folderName;
+}
+
 function looksLikeCommonDir(name) {
   return /^common$/i.test(name);
 }
@@ -171,7 +178,7 @@ function walkForSources(absDir, relPath, depth, ctx) {
     ctx.results.commonFolders.push({
       absPath: c.absPath,
       relPath: path.join(relPath, c.name),
-      name: c.name,
+      name: _commonImportName(c.absPath, c.name),
     });
   }
   // Tracks folders surface as their own bucket. The runner wires the
@@ -392,7 +399,7 @@ function scanForBulkImport({ rootDir }) {
   // order the child classifier uses (common before tracks before Proffie).
   const _rootBase = path.basename(rootDir);
   if (looksLikeCommonDir(_rootBase)) {
-    ctx.results.commonFolders.push({ absPath: rootDir, relPath: _rootBase, name: _rootBase });
+    ctx.results.commonFolders.push({ absPath: rootDir, relPath: _rootBase, name: _commonImportName(rootDir, _rootBase) });
     ctx.results.totalSizeBytes = safeDirSize(rootDir);
     return { ok: true, plan: ctx.results };
   }
