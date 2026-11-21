@@ -56,7 +56,6 @@
 <script>
   const rowsEl = document.getElementById('rows');
   const toast = document.getElementById('toast');
-  let hideTimer = null;
   window.linkPicks.onUpdate(({ rows, toast: msg, light }) => {
     document.documentElement.classList.toggle('light', !!light);
     rowsEl.replaceChildren(...rows.map(({ key, label, hint, value, undo, pending }) => {
@@ -83,11 +82,13 @@
       return row;
     }));
     rowsEl.scrollTop = 0;
+    // Every message here is a failure, and it stays until the next save or message replaces it, so it can be
+    // read however long it takes.
     if (msg) {
       toast.textContent = msg;
       toast.classList.add('show');
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => toast.classList.remove('show'), rows.length ? 2200 : 5500);
+    } else {
+      toast.classList.remove('show');
     }
   });
 </script>

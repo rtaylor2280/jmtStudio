@@ -6130,6 +6130,15 @@ const _findBarContext = new Map();   // page webContents id -> re-check whether 
 // cloud drives. Saved values show in a strip docked to the bottom of the window, and saving the
 // same kind again replaces it.
 const _CLOUD_DRIVE_HOST = /(^|\.)(drive\.google\.com|docs\.google\.com|dropbox\.com|dropboxusercontent\.com|onedrive\.live\.com|1drv\.ms|sharepoint\.com|mega\.nz|box\.com|icloud\.com|mediafire\.com|wetransfer\.com|we\.tl)$/i;
+// A question the right-click menu asks the page, answered within a second or not at all: a page that has
+// stopped answering must not keep the menu from opening. The fallback is what the menu uses instead.
+function _pageAnswer(promise, fallback, ms = 1000) {
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((r) => { timer = setTimeout(() => r(fallback), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
 async function _pdfAllowed(page) {
   let u;
   try { u = new URL(page.webContents.getURL()); } catch { return false; }
@@ -6227,7 +6236,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
       let timer = null;
       const data = await Promise.race([
         page.webContents.printToPDF({ printBackground: true }),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('this page did not finish rendering')), 20000); }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('this page did not finish rendering'), { rendering: true })), 20000); }),
       ]).finally(() => clearTimeout(timer));
       const base = (page.webContents.getTitle() || 'Proof of purchase')
         .replace(/[<>:"/\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Proof of purchase';
@@ -6240,10 +6249,11 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
     } catch (e) {
       dropPending();
       console.error('[proof pdf] save failed:', e);
-      show(`Could not save the page as PDF: ${String(e && e.message || e)}`);
-      // With nothing saved the strip is only there to carry the message: it goes once the message has
-      // been read, never left as an empty bar.
-      if (!shown.size) setTimeout(() => { if (!shown.size) { try { strip.hide(); } catch {} } }, 6000);
+      // A save that runs past the limit keeps running, and every later save in this session waits behind it
+      // until Studio restarts (measured 2026-11-21), so the message says what to do. [B-718]
+      show(e && e.rendering
+        ? "This page didn't finish rendering. Restart Studio before saving another page as proof."
+        : `Could not save the page as PDF: ${String(e && e.message || e)}`);
     }
   };
   page.webContents.on('context-menu', async (_e, params) => {
@@ -6335,12 +6345,12 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
     ];
     if (!names || names.length) {
       items.push(demoItem('Save as Demo', saveUrl));
-      const moment = await _youtubeMoment(page);
+      const moment = await _pageAnswer(_youtubeMoment(page), null);
       if (moment) items.push(demoItem(`Save as Demo at ${moment.label}`, moment.url));
     }
     if (names && names.length && typeof images === 'function' && images()) {
       const imgSrc = params.mediaType === 'image' && /^(https?:|data:image\/)/i.test(params.srcURL || '') ? params.srcURL : null;
-      const frame = await _youtubeFrame(page);
+      const frame = await _pageAnswer(_youtubeFrame(page), null);
       if (imgSrc) {
         items.push({ type: 'separator' }, pictureItem('Save as font image', () => _imageFromPage(page, imgSrc)));
         if (names.length > 1) items.push(sourceImageItem(() => _imageFromPage(page, imgSrc)));
@@ -6351,7 +6361,7 @@ function _attachLinkPicks(page, { getDir, fonts = null, allLabel = 'All fonts', 
         if (names.length > 1) items.push({ ...sourceImageItem(() => _captureYoutubeFrame(page, frame)), label: 'Save video frame as source image' });
       }
     }
-    if (!eachFontOwnsLink && await _pdfAllowed(page)) {
+    if (!eachFontOwnsLink && await _pageAnswer(_pdfAllowed(page), true)) {
       items.push({ type: 'separator' }, { label: 'Save page as proof of purchase (PDF)', click: savePdf });
     }
     if (page.isDestroyed()) return;
@@ -6466,8 +6476,14 @@ function _keepWithStudio(bw) {
   // A close always closes. A page that has stopped answering never runs its unload, and close() waits on
   // it, so a window still open shortly after a close was asked for is destroyed; 'closed' fires as usual.
   bw.on('close', () => {
-    setTimeout(() => { try { if (!bw.isDestroyed()) bw.destroy(); } catch {} }, _keepWithStudio.forceCloseMs);
+    console.log('[app browser] close requested');
+    setTimeout(() => {
+      try { if (!bw.isDestroyed()) { console.log('[app browser] still open, destroying'); bw.destroy(); } } catch (e) { console.log('[app browser] destroy failed', e && e.message); }
+    }, _keepWithStudio.forceCloseMs);
   });
+  bw.on('closed', () => console.log('[app browser] closed'));
+  bw.on('unresponsive', () => console.log('[app browser] page unresponsive'));
+  bw.on('responsive', () => console.log('[app browser] page responsive again'));
 }
 _keepWithStudio.forceCloseMs = 1500;
 ipcMain.on('appBrowser:front', () => {
