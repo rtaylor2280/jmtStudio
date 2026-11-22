@@ -1,0 +1,38 @@
+FAILED
+<OS>\styles\style_ptr.h: In instantiation of 'class Style<TrFadeX<SingleValueAdapter<IntSVF<300> > > >':
+<OS>\styles\style_ptr.h:137:10:   required from 'StyleFactory* StylePtr() [with STYLE = TrFadeX<SingleValueAdapter<IntSVF<300> > >]'
+  137 |   return &factory;
+      |          ^~~~~~~~
+<OS>\config\my_config.h:20:26:   required from here
+   20 |     StylePtr<TrFade<300>>(),
+      |     ~~~~~~~~~~~~~~~~~~~~~^~
+<OS>\styles\style_ptr.h:73:55: error: no matching function for call to 'TrFadeX<SingleValueAdapter<IntSVF<300> > >::getColor(int)'
+   73 | class Style : public StyleHelper<decltype(T().getColor(0))> {
+      |                                           ~~~~~~~~~~~~^~~
+<OS>\transitions\fade.h:24:8: note: candidate: 'template<class A, class B> typename std::remove_const<typename std::remove_reference<decltype (MixColors(a, b, ((TrFadeX<MILLIS>*)this)->TrFadeX<MILLIS>::fade_, 14))>::type>::type TrFadeX<MILLIS>::getColor(const A&, const B&, int) [with B = A; MILLIS = SingleValueAdapter<IntSVF<300> >]'
+   24 |   auto getColor(const A& a, const B& b, int led) AUTO_RETURN(MixColors(a, b, fade_, 14))
+      |        ^~~~~~~~
+<OS>\transitions\fade.h:24:8: note:   candidate expects 3 arguments, 1 provided
+<OS>\styles\style_ptr.h:79:57: error: no matching function for call to 'TrFadeX<SingleValueAdapter<IntSVF<300> > >::getColor(int)'
+   79 |   virtual auto getColor2(int i) -> decltype(T().getColor(0)) override {
+      |                                             ~~~~~~~~~~~~^~~
+<OS>\transitions\fade.h:24:8: note: candidate: 'template<class A, class B> typename std::remove_const<typename std::remove_reference<decltype (MixColors(a, b, ((TrFadeX<MILLIS>*)this)->TrFadeX<MILLIS>::fade_, 14))>::type>::type TrFadeX<MILLIS>::getColor(const A&, const B&, int) [with B = A; MILLIS = SingleValueAdapter<IntSVF<300> >]'
+   24 |   auto getColor(const A& a, const B& b, int led) AUTO_RETURN(MixColors(a, b, fade_, 14))
+      |        ^~~~~~~~
+<OS>\transitions\fade.h:24:8: note:   candidate expects 3 arguments, 1 provided
+<OS>\styles\style_ptr.h:75:8: error: 'bool Style<T>::IsHandled(HandledFeature) [with T = TrFadeX<SingleValueAdapter<IntSVF<300> > >]' marked 'override', but does not override
+   75 |   bool IsHandled(HandledFeature effect) override {
+      |        ^~~~~~~~~
+<OS>\styles\style_ptr.h:83:8: error: 'void Style<T>::run(BladeBase*) [with T = TrFadeX<SingleValueAdapter<IntSVF<300> > >]' marked 'override', but does not override
+   83 |   void run(BladeBase* blade) override {
+      |        ^~~
+<OS>\styles\style_ptr.h:89:7: error: 'int Style<T>::get_max_arg(int) [with T = TrFadeX<SingleValueAdapter<IntSVF<300> > >]' marked 'override', but does not override
+   89 |   int get_max_arg(int argument) override {
+      |       ^~~~~~~~~~~
+<OS>\styles\blade_style.h: In instantiation of 'BladeStyle* StyleFactoryImpl<STYLE>::make() [with STYLE = Style<TrFadeX<SingleValueAdapter<IntSVF<300> > > >]':
+<OS>\styles\blade_style.h:45:15:   required from here
+   45 |   BladeStyle* make() override {
+      |               ^~~~
+<OS>\styles\blade_style.h:47:22: error: cannot convert 'Style<TrFadeX<SingleValueAdapter<IntSVF<300> > > >*' to 'BladeStyle*' in return
+   47 |     return new STYLE();
+      |                      ^

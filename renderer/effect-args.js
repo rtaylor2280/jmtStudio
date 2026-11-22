@@ -187,6 +187,32 @@
     return [0, 0, 0];
   }
 
+  // The first colour written in a piece of style code, skipping black. What a style paints as its main
+  // colour is styleArgResolver.mainColor, which reads this past the arguments.
+  function earliestColor(text) {
+    if (!text) return null;
+    const m16 = /\bRgb16\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
+    const m8  = /\bRgb\s*<\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/.exec(text);
+    let namedPos = Infinity, namedRgb16 = null, namedStr = null;
+    const cwRe = /\b([A-Z][A-Za-z]*)\b/g;
+    let cwm;
+    while ((cwm = cwRe.exec(text)) !== null) {
+      const res = resolveColorDefault(cwm[1]);
+      if (res[0] || res[1] || res[2]) { namedRgb16 = res; namedPos = cwm.index; namedStr = cwm[1]; break; }
+    }
+    const p16 = m16 ? m16.index : Infinity;
+    const p8  = m8  ? m8.index  : Infinity;
+    const pMin = Math.min(p16, p8, namedPos);
+    if (pMin === Infinity) return null;
+    if (pMin === p16) {
+      return { rgb16: [parseInt(m16[1],10), parseInt(m16[2],10), parseInt(m16[3],10)], matchStr: m16[0], matchIndex: m16.index, scale: '16' };
+    }
+    if (pMin === p8) {
+      return { rgb16: resolveColorDefault(`Rgb<${m8[1]},${m8[2]},${m8[3]}>`), matchStr: m8[0], matchIndex: m8.index, scale: '8' };
+    }
+    return { rgb16: namedRgb16, matchStr: namedStr, matchIndex: namedPos, scale: null };
+  }
+
   // ── Slot map (from ProffieOS enum ArgumentName) ──────────────────────────
   //
   // Source of truth for ARG_NAME → slot number is the user's selected ProffieOS
@@ -384,6 +410,30 @@
     return _serializeSlots(slots);
   }
 
+  /**
+   * `parens` with every colour set in it that equals `oldRgb` changed to `newRgb`, or null when none
+   * did. The sticky Match B1: a colour matched to B1 still equals B1's old colour, so it moves with
+   * it. Unset (default) colours never count; nobody matched those.
+   */
+  function rematchColors(parens, oldRgb, newRgb) {
+    if (!parens || !oldRgb || !newRgb) return null;
+    const same = (a) => (a[0]||0) === (oldRgb[0]||0) && (a[1]||0) === (oldRgb[1]||0) && (a[2]||0) === (oldRgb[2]||0);
+    let out = parens;
+    let changed = false;
+    for (const reg of registry) {
+      if (reg.kind !== 'RgbArg') continue;
+      const r = readRegistryArg(reg.name, out);
+      if (!r || r.isDefault || r.unsupported || !same(r.values)) continue;
+      out = writeRegistryArg(reg.name, newRgb, out);
+      changed = true;
+    }
+    if (changed) return out;
+    // The bare "r,g,b" form, which carries no argument names.
+    const csv = parens.split(',').map(v => parseInt(v.trim(), 10));
+    if (csv.length === 3 && csv.every(Number.isFinite) && same(csv)) return newRgb.slice(0, 3).join(',');
+    return null;
+  }
+
   function isNamedColor(s) {
     return Object.prototype.hasOwnProperty.call(NAMED_COLORS, s);
   }
@@ -395,12 +445,62 @@
     return `Rgb<${Math.round(r16/257)},${Math.round(g16/257)},${Math.round(b16/257)}>`;
   }
 
+  // Where a colour sits on the wheel: reds, oranges, yellows, greens, cyans, blues, purples, pinks,
+  // then achromatic (black/grays/white).
+  //
+  // Achromatic detection uses CHROMA (max channel − min channel) rather than HSL saturation. HSL's
+  // saturation formula reports ~1.0 for near-white colors like Snow (255, 250, 250) because both max
+  // and min are near 1.0, which would place Snow next to Red at hue=0. Chroma is honest about it
+  // (Snow's chroma ≈ 0.02). Threshold 0.08 cleanly separates whites/grays from light pastels like
+  // MistyRose (chroma ≈ 0.12) that still belong in the chromatic spectrum.
+  function colorOrder(r16, g16, b16) {
+    const r = r16 / 65535, g = g16 / 65535, b = b16 / 65535;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const chroma = max - min;
+    const l = (max + min) / 2;
+    if (chroma < 0.08) return { ach: true, h: 0, l };
+    let h;
+    if      (max === r) h = (g - b) / chroma + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / chroma + 2;
+    else                h = (r - g) / chroma + 4;
+    return { ach: false, h: h / 6, l };
+  }
+
+  // The families a style's colour is filtered by, in wheel order. `to` is where the family's hue ends,
+  // in degrees, set against NAMED_COLORS; Proffie's own colours decide it, so Pink (351) is pink and
+  // Magenta (300) is purple. [B-608]
+  const COLOR_FAMILIES = [
+    { name: 'Red',    swatch: 'Red',      to: 7 },
+    { name: 'Orange', swatch: 'Orange',   to: 35 },
+    { name: 'Yellow', swatch: 'Yellow',   to: 72 },
+    { name: 'Green',  swatch: 'Green',    to: 165 },
+    { name: 'Cyan',   swatch: 'Cyan',     to: 195 },
+    { name: 'Blue',   swatch: 'Blue',     to: 250 },
+    { name: 'Purple', swatch: 'Purple',   to: 315 },
+    { name: 'Pink',   swatch: 'DeepPink', to: 353 },
+    { name: 'White',  swatch: 'White',    to: Infinity },
+  ];
+
+  // Grays and near-whites (Ivory, AliceBlue) are White. Black has no family: nobody browses for it.
+  function colorFamily([r16, g16, b16]) {
+    const { ach, h, l } = colorOrder(r16, g16, b16);
+    if (ach) return l < 0.1 ? null : 'White';
+    if (l >= 0.9) return 'White';
+    const deg = h * 360;
+    return deg >= 353 ? 'Red' : COLOR_FAMILIES.find(f => deg < f.to).name;
+  }
+
   root.proffieArgs = {
     registry,
     resolveColorDefault,
+    earliestColor,
     readRegistryArg,
     writeRegistryArg,
+    rematchColors,
     colorLabel,
+    colorOrder,
+    colorFamily,
+    colorFamilies:  COLOR_FAMILIES,
     isNamedColor,
     namedColors:    NAMED_COLORS,
     // Slot map + helpers — exposed so callers can refresh on version change

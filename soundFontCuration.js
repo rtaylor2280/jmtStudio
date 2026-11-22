@@ -1,0 +1,1031 @@
+// Sound Fonts — the curation sidecar. [B-283]
+//
+// THE PROBLEM: deleting a source cascades to its entries, and re-importing
+// gets the FONTS back with none of the curation. Dates come back on their own
+// (they derive from the archive's file date). What no heuristic can recover is
+// the hand-authored part — the purchase link, the style-library link, the demo
+// URL, the tags, a renamed entry. That is the part with the user's time in it.
+//
+// THE SHAPE (2026-09-02): one file at the ROOT of an exported zip. On a
+// zip import it is stripped the moment it is seen, along with anything it
+// points at, and the archive is repackaged BEFORE it is hashed. Everything
+// downstream then runs exactly as it does today — no hash-exclusion threaded
+// through the hasher, no second identity system.
+//
+// WHY REPACKAGING IS SAFE, and what it does and does not buy:
+//   - It does NOT recover the vendor original's hash. The vendor zipped with
+//     their settings and we zip with ours, so the bytes differ regardless.
+//     That match was never achievable and is not lost here.
+//   - It DOES make two JMT exports of the same source hash identically, because
+//     zipFolderToFile is deterministic on purpose (sorted walk, statConcurrency
+//     1). Export, curate differently, export again, strip both — same bytes.
+//     That is the "I exported before deleting, now I'm bringing it back" case,
+//     which is the whole reason this exists.
+//
+// THE COST IS GATED. A zip with no sidecar pays one root-entry listing and
+// nothing else. Only an archive that actually carries curation pays the re-zip.
+//
+// PHASE 2 — CUSTOMIZED FONTS RIDE TOO ([B-311], 2026-09-07). A library entry
+// whose files diverged from its source (the Customized marker) is the one thing
+// a delete used to destroy outright: the vendor's bytes are re-importable, the
+// user's edits existed nowhere else. Now each customized entry's folder is
+// packed under PAYLOAD_DIR/customized/<n>, pointed at by the sidecar's
+// `customized` list, and stripped before hashing exactly like a receipt — "a
+// custom font folder is a receipt, only larger" (the [B-304] dictation). On
+// re-import they are recreated as entries, and the candidate path they came
+// from is left OUT of importedPaths unless a stock copy of it also existed —
+// the rule (2026-09-07): "If I customized, its original is unchecked. If I made
+// a copy so I have the customized and the original, they are both checked.
+// Matches what was there before deletion."
+
+'use strict';
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const StreamZip = require('node-stream-zip');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
+
+const SIDECAR_NAME = '.jmt-curation.json';
+// Files the sidecar brings along (proofs of purchase) live under one root
+// folder so the strip is a prefix test rather than a per-file lookup, and so a
+// human opening the zip can see at a glance what is ours and what is the font.
+const PAYLOAD_DIR = '.jmt-curation';
+const SCHEMA_VERSION = 1;
+
+// Source-level fields worth carrying. Deliberately NOT the derived ones:
+// purchaseDate / acquisitionDate come from the archive's file date and restore
+// themselves correctly, so shipping them would only create a chance to be wrong.
+// bundleName WAS REMOVED FROM THIS LIST EARLIER ON 2026-09-03 AND THAT WAS
+// WRONG — RESTORED. I checked `_writeSourceMetaAndStamp`, saw it never writes a
+// bundleName, and concluded the field did not exist. It is written LATER, by the
+// review's commit (`updateSourceMeta({ bundleName: userBundle })`), and 56 of
+// the user's 159 sources carry one. Checking the wrong writer is not the same as
+// checking for the field.
+// It is also the field that MATTERS MOST here: bundleName is the user-facing
+// Source Name, so it is hand-authored the moment anyone renames a source, and
+// `originalName` (the archive's filename) cannot stand in for it. Without this a
+// restore falls back to the file it was picked from — which for an auto-numbered
+// export reads "Outcast_Knight (1)".
+const SOURCE_FIELDS = ['bundleName', 'vendor', 'vendorWebsite', 'linkUrl', 'downloadUrl', 'userNotes', 'purchased'];
+// Entry-level fields, keyed by candidatePath — the only stable identifier an
+// entry has across a delete and re-import. A name can be edited; the path the
+// font occupies inside the archive cannot.
+const ENTRY_FIELDS = ['name', 'tags', 'linkedStyleLibraryEntry', 'author', 'description', 'demoUrl', 'userNotes', 'purchased',
+  'formerNames'];   // [B-561] a re-import keeps them, unless it is imported as a new copy (importSource)
+// Record provenance, not curation: WHEN this entry existed in the library.
+//
+// THE LINE IS HISTORY versus ATTENTION, and it took two passes to find.
+// `createdAt` is when the font entered the user's collection - a fact about the
+// font's place in the library, and restoring it is what makes a round trip
+// leave no trace. `seenAt` is whether they have LOOKED at it since it appeared,
+// and it just appeared. Restoring it suppressed the NEW badge, so three fonts
+// landed in the grid with nothing marking them.
+// 2026-09-03: "yes, the created date goes back to original, but the new
+// tag should still come on." HISTORY IS RESTORED; ATTENTION STATE IS NOT.
+// There is a real argument the other way and it should be seen before this is
+// "fixed" back: the badge's own definition is "never opened and never used"
+// (index.html:19498), and a restored font HAS been used. The ruling stands
+// because the badge's value AT IMPORT is showing what just landed.
+// Safe from the one-time `backfillSeenAt`, which is gated behind a persisted
+// flag precisely so it cannot silently re-stamp newly arrived entries.
+//
+// entryUuid is deliberately NOT here either. It is the record's identity, and
+// restoring one while a copy of that entry still exists would put two rows in
+// the library under the same id. The timestamps carry no such hazard.
+const ENTRY_PROV_FIELDS = ['createdAt', 'updatedAt', 'acquisitionDate'];
+// A common folder's curation. Short because a common carries little: no tags and no linked
+// style. Its description and its group placement are decisions the user made, and are what a
+// restore would otherwise lose. [B-493]
+const COMMON_FIELDS = ['name', 'description', 'group', 'userNotes'];
+const COMMON_PROV_FIELDS = ['createdAt'];
+
+// [B-511] A picture in an item's own folder is not customization, but it exists nowhere else, so an
+// item carrying one rides a source export as a customized one does, and comes back with it.
+function _hasOwnPicture(dir) {
+  try {
+    const names = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name);
+    return !!require('./soundFontPicture').pickPicture(names);
+  } catch { return false; }
+}
+
+// The image file at the top of an item's own folder, or null.
+function _ownPictureFile(dir) {
+  try {
+    const names = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => d.name);
+    return require('./soundFontPicture').pickPicture(names) || null;
+  } catch { return null; }
+}
+
+function _pick(obj, fields) {
+  const out = {};
+  if (!obj) return out;
+  for (const f of fields) {
+    const v = obj[f];
+    if (v === undefined || v === null) continue;
+    if (typeof v === 'string' && v.trim() === '') continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[f] = v;
+  }
+  return out;
+}
+
+// Build the payload for a source: its own curated fields, one block per entry
+// that came from it, and the attachments it links. Returns null when there is
+// nothing worth carrying — an untouched source should not grow a sidecar,
+// because that would change its exported bytes for no gain.
+// opts.includeAttachments (default true) is the export's PARAMETER, not a
+// question this module asks. Set false and the receipts are left behind while
+// the fields still travel — which is the one thing the source-export checkbox
+// can turn off. Skipping them here rather than filtering later matters: the
+// "nothing worth carrying" test at the bottom then sees the real payload, so a
+// source whose ONLY curation was a receipt correctly produces no sidecar at all
+// and its exported bytes stay untouched.
+function buildForSource(userData, uuid, appVersion, opts) {
+  const includeAttachments = !(opts && opts.includeAttachments === false);
+  // Same treatment as the receipts ([B-311], the ruling 2026-09-07: "option only
+  // on direct export and automatic on delete with export first"): a parameter
+  // of the export, defaulting to carry.
+  const includeCustomized = !(opts && opts.includeCustomized === false);
+  // Which KIND of working copy rides, declared by the caller. [B-493, 2026-10-19]
+  //
+  // One source export, two doors. A font's Export source carries customized font entries;
+  // a common's carries the customized common folder. Everything else about the archive is
+  // the same, so this is the only thing a door declares.
+  //
+  // Defaults to 'entry', which is what every existing caller means and what this module did
+  // before a common could export at all.
+  const customizedKind = (opts && opts.customizedKind) === 'common' ? 'common' : 'entry';
+  const sources = require('./soundFontSources');
+  const entriesMod = require('./soundFontEntries');
+  const attachMod = require('./soundFontAttachments');
+
+  let sourceMeta = null;
+  try {
+    sourceMeta = JSON.parse(fs.readFileSync(
+      path.join(userData, 'soundFonts', 'sources', uuid, 'meta.json'), 'utf8'));
+  } catch { return null; }
+  if (!sourceMeta) return null;
+
+  const source = _pick(sourceMeta, SOURCE_FIELDS);
+  // [B-487] THE DOWNLOAD LINK IS PRIVATE: tied to its buyer and often redeemable by anyone holding
+  // it ([B-497]). So it rides an export only under the same box as the receipts, which is the
+  // export's disclosure for purchase material, and stays behind when that box is cleared.
+  if (!includeAttachments) delete source.downloadUrl;
+  // A vendor the app guessed is not curation — re-importing will guess it
+  // again, and shipping it would let a stale guess outrank a fresh one.
+  if (sourceMeta.vendorAutoDetected) { delete source.vendor; delete source.vendorWebsite; }
+
+  const entries = {};
+  const entryProvenance = {};
+  const importedPaths = [];
+  // The commons analogue: source subtrees whose STOCK working copy was there at export time
+  // and must therefore be rebuilt on import, even when a customized copy rides too. [B-493]
+  const importedSubPaths = [];
+  const customized = [];
+  // [B-536] ONE RECORD PER FONT, NOT PER DOWNLOAD FOLDER. `entries` holds one block per folder, so
+  // the first font from a folder takes it and every further copy rides in `copies` with its own name,
+  // details and image. And every font's own image travels by itself (`entryPictures` for the first,
+  // `copies[].picture` for the rest), whatever the include-customized choice: an image is not
+  // customization, and carrying it does not need the whole font.
+  const entryPictures = {};
+  const copies = [];
+  const _seenKeys = new Set();
+  let entryList = [];
+  try { entryList = entriesMod.listEntries(userData) || []; } catch { entryList = []; }
+  // Alphabetical, so the original (Barriss_Inquisitor) comes before its copies (Barriss_Inquisitor_2).
+  entryList = entryList.slice().sort((a, b) => String(a && a.name).localeCompare(String(b && b.name), undefined, { sensitivity: 'base' }));
+  for (const e of entryList) {
+    const m = e && e.meta;
+    if (!m || m.sourceUuid !== uuid) continue;
+    // '' IS A VALID candidatePath, not a missing one - a single-font source
+    // puts its font at the archive ROOT, so the path is the empty string. The
+    // first version tested `if (!key) continue`, which silently dropped the
+    // entry curation for every single-font source, the most common kind. Only
+    // null/undefined means "no path". (Found on a real export 2026-09-02: an
+    // entry with tags and a demo URL produced "entries": {}.)
+    const key = m.candidatePath;
+    if (key == null) continue;
+    // ── Customized fonts ride whole ([B-311]) ──
+    // Detected off the stamp getEntryCustomization maintains, so this is a
+    // cache read for every entry the marker has already answered for. `known`
+    // is required: an entry the diff cannot judge (missing manifest) must not
+    // be shipped as customized on a guess — it stays on the stock path, which
+    // loses nothing that exists.
+    let _cust = null;
+    try { _cust = entriesMod.getEntryCustomization(userData, e.name); } catch { _cust = null; }
+    const _rides = includeCustomized && customizedKind === 'entry'
+                   && !!(_cust && _cust.known && _cust.customized);
+    if (_rides) {
+      customized.push({
+        entryName: e.name,
+        candidatePath: key,
+        // Index-numbered so two entries with hostile names can never collide
+        // inside the archive; the JSON carries the real name.
+        dir: `${PAYLOAD_DIR}/customized/${customized.length}`,
+        // The entry's OWN curation and provenance, carried ON the record rather
+        // than in the candidatePath-keyed maps below — a stock copy and a
+        // customized copy can share one candidatePath, and keyed maps hold one
+        // block per key. Last-writer-wins there would cross their tags.
+        curation: _pick(m, ENTRY_FIELDS),
+        provenance: _pick(m, ENTRY_PROV_FIELDS),
+        _absDir: path.join(entriesMod.entriesRoot(userData), e.name),
+      });
+    }
+    // WHICH CANDIDATES WERE ACTUALLY IMPORTED. (2026-09-03: "if I chose
+    // to not import certain files, in other words left them unchecked, those
+    // checked versus unchecked I don't believe are included and they should
+    // be.") A bundle of six where the user took three is a DECISION. Without this the
+    // review re-opens with all six ticked by default and the restore quietly
+    // undoes it - another trace of the delete.
+    // IT CANNOT BE INFERRED FROM `entries`. That map only gains a key when
+    // the font carried curation, so an imported-but-uncurated font would look
+    // like one there had been deliberately skipped - exactly backwards.
+    // A CUSTOMIZED ENTRY THAT RIDES THE PAYLOAD DOES NOT CLAIM ITS PATH
+    // ([B-311], the rule 2026-09-07): the restore recreates the customized
+    // version directly, so the vendor's candidate comes back UNCHECKED — "the
+    // original is no longer one that you're including." A stock entry at the
+    // same path still pushes it, which is exactly the both-copies case. And a
+    // customized entry NOT riding (box unticked) pushes it too — the vendor
+    // version is then the only restorable one, and it was imported.
+    if (!_rides) importedPaths.push(key);
+    // A RIDING ENTRY'S CURATION TRAVELS ON ITS RECORD, NOT IN THE KEYED
+    // MAPS. The maps are keyed by candidatePath and a stock copy and a
+    // customized copy can SHARE one path — letting the rider write here meant
+    // last-writer-wins handed the customized entry's NAME to the stock
+    // candidate's review row. This hit the consequence live (2026-09-07): the
+    // row offered "Volatile_2", the restore had already created Volatile_2,
+    // and the commit died on "Entry already exists". The candidate row
+    // describes the VENDOR's copy, so only entries restorable THROUGH the
+    // candidate (the non-riding ones) may describe it.
+    if (_rides) continue;
+    const block = _pick(m, ENTRY_FIELDS);
+    const _picName = _ownPictureFile(path.join(entriesMod.entriesRoot(userData), e.name));
+    const _picFor = (slot) => _picName ? {
+      name: _picName,
+      file: `${PAYLOAD_DIR}/pictures/${slot}/${_picName}`,
+      _abs: path.join(entriesMod.entriesRoot(userData), e.name, _picName),
+    } : null;
+    if (_seenKeys.has(key)) {
+      copies.push({ candidatePath: key, curation: block, provenance: _pick(m, ENTRY_PROV_FIELDS),
+                    ...(_picName ? { picture: _picFor(`copy${copies.length}`) } : {}) });
+      continue;
+    }
+    _seenKeys.add(key);
+    if (_picName) entryPictures[key] = _picFor(`first${Object.keys(entryPictures).length}`);
+    if (Object.keys(block).length === 0) continue;
+    entries[key] = block;
+    // Record-level provenance, kept SEPARATE from the curation block above
+    // because they are different kinds of fact: `entries` is what the user
+    // wrote, this is when the record existed.
+    // the user's bar, 2026-09-03: "there should be no trace of me ever deleting
+    // and bringing it back." A createdAt of today is exactly such a trace - the
+    // font entered THE library in August; only the row is new. Same for the
+    // NEW badge, which is `seenAt` being empty.
+    const prov = _pick(m, ENTRY_PROV_FIELDS);
+    if (Object.keys(prov).length > 0) entryProvenance[key] = prov;
+  }
+
+  // ── The customized COMMON FOLDER rides, when a common's door asked ([B-493]) ──
+  // A common folder is a working copy of this source exactly as a font entry is, so the
+  // same rule applies: if the user changed it, the change exists nowhere else and an export
+  // that leaves it behind is the one that loses it. Detected off the same stamp, with the
+  // same `known` requirement - a common the diff cannot judge stays on the stock path,
+  // which loses nothing that exists.
+  // MARKED WITH A KIND, and entries are left unmarked on purpose: every archive written
+  // before this carries entry records with no kind field, so absent must keep meaning
+  // entry or every existing export stops restoring.
+  // RUNS ONLY FOR `customizedKind: 'common'`. A font's Export source carries no common.
+  if (includeCustomized && customizedKind === 'common') {
+    try {
+      const commonMod = require('./soundFontCommon');
+      for (const c of (commonMod.listCommons(userData) || [])) {
+        const cm = c && c.meta;
+        if (!cm || cm.sourceUuid !== uuid) continue;
+        if (cm.sourceSubPath == null) continue;
+        let cust = null;
+        try { cust = commonMod.getCommonCustomization(userData, c.uuid); } catch { cust = null; }
+        const _filesDir = path.join(commonMod.commonRoot(userData), c.uuid, 'files');
+        if (!(cust && cust.known && cust.customized) && !_hasOwnPicture(_filesDir)) {
+          // A STOCK COPY STILL CLAIMS ITS SUBTREE, which is the both-copies case and the
+          // same rule `importedPaths` applies to a font candidate: customized alone means
+          // the vendor copy stays out, customized BESIDE a stock copy means both come back.
+          // A common the diff cannot judge counts as stock, which is the branch that loses
+          // nothing that exists. [B-493, 2026-10-19]
+          if (!importedSubPaths.includes(cm.sourceSubPath)) importedSubPaths.push(cm.sourceSubPath);
+          continue;
+        }
+        customized.push({
+          kind: 'common',
+          commonName: cm.name || c.uuid,
+          sourceSubPath: cm.sourceSubPath,
+          dir: `${PAYLOAD_DIR}/customized/${customized.length}`,
+          curation: _pick(cm, COMMON_FIELDS),
+          provenance: _pick(cm, COMMON_PROV_FIELDS),
+          _absDir: path.join(commonMod.commonRoot(userData), c.uuid, 'files'),
+        });
+      }
+    } catch { /* commons unavailable: the rest of the payload still builds */ }
+  }
+
+  const attachments = [];
+  const ids = includeAttachments && Array.isArray(sourceMeta.attachments) ? sourceMeta.attachments : [];
+  for (const id of ids) {
+    let abs = null;
+    try { abs = attachMod.attachmentFilePath(userData, id); } catch { abs = null; }
+    if (!abs) continue;
+    let info = {};
+    try { info = attachMod.listAttachments(userData, uuid).find(a => a.id === id) || {}; } catch {}
+    const fileName = info.name || path.basename(abs);
+    attachments.push({
+      id,
+      name: fileName,
+      label: info.label || '',
+      // Path inside the zip. Namespaced by id so two receipts with the same
+      // filename cannot collide in the archive.
+      file: `${PAYLOAD_DIR}/${id}/${fileName}`,
+      _abs: abs,
+    });
+  }
+
+  // [B-511] The source's own picture rides along ALWAYS, like the creator and the other details.
+  // Only proof of purchase is the user's to include or leave out.
+  let picture = null;
+  try {
+    const own = attachMod.sourcePicture(userData, uuid);
+    const abs = own && attachMod.attachmentFilePath(userData, own.id);
+    if (abs) picture = { name: own.name, file: `${PAYLOAD_DIR}/picture/${own.name}`, _abs: abs };
+  } catch { picture = null; }
+  // What the source SHOWS rides too, when it is not its own: a font's image it takes as its picture
+  // (one item, or borrowed). Looked up by the caller (opts.shownPicture, an absolute path), since
+  // finding it reads the download. An image from the download travels with the download.
+  if (!picture && opts && opts.shownPicture) {
+    try {
+      if (fs.statSync(opts.shownPicture).isFile()) {
+        const name = path.basename(opts.shownPicture);
+        picture = { name, file: `${PAYLOAD_DIR}/picture/${name}`, _abs: opts.shownPicture };
+      }
+    } catch { picture = null; }
+  }
+
+  // ── PROVENANCE ──────────────────────────────────────────────────────────
+  // the user's bar, 2026-09-03: "it should for me be identical to what it was
+  // before I deleted." Curation alone does not reach that. Two things were
+  // still lost across the round trip, and neither is a value the user typed:
+  //
+  //   THE DATES. purchaseDate / acquisition were deliberately left OUT of
+  //   SOURCE_FIELDS on the grounds that they "restore themselves from the
+  //   archive's file date". THAT IS TRUE ONLY WHEN THE EXPORT AND THE
+  //   ORIGINAL SHARE A DATE, which was the case the day it was measured and is
+  //   false in general — the export was written TODAY, so a bundle acquired in
+  //   August came back acquired today. Carry them.
+  //
+  //   THE IDENTITY. A rebuilt export can never match the vendor's archive
+  //   bytes, so the app cannot recognise its own export as the same source.
+  //   Carrying the ORIGINAL hashes is what makes "if I didn't delete first, it
+  //   should know that it's imported" answerable.
+  //
+  // contentHash here is the PER-SOURCE MANIFEST's fold over the files INSIDE
+  // the archive — the container-independent one. NOT meta.contentHash,
+  // which is hashItemDir over the source DIRECTORY and therefore covers
+  // exactly one file, source.zip, making it the archive hash under another
+  // name. Two different values, same field name; do not swap them.
+  const provenance = {
+    archiveHash: sourceMeta.hash || null,
+    contentHash: null,
+    // THE DATE, and the rule is the whole specification (2026-09-03): "the date
+    // is the date of the file. The user can override that or the restore can
+    // override it. That's it." One value, three sources, in precedence: the
+    // file's date, the user's override, the restore's value.
+    // IT IS CARRIED UNDER EVERY NAME THE APP CURRENTLY KEEPS IT UNDER. The same
+    // value has accumulated three (purchaseDate / acquisitionDate /
+    // sourceFileDate) plus a routing map and a legacy fallback, and picking which
+    // ones "matter" is exactly the per-field judgement that dropped
+    // acquisitionDate and left a restored source with a blank Acquired where the
+    // original had 2025-08-21. Carry what was THERE, not what is READ.
+    // (Collapsing the three names to one is its own job, deliberately not here.)
+    purchaseDate: sourceMeta.purchaseDate || null,
+    acquisitionDate: sourceMeta.acquisitionDate || null,
+    sourceFileDate: sourceMeta.sourceFileDate || null,
+    sourceFileMtimeMs: sourceMeta.sourceFileMtimeMs || null,
+    updatedAt: sourceMeta.updatedAt || null,
+    // Carried so a restored vendor keeps its provenance: a name the app guessed
+    // must not come back looking like one the user asserted.
+    vendorAutoDetected: !!sourceMeta.vendorAutoDetected,
+  };
+  try {
+    const fh = require('./soundFontFileHash');
+    const man = fh.readFileHashManifest(
+      path.join(userData, 'soundFonts', '.filehashes', 'sources', `${uuid}.json`));
+    if (man && man.contentHash) provenance.contentHash = man.contentHash;
+  } catch { /* no manifest: identity falls back to the archive hash alone */ }
+
+  const hasSource = Object.keys(source).length > 0;
+  const hasEntries = Object.keys(entries).length > 0 || copies.length > 0
+    || Object.keys(entryPictures).length > 0;
+  // Provenance alone is worth carrying — an uncurated source that was deleted
+  // and re-imported should still come back with its own dates and identity.
+  const hasProv = !!(provenance.archiveHash || provenance.purchaseDate);
+  // A partial import is itself a decision worth carrying, even with no curation
+  // and no provenance: taking 3 of 6 fonts is a choice the restore must honour.
+  const hasPartial = importedPaths.length > 0;
+  if (!hasSource && !hasEntries && attachments.length === 0 && !hasProv && !hasPartial
+      && customized.length === 0 && !picture) return null;
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    writtenBy: `JMT Studio${appVersion ? ' ' + appVersion : ''}`,
+    writtenAt: new Date().toISOString(),
+    sourceUuid: uuid,
+    originalName: sourceMeta.originalName || '',
+    source,
+    entries,
+    entryProvenance,
+    importedPaths,
+    importedSubPaths,
+    attachments,
+    customized,
+    provenance,
+    ...(picture ? { picture } : {}),
+    ...(Object.keys(entryPictures).length ? { entryPictures } : {}),
+    ...(copies.length ? { copies } : {}),
+  };
+}
+
+// Every font image the payload carries, as { file, _abs } records. [B-536]
+function _fontPictureFiles(payload) {
+  const out = Object.values((payload && payload.entryPictures) || {});
+  for (const c of ((payload && payload.copies) || [])) if (c && c.picture) out.push(c.picture);
+  return out.filter((r) => r && r.file && r._abs);
+}
+
+// Record-level provenance for one candidate: the timestamps that make a
+// restored entry indistinguishable from the one that was deleted. Separate
+// from entryCurationFor because the caller applies them differently — curation
+// is metadata the review may overrule, these are stamped after the record is
+// built and nothing else competes for them.
+function entryProvenanceFor(payload, candidatePath) {
+  if (!payload || !payload.entryProvenance) return null;
+  const block = payload.entryProvenance[_rootKey(candidatePath)];
+  if (!block) return null;
+  const out = _pick(block, ENTRY_PROV_FIELDS);
+  return Object.keys(out).length ? out : null;
+}
+
+// Copy an entry's folder into the payload, skipping the root meta.json — the
+// same exclusion exportEntryToFolder ships with (app artifact, not font
+// content; a vendor's own nested meta.json deeper in the tree is kept).
+// Returns true only if the whole tree copied; a half-carried customized font
+// is worse than an honestly absent one, so the caller drops the record on
+// false rather than shipping a folder missing files.
+function _copyEntryDirInto(srcDir, destDir) {
+  try {
+    const stack = [['', true]];
+    while (stack.length) {
+      const [rel, isRoot] = stack.pop();
+      const from = rel ? path.join(srcDir, rel) : srcDir;
+      const to = rel ? path.join(destDir, rel) : destDir;
+      fs.mkdirSync(to, { recursive: true });
+      for (const d of fs.readdirSync(from, { withFileTypes: true })) {
+        if (isRoot && d.name === 'meta.json') continue;
+        if (d.isDirectory()) { stack.push([rel ? `${rel}/${d.name}` : d.name, false]); continue; }
+        if (!d.isFile()) continue;
+        fs.copyFileSync(path.join(from, d.name), path.join(to, d.name));
+      }
+    }
+    return true;
+  } catch { return false; }
+}
+
+// Enumerate an entry folder the way _copyEntryDirInto COPIES it - same root meta.json exclusion,
+// same all-or-nothing contract. Returns relative posix paths, or null if the walk failed at any
+// point, because a half-listed customized font must be dropped exactly like a half-copied one.
+// [B-420] The archive path needs the LIST without the copy: archiver reads these files where they
+// already sit, so copying them into a staging dir only to read them straight back is pure waste -
+// and a customized font can be a whole font.
+function _listEntryDirFiles(srcDir) {
+  try {
+    const out = [];
+    const stack = [['', true]];
+    while (stack.length) {
+      const [rel, isRoot] = stack.pop();
+      const from = rel ? path.join(srcDir, rel) : srcDir;
+      for (const d of fs.readdirSync(from, { withFileTypes: true })) {
+        if (isRoot && d.name === 'meta.json') continue;
+        const childRel = rel ? `${rel}/${d.name}` : d.name;
+        if (d.isDirectory()) { stack.push([childRel, false]); continue; }
+        if (!d.isFile()) continue;
+        out.push(childRel);
+      }
+    }
+    return out;
+  } catch { return null; }
+}
+
+// THE SIDECAR'S SHIPPING RULES, IN ONE PLACE. [B-420] Both consumers - writeIntoTree for a folder
+// export and planForArchive for a zip - need the same decisions made the same way: which customized
+// records are actually carried, which candidate paths are handed back, and what the written JSON says.
+// Two copies of this drifted apart once already (the export side grew its own inverse of the import
+// side and inherited a constraint that only applied to the other direction), so it is deliberately
+// not duplicated.
+function _cleanSidecar(payload, carriedCustomized, reclaimedPaths) {
+  return {
+    ...payload,
+    attachments: (payload.attachments || []).map(({ _abs, ...rest }) => rest),
+    ...(payload.picture ? { picture: (({ _abs, ...rest }) => rest)(payload.picture) } : {}),
+    customized: carriedCustomized.map(({ _absDir, ...rest }) => rest),
+    ...(payload.entryPictures ? { entryPictures: Object.fromEntries(Object.entries(payload.entryPictures)
+      .map(([k, v]) => [k, (({ _abs, ...rest }) => rest)(v)])) } : {}),
+    ...(payload.copies ? { copies: payload.copies.map((c) => c.picture
+      ? { ...c, picture: (({ _abs, ...rest }) => rest)(c.picture) } : c) } : {}),
+    ...(reclaimedPaths.length ? {
+      importedPaths: [...(payload.importedPaths || []), ...reclaimedPaths],
+    } : {}),
+  };
+}
+
+// What this payload contributes to an ARCHIVE, with nothing staged on disk. [B-420]
+// Returns { sidecarJson, entries: [{ name, absPath }], attachmentsWritten, customizedWritten } -
+// `entries` point at files where they already live, and the sidecar never becomes a file at all:
+// archiver takes it as bytes. This is the whole difference from writeIntoTree, which has to produce
+// real files because a folder export's deliverable IS a folder of files.
+// A record whose folder cannot be ENUMERATED is dropped here, mirroring writeIntoTree dropping one
+// whose folder cannot be COPIED - a sidecar pointing at a folder that is not in the archive would
+// make the restore invent an empty font.
+function planForArchive(payload) {
+  if (!payload) return null;
+  const entries = [];
+  let attachmentsWritten = 0;
+  for (const a of (payload.attachments || [])) {
+    if (!a._abs) continue;
+    // Checked now rather than discovered by archiver mid-stream: a receipt that cannot be read is
+    // skipped, and it must not take the export down with it.
+    try { if (!fs.statSync(a._abs).isFile()) continue; } catch { continue; }
+    entries.push({ name: a.file, absPath: a._abs });
+    attachmentsWritten++;
+  }
+  if (payload.picture && payload.picture._abs) {
+    try { if (fs.statSync(payload.picture._abs).isFile()) entries.push({ name: payload.picture.file, absPath: payload.picture._abs }); }
+    catch { /* a picture that cannot be read must not fail the export */ }
+  }
+  for (const r of _fontPictureFiles(payload)) {
+    try { if (fs.statSync(r._abs).isFile()) entries.push({ name: r.file, absPath: r._abs }); }
+    catch { /* an image that cannot be read must not fail the export */ }
+  }
+  const carriedCustomized = [];
+  const reclaimedPaths = [];
+  for (const c of (payload.customized || [])) {
+    if (!c._absDir || !c.dir) continue;
+    const rels = _listEntryDirFiles(c._absDir);
+    if (rels) {
+      for (const rel of rels) {
+        entries.push({ name: `${c.dir}/${rel}`,
+                       absPath: path.join(c._absDir, rel.split('/').join(path.sep)) });
+      }
+      carriedCustomized.push(c);
+    } else if (c.candidatePath != null) {
+      reclaimedPaths.push(c.candidatePath);
+    }
+  }
+  const clean = _cleanSidecar(payload, carriedCustomized, reclaimedPaths);
+  return {
+    sidecarJson: JSON.stringify(clean, null, 2),
+    entries,
+    attachmentsWritten,
+    customizedWritten: carriedCustomized.length,
+  };
+}
+
+// Drop the sidecar (and its payload files) into a reconstructed tree, just
+// before it is archived. The _abs / _absDir keys are stripped on the way out so
+// the written JSON carries no machine-specific paths.
+// Returns { ok, attachmentsWritten, customizedWritten } — the COUNTS are the
+// point, not a nicety. A receipt that cannot be read is skipped rather than
+// failing the export, so the number that landed can be lower than the number
+// the payload lists. Anything reporting what the archive carries has to count
+// what was written, or it describes a file that is not in there.
+function writeIntoTree(treeDir, payload) {
+  if (!payload) return { ok: false, attachmentsWritten: 0, customizedWritten: 0 };
+  let attachmentsWritten = 0;
+  for (const a of (payload.attachments || [])) {
+    if (!a._abs) continue;
+    const dest = path.join(treeDir, ...a.file.split('/'));
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(a._abs, dest);
+      attachmentsWritten++;
+    } catch { /* a receipt that cannot be read must not fail the export */ }
+  }
+  // Customized fonts ([B-311]): the whole entry folder, minus the root
+  // meta.json. A record whose copy failed is REMOVED from the written sidecar,
+  // not just uncounted — a sidecar pointing at a folder that is not in the
+  // archive would make the restore invent an empty font.
+  const carriedCustomized = [];
+  // A dropped record hands its candidate path BACK to importedPaths: the
+  // customized version is not in the archive, so the vendor's copy at that path
+  // is the only restorable one again and must come back checked, exactly as if
+  // the include box had been unticked for that font.
+  if (payload.picture && payload.picture._abs) {
+    const dest = path.join(treeDir, ...payload.picture.file.split('/'));
+    try { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(payload.picture._abs, dest); }
+    catch { /* a picture that cannot be read must not fail the export */ }
+  }
+  for (const r of _fontPictureFiles(payload)) {
+    const dest = path.join(treeDir, ...r.file.split('/'));
+    try { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(r._abs, dest); }
+    catch { /* an image that cannot be read must not fail the export */ }
+  }
+  const reclaimedPaths = [];
+  for (const c of (payload.customized || [])) {
+    if (!c._absDir || !c.dir) continue;
+    const dest = path.join(treeDir, ...String(c.dir).split('/'));
+    if (_copyEntryDirInto(c._absDir, dest)) {
+      carriedCustomized.push(c);
+    } else {
+      try { fs.rmSync(dest, { recursive: true, force: true }); } catch {}
+      if (c.candidatePath != null) reclaimedPaths.push(c.candidatePath);
+    }
+  }
+  // Shared with planForArchive - see _cleanSidecar. The folder and archive paths must describe the
+  // same shipment, or a font restored from a zip and one restored from a folder disagree.
+  const clean = _cleanSidecar(payload, carriedCustomized, reclaimedPaths);
+  try {
+    fs.writeFileSync(path.join(treeDir, SIDECAR_NAME), JSON.stringify(clean, null, 2));
+    return { ok: true, attachmentsWritten, customizedWritten: carriedCustomized.length };
+  } catch { return { ok: false, attachmentsWritten, customizedWritten: carriedCustomized.length }; }
+}
+
+// What a written sidecar actually carries, in the user's categories rather than
+// the schema's field names. Returned by injectIntoZip so a caller that wants to
+// SAY what went into the zip reads it off the export instead of re-deriving it
+// from the library.
+//
+// THE RE-DERIVATION IS THE BUG THIS EXISTS TO PREVENT. The first disclosure
+// was assembled in the renderer by re-reading the source and calling
+// listAttachments — and it looked only at the source fields, so an export
+// carrying an entry's tag and demo URL announced "Includes your links". A
+// disclosure that under-reports is worse than none: it tells the user they know
+// what is in the file when they do not. There is only one thing that knows what
+// was written, and it is the payload that was written.
+//
+// Key PRESENCE is the whole test, deliberately. _pick already dropped
+// undefined, null, blank strings and empty arrays on the way in, so a key that
+// survived into the payload is a value the user actually has. Re-testing
+// emptiness here would be a second definition of "empty", free to drift from
+// the first.
+// attachmentsWritten / customizedWritten, when given, override the payload's
+// own counts. The payload says what we MEANT to carry; the writer says what
+// landed. A receipt that could not be read is skipped silently, so counting
+// the payload would claim a proof of purchase the recipient will not find —
+// and the same honesty applies to a customized font whose copy failed.
+function summarize(payload, attachmentsWritten, customizedWritten) {
+  const none = { notes: false, tags: false, links: false, attachments: 0, customized: 0, any: false };
+  if (!payload) return none;
+  const src = payload.source || {};
+  const blocks = Object.values(payload.entries || {});
+  const on = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+  const anyEntry = (k) => blocks.some(b => on(b, k));
+
+  const notes = on(src, 'userNotes') || anyEntry('userNotes');
+  const tags = anyEntry('tags');
+  // One bucket for every kind of link, because that is the word the user owns.
+  // A style-library reference is not a URL, but "links" is what they would call
+  // it, and splitting it out lengthens the sentence without telling them more.
+  const links = on(src, 'linkUrl') || on(src, 'vendorWebsite') || on(src, 'downloadUrl')
+    || anyEntry('demoUrl') || anyEntry('linkedStyleLibraryEntry');
+  const attachments = typeof attachmentsWritten === 'number'
+    ? attachmentsWritten
+    : (payload.attachments || []).length;
+  const customized = typeof customizedWritten === 'number'
+    ? customizedWritten
+    : (payload.customized || []).length;
+
+  return {
+    notes, tags, links, attachments, customized,
+    any: notes || tags || links || attachments > 0 || customized > 0,
+  };
+}
+
+
+// Is there a sidecar at the root of this zip? This is the check every ordinary
+// import pays, so it reads the central directory and nothing else — no
+// extraction, no hashing, no walk.
+async function peekZip(zipPath) {
+  let zip;
+  try { zip = openZipOwned(zipPath, { skipEntryNameValidation: true }); }
+  catch { return null; }
+  try {
+    const entries = await zip.entries();
+    if (!entries[SIDECAR_NAME]) return null;
+    const buf = await zip.entryData(SIDECAR_NAME);
+    const payload = JSON.parse(buf.toString('utf8'));
+    if (!payload || typeof payload !== 'object') return null;
+    // A sidecar from a newer schema is data we cannot promise to read
+    // correctly. Ignore it rather than half-apply it — the font still imports,
+    // which is the important part.
+    if (typeof payload.schemaVersion !== 'number' || payload.schemaVersion > SCHEMA_VERSION) return null;
+    return payload;
+  } catch { return null; }
+  finally { try { await zip.close(); } catch {} }
+}
+
+// The folder equivalent of peekZip: is there a sidecar at the root of this directory?
+// EXISTS BECAUSE FOLDER EXPORTS NOW CARRY ONE. [B-427] Injection worked by rebuilding an ARCHIVE,
+// so a folder export had nothing to inject into - and that limitation got written down as though it
+// were a rule about folders. the user's call once the sidecar moved into the tree: "you should do the
+// export correctly now and we'll learn how to deal with the import later." This is that half.
+// Every acceptance rule is copied from peekZip deliberately, not approximated: a malformed sidecar
+// is ignored rather than half-applied, and a sidecar from a NEWER schema is data we cannot promise to
+// read correctly, so the font still imports and only the curation is lost. Two peeks that disagree
+// about what they accept would mean a zip and its extracted twin restore differently.
+function peekDir(dirPath) {
+  try {
+    const buf = fs.readFileSync(path.join(dirPath, SIDECAR_NAME));
+    const payload = JSON.parse(buf.toString('utf8'));
+    if (!payload || typeof payload !== 'object') return null;
+    if (typeof payload.schemaVersion !== 'number' || payload.schemaVersion > SCHEMA_VERSION) return null;
+    return payload;
+  } catch { return null; }
+}
+
+
+// Apply the source half after the import has landed: the curated fields, and
+// the attachments the sidecar carried. Attachments are re-stored from the
+// files that rode along inside the zip, which the caller extracted to attDir.
+// Content-addressed, so a receipt already in the store is reused rather than
+// duplicated.
+function applySourceCuration(userData, uuid, payload, attDir) {
+  if (!payload) return { ok: true, applied: 0, attachments: 0 };
+  const sources = require('./soundFontSources');
+  const attachMod = require('./soundFontAttachments');
+  let applied = 0;
+  const updates = _pick(payload.source, SOURCE_FIELDS);
+  if (Object.keys(updates).length > 0) {
+    try {
+      const r = sources.updateSourceMeta(userData, uuid, updates);
+      if (r && r.ok) applied = Object.keys(updates).length;
+    } catch {}
+  }
+  let attached = 0;
+  if (attDir) {
+    for (const a of (payload.attachments || [])) {
+      const abs = path.join(attDir, ...String(a.file || '').split('/'));
+      if (!fs.existsSync(abs)) continue;
+      try {
+        const r = attachMod.addAttachmentToSources(userData, {
+          filePath: abs, label: a.label || '', uuids: [uuid],
+        });
+        if (r && r.ok) attached++;
+      } catch {}
+    }
+  }
+  // [B-511] The picture comes back as the source's own, not as proof of purchase.
+  let picture = false;
+  if (attDir && payload.picture && payload.picture.file) {
+    const abs = path.join(attDir, ...String(payload.picture.file).split('/'));
+    if (fs.existsSync(abs)) {
+      try { picture = !!(attachMod.setSourcePictureSync(userData, uuid, abs) || {}).ok; } catch {}
+    }
+  }
+  // [B-536] The fonts' images wait in the attachment store until the fonts are made.
+  let fontPictures = 0;
+  if (attDir) { try { fontPictures = attachMod.storeCurationPictures(userData, uuid, attDir); } catch {} }
+  return { ok: true, applied, attachments: attached, picture, fontPictures };
+}
+
+// Recreate the customized fonts that rode the export ([B-311]). Runs at
+// source-commit time, while the payload files the strip extracted are still on
+// disk (payloadRootDir = the stripAndRepackage payloadDir). Each record becomes
+// a real library entry via createEntry's folderSource path — the [B-304]
+// primitive built for exactly this — so it points at the same source subtree it
+// diverged from and the Customized marker comes back on its own from the diff.
+//
+// The entry's own curation is passed as caller metadata (createEntry's
+// caller-wins rule), and its provenance is patched onto the meta AFTERWARDS —
+// createEntry stamps the candidatePath-keyed provenance block at build time,
+// which is the STOCK copy's history whenever both copies shared a path. "No
+// trace of me ever deleting and bringing it back" applies to the customized
+// row's own dates, so its record-level values win last.
+//
+// Never fatal, per the house rule for everything curation: a font that imports
+// without its customized sibling is still an imported font.
+//
+// `picks` (optional): the review form's per-row selection — [{ index, name }].
+// The single-import doors DEFER this restore to Add to Library so the user
+// decides, row by row, what comes back (, ruled 2026-09-08: "this shouldn't
+// be put in my library until the user says import and only if checked").
+// index addresses payload.customized; name is the form's edited value, and the
+// collision suffix below still backstops it. No picks = restore everything
+// with the sidecar's names (the bulk door, which commits post-review anyway).
+// `onProgress` ADDED 2026-09-23 [B-429]. This reported NOTHING for its entire life, so the import
+// bar fell to 0% and sat there through the restore - Reported: "looked like bar going backwards then
+// stayed at 0... then finished correctly."
+// IT WAS NEVER A MEASUREMENT PROBLEM, WHICH IS THE PART WORTH REMEMBERING. `createEntry` has always
+// taken an onProgress and main has always had an `entries:createProgress` channel; this function
+// simply never passed one down, and the renderer subscribed to that channel immediately AFTER the
+// restore instead of around it. Every piece existed and none of them were joined. The question is
+// what found it: "was this so small that all we could get was indeterminate?" No - it was not small,
+// it was unwired.
+async function restoreCustomizedEntries(userData, uuid, payload, payloadRootDir, picks, onProgress) {
+  const none = { ok: true, restored: 0, names: [] };
+  if (!payload || !Array.isArray(payload.customized) || payload.customized.length === 0) return none;
+  if (!payloadRootDir) return none;
+  const entriesMod = require('./soundFontEntries');
+  const names = [];
+  // The restored COMMON FOLDERS, with the source subtree each one came from. [B-493]
+  const commons = [];
+  const pickByIndex = Array.isArray(picks)
+    ? new Map(picks.map(p => [Number(p.index), p])) : null;
+
+  // A REAL DENOMINATOR, because createEntry reports cumulative bytes with nothing to divide by.
+  // The picked folders are already on local disk, so summing them costs a stat walk and buys a bar
+  // that means something across ALL picks rather than restarting per font.
+  // ONE CONTINUOUS BAR, not one per entry - the same shape it was specified for multi-source export:
+  // "one bar for the bytes over all 4 showing which source it's working on and all the files flying
+  // by. so genuinely looks the same for 1 or 100 of them."
+  const _picked = [];
+  for (let ci = 0; ci < payload.customized.length; ci++) {
+    const c = payload.customized[ci];
+    if (pickByIndex && !pickByIndex.get(ci)) continue;
+    const relDir = String(c.dir || '');
+    if (!relDir.startsWith(`${PAYLOAD_DIR}/`)) continue;
+    const abs = path.join(payloadRootDir, ...relDir.split('/'));
+    const rels = _listEntryDirFiles(abs);
+    if (!rels) continue;
+    let bytes = 0;
+    for (const rel of rels) {
+      try { bytes += fs.statSync(path.join(abs, rel.split('/').join(path.sep))).size || 0; } catch {}
+    }
+    _picked.push({ ci, bytes });
+  }
+  const grandBytes = _picked.reduce((s, p) => s + p.bytes, 0);
+  const totalPicked = _picked.length;
+  let baseBytes = 0;
+  let position = 0;
+
+  for (let ci = 0; ci < payload.customized.length; ci++) {
+    const c = payload.customized[ci];
+    const pick = pickByIndex ? pickByIndex.get(ci) : undefined;
+    if (pickByIndex && !pick) continue; // unchecked row: not brought back
+    const relDir = String(c.dir || '');
+    // The dir must live under our payload folder — a hand-edited sidecar
+    // pointing elsewhere is not ours to follow.
+    if (!relDir.startsWith(`${PAYLOAD_DIR}/`)) continue;
+    const dirAbs = path.join(payloadRootDir, ...relDir.split('/'));
+    let isDir = false;
+    try { isDir = fs.statSync(dirAbs).isDirectory(); } catch {}
+    if (!isDir) continue;
+    // A COMMON FOLDER COMES BACK AS A COMMON FOLDER. [B-493]
+    // Records written before this carry no kind, so absent means entry and every archive
+    // already in the wild keeps restoring exactly as it did. Restoring a common through
+    // createEntry would put a voicepack in the font grid, which is why the export half of
+    // this must never ship without this branch.
+    if (c.kind === 'common') {
+      position++;
+      const _mineC = _picked.find((p) => p.ci === ci);
+      let rc = null;
+      try {
+        rc = await require('./soundFontCommon').createCommonFromFolder(userData, {
+          folderPath: dirAbs,
+          name: (c.curation && c.curation.name) || c.commonName || 'Customized common',
+          sourceUuid: uuid,
+          sourceSubPath: c.sourceSubPath == null ? '' : c.sourceSubPath,
+          metadata: c.curation || {},
+          provenance: c.provenance || {},
+        });
+      } catch { rc = null; }
+      if (_mineC) baseBytes += _mineC.bytes;
+      if (rc && rc.ok && rc.name) {
+        names.push(rc.name);
+        // REPORT THE SUBTREE THIS CLAIMED. [B-493, 2026-10-19]
+        // The import door builds a stock working copy out of the source's own subtree. When
+        // a customized copy of that same subtree came back from the payload, the stock one
+        // must not also be built - one working copy was exported, one comes back. The door
+        // reads this list to know which subtrees are already claimed, the same way the font
+        // side's `importedPaths` leaves a riding entry's candidate unchecked.
+        //
+        // A CLAIM MEANS THE SUBTREE IS FULLY ACCOUNTED FOR. When a STOCK copy was there at
+        // export time too, it is not: both were exported and both come back, so the subtree
+        // is left unclaimed and the door builds the stock one beside this.
+        const _sub = c.sourceSubPath == null ? '' : c.sourceSubPath;
+        const _alsoStock = Array.isArray(payload.importedSubPaths)
+                           && payload.importedSubPaths.includes(_sub);
+        if (!_alsoStock) {
+          commons.push({ kind: 'common', uuid: rc.uuid, name: rc.name, sourceSubPath: _sub });
+        }
+      }
+      if (onProgress) {
+        try {
+          onProgress({
+            phase: 'restore-customized',
+            index: position, total: totalPicked, entryName: (rc && rc.name) || c.commonName || '',
+            bytesDone: baseBytes, totalBytes: grandBytes, currentFile: '',
+          });
+        } catch { /* a progress tick must never break a restore */ }
+      }
+      continue;
+    }
+    // The sidecar's curated name wins over the folder-time entryName, same
+    // precedence the candidate review gives it — unless the review form handed
+    // an edited name on the pick, which outranks both (it is the name the user
+    // is looking at). Collisions take the app-wide underscore suffix (the
+    // exportEntryToFolder convention) — reachable when an export is imported
+    // as a NEW source while the original entry survives.
+    const base = (pick && typeof pick.name === 'string' && pick.name.trim())
+      ? pick.name.trim()
+      : (c.curation && typeof c.curation.name === 'string' && c.curation.name.trim())
+        ? c.curation.name.trim()
+        : (String(c.entryName || '').trim() || 'Customized font');
+    let name = base;
+    for (let n = 2; entriesMod.findEntryByName(userData, name); n++) name = `${base}_${n}`;
+    const metadata = { ...(c.curation || {}) };
+    delete metadata.name;
+    let r = null;
+    position++;
+    const _mine = _picked.find((p) => p.ci === ci);
+    try {
+      r = await entriesMod.createEntry({
+        userData,
+        sourceUuid: uuid,
+        candidate: { path: c.candidatePath == null ? '' : c.candidatePath, name },
+        name,
+        metadata,
+        folderSource: { folderPath: dirAbs },
+        // createEntry's bytes are cumulative WITHIN one entry, so they are offset by everything
+        // already restored to make one continuous number across all picks. Position rides along
+        // because bytes alone cannot answer "where am I in this" - the ruling on the export bar,
+        // and the same applies here.
+        onProgress: onProgress ? (p) => {
+          try {
+            onProgress({
+              phase: 'restore-customized',
+              index: position, total: totalPicked, entryName: name,
+              bytesDone: baseBytes + (p && p.totalBytes || 0),
+              totalBytes: grandBytes,
+              currentFile: (p && p.currentFile) || '',
+            });
+          } catch { /* a progress tick must never break a restore */ }
+        } : undefined,
+      });
+    } catch { r = null; }
+    // The floor advances whether the entry succeeded or not. A failed pick still consumed its
+    // share of the plan, and leaving its bytes out would make the bar run backwards on the next one -
+    // which is the exact complaint that started this.
+    if (_mine) baseBytes += _mine.bytes;
+    if (!r || !r.ok) continue;
+    if (c.provenance && Object.keys(c.provenance).length) {
+      try {
+        const mp = path.join(entriesMod.entriesRoot(userData), r.name, 'meta.json');
+        const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
+        for (const f of ENTRY_PROV_FIELDS) if (c.provenance[f]) m[f] = c.provenance[f];
+        fs.writeFileSync(mp, JSON.stringify(m, null, 2));
+      } catch { /* dates are a restoration, never a blocker */ }
+    }
+    names.push(r.name);
+  }
+  return { ok: true, restored: names.length, names, commons };
+}
+
+// The entry half. Returned as a metadata object for createEntry, which already
+// takes one — so a re-imported font comes back with its tags, its style link
+// and its demo URL without the review screen having to learn anything new.
+// THE READERS AND THE WRITER TREAT A MISSING PATH DIFFERENTLY, ON PURPOSE.
+// buildForSource skips an entry whose stored candidatePath is null, because a
+// missing recorded value must not be invented into a root key. Here we hold a
+// LIVE candidate, and everywhere else in the app a candidate with no path IS
+// the archive root — `source.extractTo(candidate.path || '', ...)` is the
+// established form. So nullish normalises to '' rather than bailing out.
+// The previous `candidatePath == null` bail could never fire: the only caller
+// already passed `candidate.path || ''`, so the guard read as a real
+// distinction while doing nothing. Normalising here makes the two agree.
+function _rootKey(candidatePath) {
+  return candidatePath == null ? '' : candidatePath;
+}
+
+function entryCurationFor(payload, candidatePath) {
+  if (!payload || !payload.entries) return null;
+  const block = payload.entries[_rootKey(candidatePath)];
+  if (!block) return null;
+  const out = _pick(block, ENTRY_FIELDS);
+  // The name is the review's to decide — it is shown, edited and deduped
+  // there. Handing it back as metadata would fight that.
+  delete out.name;
+  return Object.keys(out).length ? out : null;
+}
+
+// `suggestedNameFor` LIVED HERE AND NEVER HAD A CALLER (removed 2026-09-03).
+// It was written for the import review to offer the sidecar's name, and the
+// review was never wired to it - so a curated re-import came back with the
+// detector's raw folder names (`1.blue`, `2.orange`, `3.red`) instead of the
+// user's own. The review now reads the payload's entry blocks directly, since
+// they are plain JSON and it already has them in hand, which makes a backend
+// helper for one field lookup pure indirection. Deleted rather than left
+// standing: dead code that describes a feature nobody can reach reads as
+// evidence the feature exists.
+
+module.exports = {
+  SIDECAR_NAME, PAYLOAD_DIR, SCHEMA_VERSION,
+  SOURCE_FIELDS, ENTRY_FIELDS,
+  buildForSource, writeIntoTree, planForArchive, peekZip, peekDir, summarize,
+  applySourceCuration, entryCurationFor, entryProvenanceFor, restoreCustomizedEntries,
+  ENTRY_PROV_FIELDS,
+};

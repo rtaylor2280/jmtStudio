@@ -1,0 +1,4 @@
+FAILED
+<OS>\config\proffieboard_v2_config.h:89:2: error: #error Please select Proffieboard V2 in Tools->Board
+   89 | #error Please select Proffieboard V2 in Tools->Board
+      |  ^~~~~

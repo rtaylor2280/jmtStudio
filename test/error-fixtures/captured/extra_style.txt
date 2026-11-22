@@ -1,0 +1,5 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:26:1: error: too many initializers for 'Preset'
+   26 | };
+      | ^

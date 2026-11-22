@@ -21,15 +21,12 @@ function getCliPath() {
   return path.join(proffie.getResourcesPath(), 'arduino-cli', platform, bin);
 }
 
+// The toolchain's answer, never a path built here. Since cores live one per version
+// (arduino-data/4.6.0/), the folder root holds a core only on a machine that installed one
+// before 1.8; a first install has none there, and `board list` reading the root names no
+// board, so a connected board reads "No Proffieboard detected".
 function getArduinoDataPath() {
-  // Always use the prod userData path for arduino-data so installed packages are
-  // shared between dev and prod builds. In dev mode, app.getPath('userData') is
-  // overridden to 'jmt-studio-dev', which would be missing the board packages.
-  const { app } = require('electron');
-  const base = app.isPackaged
-    ? app.getPath('userData')
-    : path.join(app.getPath('appData'), 'jmt-studio');
-  return path.join(base, 'arduino-data');
+  return toolchain.getArduinoDataPath();
 }
 
 // ── Run arduino-cli board list ─────────────────────────
@@ -239,9 +236,16 @@ async function getRecommendedPort() {
       proffieports: [],
       linuxSerialPermissionIssue,
       linuxUdevRulesMissing,
+      // A status says what is true, and stops. The count used to ride along here - "3 other
+      // port(s) available" - which advertised a number nobody can act on and stood in for an
+      // explanation that does not fit in a status line. The zero-port branch below already carries
+      // the only distinction that changes what someone does. (2026-08-14)
+      // No TERMINAL period: the status row is a line of fragments, not sentences - "Toolchain
+      // ready", "Compile restored from cache", "Not flashed". An internal period is fine where a
+      // second clause earns its place. (2026-08-14)
       message: ports.length === 0
-        ? 'No serial ports detected. Connect your Proffieboard.'
-        : `No Proffieboard detected. ${ports.length} other port(s) available.`
+        ? 'No serial ports detected. Connect your Proffieboard'
+        : 'No Proffieboard detected'
     };
   }
 
@@ -254,7 +258,7 @@ async function getRecommendedPort() {
       proffieports,
       linuxSerialPermissionIssue,
       linuxUdevRulesMissing,
-      message: `Proffieboard detected on ${proffieports[0].path}.`
+      message: `Proffieboard detected on ${proffieports[0].path}`
     };
   }
 
@@ -265,7 +269,7 @@ async function getRecommendedPort() {
     ports,
     proffieports,
     linuxSerialPermissionIssue,
-    message: `${proffieports.length} Proffieboards detected. Select a port.`
+    message: `${proffieports.length} Proffieboards detected. Select a port`
   };
 }
 

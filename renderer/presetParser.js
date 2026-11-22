@@ -18,6 +18,49 @@
 
   // ── Low-level readers ──────────────────────────────────────────────────────
 
+  /**
+   * Blank out comments while preserving EVERY offset. [B-372]
+   *
+   * Returns a string the same length as the input, with comment characters replaced by
+   * spaces and newlines kept, so any index into the result is also a valid index into
+   * the original. That is the whole point: this parser hands back document coordinates,
+   * and a stripper that shortens the text would move every slot in the file.
+   *
+   * STRING-AWARE, AND THAT IS NOT OPTIONAL. A naive `//` rule eats the rest of the
+   * line on a track path like "sounds//hum.wav" — and the cost of getting THAT wrong is
+   * a live style silently vanishing from the parse, which is worse than the bug this
+   * fixes. (Same trap as the 2026-09-12 scanner whose comment stripper ate a real
+   * function through a URL.)
+   */
+  function maskComments(src) {
+    const out = src.split('');
+    let i = 0; const n = src.length;
+    while (i < n) {
+      const c = src[i], d = src[i + 1];
+      if (c === '/' && d === '/') {
+        while (i < n && src[i] !== '\n') { out[i] = ' '; i++; }
+        continue;
+      }
+      if (c === '/' && d === '*') {
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) {
+          if (src[i] !== '\n') out[i] = ' ';
+          i++;
+        }
+        if (i < n) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        const q = c;
+        i++;
+        while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; }
+        i++;
+        continue;
+      }
+      i++;
+    }
+    return out.join('');
+  }
+
   /** Skip whitespace and C/C++ comments. Returns new position. */
   function skipWS(text, pos) {
     while (pos < text.length) {
@@ -204,6 +247,15 @@
     return count > 0 ? count : null;
   }
 
+  // THE ONE PLACE THAT KNOWS WHAT A STYLE WRAPPER IS CALLED. Preflight's blade-count
+  // check reads the same text as a crude second opinion and used to carry its own copy of
+  // this pattern; two hardcoded copies that must independently stay right is how they
+  // drift. It imports this instead, so the two readings differ in METHOD, not vocabulary.
+  // A FACTORY, NOT A SHARED REGEX OBJECT: /g carries lastIndex, and handing the same
+  // object to two consumers means one silently resumes where the other stopped.
+  const STYLE_PTR_OPEN_SRC = '\\b\\w*Style\\w*Ptr\\w*\\s*<';
+  const stylePtrOpenRe = () => new RegExp(STYLE_PTR_OPEN_SRC, 'g');
+
   // ── StylePtr extraction ────────────────────────────────────────────────────
 
   /**
@@ -232,10 +284,20 @@
   /**
    * Extracts all style slots from a preset entry text span.
    * Handles:
-   *   XxxStylePtr<T>()         — standard
-   *   XxxStylePtr<T>("arg")    — with color arg
-   *   XxxStylePtr<T>(// c\n"") — comment in parens
+   *   StylePtr<T>()            — standard
+   *   StylePtr<T>("arg")       — with color arg
+   *   StylePtr<T>(// c\n"")    — comment in parens
    *   &style_identifier        — raw pointer reference
+   *
+   * The wrapper name varies TWO ways and the pattern has to cover both, which is
+   * why it is `\w*Style\w*Ptr` and not `\w*StylePtr`. Enumerated from the 8.10
+   * source, seven names exist: StylePtr, StyleNormalPtr, StyleFirePtr,
+   * StyleStrobePtr, StyleRainbowPtr, StyleRainBowPtr (a real second spelling,
+   * not a typo) and ChargingStylePtr — so the variant sits in the MIDDLE for six
+   * of them and at the FRONT for the seventh. The old suffix-anchored pattern
+   * matched only bare StylePtr, so a preset built from any other form parsed as
+   * having zero styles and the sidecar offered to "add" styles that were already
+   * there. (2026-09-06)
    * Returns array of { type, expr, colorArg, startOffset, endOffset }.
    *   type     = 'styleptr' | 'ref'
    *   expr     = inner content of <> (for styleptr) or identifier (for ref)
@@ -244,18 +306,34 @@
   function extractStyleSlots(text) {
     const results = [];
 
-    // Pass 1: XxxStylePtr<T>(...)
-    const re = /\b\w*StylePtr\s*</g;
+    // [B-372] SCAN THE TEXT THE COMPILER WOULD SEE. A commented-out style used to
+    // parse as a real slot:
+    //     StylePtr<Red>(),  //StylePtr<Blue>(),     -> 2 slots
+    //     StylePtr<Red>(),  /*StylePtr<Blue>(),*/   -> 2 slots
+    // so with NUM_BLADES 2 that preset rendered "Styles (2/2 blades)" with no red
+    // header and no empty tile — the app stating a preset is COMPLETE when it has one
+    // real style and cannot compile. Commenting a style out to test something is an
+    // ordinary thing to do in this editor, and the screen that exists to show blade
+    // coverage was the screen getting it wrong.
+    //
+    // MASKED, NOT STRIPPED. Every offset this function returns is a document
+    // coordinate, so the scan text must stay the same LENGTH as the original. Content
+    // is still sliced from `text`, so an inline comment inside a live expression
+    // survives in `expr` exactly as before.
+    const scan = maskComments(text);
+
+    // Pass 1: any Style*Ptr wrapper (see the note above on the two name shapes)
+    const re = stylePtrOpenRe();
     let m;
-    while ((m = re.exec(text)) !== null) {
+    while ((m = re.exec(scan)) !== null) {
       const openAngle = m.index + m[0].length - 1;
-      const angleGroup = readAngleGroup(text, openAngle);
+      const angleGroup = readAngleGroup(scan, openAngle);
       if (!angleGroup) continue;
 
-      const parenStart = skipWS(text, angleGroup.end);
-      if (text[parenStart] !== '(') continue;
+      const parenStart = skipWS(scan, angleGroup.end);
+      if (scan[parenStart] !== '(') continue;
 
-      const parenGroup = readParenGroup(text, parenStart);
+      const parenGroup = readParenGroup(scan, parenStart);
       if (!parenGroup) continue;
 
       // Extract color arg string from parens if present
@@ -270,8 +348,13 @@
 
       results.push({
         type:        'styleptr',
-        expr:        angleGroup.inner.trim(),
+        // Sliced from the ORIGINAL text, not the masked scan: the offsets are
+        // identical, and an inline comment inside a live expression is part of what
+        // the user wrote. Masking is for deciding what EXISTS, not for rewriting it.
+        expr:        text.slice(openAngle + 1, angleGroup.end - 1).trim(),
         colorArg,
+        wrapper:     m[0].replace(/\s*<$/, ''),
+        argText:     parenInner,
         startOffset: m.index,
         endOffset:   parenGroup.end,
       });
@@ -279,9 +362,10 @@
     }
 
     // Pass 2: &style_identifier  (raw pointer, e.g. &style_pov, &style_charging)
+    // Same masked scan — a commented-out `&style_pov` is not a slot either.
     const refRe = /&(\w+)/g;
     let rm;
-    while ((rm = refRe.exec(text)) !== null) {
+    while ((rm = refRe.exec(scan)) !== null) {
       const name = rm[1];
       // Skip if this offset is already inside a StylePtr span
       if (results.some(r => rm.index >= r.startOffset && rm.index < r.endOffset)) continue;
@@ -402,6 +486,8 @@
       type:        sp.type,
       expr:        sp.expr,
       colorArg:    sp.colorArg,
+      wrapper:     sp.wrapper,
+      argText:     sp.argText,
       styleClass:  classifyStyle(sp.type, sp.expr),
       startOffset: sp.startOffset,
       endOffset:   sp.endOffset,
@@ -454,6 +540,415 @@
       }
     } catch (_) { /* ignore malformed */ }
     return { labels, labelBodyOffset: match.index };
+  }
+
+  /**
+   * Scans an array body for a `// @jmt-follow:` comment and parses Bn=Bm pairs.
+   * Returns { follows: { [follower]: target }, followBodyOffset: number|null }.
+   *
+   * Its own line, deliberately NOT merged into @jmt-labels. Two concerns on one comment line makes
+   * the delete-when-empty logic fragile, which this codebase has been bitten by before, and the two
+   * have independent lifetimes: a blade can be named without following, and vice versa.
+   *
+   * A follower may only target a LOWER-numbered blade. That makes cycles structurally impossible
+   * instead of something to detect, and "never on B1" falls out of it rather than being a special
+   * case. Pairs that break the rule are dropped here rather than trusted downstream. (B-219)
+   */
+  function extractFollows(bodyContent) {
+    const re = /\/\/\s*@jmt-follow:\s*(.*)/;
+    const match = re.exec(bodyContent);
+    if (!match) return { follows: {}, followBodyOffset: null };
+    const follows = {};
+    try {
+      const pairRe = /B(\d+)\s*=\s*B(\d+)/g;
+      let pm;
+      while ((pm = pairRe.exec(match[1])) !== null) {
+        const follower = parseInt(pm[1], 10);
+        const target   = parseInt(pm[2], 10);
+        // Self-follow and forward references are meaningless; a malformed line must not be able to
+        // make the app write a blade from itself or chase a cycle.
+        if (target < follower) follows[follower] = target;
+      }
+    } catch (_) { /* ignore malformed */ }
+    return { follows, followBodyOffset: match.index };
+  }
+
+  /**
+   * A copied style made to fit the preset it lands in: every place `text` uses `fromName` as a
+   * template argument becomes `toName`. [B-222]
+   *
+   * The wrapper case: PixelSwitchWrapper<MainCalKestisSurvivorBlueBaseColor> on Cal_Blue's B2 wraps
+   * that preset's own B1. Copied to Cal_Cyan it must wrap Cal_Cyan's B1, or every preset gets the
+   * blue blade. Only template ARGUMENTS move (after `<` or `,`, before `>` or `,`), so a name that
+   * merely appears inside a longer one is left alone. `fromName` must be a plain identifier.
+   */
+  function retargetStyleText(text, fromName, toName) {
+    if (!text || !fromName || !toName || fromName === toName) return text;
+    if (!/^[A-Za-z_]\w*$/.test(fromName)) return text;
+    const re = new RegExp(`(?<=[<,]\\s*)${fromName}(?=\\s*[>,])`, 'g');
+    return text.replace(re, toName);
+  }
+
+  /**
+   * True when `expr` is a single wrapper around exactly `inner`: Wrapper<inner>, nothing else.
+   * It keeps a wrapper on B1 when B1 changes, including the placeholder a wrapper is copied
+   * around while B1 is still empty (PixelSwitchWrapper<Black>). Narrow on purpose: a style that
+   * merely contains `inner` among other things is never rewritten. [B-222]
+   */
+  function wrapsExactly(expr, inner) {
+    if (!expr || !inner || !/^[A-Za-z_]\w*$/.test(inner)) return false;
+    return new RegExp(`^[A-Za-z_]\\w*\\s*<\\s*${inner}\\s*>$`).test(String(expr).trim());
+  }
+
+  /** Whitespace-insensitive comparison of two slot expressions. */
+  function sameExpr(a, b) {
+    return (a || '').replace(/\s+/g, '') === (b || '').replace(/\s+/g, '');
+  }
+
+  /** A style's code with comments and spacing gone, so two copies of it compare equal. */
+  function styleCodeKey(expr) {
+    return (expr || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
+  }
+
+  /**
+   * A written-out style that can become a library entry. Left out: anything that is not a plain
+   * style expression (a raw argument list such as StyleNormalPtr<CYAN,WHITE,300,800>), a bare
+   * color or placeholder, and code that leans on a name this config defines for itself, since
+   * the library cannot see those.
+   */
+  function isLibraryCandidate(slot, localNames) {
+    if (!slot || slot.type !== 'styleptr' || slot.styleClass !== 'inline') return false;
+    const expr = slot.expr || '';
+    if (!expr.includes('<') || hasTopLevelComma(expr)) return false;
+    if (localNames && localNames.size) {
+      for (const w of styleCodeKey(expr).match(/[A-Za-z_]\w*/g) || []) if (localNames.has(w)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * A style with its color defaults set aside: `skeleton` is the code with each color argument's
+   * default blanked, `colors` is argument name -> [r,g,b]. Two styles with the same skeleton differ
+   * only in those defaults. Null when one argument has two defaults, since a preset's string sets
+   * every place an argument appears at once, or when this OS has no such argument.
+   */
+  function colorSignature(expr, args) {
+    let skeleton = styleCodeKey(expr);
+    const colors = new Map();
+    for (const a of args.findArgs(skeleton).reverse()) {
+      if (a.kind !== 'RgbArg') continue;
+      const rgb = args.resolve(a.defaultExpr);
+      if (!rgb.some(Boolean) && !/^(Black|BLACK|Rgb(16)?<0,0,0>)$/.test(a.defaultExpr)) continue;
+      const held = colors.get(a.name);
+      if (held && held.join() !== rgb.join()) return null;
+      if ((args.read(a.name, '') || { unsupported: true }).unsupported) return null;
+      colors.set(a.name, rgb);
+      skeleton = skeleton.slice(0, a.start) + `RgbArg<${a.name},C>` + skeleton.slice(a.end);
+    }
+    return { skeleton, colors };
+  }
+
+  /** A preset can carry its colors only as one plain string on a StylePtr. */
+  function canCarryColors(slot) {
+    if (slot.wrapper !== 'StylePtr') return false;
+    const text = String(slot.argText || '').replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    return !text || /^"[^"\\]*"$/.test(text);
+  }
+
+  /**
+   * The color string that keeps this use looking as it does once it runs on the row's style. What a
+   * use shows is its own string where that sets the argument, else its style's default. A value
+   * matching the row's default needs nothing written. Anything else in the string stays.
+   */
+  function colorStringFor(row, use, args) {
+    const start = use.slot.colorArg || '';
+    let out = start;
+    for (const [name, lead] of row.colors) {
+      const set = args.read(name, start);
+      if (set && !set.isDefault && set.values.every(v => v != null)) {
+        if (set.values.join() !== lead.join()) out = args.write(name, set.values, out);
+        continue;
+      }
+      const shown = use.colors.get(name);
+      if (shown.join() !== lead.join()) out = args.write(name, shown, out);
+    }
+    return out;
+  }
+
+  /**
+   * The written-out styles across every bank, one row per distinct style, each with its default
+   * name and everywhere it is used. [B-367]
+   *
+   * With opts.args, styles differing only in color defaults become one row, led by the first: its
+   * code goes in as written, so its colors are the defaults, and the others carry theirs in their
+   * preset's string. A style in the library with the same code bar color leads the same way.
+   *
+   * The name is a comment's, then the preset's, then the font's. A style most of the config's
+   * presets share belongs to the config, so it takes the file's name instead of the first preset's.
+   * A later blade adds its label or blade number. Pure: the caller supplies the name rules.
+   *   opts.fileName      the config's own name, or ''
+   *   opts.localNames    names the config defines itself
+   *   opts.library       Map of styleCodeKey -> library name, for code already in the library
+   *   opts.libraryStyles [{ name, expr }], to match the library on code bar color
+   *   opts.args          { findArgs, resolve, read, write } over the style argument string
+   *   opts.nameOf        text -> identifier
+   *   opts.commentName   (slot) -> a name from the slot's comment, or ''
+   *   opts.isTaken       name -> true when a default must step around it
+   */
+  function planLibraryStyles(arrays, opts = {}) {
+    const nameOf = opts.nameOf || (s => s);
+    // A display name of "0" is a common placeholder and names nothing, so a name needs a letter.
+    const wordOf = s => { const n = nameOf(s || ''); return /[A-Za-z]/.test(n) ? n : ''; };
+    let rows = [];
+    const byKey = new Map();
+    const used = new Set();
+    const free = base => {
+      let name = base, n = 2;
+      while (used.has(name) || (opts.isTaken && opts.isTaken(name))) name = `${base}_${n++}`;
+      used.add(name);
+      return name;
+    };
+    (arrays || []).forEach((arr, bank) => {
+      (arr.presets || []).forEach((preset, presetIdx) => {
+        (preset.styles || []).forEach((slot, blade) => {
+          if (!isLibraryCandidate(slot, opts.localNames)) return;
+          const key = styleCodeKey(slot.expr);
+          let row = byKey.get(key);
+          if (!row) {
+            row = { key, expr: slot.expr, existing: opts.library ? opts.library.get(key) || '' : '', uses: [], colors: null };
+            byKey.set(key, row);
+            rows.push(row);
+          }
+          row.uses.push({ bank, presetIdx, blade, preset, slot, colors: null, labels: arr.labels });
+        });
+      });
+    });
+
+    if (opts.args) {
+      const leads = new Map();
+      for (const entry of opts.libraryStyles || []) {
+        let sig = entry.signature;
+        if (sig === undefined) sig = entry.signature = colorSignature(entry.expr, opts.args);
+        if (sig && sig.colors.size && !leads.has(sig.skeleton)) leads.set(sig.skeleton, { name: entry.name, colors: sig.colors });
+      }
+      const kept = [];
+      for (const row of rows) {
+        const sig = row.uses.every(u => canCarryColors(u.slot)) ? colorSignature(row.expr, opts.args) : null;
+        if (!sig || !sig.colors.size) { kept.push(row); continue; }
+        for (const use of row.uses) use.colors = sig.colors;
+        const lead = leads.get(sig.skeleton);
+        if (lead && lead.row) {
+          lead.row.uses.push(...row.uses);
+          continue;
+        }
+        row.colors = row.existing || !lead ? sig.colors : lead.colors;
+        if (lead && !row.existing) row.existing = lead.name;
+        leads.set(sig.skeleton, { name: row.existing, colors: row.colors, row });
+        kept.push(row);
+      }
+      rows = kept;
+      for (const row of rows) {
+        row.colorCount = row.colors ? new Set(row.uses.map(u => colorStringFor(row, u, opts.args))).size : 1;
+      }
+    }
+
+    const presetTotal = (arrays || []).reduce((n, arr) => n + (arr.presets || []).length, 0);
+    const fileWord = wordOf(opts.fileName);
+    for (const row of rows) {
+      const { preset, blade, labels } = row.uses[0];
+      if (row.existing) { row.name = row.existing; continue; }
+      const font = String(preset.font || '').split(';')[0];
+      const covers = new Set(row.uses.map(u => `${u.bank}:${u.presetIdx}`)).size;
+      const shared = fileWord && covers > 1 && covers * 2 > presetTotal;
+      const base = (shared && fileWord) || wordOf(preset.displayName) || wordOf(font) || 'Style';
+      const label = blade > 0 ? wordOf((labels || {})[blade + 1]) || `blade${blade + 1}` : '';
+      const hint = opts.commentName ? row.uses.map(u => opts.commentName(u.slot)).find(Boolean) || '' : '';
+      row.name = free(hint || (label ? `${base}_${label}` : base));
+    }
+    return rows;
+  }
+
+  /** A use's new text: on the row's style under `name`, showing the colors it shows now. */
+  function librarySlotText(text, row, use, name, args) {
+    const renamed = nameSlotStyle(text, name);
+    if (renamed === null || !row.colors) return renamed;
+    const next = colorStringFor(row, use, args);
+    if (next === (use.slot.colorArg || '')) return renamed;
+    return `${renamed.slice(0, renamed.indexOf('(', renamed.indexOf(name) + name.length))}(${next ? `"${next}"` : ''})`;
+  }
+
+  /** A slot's text with its style swapped for `name`: wrapper and color arguments stay as written. */
+  function nameSlotStyle(text, name) {
+    const scan = maskComments(text);
+    const m = stylePtrOpenRe().exec(scan);
+    if (!m) return null;
+    const open = m.index + m[0].length - 1;
+    const group = readAngleGroup(scan, open);
+    if (!group) return null;
+    return text.slice(0, open + 1) + name + text.slice(group.end - 1);
+  }
+
+  /**
+   * Decide which followers of `sourceBlade` should receive `newText` within ONE preset.
+   *
+   * Returns [{ blade, text }] for the blades that must be written, ascending. Pure: the caller
+   * supplies the preset's current slot text and turns the result into editor edits.
+   *
+   * WHY THIS IS CONDITIONAL, and it is the load-bearing half of the no-override-list design.
+   * Nothing anywhere records that a preset overrode a follower. It does not need to: the follower
+   * holds TEXT, so a follower whose text still equals the target's PREVIOUS text was following, and
+   * one that differs was overridden by hand. Writing unconditionally would silently destroy every
+   * per-preset exception, which is the one thing the feature must never do.
+   *
+   * The cascade is stepwise for the same reason. With B2=B1 and B3=B2, an edit to B1 reaches B3 only
+   * if B2 actually moved: if B2 is overridden in this preset, B3 is following a blade that did not
+   * change, so it stays put. Termination is structural rather than guarded - a follower always has a
+   * higher number than its target - and `done` covers a hand-edited line that broke the rule anyway.
+   */
+  function planFollowWrites(follows, sourceBlade, oldText, newText, currentTextByBlade) {
+    if (!follows || sameExpr(oldText, newText)) return [];
+    const writes = [];
+    const done   = new Set([sourceBlade]);
+    const queue  = [{ blade: sourceBlade, oldText }];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const followerStr of Object.keys(follows)) {
+        const follower = parseInt(followerStr, 10);
+        if (follows[followerStr] !== cur.blade || done.has(follower)) continue;
+        const followerText = currentTextByBlade[follower];
+        if (followerText === undefined) continue;      // no such slot in this preset
+        if (!sameExpr(followerText, cur.oldText)) continue;  // overridden here; leave it alone
+        done.add(follower);
+        writes.push({ blade: follower, text: newText });
+        queue.push({ blade: follower, oldText: followerText });
+      }
+    }
+    return writes.sort((a, b) => a.blade - b.blade);
+  }
+
+  /**
+   * Old 1-based blade number to new 1-based blade number, for a move of fromIdx to toIdx.
+   *
+   * Pure and separately testable on purpose: a wrong entry here does not throw and does not look
+   * wrong. It silently attaches every name to the wrong blade, which is the same invisible-failure
+   * class as the reorder it serves. (B-220)
+   */
+  function planBladeReorder(count, fromIdx, toIdx) {
+    const map = {};
+    if (!(count > 0) || fromIdx === toIdx) {
+      for (let i = 1; i <= count; i++) map[i] = i;
+      return map;
+    }
+    const order = [];
+    for (let i = 0; i < count; i++) order.push(i);
+    const moved = order.splice(fromIdx, 1)[0];
+    order.splice(toIdx, 0, moved);
+    order.forEach((oldIdx, newIdx) => { map[oldIdx + 1] = newIdx + 1; });
+    return map;
+  }
+
+  // A blade a short preset has no style for yet. Written into its slot so a slot's position
+  // stays the blade it drives. Does not compile until filled. (B-355)
+  const PLACEHOLDER_STYLE = 'StylePtr<MISSING_STYLE>()';
+
+  function isPlaceholderText(text) {
+    return sameExpr(text, PLACEHOLDER_STYLE);
+  }
+
+  function isPlaceholderSlot(slot) {
+    return !!slot && slot.type === 'styleptr' && (slot.expr || '').trim() === 'MISSING_STYLE';
+  }
+
+  /**
+   * One preset's slot texts after moving position fromIdx to toIdx.
+   *
+   * The preset is first padded with placeholders to bladeCount, so a short preset's open slots
+   * move like any other slot; trailing placeholders are then dropped, since a missing tail needs
+   * no text. Returns the new list, or null when nothing changed. (B-355)
+   */
+  function planPresetReorder(texts, bladeCount, fromIdx, toIdx) {
+    const len = Math.max(texts.length, bladeCount || 0);
+    if (fromIdx === toIdx || fromIdx >= len || toIdx >= len) return null;
+    const padded = [...texts];
+    while (padded.length < len) padded.push(PLACEHOLDER_STYLE);
+    const [moved] = padded.splice(fromIdx, 1);
+    padded.splice(toIdx, 0, moved);
+    while (padded.length && isPlaceholderText(padded[padded.length - 1])) padded.pop();
+    const same = padded.length === texts.length && padded.every((t, i) => t === texts[i]);
+    return same ? null : padded;
+  }
+
+  /**
+   * Numbering, names and follow pairs after blade `bladeNum` STOPS EXISTING.
+   *
+   * Deletion is not a reorder with a gap. renumberLabels and renumberFollows both fall back to the
+   * original number for a blade absent from the map (`map[n] || +n`), which is correct for a move
+   * and would silently RESURRECT a deleted blade here - its name reappearing on whatever now holds
+   * that number, its follow pair pointing at a blade that is gone. So the filtering happens once, in
+   * this function, and callers cannot get it wrong by forgetting.
+   *
+   * Three shapes of follow pair, one answer each (B-226):
+   *   deleted blade is the FOLLOWER  -> pair is dead
+   *   deleted blade is the TARGET    -> pair is dead; the follower keeps the text it was given
+   *   deleted blade is NEITHER       -> pair survives and renumbers
+   * A chain produces both at once: deleting B2 with B4=B3 and B3=B2 kills one pair and renumbers
+   * the other, from a single deletion.
+   *
+   * Returns pairs FILTERED but NOT renumbered - the caller passes them through the same
+   * renumberLabels/renumberFollows the reorder uses, so there is one renumbering path, not two.
+   */
+  function planBladeDelete(count, bladeNum, labels, follows) {
+    const map = {};
+    for (let n = 1; n <= count; n++) {
+      if (n === bladeNum) continue;              // gone, and deliberately absent from the map
+      map[n] = n < bladeNum ? n : n - 1;
+    }
+
+    const keptLabels = {};
+    for (const n of Object.keys(labels || {})) {
+      if (+n === bladeNum) continue;             // a name belongs to its blade, so it goes too
+      keptLabels[n] = labels[n];
+    }
+
+    const keptFollows = {};
+    const droppedPairs = [];
+    for (const follower of Object.keys(follows || {})) {
+      const target = +follows[follower];
+      if (+follower === bladeNum || target === bladeNum) {
+        droppedPairs.push({ follower: +follower, target });
+        continue;
+      }
+      keptFollows[follower] = target;
+    }
+
+    return { map, labels: keptLabels, follows: keptFollows, droppedPairs };
+  }
+
+  /** Blade names under a new numbering. The NAME FOLLOWS THE BLADE, never the slot. */
+  function renumberLabels(labels, map) {
+    const out = {};
+    for (const n of Object.keys(labels || {})) out[map[n] || +n] = labels[n];
+    return out;
+  }
+
+  /**
+   * Follow pairs under a new numbering, dropping any the move inverted.
+   *
+   * A follower may only mirror a LOWER-numbered blade, which is what makes cycles impossible by
+   * construction. A reorder can violate that - move a follower above its target and the pair points
+   * forward. Such a pair is DROPPED rather than kept, because keeping it would trade a structural
+   * guarantee for a class of cycle bugs. Nothing is lost but future propagation: every preset still
+   * holds the text it was given.
+   */
+  function renumberFollows(follows, map) {
+    const kept = {};
+    let dropped = 0;
+    for (const follower of Object.keys(follows || {})) {
+      const f = map[follower] || +follower;
+      const t = map[follows[follower]] || +follows[follower];
+      if (t < f) kept[f] = t; else dropped++;
+    }
+    return { kept, dropped };
   }
 
   // ── Preset array detection ─────────────────────────────────────────────────
@@ -564,6 +1059,8 @@
           type:       slot.type,
           expr:       slot.expr,
           colorArg:   slot.colorArg,
+          wrapper:    slot.wrapper,
+          argText:    slot.argText,
           styleClass: slot.styleClass,
           startLine:  lineAt(text, innerBase + slot.startOffset),
           endLine:    lineAt(text, innerBase + slot.endOffset),
@@ -588,6 +1085,7 @@
       });
 
       const labelData = extractLabels(decl.bodyContent);
+      const followData = extractFollows(decl.bodyContent);
       return {
         name:          decl.name,
         startLine:     lineAt(text, decl.declarationStart),
@@ -598,8 +1096,28 @@
         labelLine:     labelData.labelBodyOffset !== null
                          ? lineAt(text, decl.bodyStart + labelData.labelBodyOffset)
                          : null,
+        follows:       followData.follows,
+        followLine:    followData.followBodyOffset !== null
+                         ? lineAt(text, decl.bodyStart + followData.followBodyOffset)
+                         : null,
       };
     });
+
+    // Blade names and follows are the saber's, not a bank's: every bank drives the same NUM_BLADES
+    // blades, and both are app-side only. A bank that does not say something about a blade takes
+    // what the first bank saying it gives. `ownLabels` / `ownFollows` are the bank's own lines.
+    const saber = (key) => {
+      const all = {};
+      for (const a of arrays) for (const n of Object.keys(a[key])) if (!(n in all)) all[n] = a[key][n];
+      return all;
+    };
+    const saberLabels = saber('labels'), saberFollows = saber('follows');
+    for (const a of arrays) {
+      a.ownLabels = a.labels;
+      a.labels = Object.assign({}, saberLabels, a.ownLabels);
+      a.ownFollows = a.follows;
+      a.follows = Object.assign({}, saberFollows, a.ownFollows);
+    }
 
     return { arrays, bladeCount, warnings };
   }
@@ -607,9 +1125,9 @@
   // ── Export ─────────────────────────────────────────────────────────────────
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parsePresets };
+    module.exports = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, librarySlotText, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   } else {
-    root.presetParser = { parsePresets };
+    root.presetParser = { styleCodeKey, isLibraryCandidate, planLibraryStyles, nameSlotStyle, librarySlotText, parsePresets, STYLE_PTR_OPEN_SRC, stylePtrOpenRe, planFollowWrites, sameExpr, retargetStyleText, wrapsExactly, extractStyleSlots, planBladeReorder, planBladeDelete, renumberLabels, renumberFollows, PLACEHOLDER_STYLE, isPlaceholderText, isPlaceholderSlot, planPresetReorder };
   }
 
 }(typeof globalThis !== 'undefined' ? globalThis : this));

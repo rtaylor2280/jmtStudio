@@ -1,0 +1,33 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:21:5: error: expected '}' before string constant
+   21 |     "One" },
+      |     ^~~~~
+<OS>\config\my_config.h:19:3: note: to match this '{'
+   19 |   { "Font1;common", "tracks/track1.wav",
+      |   ^
+<OS>\config\my_config.h:21:5: error: expected '}' before string constant
+   21 |     "One" },
+      |     ^~~~~
+<OS>\config\my_config.h:18:20: note: to match this '{'
+   18 | Preset presets[] = {
+      |                    ^
+<OS>\config\my_config.h:21:5: error: expected ',' or ';' before string constant
+   21 |     "One" },
+      |     ^~~~~
+<OS>\config\my_config.h:21:11: error: expected declaration before '}' token
+   21 |     "One" },
+      |           ^
+<OS>\config\my_config.h:21:12: error: expected unqualified-id before ',' token
+   21 |     "One" },
+      |            ^
+<OS>\config\my_config.h:22:3: error: expected unqualified-id before '{' token
+   22 |   { "Font2;common", "tracks/track2.wav",
+      |   ^
+<OS>\config\my_config.h:24:12: error: expected unqualified-id before ',' token
+   24 |     "Two" },
+      |            ^
+<OS>\config\my_config.h:25:1: error: expected unqualified-id before '}' token
+   25 | };
+      | ^
+<OS>\config\my_config.h:25:1: error: expected declaration before '}' token

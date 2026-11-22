@@ -1,0 +1,4 @@
+COMPILED
+Sketch uses 190680 bytes (37%) of program storage space. Maximum is 507904 bytes.
+lto-wrapper.exe: warning: using serial compilation of 5 LTRANS jobs
+lto-wrapper.exe: note: see the '-flto' option documentation for more information

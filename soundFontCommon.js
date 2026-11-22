@@ -1,0 +1,2762 @@
+// Sound Fonts — Common folder storage layer.
+//
+// A "common folder" is a parallel pool of shared .wav files that Proffie
+// configs reference via the ";common" suffix on a preset's font field
+// (e.g. "Father;common" layers the common pool on top of the Father font).
+// Configurations almost always use one. Power users with multiple sabers
+// may keep several variants (different voice packs, different languages).
+//
+// Storage layout under userData/soundFonts/common/:
+//   <uuid>/
+//     meta.json   — { schemaVersion, uuid, name, createdAt, importedFrom }
+//     files/      — the actual wav files (and any nested subfolders like
+//                   clrlst/) that get copied to <SD card>/common/ on Save.
+//
+// The "active" common folder (the one Save will include, and the one the
+// in-config in-use indicator reads from) is tracked at the prefs level
+// rather than per-common-meta so switching is a single atomic flip.
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const StreamZip = require('node-stream-zip');
+const { copyTreeWithProgress, copyFileWithProgress } = require('./sfExportCopy');
+const { rmWithRetry } = require('./fsRemove');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
+
+function commonRoot(userData) {
+  return path.join(userData, 'soundFonts', 'common');
+}
+
+function ensureCommonRoot(userData) {
+  const root = commonRoot(userData);
+  if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+  return root;
+}
+
+function _readMeta(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); }
+  catch { return null; }
+}
+
+// Recursively walk a directory and yield file stats. Used for size + count
+// rollups so the side panel can show "N files (M MB)" per common.
+function _walkFiles(dir) {
+  const out = [];
+  if (!fs.existsSync(dir)) return out;
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      const abs = path.join(cur, e.name);
+      if (e.isDirectory()) stack.push(abs);
+      else if (e.isFile()) {
+        let size = 0;
+        try { size = fs.statSync(abs).size; } catch {}
+        out.push({ abs, rel: path.relative(dir, abs).replace(/\\/g, '/'), size });
+      }
+    }
+  }
+  return out;
+}
+
+// List every common folder on disk with its file count + total bytes for the side panel.
+// The count and size come from the meta's content stamp (contentFileCount / contentTotalBytes,
+// written with the content hash and marked dirty by every edit path); only a common whose stamp
+// is missing or dirty is walked. Walking every file of every common took ~600 ms on a real
+// library of 21; the stamps take ~17 ms.
+function listCommons(userData) {
+  const root = commonRoot(userData);
+  if (!fs.existsSync(root)) return [];
+  const out = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(root, entry.name);
+    const meta = _readMeta(dir);
+    if (!meta) continue;
+    let fileCount, totalBytes;
+    if (!meta.contentHashDirty && typeof meta.contentFileCount === 'number'
+        && typeof meta.contentTotalBytes === 'number') {
+      fileCount = meta.contentFileCount;
+      totalBytes = meta.contentTotalBytes;
+    } else {
+      const files = _walkFiles(path.join(dir, 'files'));
+      fileCount = files.length;
+      totalBytes = files.reduce((s, f) => s + f.size, 0);
+    }
+    // mmain.wav is the Proffie-convention "main voice" — a common folder that ships one at its
+    // top level is auditionable from the side panel. Case-insensitive (MMain.wav and the like).
+    let top = [];
+    try { top = fs.readdirSync(path.join(dir, 'files')); } catch {}
+    const hasMmain = top.some((n) => n.toLowerCase() === 'mmain.wav');
+    // The declared voice pack version, straight from this pack's own
+    // voicepack.ini. null when there is no ini, which ProffieOS treats as
+    // version 1 — so absence is a real answer, not missing data.
+    const voicepackVersion = _readVoicePackVersion(path.join(dir, 'files'));
+    out.push({ uuid: entry.name, meta, fileCount, totalBytes, hasMmain, voicepackVersion });
+  }
+  out.sort((a, b) => (a.meta.name || '').localeCompare(b.meta.name || ''));
+  return out;
+}
+
+// Names are user-facing and must be unique (case-insensitive). Reserved
+// against the existing set; null in `excludeUuid` lets a rename check skip
+// itself when validating its own current name.
+function nameInUse(userData, name, excludeUuid = null) {
+  if (!name) return false;
+  const lc = String(name).toLowerCase();
+  for (const c of listCommons(userData)) {
+    if (excludeUuid && c.uuid === excludeUuid) continue;
+    if ((c.meta.name || '').toLowerCase() === lc) return true;
+  }
+  return false;
+}
+
+// Next free common-folder name using the app-wide `_N` convention. Same rule as
+// the renderer's _jmtNumberedName, kept here because main-process callers cannot
+// reach it: strip a trailing _N off the base, then take one above the highest _N
+// already taken (never the first gap, so a name that was freed does not get
+// silently reused).
+//
+// It exists because the voicepack installer had grown its OWN numbering - a
+// " (2)" suffix - so the same library ended up holding `X (2)` from a download
+// and `X_1` from a duplicate. One convention, one helper. OS Versions' "copy" is
+// the only deliberate exception in the app. (2026-08-31, found in a dev pass.)
+function nextNumberedName(userData, base) {
+  const root = String(base || '').replace(/_\d+$/, '');
+  if (!root) return '';
+  if (!nameInUse(userData, root)) return root;
+  const prefix = root.toLowerCase() + '_';
+  let max = 0;
+  for (const c of listCommons(userData)) {
+    const nm = (c.meta.name || '').toLowerCase();
+    if (!nm.startsWith(prefix)) continue;
+    const rest = nm.slice(prefix.length);
+    if (/^\d+$/.test(rest) && parseInt(rest, 10) > max) max = parseInt(rest, 10);
+  }
+  // Never mint _1 ([B-343], the rule): the ORIGINAL is implicitly number one,
+  // so the first copy is _2. An existing higher _N still numbers above itself;
+  // names already on disk are data and are not migrated.
+  let n = Math.max(max + 1, 2);
+  while (nameInUse(userData, `${root}_${n}`)) n++;
+  return `${root}_${n}`;
+}
+
+// Recursive folder copy used by import + duplicate. Files only (no symlinks,
+// no device files). Throws on first I/O error so the caller can clean up
+// the partial destination tree before surfacing the failure.
+function _copyDirRecursive(srcDir, destDir) {
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const e of entries) {
+    const srcPath = path.join(srcDir, e.name);
+    const destPath = path.join(destDir, e.name);
+    if (e.isDirectory()) _copyDirRecursive(srcPath, destPath);
+    else if (e.isFile()) fs.copyFileSync(srcPath, destPath);
+  }
+}
+
+// Best-effort cleanup of a partial common dir on import failure.
+function _cleanupPartial(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+
+// Find a sub-path within a directory tree whose basename is "common"
+// (case-insensitive). Returns the absolute path or null. Used to detect
+// the typical voicepack shape where wavs live one level down inside a
+// "common" folder wrapped by an outer name like "ProffieOS_Voicepack_English_A".
+function _findCommonSubfolder(rootDir) {
+  if (!fs.existsSync(rootDir)) return null;
+  const stack = [rootDir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const abs = path.join(cur, e.name);
+      if (e.name.toLowerCase() === 'common') return abs;
+      stack.push(abs);
+    }
+  }
+  return null;
+}
+
+// Check whether a directory has at least one .wav file (recursively).
+// Used as the "is this worth wrapping as a common folder" signal when the
+// user-picked source doesn't have a recognizable "common" subfolder.
+// Every `common` folder under rootDir, in name order. A pack bundle holds one per pack under its
+// own parent folder (<Pack>/common); each becomes its own common folder from the one source.
+function _findCommonSubfolders(rootDir) {
+  const out = [];
+  if (!fs.existsSync(rootDir)) return out;
+  const stack = [rootDir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const abs = path.join(cur, e.name);
+      if (e.name.toLowerCase() === 'common') out.push(abs);
+      else stack.push(abs);
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+function _hasAnyWav(dir) {
+  const files = _walkFiles(dir);
+  return files.some(f => /\.wav$/i.test(f.rel));
+}
+
+// Import a common folder from a folder on disk. If the picked folder
+// contains a "common" subfolder anywhere inside, that subfolder's contents
+// become the new common's files. Otherwise — as long as there's at least
+// one .wav somewhere under the picked folder — the entire picked folder
+// is wrapped as the common (so a user who points at a loose folder of
+// wavs gets the right result).
+//
+// ── Human-readable marker ────────────────────────────────────────────────
+// Once a common folder is exported it is just called "common", and nothing
+// inside says WHICH voice pack it is: meta.json lives outside files/ and never
+// ships, and voicepack.ini carries a version number but no name. So neither the
+// user nor the app can tell Bane from HAL 9000 on a card without listening to it.
+//
+// A .txt is inert to ProffieOS: Effect::ScanAll bails immediately when
+// IdentifyExtension() returns UNKNOWN (sound/effect.h), which is why
+// voicepack.ini can already sit in there safely. Named after the pack so a plain
+// directory listing answers the question without opening anything.
+//
+// Written at EXPORT, into the destination, never into the library copy. That was
+// caught that on 2026-07-30 and that was right: storing it in files/ would pollute
+// the content hash, go stale on every add/delete, and need a backfill. Generated
+// fresh at export it is always true, and the library copy stays a pristine copy
+// of the upstream pack. destDir is REQUIRED so that invariant is structural
+// rather than a convention someone has to remember.
+//
+// IT MUST BE OBVIOUS WE WROTE THIS. The file lands beside NoSloppy's own
+// a_ReadMe.txt and cover art, in the same naming style, and it talks ABOUT the
+// pack — so without a clear byline a reader reasonably assumes it shipped with
+// the pack, and anything wrong in it lands . Hence the JMT_ in the
+// filename (the only part most people ever see) and the byline on line 2, above
+// any fact that could be mistaken for the pack's own documentation.
+//
+// NOT printed: a content hash. Nothing reads it since the card compare moved to
+// live hashing (2026-07-31), and the value we used to print was taken at the
+// UUID dir, so its paths carry a "files/" prefix and it can NEVER be reproduced
+// by hashing the folder the file sits in. Anyone trying to verify it would fail
+// and conclude their card was corrupt. If a hash returns here it must be one
+// computed the way commonMatchesAt computes it, so it is reproducible.
+const _COMMON_README_MARK = 'Generated by JMT Studio';
+
+function _appVersion() {
+  try { return require('./package.json').version || ''; } catch { return ''; }
+}
+function _safeFileName(s) {
+  return String(s || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 80) || 'common';
+}
+function _readVoicePackVersion(filesDir) {
+  try {
+    const ini = fs.readFileSync(path.join(filesDir, 'voicepack.ini'), 'utf8');
+    const m = ini.match(/voice_pack_version\s*=\s*(\d+)/i);
+    if (m) return m[1];
+  } catch {}
+  return null;
+}
+const _mb = (b) => (b / (1024 * 1024)).toFixed(1) + ' MB';
+
+// The voicepack version on its own means nothing to a reader who does not
+// already know the V1/V2 story — and that story is exactly what the forum keeps
+// getting wrong. The qualifier is most useful in the case that actually hurts:
+// a V1 pack on an OS8 prop is the failure the compile preflight exists to catch,
+// and this puts the diagnosis on the card, where someone will find it while
+// troubleshooting rather than having to already suspect it.
+function _versionLine(ver) {
+  if (ver === '2') return '2  (what ProffieOS 8 expects)';
+  if (ver === '1') return '1  (ProffieOS 8 props usually require version 2)';
+  return ver || 'not stated (no voicepack.ini)';
+}
+
+// Writes (or refreshes) the marker at `destDir` (the exported folder itself, not
+// the destination root). Returns { ok, fileName } or { ok:false, error }.
+function writeCommonReadme(userData, uuid, destDir) {
+  // Required, not defaulted: the library copy must never gain a marker, and a
+  // default that quietly pointed at files/ is the one mistake that would undo
+  // the whole design.
+  if (!destDir) return { ok: false, error: 'destDir is required' };
+  const uuidDir  = path.join(commonRoot(userData), uuid);
+  const filesDir = destDir;
+  if (!fs.existsSync(filesDir)) return { ok: false, error: 'destination not found' };
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(path.join(uuidDir, 'meta.json'), 'utf8')); } catch {}
+  const name = meta.name || uuid;
+  // 'a_' prefix follows NoSloppy's existing convention (a_ReadMe.txt, a_<Character>.jpg
+  // ship in 11 of the official V2 packs) so it sorts to the top of a directory
+  // listing with the other metadata instead of scattering among the wavs. 'JMT_'
+  // then separates ours from the at a glance, in the one place a reader always
+  // looks. The pack name stays in the filename so a plain listing still answers
+  // 'which pack is this' without opening anything.
+  const fileName = `a_JMT_${_safeFileName(name)}.txt`;
+
+  // A rename (or the older a_<Name>.txt filename) would otherwise leave a stale
+  // marker behind. Detection is by BODY, never by filename, so old-format
+  // markers migrate automatically on the next export. Only ever remove a file we
+  // recognise as ours — never anything the user put here.
+  try {
+    for (const e of fs.readdirSync(filesDir, { withFileTypes: true })) {
+      if (!e.isFile() || !e.name.toLowerCase().endsWith('.txt') || e.name === fileName) continue;
+      const body = fs.readFileSync(path.join(filesDir, e.name), 'utf8');
+      if (body.includes(_COMMON_README_MARK)) fs.unlinkSync(path.join(filesDir, e.name));
+    }
+  } catch {}
+
+  // Counted with the same marker-exclusion the card compare uses, so the two can
+  // never disagree about what belongs to the pack.
+  const { fileCount, totalBytes } = _dirSignals(filesDir, _excludeOurMarkers(filesDir));
+  const ver = _readVoicePackVersion(filesDir);
+  const av  = _appVersion();
+  const folder = path.basename(filesDir) || 'common';
+  const lines = [
+    name,
+    `${_COMMON_README_MARK}${av ? ' ' + av : ''}. This marker is not part of the voice pack.`,
+    '',
+    'Common folder (voice pack) for ProffieOS.',
+    `Presets use it by adding ";${folder}" to their font path.`,
+    '',
+    `Voice pack version : ${_versionLine(ver)}`,
+    `Files              : ${fileCount}  (${_mb(totalBytes)})`,
+    `Written to card    : ${require('./localDate').localDateString()}`,
+    '',
+    'This file is ignored by ProffieOS. Deleting it is safe.',
+  ];
+
+  // The mark is what identifies this file as ours — for the cleanup above and,
+  // more importantly, for the marker-subtraction in commonMatchesAt. A wording
+  // edit that dropped it would make every exported card read as different from
+  // the library forever after, silently. Fail loudly instead.
+  const body = lines.join('\r\n') + '\r\n';
+  if (!body.includes(_COMMON_README_MARK)) {
+    return { ok: false, error: 'marker text no longer contains the identifying phrase' };
+  }
+
+  try {
+    fs.writeFileSync(path.join(filesDir, fileName), body);
+    return { ok: true, fileName };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+// The one-line description out of a pack's own readme. [B-493, 2026-10-19]
+//
+// Shape, consistent across every pack that ships one:
+//
+//     <PackName> - <Creator> <year>
+//     <blank>
+//     <description>
+//     <blank>
+//     <support url>
+//
+// So: skip the credit line, take the first non-empty line after it, and stop at a URL. A
+// pack whose readme does not look like this returns null and the description stays empty,
+// which is the same outcome as having no readme at all.
+//
+// Reads only the first 4 KB. These files are a few hundred bytes; anything far larger is
+// not the file this is looking for.
+function _descriptionFromReadme(filesDir) {
+  let raw = null;
+  for (const name of fs.readdirSync(filesDir)) {
+    if (!/^a_readme\.txt$/i.test(name)) continue;
+    try {
+      const fd = fs.openSync(path.join(filesDir, name), 'r');
+      const buf = Buffer.alloc(4096);
+      const n = fs.readSync(fd, buf, 0, 4096, 0);
+      fs.closeSync(fd);
+      raw = buf.slice(0, n).toString('utf8');
+    } catch { raw = null; }
+    break;
+  }
+  if (!raw) return null;
+  const rows = raw.split(/\r?\n/).map((l) => l.trim());
+  // The credit line is the first non-empty one, and it is the line being skipped rather
+  // than parsed: the creator reaches the source through the vendor table.
+  let k = 0;
+  while (k < rows.length && !rows[k]) k++;
+  if (k >= rows.length) return null;
+  k++;
+  while (k < rows.length && !rows[k]) k++;
+  if (k >= rows.length) return null;
+  const line = rows[k];
+  if (!line || /^https?:\/\//i.test(line)) return null;
+  return line.slice(0, 500);
+}
+
+
+
+// ── Source-backed common import ([B-327], 2026-09-07) ─────────────────────
+// A common is the same two-layer pair a font is: an immutable SOURCE stored
+// like any other import (dedup at the door, provenance, cross-linked against
+// the library), with an editable working copy on top in common/<uuid>/files/.
+// "Just because they get marked to live on the side car and use common folder
+// controls, doesn't mean they have to be truly different than any other
+// source." The working copy's files are hardlinks into the source tree, so a
+// fresh common costs only what the library does not already hold.
+//
+// ORDER IS LOAD-BEARING ([B-334]): the source is deduped BEFORE the working
+// copy links to it, so the links land on canonical names nothing rewrites.
+//
+// The shared body behind both routes. `sourcePath` is the picked folder OR the
+// picked zip; importSource treats either as a source. Returns
+// { ok, uuid, name, sourceUuid, savings } where savings carries what the
+// close-out sentence needs (archiveBytes / contentBytes / crossLinked).
+// `bundle`: the caller found several packs before importing, so `name` names the SOURCE (each
+// common folder is named from its pack) and is not checked against common folder names.
+async function _importCommonAsSource(userData, sourcePath, name, onProgress, shouldStop,
+                                     { forceNewSource = false, askOnDuplicate = false, bundle = false, besideOf = null } = {}) {
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return { ok: false, error: 'Source not found' };
+  }
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return { ok: false, error: 'Name is required' };
+  if (!bundle && nameInUse(userData, cleanName)) {
+    return { ok: false, error: `A common folder named "${cleanName}" already exists` };
+  }
+  const S = require('./soundFontSources');
+  // onProgress rides straight into importSource ([B-352]): the source
+  // pipeline has emitted per-byte hashing/copying stages all along — this
+  // caller just never asked, so a bulk common import ran with a dead bar.
+  // THE PIPELINE WAS ALWAYS CANCELLABLE - `importSource` has taken `shouldStop`
+  // since [B-462]. This caller simply never passed one, which is why the Common
+  // Folders door had no way out of a long copy. [B-424] Not a limitation, an
+  // omission. A stop surfaces as a thrown ExportCancelled; the partial is
+  // discarded, because a cancelled import keeps nothing.
+  const imp = await S.importSource({
+    userData, sourcePath, originalName: path.basename(sourcePath), metadata: {},
+    onProgress: typeof onProgress === 'function' ? onProgress : undefined,
+    shouldStop: typeof shouldStop === 'function' ? shouldStop : null,
+    forceNewSource: !!forceNewSource,
+  });
+  if (!imp || !imp.ok) return { ok: false, error: (imp && imp.error) || 'Source import failed' };
+  // ── THIS ARCHIVE IS ALREADY IN THE LIBRARY ──────────────────── [B-493, 2026-10-19]
+  //
+  // OPT-IN, AND THE DEFAULT IS UNCHANGED ON PURPOSE. Importing the same pack twice under a
+  // different name is a supported operation: the second copy hardlinks into the source
+  // already on disk, so the whole content comes back as saved bytes. Refusing to build it
+  // would break that, which is what test/common-import-reused-savings.test.js asserts.
+  //
+  // So the DOOR keeps building, and a caller that has a user to ask opts in. Only the UI
+  // passes this; every programmatic caller keeps the behaviour it had.
+  //
+  // NOTHING HAS BEEN CREATED YET at this point - the dedup short-circuits before any source
+  // directory is written and the working copy is built below - so there is nothing to undo.
+  //
+  // AND THE CUSTOMIZED COPY CANNOT COME BACK ON THIS PATH: importSource returns early on a
+  // duplicate, before the curation payload is ever read. Re-importing as a NEW source is what
+  // restores it, which is why that answer has to be offered rather than assumed.
+  if (imp.isDuplicate && askOnDuplicate && !forceNewSource) {
+    let existingCommons = [];
+    try {
+      existingCommons = listCommons(userData)
+        .filter((c) => c && c.meta && c.meta.sourceUuid === imp.uuid)
+        .map((c) => ({ uuid: c.uuid, name: c.meta.name || c.uuid }));
+    } catch {}
+    return { ok: true, isDuplicate: true, sourceUuid: imp.uuid, existingCommons, incomingName: cleanName };   // name: the alias [B-643]
+  }
+  const sourceUuid = imp.uuid;
+  // A duplicate archive is not an error here: the same zip may already be in
+  // the library (even as a font source). Commons and fonts sharing one source
+  // is the point of the model - reuse it and only build the working copy.
+  let dedupSaved = 0;
+  if (!imp.isDuplicate) {
+    // [B-334]: canonicalize the source BEFORE anything links to it.
+    try {
+      await S.ensureSourceManifest(userData, sourceUuid, () => {});
+      const dd = await S.dedupeSource(userData, sourceUuid, () => {});
+      if (dd && dd.deduped && dd.savedBytes) dedupSaved = dd.savedBytes;
+    } catch {}
+  }
+  // Find the common content INSIDE the stored source tree (the same
+  // common-subfolder detection the old import ran on the picked folder), and
+  // require at least one wav, or this was never a sound asset import.
+  const srcObj = S.openSource(userData, sourceUuid);
+  if (!srcObj) return { ok: false, error: 'Stored source could not be opened' };
+  const treeRoot = path.join(sourcesRoot_(userData), sourceUuid, 'source');
+  const _packs = _findCommonSubfolders(treeRoot).filter((d) => _hasAnyWav(d));
+  if (_packs.length > 1) {
+    if (bundle && !imp.isDuplicate) {
+      try { S.updateSourceMeta(userData, sourceUuid, { bundleName: cleanName }); } catch {}
+    }
+    return await _importCommonPacks(userData, { imp, srcObj, sourceUuid, treeRoot, packs: _packs, sourcePath, dedupSaved });
+  }
+  const contentDir = _packs[0] || _findCommonSubfolder(treeRoot) || treeRoot;
+  if (!_hasAnyWav(contentDir)) {
+    // A fresh source with no wavs is useless - reclaim it rather than leaving
+    // an orphan for the sweep. A REUSED (duplicate) source is someone else's
+    // and is left alone.
+    if (!imp.isDuplicate) { try { S.deleteSource(userData, sourceUuid); } catch {} }
+    return { ok: false, error: 'No .wav files found in the picked source' };
+  }
+  const subPath = path.relative(treeRoot, contentDir).replace(/\\/g, '/');
+  // ── THE ARCHIVE ALREADY BROUGHT THIS SUBTREE BACK ───────────────────── [B-493, 2026-10-19]
+  //
+  // A source archive carrying a customized common has already restored it by the time we get
+  // here, pointing at this same subtree. Building a stock copy of it as well returns TWO
+  // working copies for the one that was exported.
+  //
+  // THE CHOICE IS STILL BEING MADE, IT IS JUST NOT SHOWN. The font side asks this on the
+  // candidate review: a customized entry that rides the payload leaves the vendor's candidate
+  // UNCHECKED, so only the customized copy comes in. A common folder has no row on that
+  // screen, so the same answer is applied here instead of being offered.
+  const _claimed = ((imp.customizedRestored && imp.customizedRestored.commons) || [])
+    .find((r) => r && String(r.sourceSubPath || '') === subPath);
+  if (_claimed) {
+    const _cdir = path.join(commonRoot(userData), _claimed.uuid, 'files');
+    const _csig = _walkCommonContentSignals(_cdir);
+    return {
+      ok: true, uuid: _claimed.uuid, name: _claimed.name, sourceUuid,
+      restoredFromArchive: true,
+      blockedFiles: imp.blockedFiles || [],
+      notedFiles: imp.notedFiles || [],
+      savings: {
+        archiveBytes: imp.archiveBytes || 0,
+        contentBytes: imp.contentBytes || _csig.totalBytes || 0,
+        crossLinked: imp.crossLinked || null,
+        dedupSaved,
+        reusedBytes: imp.isDuplicate ? _csig.totalBytes : 0,
+        reusedSource: !!imp.isDuplicate,
+      },
+    };
+  }
+  // ── THE SAME PACK, BY CONTENT ─────────────────────────────────────────────── [B-643]
+  // The archive check above only knows a byte-identical ZIP. A fresh download of the same pack is
+  // a different zip with the same sounds, so it passed, and the library gained a second source and
+  // a second common for content it already held. Same two ways in as a font: the new pack almost
+  // entirely inside a common you have, or most of that common in the new pack. A match is asked
+  // about; this download is let go (its bytes are already held), so Cancel leaves nothing behind.
+  if (askOnDuplicate && !forceNewSource && !besideOf) {
+    const _same = samePackCommon(userData, contentDir);
+    if (_same) {
+      if (!imp.isDuplicate) { try { S.deleteSource(userData, sourceUuid); } catch {} }
+      return { ok: true, isDuplicate: true, sameContent: true, sourceUuid: _same.sourceUuid || null,
+        existingCommons: [{ uuid: _same.uuid, name: _same.name }], incomingName: cleanName };
+    }
+  }
+  // ── IMPORTED ANYWAY: A VERSION BESIDE THE ONE IT MATCHED ───────────────────── [B-643]
+  // Attached to the matched common's SOURCE, not a source of its own: a new common in that source,
+  // files read from this download's tree (linked, nothing written twice), then this download's
+  // source record goes, since the version now lives on the one already held.
+  if (besideOf) {
+    const _anchor = getCommon(userData, besideOf);
+    if (_anchor && _anchor.meta && _anchor.meta.sourceUuid) {
+      const _r = createCommonFromFolder(userData, {
+        folderPath: contentDir, name: cleanName,
+        sourceUuid: _anchor.meta.sourceUuid, sourceSubPath: _anchor.meta.sourceSubPath || '',
+        metadata: { importedFrom: path.basename(sourcePath), description: _anchor.meta.description || '',
+          ...(_anchor.meta.group ? { group: _anchor.meta.group } : {}) },
+      });
+      if (_r && _r.ok) {
+        if (!imp.isDuplicate && sourceUuid !== _anchor.meta.sourceUuid) { try { S.deleteSource(userData, sourceUuid); } catch {} }
+        const _bsig = _walkCommonContentSignals(path.join(commonRoot(userData), _r.uuid, 'files'));
+        return { ok: true, uuid: _r.uuid, name: _r.name, sourceUuid: _anchor.meta.sourceUuid, besideOf: _anchor.meta.name,
+          blockedFiles: imp.blockedFiles || [], notedFiles: imp.notedFiles || [],
+          savings: { archiveBytes: imp.archiveBytes || 0, contentBytes: _bsig.totalBytes || 0, crossLinked: null,
+            dedupSaved, reusedBytes: _bsig.totalBytes || 0, reusedSource: true } };
+      }
+    }
+    // An anchor that is gone or has no source falls through to the ordinary build.
+  }
+  ensureCommonRoot(userData);
+  const uuid = crypto.randomUUID();
+  const uuidDir = path.join(commonRoot(userData), uuid);
+  const filesDir = path.join(uuidDir, 'files');
+  try {
+    fs.mkdirSync(filesDir, { recursive: true });
+    // POINTERS, NOT A SECOND COPY: the working copy hardlinks into the
+    // (already canonical) source tree. Rename or delete a name here and the
+    // source keeps its own; edit paths replace files, never write in place,
+    // so the pool is never written through.
+    await srcObj.extractTo(subPath, filesDir, null, { link: true });
+    const _markers = _dropOurMarkers(filesDir);
+    const meta = {
+      schemaVersion: 1,
+      uuid,
+      name: cleanName,
+      createdAt: new Date().toISOString(),
+      importedFrom: path.basename(sourcePath),
+      // The tie that keeps the source alive: cleanupOrphanSources counts
+      // common references the same way it counts library entries. ([B-327])
+      sourceUuid,
+      // Where in the source tree this working copy came from, so a future
+      // compare/reset knows its baseline.
+      sourceSubPath: subPath,
+      ...(_markers.length ? { markerFiles: _markers } : {}),
+    };
+    // ── WHAT THE PACK'S OWN README SAYS ──────────────────────── [B-493, 2026-10-19]
+    //
+    // NoSloppy's packs ship `a_ReadMe.txt` in a fixed shape, and two of its lines are fields
+    // this app has somewhere to put:
+    //
+    //     <PackName> - <Creator> <year>
+    //     <blank>
+    //     <one-line description>
+    //
+    // The CREATOR half goes to the source through the vendor table, which is the mechanism
+    // that already exists for it. The DESCRIPTION has no other home, so it is read here and
+    // seeded onto the working copy.
+    //
+    // SEEDED, NEVER OVERWRITTEN: an import only fills a description that is empty, so a
+    // re-import can never clobber something the user typed.
+    try {
+      const _desc = _descriptionFromReadme(filesDir);
+      if (_desc && !meta.description) meta.description = _desc;
+    } catch { /* a readme we cannot parse is not a failed import */ }
+
+    fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    try { recomputeCommonContentHash(userData, uuid); } catch {}
+    // ── WHO MADE IT ─────────────────────────────────────────── [B-493, 2026-10-19]
+    //
+    // The font doors run vendor detection on a just-imported source; this one never did,
+    // which is why every common folder in the library shows no creator. Same call, same
+    // table, same write the bulk importer makes.
+    //
+    // ONLY FILLS A BLANK. A reused source may already carry a vendor the user typed, and
+    // an auto-detected guess must not outrank it. Detection is also re-runnable at any
+    // time from the source detail, so losing a guess here costs nothing.
+    try {
+      const _V = require('./soundFontVendors');
+      const _sm = S.readSourceMeta(path.join(sourcesRoot_(userData), sourceUuid));
+      if (!_sm || !_sm.vendor) {
+        const _so = S.openSource(userData, sourceUuid);
+        if (_so) {
+          const _det = await _V.detectVendor(_so, { learned: _V.learnedVendorsFrom(S.listSources(userData)) });
+          if (_det && _det.vendor) {
+            S.updateSourceMeta(userData, sourceUuid, {
+              vendor: _det.vendor,
+              vendorWebsite: _det.vendorWebsite || null,
+              vendorAutoDetected: true,
+            });
+          }
+        }
+      }
+    } catch { /* an undetected creator is a blank field, never a failed import */ }
+    // THE SPACE IS ALWAYS KNOWABLE, EVEN WHEN importSource REPORTS NO BYTES.
+    // A reused source short-circuits early and returns only
+    // { ok, isDuplicate, uuid, hash, format } - no contentBytes - so savings came
+    // back all zeros and the summary's space sentence was gated off entirely. The
+    // door then said nothing but "X was added". Measuring the working copy makes
+    // the number independent of which path inside importSource ran. [B-424]
+
+    const _sig = _walkCommonContentSignals(filesDir);
+    return {
+      ok: true, uuid, name: cleanName, sourceUuid,
+      // CARRY WHAT WAS REFUSED ([B-214], 2026-09-10). importSource already strips
+      // programs and macro documents out of a common folder - that half always
+      // worked - but this return read four fields off `imp` and not this one, so the
+      // commons door removed files and said nothing. It was the last of the five
+      // doors with a silent strip.
+      blockedFiles: imp.blockedFiles || [],
+      notedFiles: imp.notedFiles || [],
+      savings: {
+        archiveBytes: imp.archiveBytes || 0,
+        contentBytes: imp.contentBytes || _sig.totalBytes || 0,
+        crossLinked: imp.crossLinked || null,
+        dedupSaved,
+        // A REUSED SOURCE IS THE LARGEST SAVING THIS DOOR EVER HAS TO REPORT,
+        // and it was the one case that reported nothing at all. The working copy
+        // hardlinks into a source tree that was already on disk, so not one
+        // content byte gets written. Carried separately from dedupSaved because
+        // they are different facts about different work; the renderer sums them.
+        reusedBytes: imp.isDuplicate ? _sig.totalBytes : 0,
+        reusedSource: !!imp.isDuplicate,
+      },
+    };
+  } catch (err) {
+    // THE PARTIAL GOES EITHER WAY. A cancelled import keeps nothing - the rule,
+    // 2026-10-07: *"A cancelled import just throws away."* The cleanup that was
+    // already here for failures is exactly what a cancel needs, which is part of
+    // why wiring this was small. [B-424]
+    _cleanupPartial(uuidDir);
+    // A CANCEL IS NOT A FAILURE. The pipeline throws ExportCancelled when
+    // `shouldStop` fires; reporting the user's own click as "Import failed" is the
+    // red-error-for-your-own-action defect the export doors already paid for.
+    // `cancelled` is the spelling the newer modules use - see
+    // test/cancel-flag-spelling.test.js.
+    if (err && (err.name === 'ExportCancelled' || err.cancelled)) {
+      return { ok: false, cancelled: true, error: 'Import cancelled.' };
+    }
+    return { ok: false, error: `Import failed: ${err.message}` };
+  }
+}
+// The sources root without importing soundFontSources at module load (the two
+// modules require each other lazily).
+function sourcesRoot_(userData) {
+  return path.join(userData, 'soundFonts', 'sources');
+}
+
+// A source holding several packs (<Pack>/common each): one common folder per pack, all from the
+// one source, each named from its parent folder and numbered _N if that name is taken. A pack the
+// archive's own curation already brought back is reported, not made twice.
+async function _importCommonPacks(userData, { imp, srcObj, sourceUuid, treeRoot, packs, sourcePath, dedupSaved }) {
+  const S = require('./soundFontSources');
+  ensureCommonRoot(userData);
+  const restored = (imp.customizedRestored && imp.customizedRestored.commons) || [];
+  const made = [];
+  let contentBytes = 0;
+  try {
+    for (const dir of packs) {
+      const subPath = path.relative(treeRoot, dir).replace(/\\/g, '/');
+      const claimed = restored.find((r) => r && String(r.sourceSubPath || '') === subPath);
+      if (claimed) { made.push({ uuid: claimed.uuid, name: claimed.name, restoredFromArchive: true }); continue; }
+      const parent = path.basename(path.dirname(dir)) || 'common';
+      const name = nextNumberedName(userData, parent);
+      const uuid = crypto.randomUUID();
+      const uuidDir = path.join(commonRoot(userData), uuid);
+      const filesDir = path.join(uuidDir, 'files');
+      try {
+        fs.mkdirSync(filesDir, { recursive: true });
+        await srcObj.extractTo(subPath, filesDir, null, { link: true });
+        const meta = {
+          schemaVersion: 1, uuid, name,
+          createdAt: new Date().toISOString(),
+          importedFrom: path.basename(sourcePath),
+          sourceUuid, sourceSubPath: subPath,
+        };
+        try { const d = _descriptionFromReadme(filesDir); if (d) meta.description = d; } catch {}
+        fs.writeFileSync(path.join(uuidDir, 'meta.json'), JSON.stringify(meta, null, 2));
+        try { recomputeCommonContentHash(userData, uuid); } catch {}
+        contentBytes += _walkCommonContentSignals(filesDir).totalBytes || 0;
+        made.push({ uuid, name });
+      } catch (err) { _cleanupPartial(uuidDir); throw err; }
+    }
+  } catch (err) {
+    if (err && (err.name === 'ExportCancelled' || err.cancelled)) {
+      return { ok: false, cancelled: true, error: 'Import cancelled.', commons: made };
+    }
+    return { ok: false, error: `Import failed: ${err.message}`, commons: made };
+  }
+  try {
+    const _V = require('./soundFontVendors');
+    const _sm = S.readSourceMeta(path.join(sourcesRoot_(userData), sourceUuid));
+    if (!_sm || !_sm.vendor) {
+      const _det = await _V.detectVendor(srcObj, { learned: _V.learnedVendorsFrom(S.listSources(userData)) });
+      if (_det && _det.vendor) {
+        S.updateSourceMeta(userData, sourceUuid, { vendor: _det.vendor, vendorWebsite: _det.vendorWebsite || null, vendorAutoDetected: true });
+      }
+    }
+  } catch {}
+  const first = made[0] || {};
+  return {
+    ok: true, uuid: first.uuid, name: first.name, sourceUuid, commons: made,
+    blockedFiles: imp.blockedFiles || [],
+    notedFiles: imp.notedFiles || [],
+    savings: {
+      archiveBytes: imp.archiveBytes || 0,
+      contentBytes: imp.contentBytes || contentBytes,
+      crossLinked: imp.crossLinked || null,
+      dedupSaved,
+      reusedBytes: imp.isDuplicate ? contentBytes : 0,
+      reusedSource: !!imp.isDuplicate,
+    },
+  };
+}
+
+// A zip whose own top level is other zips and no audio: a package of packages, refused before
+// anything is copied or scanned. Reads only the outer central directory.
+async function inspectIncomingCommonZip(zipPath) {
+  // Opened the way every other zip in the app is: some packs (Brian Conner's among them) carry a
+  // bare `/` entry, which node-stream-zip otherwise rejects by throwing out of its read callback.
+  const zip = openZipOwned(zipPath, { skipEntryNameValidation: true });
+  try {
+    const entries = Object.values(await zip.entries());
+    let innerZips = 0, wavs = 0;
+    const packDirs = new Set();
+    for (const e of entries) {
+      if (e.isDirectory || e.name === '/') continue;
+      if (/[.]zip$/i.test(e.name)) innerZips++;
+      else if (/[.]wav$/i.test(e.name)) {
+        wavs++;
+        // A pack is a `common` folder holding audio; its path up to and including `common`.
+        const m = e.name.match(/^(.*?(?:^|[/])common)[/]/i);
+        if (m) packDirs.add(m[1].toLowerCase());
+      }
+    }
+    // The pack name an export's marker carries: a small .txt at the top level or beside the wavs.
+    let markerName = null;
+    for (const e of entries) {
+      if (markerName) break;
+      if (e.isDirectory || !/[.]txt$/i.test(e.name) || e.size > 4096) continue;
+      if (e.name.split('/').length > 3) continue;
+      try {
+        const body = (await zip.entryData(e.name)).toString('utf8');
+        if (body.includes(_COMMON_README_MARK)) markerName = (body.split(/\r?\n/)[0] || '').trim() || null;
+      } catch {}
+    }
+    return { ok: true, zipOfZips: innerZips >= 2 && wavs === 0, innerZips, packs: packDirs.size, markerName };
+  } finally { try { await zip.close(); } catch {} }
+}
+
+// The same count for a picked folder: `common` folders under it that hold audio.
+function inspectIncomingCommonFolder(folderPath) {
+  const packs = _findCommonSubfolders(folderPath).filter((d) => _hasAnyWav(d));
+  let markerName = _markerNameIn(folderPath);
+  for (const d of packs) { if (markerName) break; markerName = _markerNameIn(d); }
+  return { ok: true, packs: packs.length, markerName: markerName || null };
+}
+
+// Returns { ok: true, uuid, name } on success, { ok: false, error } on failure.
+// `shouldStop` is OPTIONAL and last, so the bulk import runner - which shares
+// this function and is already dev-tested - calls it unchanged and keeps its own
+// cancel. [B-424]
+async function importCommonFromFolder(userData, folderPath, name, onProgress, shouldStop,
+                                      opts = {}) {
+  return await _importCommonAsSource(userData, folderPath, name, onProgress, shouldStop, opts);
+}
+
+// Import a common folder from a zip file. The zip IS the source now - its
+// bytes are the provenance identity, so no temp extraction happens outside
+// the source pipeline.
+async function importCommonFromZip(userData, zipPath, name, onProgress, shouldStop,
+                                   opts = {}) {
+  return await _importCommonAsSource(userData, zipPath, name, onProgress, shouldStop, opts);
+}
+
+// Answer "do I already have this pack?" by CONTENT, not name. ([B-340])
+// Every card names its common folder literally "common", so a name test made
+// every later card's pack read as owned - and the bulk path then dropped a
+// voicepack the user did not have. The digest compared here is
+// hashItemDir(files) - exactly what the [B-327] manifests store as
+// contentHash - so an incoming folder hashes once and existing commons are a
+// manifest read. A dirty or missing manifest falls back to a live hash of
+// that common's files, so an edited pack is never judged by stale rows.
+// ── WHAT WOULD BE REFUSED, BEFORE ANYTHING IS IMPORTED ([B-214], 2026-09-10) ──
+//
+// Every other door warns BEFORE it acts: the card panel lists programs and makes
+// you press "Import fonts anyway", and the font review shows what was refused with
+// Cancel as the recommended button. The commons door imported first and reported
+// afterwards, which is a different contract - a fait accompli instead of a choice.
+// Ruled: "the other imports stop it from importing and check then import anyway...
+// seems inconsistent."
+//
+// So this answers the question the dialog needs BEFORE the copy happens. The strip
+// inside importSource is unchanged and still authoritative; this only decides what
+// to say up front. Reads 256 bytes per file, same as every other check.
+// `files` and `bytes` ride along because this walk already has them. [B-424] The import side
+// needs a payload size to decide whether a board card is worth warning about, and the alternative
+// was a SECOND walk of the same tree to count what this one was already touching. Both are
+// best-effort: a file whose size cannot be read still counts toward `files`.
+async function scanIncomingCommon(srcPath) {
+  const out = { blocked: [], noted: [], files: 0, bytes: 0 };
+  if (!srcPath || !fs.existsSync(srcPath)) return out;
+  const { classifyFileBuffer } = require('./sdCardDetect');
+  const take = (rel, buf) => {
+    const v = classifyFileBuffer(buf, rel);
+    // 'opaque' joins the blocked set ([B-368]): an archive we cannot open cannot be
+    // checked, and cannot be read by a saber either, so it does not come in.
+    if (v.kind === 'program' || v.kind === 'macro' || v.kind === 'opaque') {
+      out.blocked.push({ relPath: rel, kind: v.kind, reason: v.reason,
+        byContent: !!v.byContent, disguised: !!v.disguised });
+    } else if (v.kind !== 'ok') {
+      out.noted.push({ relPath: rel, kind: v.kind, reason: v.reason });
+    }
+  };
+  const st = fs.statSync(srcPath);
+  if (st.isDirectory()) {
+    const walk = (dir, rel) => {
+      let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        const abs = path.join(dir, e.name);
+        const r = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) { walk(abs, r); continue; }
+        if (!e.isFile()) continue;
+        // [B-424] Counted BEFORE the read, so a file we cannot open still counts as payload.
+        out.files++;
+        try { out.bytes += fs.statSync(abs).size; } catch { /* size is best-effort */ }
+        let buf = Buffer.alloc(0);
+        try {
+          const fd = fs.openSync(abs, 'r');
+          try { const b = Buffer.alloc(256); const n = fs.readSync(fd, b, 0, 256, 0); buf = b.subarray(0, n); }
+          finally { fs.closeSync(fd); }
+        } catch { continue; }
+        take(r, buf);
+      }
+    };
+    walk(srcPath, '');
+    return out;
+  }
+  // A picked .zip: read each entry's leading bytes without extracting the archive.
+  const zip = openZipOwned(srcPath);
+  try {
+    const entries = await zip.entries();
+    for (const name of Object.keys(entries)) {
+      const e = entries[name];
+      if (e.isDirectory) continue;
+      // [B-424] UNCOMPRESSED size, not the entry's packed size: the import writes the expanded
+      // bytes to disk, and that is the number the slow-card threshold is measured against.
+      out.files++;
+      out.bytes += Number(e.size) || 0;
+      let buf = Buffer.alloc(0);
+      try { const full = await zip.entryData(name); buf = full.subarray(0, 256); } catch { continue; }
+      take(name, buf);
+    }
+  } finally { try { await zip.close(); } catch {} }
+  return out;
+}
+
+function classifyIncomingCommon(userData, folderPath) {
+  const out = { ownedByContent: false, matchName: null, nameTaken: false, contentHash: null };
+  if (!folderPath || !fs.existsSync(folderPath)) return out;
+  const fh = require('./soundFontFileHash');
+  // OS CLUTTER NEVER DECIDES IT, ON EITHER SIDE. The import strips desktop.ini, Thumbs.db and the
+  // macOS leftovers on the way in, so a card's common carrying a desktop.ini Google Drive wrote never
+  // matched the copy it had already given the library: the one-number fingerprint differed by that
+  // file alone, and the card offered its common again. [B-643]
+  const { isOsNoiseName } = require('./osNoise');
+  const _clean = (rel) => !String(rel || '').split('/').some((seg) => isOsNoiseName(seg));
+  const contentDir = _findCommonSubfolder(folderPath) || folderPath;
+  try { out.contentHash = fh.hashItemDir(contentDir, _clean); } catch { out.contentHash = null; }
+  if (!out.contentHash) return out;
+  for (const c of listCommons(userData)) {
+    let digest = null;
+    if (!(c.meta && c.meta.contentHashDirty)) {
+      try {
+        const mf = fh.readFileHashManifest(
+          path.join(userData, 'soundFonts', '.filehashes', 'commons', `${c.uuid}.json`));
+        // The stored digest stands only when it covers no clutter; otherwise it is recomputed
+        // with the same filter as the incoming side.
+        const _noisy = mf && Array.isArray(mf.records) && mf.records.some((r) => r && !_clean(r.relPath));
+        digest = (mf && !_noisy && mf.contentHash) || null;
+      } catch { digest = null; }
+    }
+    if (!digest) {
+      try { digest = fh.hashItemDir(path.join(commonRoot(userData), c.uuid, 'files'), _clean); } catch { digest = null; }
+    }
+    if (digest && digest === out.contentHash) {
+      out.ownedByContent = true;
+      out.matchName = (c.meta && c.meta.name) || c.uuid;
+      break;
+    }
+  }
+  return out;
+}
+
+function getCommon(userData, uuid) {
+  if (!uuid) return null;
+  const dir = path.join(commonRoot(userData), uuid);
+  const meta = _readMeta(dir);
+  if (!meta) return null;
+  const files = _walkFiles(path.join(dir, 'files'));
+  return { uuid, meta, fileCount: files.length, totalBytes: files.reduce((s, f) => s + f.size, 0) };
+}
+
+// Group management. Each common folder optionally carries a `group`
+// string in its meta.json — a free-form label used by the renderer
+// to render commons in collapsible sections. Identity by name (not
+// uuid) since groups are user-facing labels; renaming the group
+// updates all member commons' meta.group field in place. Group order
+// is a separate concern persisted as a renderer preference (see the
+// SF settings keys); this module only owns the per-common membership.
+function setCommonGroup(userData, uuid, groupName) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const clean = String(groupName || '').trim();
+  const dir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  if (clean) meta.group = clean;
+  else delete meta.group;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true };
+}
+
+// A common folder's own description, the same field a font entry carries. [B-493, 2026-10-19]
+// Empty clears it rather than storing a blank string, matching setCommonGroup: absent and
+// empty mean the same thing to every reader, and only one of them survives a round trip.
+function setCommonDescription(userData, uuid, description) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const clean = String(description || '').trim();
+  const dir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  if (clean) meta.description = clean;
+  else delete meta.description;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true };
+}
+
+// Apply a group label to many commons at once. Used by the "Group
+// selected" multi-select action so a single backend call updates
+// every member's meta in one pass.
+function setCommonGroupMany(userData, uuids, groupName) {
+  if (!Array.isArray(uuids) || uuids.length === 0) return { ok: false, error: 'No uuids provided' };
+  for (const uuid of uuids) {
+    const r = setCommonGroup(userData, uuid, groupName);
+    if (!r.ok) return { ok: false, error: `Failed for ${uuid}: ${r.error}` };
+  }
+  return { ok: true, count: uuids.length };
+}
+
+// Rename a group across every common that has it. No-op if the new
+// name is empty or matches the old name. Returns the number of
+// commons that were updated.
+function renameCommonGroup(userData, oldName, newName) {
+  const oldClean = String(oldName || '').trim();
+  const newClean = String(newName || '').trim();
+  if (!oldClean) return { ok: false, error: 'Missing old group name' };
+  if (!newClean) return { ok: false, error: 'New group name is required' };
+  if (oldClean === newClean) return { ok: true, count: 0 };
+  let updated = 0;
+  for (const c of listCommons(userData)) {
+    if ((c.meta.group || '') !== oldClean) continue;
+    const r = setCommonGroup(userData, c.uuid, newClean);
+    if (r.ok) updated++;
+  }
+  return { ok: true, count: updated };
+}
+
+// Delete a group — sets meta.group to empty on every member, leaving
+// the commons themselves intact (they just become ungrouped).
+function deleteCommonGroup(userData, groupName) {
+  const clean = String(groupName || '').trim();
+  if (!clean) return { ok: false, error: 'Missing group name' };
+  let updated = 0;
+  for (const c of listCommons(userData)) {
+    if ((c.meta.group || '') !== clean) continue;
+    const r = setCommonGroup(userData, c.uuid, '');
+    if (r.ok) updated++;
+  }
+  return { ok: true, count: updated };
+}
+
+// Rename a common folder. Updates meta.json in place; the on-disk uuid
+// directory is unchanged (uuid is the stable identifier; name is the
+// user-facing label only). Validates the new name is non-empty and unique.
+function renameCommon(userData, uuid, newName) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const cleanName = String(newName || '').trim();
+  if (!cleanName) return { ok: false, error: 'Name is required' };
+  if (nameInUse(userData, cleanName, uuid)) {
+    return { ok: false, error: `A common folder named "${cleanName}" already exists` };
+  }
+  const dir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  const _old = meta.name;
+  meta.name = cleanName;
+  // The old name stays an alias, so a config whose font names this common by it finds it. [B-643]
+  if (_old && _old !== cleanName) {
+    const al = _withAlias(meta.aliases, _old, cleanName);
+    if (al.length) meta.aliases = al; else delete meta.aliases;
+  }
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true };
+}
+
+// ── A COMMON FOLDER'S ALIASES ──────────────────────────────────────────────── [B-643]
+// A config names a common folder exactly, in a preset's font list ("Nomad;common"), so a common
+// the library holds under one name is missing to a preset that asks for another. Same rules as a
+// font's and a track's: newest first, fifty at most, no repeats in any case, never the current name.
+const COMMON_ALIASES_MAX = 50;
+function _withAlias(list, alias, current) {
+  const lc = (s) => String(s).toLowerCase();
+  const all = [alias, ...(Array.isArray(list) ? list : [])]
+    .filter((n) => typeof n === 'string' && n && lc(n) !== lc(current));
+  return all.filter((n, i) => all.findIndex((m) => lc(m) === lc(n)) === i).slice(0, COMMON_ALIASES_MAX);
+}
+function addCommonAlias(userData, uuid, alias) {
+  if (!uuid || typeof alias !== 'string' || !alias.trim()) return { ok: false, error: 'Missing argument' };
+  const dir = path.join(commonRoot(userData), uuid);
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  const before = Array.isArray(meta.aliases) ? meta.aliases : [];
+  const known = before.find((n) => String(n).toLowerCase() === alias.trim().toLowerCase());
+  const after = _withAlias(before, known || alias.trim(), meta.name);
+  if (after.length === before.length && after.every((n, i) => n === before[i])) return { ok: true, changed: false };
+  if (after.length) meta.aliases = after; else delete meta.aliases;
+  try { fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true, changed: true };
+}
+function forgetCommonAlias(userData, uuid, alias) {
+  if (!uuid || !alias) return { ok: false, error: 'Missing argument' };
+  const dir = path.join(commonRoot(userData), uuid);
+  const meta = _readMeta(dir);
+  if (!meta) return { ok: false, error: 'Common folder not found' };
+  const before = Array.isArray(meta.aliases) ? meta.aliases : [];
+  const after = before.filter((n) => String(n).toLowerCase() !== String(alias).toLowerCase());
+  if (after.length === before.length) return { ok: true, changed: false };
+  if (after.length) meta.aliases = after; else delete meta.aliases;
+  try { fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2)); }
+  catch (err) { return { ok: false, error: `Cannot write meta: ${err.message}` }; }
+  return { ok: true, changed: true };
+}
+
+// THE SAME PACK, BY CONTENT: the common in the library that an incoming pack folder is a copy or a
+// version of, or null. The sounds (.wav) are compared by content against each common's own
+// fingerprints (.filehashes/commons). Two ways in, as for fonts: the pack almost entirely inside a
+// common (98%, with the overlap guard), or at least 70% of that common in the pack. [B-643]
+function samePackCommon(userData, packDir) {
+  const { isOsNoiseName } = require('./osNoise');
+  const incoming = new Set();
+  const walk = (d) => {
+    let es = [];
+    try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of es) {
+      if (isOsNoiseName(e.name)) continue;
+      const a = path.join(d, e.name);
+      if (e.isDirectory()) walk(a);
+      else if (/\.wav$/i.test(e.name)) {
+        try { incoming.add(crypto.createHash('sha256').update(fs.readFileSync(a)).digest('hex')); } catch {}
+      }
+    }
+  };
+  walk(packDir);
+  if (incoming.size < 3) return null;
+  const fhDir = path.join(userData, 'soundFonts', '.filehashes', 'commons');
+  let best = null, bestScore = -1;
+  for (const c of listCommons(userData)) {
+    if (!c || !c.uuid || !c.meta) continue;
+    let mf = null;
+    try { mf = JSON.parse(fs.readFileSync(path.join(fhDir, `${c.uuid}.json`), 'utf8')); } catch { continue; }
+    const have = new Set((mf && mf.records || []).filter((r) => r && /\.wav$/i.test(r.relPath || '')
+      && !String(r.relPath).split('/').some((s) => isOsNoiseName(s))).map((r) => r.fileHash));
+    if (have.size < 3) continue;
+    let inter = 0;
+    for (const h of incoming) if (have.has(h)) inter++;
+    const inside = inter / incoming.size, coverage = inter / have.size;
+    const jaccard = inter / (incoming.size + have.size - inter);
+    const same = (inside >= 0.98 && (inside >= 1 || jaccard >= 0.90)) || coverage >= 0.70;
+    if (!same) continue;
+    const score = inside + coverage;
+    if (score > bestScore) { best = { uuid: c.uuid, name: c.meta.name || c.uuid, sourceUuid: c.meta.sourceUuid || null }; bestScore = score; }
+  }
+  return best;
+}
+
+// Duplicate a common folder. New uuid, new name (validated unique), same
+// file contents copied byte-for-byte into the new dir's files/.
+// Two modes, the same pair the entry side already draws. [B-493]
+//   mode 'current' — copy the working copy as it stands, edits and all.
+//   mode 'source'  — re-extract from the stored source, so the result is the subtree as
+//                    the vendor shipped it and local edits are NOT carried over.
+// A common folder is a working copy of a source exactly as a font entry is, so it gets
+// the same two doors rather than a common-shaped invention.
+// The caller is responsible for only OFFERING mode 'source' when the two would differ.
+// On an unmodified common both modes produce the same bytes, and a choice with one
+// outcome is noise that makes the user stop and wonder which is right.
+async function duplicateCommon(userData, sourceUuid, newName, { mode = 'current' } = {}) {
+  if (!sourceUuid) return { ok: false, error: 'Missing source uuid' };
+  const cleanName = String(newName || '').trim();
+  if (!cleanName) return { ok: false, error: 'Name is required' };
+  if (nameInUse(userData, cleanName)) {
+    return { ok: false, error: `A common folder named "${cleanName}" already exists` };
+  }
+  const srcDir = path.join(commonRoot(userData), sourceUuid);
+  if (!fs.existsSync(srcDir)) return { ok: false, error: 'Source common folder not found' };
+  const origMeta = _readMeta(srcDir) || {};
+  if (mode === 'source' && !origMeta.sourceUuid) {
+    return { ok: false, error: 'This common folder has no stored source to duplicate from' };
+  }
+  ensureCommonRoot(userData);
+  const newUuid = crypto.randomUUID();
+  const newDir = path.join(commonRoot(userData), newUuid);
+  try {
+    fs.mkdirSync(newDir, { recursive: true });
+    if (mode === 'source') {
+      // The same extract the original import ran, against the same immutable tree, so the
+      // duplicate is the vendor's subtree rather than a copy of someone's edits.
+      const S = require('./soundFontSources');
+      const srcObj = S.openSource(userData, origMeta.sourceUuid);
+      if (!srcObj) { _cleanupPartial(newDir); return { ok: false, error: 'Stored source could not be opened' }; }
+      const filesDir = path.join(newDir, 'files');
+      fs.mkdirSync(filesDir, { recursive: true });
+      await srcObj.extractTo(origMeta.sourceSubPath || '', filesDir, null, { link: true });
+    } else {
+    // POINTERS, NOT A SECOND COPY ([B-327]): the duplicate's names hardlink
+    // the original's files. Duplicating a 20 MB voicepack costs directory
+    // entries; edits on either side replace files (never write in place), so
+    // the two diverge safely from that moment.
+    _linkOrCopyDirRecursive(path.join(srcDir, 'files'), path.join(newDir, 'files'));
+    }
+    const sourceMeta = origMeta;
+    const meta = {
+      schemaVersion: 1,
+      uuid: newUuid,
+      name: cleanName,
+      createdAt: new Date().toISOString(),
+      // Says which door it came through, because the two produce different bytes whenever
+      // the original was customized - which is the only time both are offered.
+      importedFrom: sourceMeta.name
+        ? (mode === 'source' ? `From source of ${sourceMeta.name}` : `Duplicate of ${sourceMeta.name}`)
+        : (mode === 'source' ? 'From source' : 'Duplicate'),
+      // The duplicate references the same immutable source as the original,
+      // so the source survives whichever of the two is deleted first.
+      ...(sourceMeta.sourceUuid ? { sourceUuid: sourceMeta.sourceUuid, sourceSubPath: sourceMeta.sourceSubPath } : {}),
+    };
+    fs.writeFileSync(path.join(newDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    try { recomputeCommonContentHash(userData, newUuid); } catch {}
+    return { ok: true, uuid: newUuid, name: cleanName };
+  } catch (err) {
+    _cleanupPartial(newDir);
+    return { ok: false, error: `Duplicate failed: ${err.message}` };
+  }
+}
+
+// Link-first recursive copy: hardlink each file (same-volume, the normal
+// case), fall back to a real copy when the filesystem refuses. Used by
+// duplicateCommon; never writes through an existing name.
+// Duplicating something ALREADY in the library, so the guard here is a backstop
+// rather than the front door: anything imported since [B-214] was checked on the
+// way in, but entries that predate it were not, and a duplicate should not spread
+// a program file into a second copy.
+function _linkOrCopyDirRecursive(srcDir, destDir, blocked, relBase) {
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const e of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const s = path.join(srcDir, e.name);
+    const d = path.join(destDir, e.name);
+    const rel = relBase ? relBase + '/' + e.name : e.name;
+    if (e.isDirectory()) { _linkOrCopyDirRecursive(s, d, blocked, rel); continue; }
+    if (!e.isFile()) continue;
+    // checkCarryableFile, not the executable test: a duplicate cannot ADMIT anything
+    // new, but it would happily spread an archive or a macro document into a second
+    // copy, and neither is allowed to live here ([B-370]).
+    const v = require('./sdCardDetect').checkCarryableFile(s, rel);
+    if (v.blocked) { if (blocked) blocked.push({ relPath: rel, reason: v.reason, byContent: !!v.byContent }); continue; }
+    let linked = false;
+    try { fs.linkSync(s, d); linked = true; } catch { linked = false; }
+    if (!linked) fs.copyFileSync(s, d);
+  }
+}
+
+// Whether anything still uses a source: a font from it, or a common folder pointing at it.
+// When that cannot be read, the answer is yes, so the source is kept.
+function _sourceStillUsed(userData, sourceUuid) {
+  try {
+    if (require('./soundFontEntries').listEntriesBySourceUuid(userData, sourceUuid).length) return true;
+  } catch { return true; }
+  const root = commonRoot(userData);
+  let uuids = [];
+  try { uuids = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); }
+  catch { return true; }
+  for (const u of uuids) {
+    const m = _readMeta(path.join(root, u));
+    if (m && m.sourceUuid === sourceUuid) return true;
+  }
+  return false;
+}
+
+function deleteCommon(userData, uuid) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const dir = path.join(commonRoot(userData), uuid);
+  const _dropManifest = () =>
+    require('./soundFontFileHash').dropManifestIfOwnerGone(userData, 'commons', uuid, dir);
+  // ABOVE THE EXISTENCE GUARD, same as the source and entry paths. [B-310]
+  // With the folder already gone by any other route, every later call took the return below
+  // and the manifest could never be reclaimed.
+  _dropManifest();
+  if (!fs.existsSync(dir)) return { ok: true, deleted: false };
+  const sourceUuid = (_readMeta(dir) || {}).sourceUuid || null;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    // The per-file manifest goes with it ([B-327]) - a manifest surviving its
+    // common is the receipt-nobody-points-at mistake the source side already
+    // fixed once. So does the SOURCE when this was the last thing using it: a delete
+    // deletes, and the orphan sweep exists for backups, not to finish a delete.
+    _dropManifest();
+    // A pooled file this folder was the last user of goes too, as when a font is deleted
+    // ([B-316]): after the folder, since the link count only falls once its name is gone. An
+    // image pasted into a common folder lived on in the pool after the folder was deleted.
+    try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
+    let sourceDeleted = false;
+    if (sourceUuid && !fs.existsSync(dir) && !_sourceStillUsed(userData, sourceUuid)) {
+      const sr = require('./soundFontSources').deleteSource(userData, sourceUuid);
+      sourceDeleted = !!(sr && sr.ok && sr.deleted);
+    }
+    return { ok: true, deleted: true, sourceDeleted };
+  } catch (err) {
+    // The removal may have torn the directory down before it threw.
+    _dropManifest();
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+// Proffie-style variant numbering for wav file collisions. The Proffie
+// firmware reads multi-variant sound effects from <name>.wav,
+// <name>2.wav, <name>3.wav... (no spaces, no parens, no underscore —
+// just the digit appended directly). Use this helper everywhere a wav
+// file might collide on copy/move/add inside a common (the destination
+// SD layout depends on these names being Proffie-readable).
+//
+//   destDir   absolute dir we're writing into
+//   srcName   the source file's basename (e.g. "boot.wav" or "boot2.wav")
+//
+// Tries the source name first (round-trip identity wins when free), then
+// strips any trailing digits from the stem to find the "base," and walks
+// 2, 3, 4... until a free slot opens up. So copying "boot.wav" into a
+// dir already holding "boot.wav" yields "boot2.wav"; doing it again
+// yields "boot3.wav"; copying an existing "boot5.wav" into the same dir
+// yields "boot6.wav" (or whatever's next free).
+function _proffieVariantName(destDir, srcName) {
+  if (!fs.existsSync(path.join(destDir, srcName))) return srcName;
+  const ext = path.extname(srcName);
+  const stem = path.basename(srcName, ext);
+  // Base = source stem with any trailing digits stripped. Used to scan
+  // the destination for existing variants and infer the local convention.
+  const baseMatch = stem.match(/^(.*?)(\d*)$/);
+  const base = (baseMatch && baseMatch[1]) || stem;
+  const srcPad = (baseMatch && baseMatch[2]) ? baseMatch[2].length : 0;
+  // Scan dest for files matching <base>\d*<ext>. Each contributes its
+  // digit-suffix length (padding seen locally) and value (max number
+  // already used). The "1" slot is implicit when a bare <base><ext>
+  // exists with no digits — Proffie's first variant slot.
+  // Collect the DISTINCT padding lengths observed in the dest so we can
+  // detect convention vs. ambiguity. The bare-base file (e.g., "boot.wav"
+  // alongside "boot2.wav") doesn't contribute to padLens — it's the
+  // implicit slot 1 in any convention.
+  let maxNum = 0;
+  const padLens = new Set();
+  let entries;
+  try { entries = fs.readdirSync(destDir); } catch { entries = []; }
+  for (const file of entries) {
+    if (path.extname(file) !== ext) continue;
+    const fStem = path.basename(file, ext);
+    if (fStem === base) { if (maxNum < 1) maxNum = 1; continue; }
+    if (!fStem.startsWith(base)) continue;
+    const rest = fStem.substring(base.length);
+    if (!/^\d+$/.test(rest)) continue;
+    const num = parseInt(rest, 10);
+    if (num > maxNum) maxNum = num;
+    padLens.add(rest.length);
+  }
+  let padLen;
+  if (padLens.size === 0) padLen = srcPad;
+  else if (padLens.size === 1) padLen = [...padLens][0];
+  else padLen = 0; // Ambiguous mix → fall back to plain 1, 2, 3...
+  let n = maxNum + 1;
+  while (true) {
+    const candidate = `${base}${String(n).padStart(padLen, '0')}${ext}`;
+    if (!fs.existsSync(path.join(destDir, candidate))) return candidate;
+    n++;
+  }
+}
+
+// Validate a sub-path stays inside a common's files/ root. Defensive
+// against any caller passing "../" sequences or absolute paths.
+function _resolveFilesPath(userData, uuid, subPath) {
+  const root = path.resolve(commonRoot(userData), uuid, 'files');
+  const target = path.resolve(root, String(subPath || '').replace(/\\/g, '/'));
+  if (!target.startsWith(root + path.sep) && target !== root) {
+    throw new Error('Path escapes common folder');
+  }
+  return target;
+}
+
+// Tree-shaped listing of one common's files/, used by the file browser UI.
+// Returns { name, isDir, path, size, children? } recursively. Sort: dirs
+// first, then files, each alphabetical.
+function listCommonFiles(userData, uuid) {
+  const root = path.join(commonRoot(userData), uuid, 'files');
+  if (!fs.existsSync(root)) return [];
+  const walk = (dir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return []; }
+    const out = [];
+    for (const e of entries) {
+      const abs = path.join(dir, e.name);
+      const rel = relBase ? `${relBase}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        out.push({ name: e.name, isDir: true, path: rel, children: walk(abs, rel) });
+      } else if (e.isFile()) {
+        let size = 0;
+        try { size = fs.statSync(abs).size; } catch {}
+        out.push({ name: e.name, isDir: false, path: rel, size });
+      }
+    }
+    out.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      // Natural sort so numbered filenames land in human order.
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    return out;
+  };
+  return walk(root, '');
+}
+
+// Add one or more files into a common's files/ at the given subPath
+// (default: root of files/). Files are copied; sources are left in place.
+// Returns counts of added vs failed. Collisions are renamed with " (N)"
+// suffix so an Add never silently overwrites an existing wav.
+// [B-400] Async, byte-weighted per file — the same treatment as addFilesAt and for the same
+// reason: a common folder is many small files, so crediting each as it lands is smooth, while
+// streaming inside a file would mean changing the shared content index four other callers use.
+// The `await` per iteration is load-bearing: ingest resolves to a hardlink and never touches
+// fsp, so without an explicit yield the loop runs to completion synchronously and every tick
+// flushes after the work is already done.
+// `shouldStop` ARRIVED LATE AND THE GAP WAS REAL. [B-424, 2026-10-08] Found on the font
+// detail's "+ Add → Browse…" by pressing it - eject checkbox present, eject toast present, no
+// Cancel at all - and an audit of the shared byte-progress runner found this door carrying the
+// identical hole. One cause, two faces, same as door 9. The shape is copied from
+// `soundFontSharedTracks.addFiles`, which already solved it, rather than re-derived here.
+async function addFilesToCommon(userData, uuid, subPath, sourceFilePaths, onBytes, shouldStop) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
+    return { ok: false, error: 'No source files provided' };
+  }
+  let destDir;
+  try { destDir = _resolveFilesPath(userData, uuid, subPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create dest: ${err.message}` }; }
+  }
+  const added = [];
+  const failed = [];
+  const refusedIn = [];
+  // One index for the whole batch ([B-327]): each added file lands as a link
+  // when the library already holds its bytes (a wav shared with a font, or
+  // with another common), and as a copy only when genuinely novel. ingestFile
+  // writes via temp-name + rename, so nothing is ever written through an
+  // existing name. The variant-rename collision rule is unchanged.
+  let _idx = null;
+  try { _idx = require('./soundFontContentIndex').buildIndex(userData); } catch { _idx = null; }
+  // Byte budget, stat'd up front so the bar is determinate from its first frame.
+  const _sizes = new Map();
+  let _bytesTotal = 0;
+  for (const sp of sourceFilePaths) {
+    let sz = 0;
+    try { sz = fs.statSync(sp).size; } catch {}
+    _sizes.set(sp, sz);
+    _bytesTotal += sz;
+  }
+  let _bytesDone = 0;
+  const _emit = (name) => {
+    if (typeof onBytes !== 'function') return;
+    try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
+  };
+  _emit('');
+  // CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
+  // Stopping here leaves every file already added in place and complete; files not yet reached are
+  // simply not added, so there is nothing half-written to clean up.
+  let _stopped = false;
+  for (const src of sourceFilePaths) {
+    if (shouldStop && shouldStop()) { _stopped = true; break; }
+    // Name first, so the label names what is being worked on rather than what just finished.
+    _emit(path.basename(String(src || '')));
+    await new Promise(r => setImmediate(r));
+    try {
+      if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
+        failed.push({ source: src, error: 'Not a file' });
+        continue;
+      }
+      // THIS IS AN IMPORT DOOR ([B-214]). Common folders come off the same cards
+      // the fonts do. Refused rather than stripped: the caller named this exact file,
+      // so there is nothing left to add if it is dropped, and `failed` already reaches
+      // the user with a per-file reason.
+      // checkCarryableFile, not the executable test ([B-370]): programs were stopped
+      // here but a .rar or a macro document walked straight in.
+      const _v = require('./sdCardDetect').checkCarryableFile(src, path.basename(src));
+      // `refused` IS NOT `failed` ([B-370], the catch 2026-09-11: correctly blocked,
+      // but it surfaced in the generic failure dialog with a raw G:\ path). A policy
+      // refusal and a copy that broke are different facts — one is the app working, the
+      // other is the app failing — and they read completely differently to the user.
+      if (_v.blocked) {
+        refusedIn.push({ name: path.basename(src), kind: _v.kind, reason: _v.reason,
+          disguised: !!_v.disguised });
+        continue;
+      }
+      const finalName = _proffieVariantName(destDir, path.basename(src));
+      const dest = path.join(destDir, finalName);
+      let done = false;
+      if (_idx) {
+        try { const r = _idx.ingest({ srcAbs: src, destAbs: dest }); done = !!(r && r.ok); } catch { done = false; }
+      }
+      if (!done) fs.copyFileSync(src, dest);
+      added.push(path.basename(dest));
+    } catch (err) {
+      failed.push({ source: src, error: String(err && err.message || err) });
+    }
+    _bytesDone += (_sizes.get(src) || 0);
+    _emit(path.basename(String(src || '')));
+  }
+  // Land on 100% whatever route the files took — added, not-a-file, refused, or a thrown
+  // copy. Crediting at each exit is a guard the next exit will forget. [B-389].
+  _bytesDone = _bytesTotal;
+  _emit('');
+  if (added.length) {
+    try { markCommonContentDirty(userData, uuid); } catch {}
+  }
+  // A stop the user asked for is an OUTCOME, not an error - see the twin in soundFontFileOps.
+  // So `ok: true` no longer means "it wrote everything": test `canceled` BEFORE `!ok`.
+  return { ok: true, cancelled: _stopped, added, failed, refused: refusedIn };
+}
+
+// Which of `sounds` ({ file, sha256 }) a common already holds, by content, as the library picker's
+// "already in entry" does: the sound itself or a numbered variant of it, in the folder's root.
+// { present, taken }, sets of file names, taken being a different file under the same name.
+function commonSoundsHeld(userData, uuid, sounds) {
+  const root = _resolveFilesPath(userData, uuid, '');
+  const names = fs.existsSync(root) ? fs.readdirSync(root) : [];
+  const present = new Set(), taken = new Set();
+  for (const s of sounds) {
+    const stem = path.basename(s.file, '.wav').toLowerCase();
+    const mine = names.filter(n => new RegExp(`^${stem}\\d*\\.wav$`, 'i').test(n));
+    const same = mine.some(n => {
+      try { return require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root, n))).digest('hex') === s.sha256; }
+      catch { return false; }
+    });
+    if (same) present.add(s.file);
+    else if (mine.length) taken.add(s.file);
+  }
+  return { present, taken };
+}
+
+// Rename one file inside a common. Validates the new name doesn't collide
+// with anything else in the same subfolder.
+function renameCommonFile(userData, uuid, subPath, newName) {
+  if (!uuid || !subPath) return { ok: false, error: 'Missing uuid or path' };
+  const cleanName = String(newName || '').trim();
+  if (!cleanName) return { ok: false, error: 'Name is required' };
+  if (/[\\/]/.test(cleanName)) return { ok: false, error: 'Name cannot contain path separators' };
+  let src, dest;
+  try { src = _resolveFilesPath(userData, uuid, subPath); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(src)) return { ok: false, error: 'File not found' };
+  dest = path.join(path.dirname(src), cleanName);
+  if (fs.existsSync(dest)) return { ok: false, error: `A file named "${cleanName}" already exists here` };
+  try {
+    fs.renameSync(src, dest);
+    try { markCommonContentDirty(userData, uuid); } catch {}
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+// Delete one file (or empty folder) inside a common. Used by right-click
+// from the file browser. Non-empty folders are intentionally rejected so
+// the user has to clear them out deliberately rather than nuking a tree.
+function deleteCommonFile(userData, uuid, subPath) {
+  if (!uuid || !subPath) return { ok: false, error: 'Missing uuid or path' };
+  let target;
+  try { target = _resolveFilesPath(userData, uuid, subPath); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(target)) return { ok: false, error: 'Not found' };
+  try {
+    const stat = fs.statSync(target);
+    if (stat.isDirectory()) {
+      const contents = fs.readdirSync(target);
+      if (contents.length > 0) {
+        return { ok: false, error: 'Folder is not empty' };
+      }
+      fs.rmdirSync(target);
+    } else {
+      fs.unlinkSync(target);
+    }
+    try { markCommonContentDirty(userData, uuid); } catch {}
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+// Create a new (empty) subfolder inside a common's files tree at the given
+// parent path. Used by the "+ Folder" UI affordance. parentSubPath defaults
+// to the files/ root when blank. Name validated for path separators and
+// uniqueness within the parent.
+function createCommonSubfolder(userData, uuid, parentSubPath, name) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return { ok: false, error: 'Name is required' };
+  if (/[\\/]/.test(cleanName)) return { ok: false, error: 'Name cannot contain path separators' };
+  let parentDir;
+  try { parentDir = _resolveFilesPath(userData, uuid, parentSubPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(parentDir)) {
+    try { fs.mkdirSync(parentDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create parent: ${err.message}` }; }
+  }
+  const newDir = path.join(parentDir, cleanName);
+  if (fs.existsSync(newDir)) {
+    return { ok: false, error: `A folder named "${cleanName}" already exists here` };
+  }
+  try {
+    fs.mkdirSync(newDir);
+    const rel = path.join(parentSubPath || '', cleanName).replace(/\\/g, '/');
+    try { markCommonContentDirty(userData, uuid); } catch {}
+    return { ok: true, path: rel };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+// Copy one or more files between commons (or within the same common, into
+// a different subpath). Collision-safe — destination names get " (N)"
+// suffixed until free. Returns the list of paths actually written, scoped
+// to the destination common's files/ root, so the caller can select the
+// newly-pasted set in the UI. Failures are itemized.
+function copyCommonFiles(userData, sourceUuid, sourcePaths, destUuid, destSubPath) {
+  if (!sourceUuid || !destUuid) return { ok: false, error: 'Missing uuids' };
+  if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
+    return { ok: false, error: 'No source paths' };
+  }
+  let destDir;
+  try { destDir = _resolveFilesPath(userData, destUuid, destSubPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create dest: ${err.message}` }; }
+  }
+  const destFilesRoot = path.join(commonRoot(userData), destUuid, 'files');
+  const added = [];
+  const failed = [];
+  for (const srcSubPath of sourcePaths) {
+    try {
+      let srcAbs;
+      try { srcAbs = _resolveFilesPath(userData, sourceUuid, srcSubPath); }
+      catch (err) { failed.push({ source: srcSubPath, error: err.message }); continue; }
+      if (!fs.existsSync(srcAbs) || !fs.statSync(srcAbs).isFile()) {
+        failed.push({ source: srcSubPath, error: 'Source file not found' });
+        continue;
+      }
+      const finalName = _proffieVariantName(destDir, path.basename(srcAbs));
+      const destPath = path.join(destDir, finalName);
+      // Paste between commons is a new NAME, not new bytes ([B-327]): the
+      // source of the copy is already a library file, so link it directly and
+      // fall back to a real copy only when the filesystem refuses.
+      let linked = false;
+      try { fs.linkSync(srcAbs, destPath); linked = true; } catch { linked = false; }
+      if (!linked) fs.copyFileSync(srcAbs, destPath);
+      const rel = path.relative(destFilesRoot, destPath).replace(/\\/g, '/');
+      added.push(rel);
+    } catch (err) {
+      failed.push({ source: srcSubPath, error: String(err && err.message || err) });
+    }
+  }
+  if (added.length) {
+    try { markCommonContentDirty(userData, destUuid); } catch {}
+  }
+  return { ok: true, added, failed };
+}
+
+// Move files within a single common into a different subPath. Used when the
+// user drags files between folders of the same common — semantically a
+// rename, not a copy, so the source is removed. No-op (skipped, not failed)
+// when a file is already in the destination dir. Collision-safe — destination
+// names get " (N)" suffixed when a different file with the same name already
+// exists at the destination.
+function moveCommonFiles(userData, uuid, sourcePaths, destSubPath) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
+    return { ok: false, error: 'No source paths' };
+  }
+  let destDir;
+  try { destDir = _resolveFilesPath(userData, uuid, destSubPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create dest: ${err.message}` }; }
+  }
+  const filesRoot = path.join(commonRoot(userData), uuid, 'files');
+  const cleanDest = (destSubPath || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+  const moved = [];
+  const failed = [];
+  let actuallyMoved = 0;
+  for (const srcSubPath of sourcePaths) {
+    try {
+      let srcAbs;
+      try { srcAbs = _resolveFilesPath(userData, uuid, srcSubPath); }
+      catch (err) { failed.push({ source: srcSubPath, error: err.message }); continue; }
+      if (!fs.existsSync(srcAbs) || !fs.statSync(srcAbs).isFile()) {
+        failed.push({ source: srcSubPath, error: 'Source file not found' });
+        continue;
+      }
+      // Already at destination — return the existing rel so the caller can
+      // still select it, but don't actually move anything.
+      const srcParts = srcSubPath.split('/'); srcParts.pop();
+      const srcParent = srcParts.join('/');
+      if (srcParent === cleanDest) {
+        moved.push(srcSubPath);
+        continue;
+      }
+      const finalName = _proffieVariantName(destDir, path.basename(srcAbs));
+      const destPath = path.join(destDir, finalName);
+      fs.renameSync(srcAbs, destPath);
+      const rel = path.relative(filesRoot, destPath).replace(/\\/g, '/');
+      moved.push(rel);
+      actuallyMoved++;
+    } catch (err) {
+      failed.push({ source: srcSubPath, error: String(err && err.message || err) });
+    }
+  }
+  if (actuallyMoved > 0) {
+    try { markCommonContentDirty(userData, uuid); } catch {}
+  }
+  return { ok: true, moved, failed };
+}
+
+// Does a "common" folder already exist at this destination? Used by Save
+// pre-scans so the conflict UI can include the common alongside font
+// entries that would collide.
+function commonFolderExistsAt(destDir, targetName = 'common') {
+  if (!destDir) return false;
+  try { return fs.existsSync(path.join(destDir, targetName || 'common')); }
+  catch { return false; }
+}
+
+// Read the marker we wrote on a previous export, if the destination has one.
+// Returns { name, version, fileName } or null.
+//
+// DISPLAY ONLY. This never decides whether a copy is skipped — see
+// commonMatchesAt for why a file describing a filesystem we do not control
+// cannot be trusted to suppress a question. What it is good for is NAMING what
+// is on the card ("your card has Bane, your library has HAL 9000") and
+// reporting the version a card is carrying, which is the useful fact when
+// someone is troubleshooting a voice pack error.
+//
+// No contentHash: nothing reads it, and the value we used to write could not be
+// reproduced by hashing the folder it sat in. A marker from an older build still
+// parses fine here; its hash line is simply ignored.
+function readCommonMarkerAt(destDir, targetName = 'common') {
+  if (!destDir) return null;
+  const dir = path.join(destDir, targetName || 'common');
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.toLowerCase().endsWith('.txt')) continue;
+    let body = '';
+    try { body = fs.readFileSync(path.join(dir, e.name), 'utf8'); } catch { continue; }
+    if (!body.includes(_COMMON_README_MARK)) continue;
+    // Leading digits only — the version line carries a plain-English qualifier
+    // after the number ("2  (what ProffieOS 8 expects)").
+    const version = (body.match(/^Voice pack version\s*:\s*(\d+)/mi) || [])[1] || null;
+    const name = (body.split(/\r?\n/)[0] || '').trim() || null;
+    return { name, version, fileName: e.name };
+  }
+  return null;
+}
+
+// ── Is the destination's copy the same content we hold? ──────────────────
+// NEVER answered from the marker. The marker records what we wrote LAST time,
+// not what is there NOW: anyone can delete a wav, drop a file in, or swap one
+// by hand, and the marker would still recite the old hash. Trusting it means
+// skipping the copy and leaving a card that genuinely differs, silently, while
+// the user believes it is current. So the rule, and it generalises past this
+// function: a cached claim about a filesystem we do not control may RAISE a
+// question, never suppress one. Skipping requires reading the bytes.
+// (2026-07-31 — found by deleting the marker, then sharpened to the real
+// case: the folder can change underneath a marker that still looks current.)
+//
+// The marker's remaining job is to tell a HUMAN which pack this is, and to
+// give the conflict prompt something concrete to say. Display, not decision.
+//
+// COMPARABLE ROOTS. The library's stored meta.contentHash is taken at the UUID
+// dir, so its record paths are prefixed "files/" and can never equal a hash of
+// a card's "common/" folder. Both sides are hashed at the roots that actually
+// correspond: <uuid>/files and <destDir>/<targetName>.
+//
+// Markers are subtracted from BOTH sides, by DETECTION rather than by filename
+// — the same rule writeCommonReadme's cleanup uses. Excluding only the name we
+// are about to write would let a renamed pack's stale marker count as a real
+// difference. Anything else at the destination (a hand-added wav, a text file
+// that is not ours) correctly still counts as different.
+function _isOurMarkerAt(absPath, name) {
+  if (!name || !name.toLowerCase().endsWith('.txt')) return false;
+  try { return fs.readFileSync(absPath, 'utf8').includes(_COMMON_README_MARK); }
+  catch { return false; }
+}
+
+// filter(relPath) => truthy to INCLUDE, matching soundFontFileHash's contract.
+// Only root-level .txt files can be ours; nested ones are real content.
+// The marker an export writes into a common folder is Studio's note, not part of the pack: an
+// import leaves it out of the library copy and remembers its name, so the copy is not called
+// customized for lacking it. Returns the names removed.
+function _dropOurMarkers(filesDir) {
+  const out = [];
+  try {
+    for (const e of fs.readdirSync(filesDir, { withFileTypes: true })) {
+      if (!e.isFile() || !_isOurMarkerAt(path.join(filesDir, e.name), e.name)) continue;
+      try { fs.unlinkSync(path.join(filesDir, e.name)); out.push(e.name); } catch {}
+    }
+  } catch {}
+  return out;
+}
+
+// A source's records without the marker files its common was imported without.
+function _sourceRecordsWithoutMarkers(records, meta) {
+  const names = Array.isArray(meta && meta.markerFiles) ? meta.markerFiles : [];
+  if (!names.length) return records;
+  const pfx = meta.sourceSubPath ? meta.sourceSubPath + '/' : '';
+  const skip = new Set(names.map((n) => pfx + n));
+  return records.filter((r) => !(r && skip.has(String(r.relPath || ''))));
+}
+
+// The pack name an export's marker carries, from a folder holding the pack's files, or null.
+function _markerNameIn(dir) {
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isFile() || !_isOurMarkerAt(path.join(dir, e.name), e.name)) continue;
+      const first = (fs.readFileSync(path.join(dir, e.name), 'utf8').split(/\r?\n/)[0] || '').trim();
+      if (first) return first;
+    }
+  } catch {}
+  return null;
+}
+
+function _excludeOurMarkers(root) {
+  return (relPath) => {
+    if (relPath.includes('/')) return true;
+    return !_isOurMarkerAt(path.join(root, relPath), relPath);
+  };
+}
+
+// Cheap signal: file count + total bytes under `root`, stat only, no reads.
+// Mirrors the hash walk's exclusions (root meta.json, plus `excludeFn`) so the
+// two can never disagree about what they are counting.
+// Moved to soundFontFileHash so the font compare can use the same walk under the same rules;
+// a second copy would be two definitions of what 'the shape of this folder' means.
+const _dirSignals = (root, excludeFn) => require('./soundFontFileHash').dirSignals(root, excludeFn);
+
+// Returns { ok, exists, identical, reason }.
+//   exists    — the destination has the folder at all
+//   identical — its content is byte-for-byte ours, markers subtracted
+//   reason    — 'missing' | 'unreadable' | 'signals' | 'hash' | null
+// The cheap signal is only sound as a NEGATIVE: differing counts or byte
+// totals PROVE a difference (prompt, nothing read). Matching ones prove
+// nothing, since a same-size swap defeats them, so they gate INTO the hash
+// THE LIBRARY SIDE OF A COMMON COMPARE IS ALREADY WRITTEN DOWN. [B-433, 2026-09-26]
+//
+// This used to call `collectFileRecords(libDir, ...)` on every comparison, which READS AND HASHES
+// the whole library common folder each time. A voicepack common is 214-225 files and ~20 MB, and
+// it was re-read on every export that touched a common folder, to re-learn something recorded when
+// the folder was hashed.
+//
+// Fonts already avoid this (`_libRecordsFor` in soundFontEntries reads the central per-file
+// manifest) and tracks avoid it via the tracks hash index. Commons had the manifest WRITTEN all
+// along - `.filehashes/commons/<uuid>.json`, refreshed at creation and whenever a dirty flag
+// resolves, the same lifecycle the tree hash rides - and simply never read it back.
+//
+// VALIDATED ON SIGNALS, NOT ON THE AGGREGATE HASH, and the difference matters. The entries
+// side compares `mf.contentHash === meta.contentHash`. That cannot be reused here: this manifest is
+// written WITHOUT an aggregate, so `writeFileHashManifest` defaults it to a hash OF THE RECORDS -
+// a different quantity from the folder's `meta.contentHash`. Comparing them would fail for every
+// one of the manifests already on disk, so the fix would have shipped green and saved nothing.
+//
+// THE RECORDS ARE FILTERED THROUGH THE SAME PREDICATE THE SIGNALS WERE. The manifest is
+// written unfiltered, while the compare excludes our own readme markers - so an unfiltered count
+// would disagree with `signals` for any common carrying one, and fall back every time.
+//
+// WHAT THIS TRADES: a library folder edited WITHOUT the dirty flag being set would now be
+// compared against stale hashes instead of being re-read. That is the same bargain the entries
+// side already makes, and the flag is set by every mutating path in this module.
+function _commonLibRecords(userData, uuid, libDir, libFilter, signals) {
+  const { readFileHashManifest, collectFileRecords } = require('./soundFontFileHash');
+  const full = () => collectFileRecords(libDir, null, libFilter);
+  try {
+    let meta = null;
+    try { meta = JSON.parse(fs.readFileSync(path.join(commonRoot(userData), uuid, 'meta.json'), 'utf8')); }
+    catch { return full(); }
+    // A folder whose content is known to have moved has nothing trustworthy recorded yet.
+    if (!meta || meta.contentHashDirty) return full();
+
+    const mf = readFileHashManifest(
+      path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`));
+    if (!mf || !Array.isArray(mf.records)) return full();
+
+    const recs = mf.records.filter((r) => r && r.relPath && libFilter(r.relPath));
+    // The manifest has to describe the folder as it is NOW. Count and bytes are what
+    // `signals` already measured a few lines above, so this check costs nothing beyond the sum.
+    if (!signals || recs.length !== signals.fileCount) return full();
+    let bytes = 0;
+    for (const r of recs) bytes += (r.size || 0);
+    if (bytes !== signals.totalBytes) return full();
+    // A record with no hash cannot answer the question this is here to answer.
+    if (recs.some((r) => !r.fileHash)) return full();
+    return recs;
+  } catch { return full(); }
+}
+
+// and never past it.
+// `shouldStop` HONOURED 2026-09-24 [B-420], for the same reason as its twin in
+// soundFontEntries: this is a pure READ that hashes 200+ files off a card, and a cancel during the
+// conflict scan used to wait for all of them.
+async function commonMatchesAt(userData, uuid, destDir, targetName = 'common', shouldStop = null) {
+  if (!uuid || !destDir) return { ok: false, error: 'Missing uuid or destDir' };
+  const libDir  = path.join(commonRoot(userData), uuid, 'files');
+  const cardDir = path.join(destDir, targetName || 'common');
+
+  let cardExists = false;
+  try { cardExists = fs.existsSync(cardDir) && fs.statSync(cardDir).isDirectory(); } catch {}
+  if (!cardExists) return { ok: true, exists: false, identical: false, reason: 'missing' };
+  if (!fs.existsSync(libDir)) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+
+  const libFilter  = _excludeOurMarkers(libDir);
+  const cardFilter = _excludeOurMarkers(cardDir);
+
+  const mine  = _dirSignals(libDir, libFilter);
+  const theirs = _dirSignals(cardDir, cardFilter);
+  // The image the folder shows is one of its files at the destination (exportCommonToFolder). [B-534]
+  const _picMod = require('./soundFontPicture');
+  const _pic = await _picMod.shownPictureExtra(userData, 'common', uuid);
+  _picMod.dropPictureTemp(_pic);
+  const _mineCount = mine.fileCount + (_pic ? 1 : 0), _mineBytes = mine.totalBytes + (_pic ? _pic.size : 0);
+  if (_mineCount !== theirs.fileCount || _mineBytes !== theirs.totalBytes) {
+    return { ok: true, exists: true, identical: false, reason: 'signals' };
+  }
+
+  // Per file, over the LIBRARY's files only. Anything else on the card, recorded
+  // or not, is none of this comparison's business. The destination manifest
+  // supplies a hash per file; mtime says only whether the user invalidated it,
+  // and an invalidated or missing entry costs one hash for that file alone.
+  const { collectFileRecords, hashFile } = require('./soundFontFileHash');
+  let libRecords = _commonLibRecords(userData, uuid, libDir, libFilter, mine);
+  if (!libRecords) return { ok: true, exists: true, identical: false, reason: 'unreadable' };
+  if (_pic) libRecords = [...libRecords, { relPath: _pic.relPath, size: _pic.size, fileHash: _pic.fileHash }];
+
+  const sync = require('./sfSyncManifest');
+  const item = targetName || 'common';
+  let cache = new Map();
+  try { cache = sync.cacheFor(destDir, item); } catch {}
+  const refreshed = new Map();
+  let identical = true, _anyMissing = false;
+
+  // [B-398] door 2. This loop hashes every file of a common folder AND READS THE CARD, so it was
+  // the same main-thread block as the import - on slower storage. The ProffieOS voicepack commons
+  // are 214-225 files each. Yield between files so the window keeps answering Windows.
+  // The breath is shared from soundFontFileHash on purpose: it must be setImmediate, never a
+  // microtask, or it yields to nothing while looking fixed.
+  const { breathe, hashFileAsync } = require('./soundFontFileHash');
+  for (const rec of libRecords) {
+    // PER FILE - a voicepack common is 214-225 files.
+    if (shouldStop && shouldStop()) return { ok: true, canceled: true };
+    if (!rec || rec.fileHash === '<empty>') continue;
+    const abs = path.join(cardDir, rec.relPath);
+    let st = null;
+    // [B-173] point 2 - see the twin in soundFontEntries.
+    sync.countStat();
+    try { st = fs.statSync(abs); } catch { st = null; }
+    // A library file the card does not have means what we examined is NOT the whole
+    // folder, which disqualifies the completeness claim on the return.
+    if (!st) { identical = false; _anyMissing = true; continue; }
+    const mtime = Math.round(st.mtimeMs);
+    const ent = cache.get(rec.relPath);
+    const valid = sync.entryValid(ent, st.size, mtime);
+    // AWAITED STREAM HASH — see the twin in soundFontEntries. [B-398]
+    // [B-173] - see the twin in soundFontEntries.
+    const destHash = valid ? ent[2] : (sync.countHash(), await hashFileAsync(abs, { shouldStop }));
+    if (shouldStop && shouldStop()) return { ok: true, canceled: true };   // stopped mid-file
+    refreshed.set(rec.relPath, [st.size, mtime, destHash]);
+    if (destHash !== rec.fileHash) identical = false;
+    await breathe();
+  }
+  // [B-402] Returned, not written — see the twin in soundFontEntries.entryMatchesAt. A compare
+  // is a question, and the answer is handed back for the export to record once.
+  // `complete` LICENSES THE CALLER TO DELETE RECORDS THIS LIST DOES NOT MENTION, so it is
+  // only claimed when the observations really are the whole folder: every library file was
+  // FOUND, and the two sides carry the same file count (measured above, markers subtracted
+  // from both). Counts alone can coincide - one absent, one stray - which is why both.
+  // A cancel returns from inside the loop with no observations, so a partial pass can
+  // never reach this and can never license a deletion.
+  return { ok: true, exists: true, identical, reason: identical ? null : 'hash',
+           complete: !_anyMissing && mine.fileCount === theirs.fileCount,
+           observed: [...refreshed] };
+}
+
+// Copy a common's files/ contents into destDir/<targetName>/. Mirrors
+// soundFontEntries.exportEntryToFolder's mode semantics so the bulk Save
+// flow can treat both uniformly. Target name is "common" by Proffie's SD
+// convention; rename mode bumps to "common (N)" if collisions can't be
+// avoided otherwise.
+// Export a common OUT OF THE APP as a portable zip. A DIFFERENT VERB from
+// exportCommonToFolder below, which puts a pack on an SD card - and the two were
+// the same function until 2026-08-31, reached from a right-click that had nothing
+// to do with cards. Three things were wrong with that: the pack's NAME was lost
+// (the card path hardcodes `targetName = 'common'`, because that is what Proffie
+// requires), a sync manifest was written into whatever folder the user picked,
+// and the SD conflict dialog asked about replacing "the current common folder".
+//
+// THE SHAPE IS THE ONE THE PACKS ACTUALLY SHIP IN, verified 2026-08-31 against a
+// real download (ProffieOS_V2_Voicepack_ChineseA.zip, 218 entries):
+//     <Pack Name>.zip
+//       └── common/
+//             (the wavs)
+// The pack's name lives in the FILENAME; there is no wrapper folder inside. An
+// earlier version of this nested `<Pack>/common/` and the name read twice over -
+// Checked against a real vendor zip and it does not do that.
+// Two consequences worth keeping: unzipping hands you a `common/` folder that
+// can go straight onto a card, and what we emit is indistinguishable from what
+// people already receive. Our own importer takes either shape
+// (_findCommonSubfolder searches for a `common` directory at any depth), so this
+// round-trips: export it, hand it over, they import it and get the same pack.
+//
+// No manifest and no conflict prompt: nothing here is syncing with a card, and
+// the destination is a single file the OS save dialog has already confirmed.
+async function exportCommonAsZip(userData, uuid, destPath, onBytes = null, opts = {}) {
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  if (!destPath) return { ok: false, error: 'Missing destPath' };
+  const dir = path.join(commonRoot(userData), uuid);
+  const srcDir = path.join(dir, 'files');
+  if (!fs.existsSync(srcDir)) return { ok: false, error: `Common files not found: ${uuid}` };
+  const meta = _readMeta(dir) || {};
+  const packName = String(meta.name || 'common').trim() || 'common';
+
+  const archiver = require('archiver');
+  // Same atomic-write pattern as the backup writer: stream to a sibling
+  // .partial and rename on success, so the user's chosen path is never a
+  // half-written zip a sync agent can pick up.
+  const partialPath = destPath + '.partial';
+  const refused = [];
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let ws;
+    try { ws = fs.createWriteStream(partialPath); }
+    catch (err) { return done({ ok: false, error: `Cannot write: ${err.message}` }); }
+    const archive = archiver('zip', { zlib: { level: 6 }, forceZip64: true });
+    archive.on('error', (err) => {
+      try { ws.destroy(); } catch {}
+      try { fs.unlinkSync(partialPath); } catch {}
+      done({ ok: false, error: `Export failed: ${err.message}` });
+    });
+    // THE WRITE STREAM NEEDS ITS OWN ERROR LISTENER, AND HAD NONE. archive.on('error')
+    // covers failures on the ARCHIVER side; ENOSPC happens on the DESTINATION side, which is
+    // this stream. With no listener, an 'error' event on an EventEmitter is an uncaught
+    // exception in the main process - the same shape as [B-418] - and from the renderer it
+    // looked like nothing happened at all: the progress modal appeared, showed
+    // "Compressing · 0 B of 16.3 MB", then vanished with no result and no message.
+    // (Reported, 2026-09-19: "does this but then disappears like nothing happened".)
+    //
+    // Clean up the same way the archiver path does, so a failed export never leaves a
+    // .partial behind - it is the one artefact that would consume the space that just ran
+    // out. The backup writer already had `ws.on('error', reject)`; this writer was copied
+    // from it and lost that line. [B-203]
+    ws.on('error', (err) => {
+      try { ws.destroy(); } catch {}
+      try { fs.unlinkSync(partialPath); } catch {}
+      done({ ok: false, error: `Export failed: ${err.message}` });
+    });
+    // Progress from archiver's own 'progress' event, NOT from 'data' chunks.
+    // 'data' is COMPRESSED output, which cannot be measured against the pack's
+    // known size on disk - the bar would run to some fraction of the total and
+    // stop. `fs.processedBytes` is source bytes read, which is exactly what the
+    // caller already knows the total of.
+    if (onBytes) {
+      let seen = 0;
+      // ARCHIVER SPLITS THE TWO FACTS ACROSS TWO EVENTS. [B-420, 2026-09-23:
+      // "same thing on the common folder export as common and export as archive"]
+      // `progress` carries byte counts and no name; `entry` carries the name and no bytes. So a
+      // bar fed only from `progress` can say how much has moved and never what is moving, which
+      // is exactly how this door looked beside the funnel doors that name every file.
+      // Last entry wins, which is honest here for the same reason it is on the delta channel:
+      // the bytes are a sum over a window and the only truthful label is the most recent file
+      // that window touched.
+      let entryName = '';
+      archive.on('entry', (e) => { if (e && e.name) entryName = String(e.name); });
+      archive.on('progress', (p) => {
+        const done = (p && p.fs && p.fs.processedBytes) || 0;
+        if (done > seen) { const d = done - seen; seen = done; try { onBytes(d, entryName); } catch {} }
+      });
+    }
+    // ── Cancelling a zip ──────────────────────────────────────────── [B-005 item 4]
+    //
+    // THE .partial PATTERN MAKES THIS THE CLEANEST CANCEL IN THE APP. Everything streams to a
+    // sibling file and only becomes the user's chosen path on a successful rename, so stopping
+    // here leaves the destination exactly as it was - not a truncated archive, not an empty file,
+    // nothing. A zip cannot be "partially written but fine", which is why the folder export had
+    // to clean up after itself and this one simply does not.
+    //
+    // A SEPARATE LISTENER FROM THE PROGRESS ONE ABOVE, because that one only exists when the
+    // caller asked for progress. Cancelling must not depend on whether anybody is watching.
+    //
+    // done() FIRST, THEN abort(). `settled` is what stops ws.on('close') from racing in behind
+    // the abort and reporting a successful export of a file we just deleted.
+    if (opts.shouldStop) {
+      archive.on('progress', () => {
+        if (settled || !opts.shouldStop()) return;
+        done({ ok: true, canceled: true });
+        try { archive.abort(); } catch {}
+        // UNLINK AFTER THE STREAM CLOSES, NOT BESIDE destroy(). Windows refuses to delete a
+        // file that is still open, so deleting here left the .partial behind on exactly the
+        // path whose comment promises it never does - and a stray .partial is what eats the
+        // space a cancelled export was trying to stop consuming. [B-005 item 4]
+        ws.once('close', () => { try { fs.unlinkSync(partialPath); } catch {} });
+        try { ws.destroy(); } catch {}
+      });
+    }
+    ws.on('close', () => {
+      if (settled) return;
+      try { fs.renameSync(partialPath, destPath); }
+      catch (err) {
+        try { fs.unlinkSync(partialPath); } catch {}
+        return done({ ok: false, error: `Cannot finalise: ${err.message}` });
+      }
+      done({ ok: true, path: destPath, name: packName, refused });
+    });
+    archive.pipe(ws);
+    // THE ZIP IS A WAY OUT TOO ([B-364]/[B-368]). Export-to-folder refuses a program;
+    // this writer used a bare archive.directory() and carried everything. Filtering via
+    // archiver's data function is safe HERE specifically because this writer has no
+    // entry-count gating - progress comes from archiver's own fs.processedBytes, which
+    // simply reports less when a file is skipped. (The backup writer is NOT like this:
+    // it awaits an expected entry count per item and a filtered file deadlocks it. See
+    // [B-369].)
+    const { checkCarryableFile } = require('./sdCardDetect');
+    // THE ENTRY CARRIES `name` (RELATIVE) AND `stats` — THERE IS NO sourcePath.
+    // Guarding on a field that does not exist made the filter a no-op that still looked
+    // right: every file was included and nothing was reported. Verified against
+    // archiver 5's core.js rather than assumed (onGlobMatch builds entryData from
+    // match.relative + match.stat), and proved by zipping a folder with a planted
+    // program and reading the archive back.
+    archive.directory(srcDir, 'common', (entry) => {
+      if (!entry || !entry.name) return entry;
+      if (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory()) return entry;
+      const abs = path.join(srcDir, entry.name);
+      const v = checkCarryableFile(abs, path.basename(entry.name));
+      if (!v.blocked) return entry;
+      refused.push({ relPath: String(entry.name), name: path.basename(entry.name),
+        kind: v.kind, reason: v.reason, disguised: !!v.disguised });
+      return false;
+    });
+    archive.finalize();
+  });
+}
+
+// `targetName` is the folder to CREATE on the card. Its three siblings
+// (commonFolderExistsAt, readCommonMarkerAt, commonMatchesAt) have taken this
+// parameter all along; only the write hardcoded the name, so a config organised
+// around "MC" was checked against MC and then written as common. [B-326]
+async function exportCommonToFolder(userData, uuid, destDir, mode = 'rename', onBytes = null, targetName = 'common', opts = {}) {
+  // [B-402] What this export learned, handed back for the caller's single terminal write.
+  let _observedOut = null, _observedItem = null;
+  if (!uuid) return { ok: false, error: 'Missing uuid' };
+  if (!destDir) return { ok: false, error: 'Missing destDir' };
+  const srcDir = path.join(commonRoot(userData), uuid, 'files');
+  if (!fs.existsSync(srcDir)) return { ok: false, error: `Common files not found: ${uuid}` };
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create destination: ${err.message}` }; }
+  }
+  targetName = String(targetName || 'common').trim() || 'common';
+  // DECLARED HERE, NOT INSIDE THE `replace` BRANCH. [B-420, 2026-09-24] It is written in that
+  // branch and read by three later places - the cancel restore, the success disposal and the
+  // failure restore - so a `let` inside the branch would be invisible to all of them. This file
+  // is not in strict mode, so the missing declaration would not have thrown: it would have made a
+  // silent GLOBAL that works until two exports overlap. `node --check` passes either way.
+  let asideDir = null;
+  const exists = fs.existsSync(path.join(destDir, targetName));
+  if (exists) {
+    if (mode === 'skip') {
+      return { ok: true, skipped: true, destPath: path.join(destDir, targetName) };
+    }
+    if (mode === 'replace') {
+      // SET ASIDE, DO NOT DELETE. [B-420, 2026-09-24] THIS PATH USED TO REMOVE THE EXISTING
+      // FOLDER AND THEN WRITE, AND THAT HAS NO SAFE FAILURE MODE.
+      //
+      // Reported on a real export: `EPERM: operation not permitted, rmdir
+      // 'D:\Desktop\SD Simulation\common\alts'`. The recursive delete had already removed every
+      // wav and emptied the subfolders before it failed on one directory - so the reply was an
+      // error AND the user's existing common folder was gone, reduced to three empty
+      // directories. The export failed and took the thing it was replacing with it.
+      //
+      // THE CAUSE OF THAT PARTICULAR FAILURE IS STILL UNKNOWN, and this is not a fix for it.
+      // Measured and ruled out: the read-only attribute (read-only directories delete fine there),
+      // the location (a tree built at that same path deletes fine), and a prior hash pass holding
+      // handles. It could not be reproduced. WHICH IS THE ARGUMENT FOR THIS CHANGE RATHER THAN
+      // AGAINST IT: the removal is allowed to fail for reasons we do not control, so it must not
+      // be the step that destroys the old folder.
+      //
+      // THE PATTERN IS NOT NEW - the FONT export has always done it this way
+      // (soundFontEntries, `ORIGINAL.<name>`), for a different reason: a rename is one metadata
+      // write where a delete is a round trip per file, which is what makes a cancel instant on a
+      // board card. The robustness came along free, and this path never got either half. The
+      // seven `DELETE.*` folders sitting at the destination are the font path surviving exactly
+      // this and moving on.
+      //
+      // SAME DIRECTORY, SO NO EXDEV. Renaming within destDir is same-volume by construction.
+      // A LEFTOVER FROM AN EARLIER RUN IS LEFT ALONE - see the note on the font path and
+      // [B-436]. Sweeping them here would delete on an unrelated export and would hide the
+      // very thing the reporting was added to surface.
+      asideDir = path.join(destDir, `ORIGINAL.${targetName}`);
+      // A stale aside means a previous run died between the rename and the disposal. Its
+      // content is the OLDER copy of a folder the user has since replaced, so the live tree wins;
+      // clearing it is what makes this repeatable instead of jamming on the second attempt.
+      if (fs.existsSync(asideDir)) {
+        try { await rmWithRetry(asideDir); }
+        catch (err) { return { ok: false, error: `Cannot clear a leftover ORIGINAL folder: ${err.message}` }; }
+      }
+      try { await fs.promises.rename(path.join(destDir, targetName), asideDir); }
+      catch (err) {
+        asideDir = null;
+        return { ok: false, error: `Cannot set aside the existing folder: ${err.message}` };
+      }
+    } else {
+      // Underscore (not parens) — folder names on SD ride the same
+      // safety rule as font folders. The user-facing "rename" mode is
+      // really staging, since Proffie only matches the literal "common"
+      // folder; either way, _N is the safer suffix.
+      // First suffix is _2 ([B-343]): the original is implicitly number one.
+      let n = 2;
+      while (fs.existsSync(path.join(destDir, targetName))) {
+        targetName = `common_${n}`;
+        n++;
+      }
+    }
+  }
+  const targetDir = path.join(destDir, targetName);
+  // The image the folder shows when it lives outside the folder. [B-534]
+  const _pic = require('./soundFontPicture');
+  const _shownPic = await _pic.shownPictureExtra(userData, 'common', uuid);
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    // Streamed copy with write-paced byte progress. srcDir is the common's
+    // `files/` subtree (its meta.json lives one level up, outside srcDir), so
+    // there's nothing to skip here — every file ships.
+    const _exportRefused = [];
+    try {
+      await copyTreeWithProgress(srcDir, targetDir, { onBytes, refused: _exportRefused,
+        shouldStop: opts.shouldStop || null,
+        // The tally the cancel-cleanup rule reads. Owned by the caller's gate token so one
+        // object counts for the whole operation. Without it the offer branch below can never
+        // fire, which is a branch that exists and does nothing. [B-005 item 4]
+        wrote: opts.wrote || null });
+      if (_shownPic) {
+        try { await copyFileWithProgress(_shownPic.abs, path.join(targetDir, _shownPic.relPath), onBytes, opts.shouldStop || null); }
+        finally { _pic.dropPictureTemp(_shownPic); }
+      }
+    } catch (err) {
+      // Same rule as a font ([B-005 item 4]): `targetDir` was created by this call - 'replace'
+      // removed the old tree first, 'rename' minted a new name - so the partial is ours to take
+      // back, and a half-copied voice pack on a card is worse than an absent one. It boots, it
+      // is listed, and it fails at the moment a sound is needed.
+      if (require('./sfExportCopy').isCancel(err)) {
+        const out = { ok: true, canceled: true, partialRemoved: false, restored: false,
+                      destPath: targetDir, item: targetName, leftovers: [] };
+        // RESTORE FIRST, DISPOSE SECOND, AND THE ORDER IS THE WHOLE POINT. [B-420,
+        // 2026-09-24] Mirrors the font export exactly. Getting the user's folder back is two
+        // metadata renames - instant even on a board card - and it must not wait behind a
+        // recursive delete that costs a round trip per file. If the process dies between the two
+        // steps they still have a COMPLETE folder under ORIGINAL.<name>, which is why the aside
+        // is renamed back LAST rather than first.
+        // Before this, cancelling a replace here left NOTHING: the old folder had already been
+        // deleted outright and the partial was removed on the way out.
+        if (asideDir) {
+          const junk0 = path.join(destDir, `DELETE.${targetName}`);
+          try {
+            if (fs.existsSync(junk0)) await rmWithRetry(junk0);
+            if (fs.existsSync(targetDir)) {
+              await fs.promises.rename(targetDir, junk0);
+              out.leftovers.push(junk0);
+            }
+          } catch { /* fall through - the restore below matters more than tidiness */ }
+          try {
+            await fs.promises.rename(asideDir, targetDir);
+            out.restored = true;
+            out.destPath = targetDir;
+          } catch {
+            // Their folder is still WHOLE, just under the wrong name. Say so rather than
+            // reporting a clean stop - they need to know ORIGINAL.<name> is theirs and must
+            // not be deleted.
+            out.leftovers.push(asideDir);
+          }
+          const junkLeft = out.leftovers.find((p) => /[\\/]DELETE\./.test(p));
+          if (junkLeft) {
+            const _ed0 = require('./exportDestination');
+            const _wf0 = (opts.wrote && opts.wrote.files) || 0;
+            const _wb0 = (opts.wrote && opts.wrote.bytes) || 0;
+            if (opts.boardCard && _ed0.isSlowCleanupJob(_wf0, _wb0)) {
+              out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
+              out.offerCleanup = junkLeft;
+            } else {
+              try {
+                await rmWithRetry(junkLeft);
+                out.leftovers = out.leftovers.filter((p) => p !== junkLeft);
+              } catch { /* keep it named so the user is told it is there */ }
+            }
+          }
+          return out;
+        }
+        // THE SAME RULE THE FONT EXPORT FOLLOWS. [B-005 item 4] Found reviewing for parity
+        // 2026-09-21: this door removed its partial unconditionally while the font door
+        // offered on a board card, so cancelling a voice pack could sit through a per-file
+        // delete across the bridge that cancelling a font never did. Same shape of job, same
+        // destination, same thresholds - it must get the same treatment.
+        //
+        // Safe by construction, exactly as there: `targetDir` was minted by this call, so
+        // renaming or removing it cannot touch content that was already the user's.
+        const _ed = require('./exportDestination');
+        const _wf = (opts.wrote && opts.wrote.files) || 0;
+        const _wb = (opts.wrote && opts.wrote.bytes) || 0;
+        if (opts.boardCard && _ed.isSlowCleanupJob(_wf, _wb)) {
+          const junk = path.join(path.dirname(targetDir), `DELETE.${targetName}`);
+          try {
+            if (fs.existsSync(junk)) await fs.promises.rm(junk, { recursive: true, force: true });
+            await fs.promises.rename(targetDir, junk);
+            out.offerCleanup = junk;
+            return out;
+          } catch { /* rename failed - fall through to the ordinary removal */ }
+        }
+        // Retried: on Windows a directory holding a file with an open handle cannot be
+        // removed, and a write stream's handle release is asynchronous.
+        let removed = false;
+        for (let i = 0; i < 4 && !removed; i++) {
+          try { await fs.promises.rm(targetDir, { recursive: true, force: true }); removed = true; }
+          catch { await new Promise((r) => setTimeout(r, 100 * (i + 1))); }
+        }
+        out.partialRemoved = removed;
+        return out;
+      }
+      throw err;
+    }
+    // THE "AND ONLY THEN DELETE THE ORIGINAL" HALF. [B-420, 2026-09-24] Everything above this
+    // line is reversible; past it the new folder is complete at the destination and the parked
+    // copy is genuinely superseded.
+    // RENAMED TO DELETE.<name> BEFORE REMOVAL, NOT REMOVED DIRECTLY. The rename is instant, so
+    // the user's replace is COMPLETE the moment it returns; a disposal that fails or is
+    // interrupted then leaves something whose NAME says what it is, rather than a second copy of
+    // a folder they would have to identify.
+    // NOT FATAL. The export succeeded - a leftover folder is untidy, not broken, and turning
+    // it into an error would report a successful write as a failure. This is precisely the case
+    // that was reported as `Cannot remove existing folder`: it is now a note instead of a loss.
+    let replacedLeftover = null;
+    if (asideDir) {
+      const junk = path.join(destDir, `DELETE.${targetName}`);
+      try {
+        if (fs.existsSync(junk)) await rmWithRetry(junk);
+        await fs.promises.rename(asideDir, junk);
+        replacedLeftover = junk;
+        await rmWithRetry(junk);
+        replacedLeftover = null;
+      } catch {
+        replacedLeftover = fs.existsSync(junk) ? junk
+          : (fs.existsSync(asideDir) ? asideDir : null);
+      }
+    }
+    // Human-readable marker, written into the destination so the card can say
+    // which voice pack it is carrying. Never written into the library copy.
+    try { writeCommonReadme(userData, uuid, targetDir); } catch {}
+    // Recorded AFTER the marker is written, so the signature includes it and a
+    // later scan does not see the marker as an unexplained change.
+    try {
+      // [B-398] Same blocker as the entry export, and worse here: a ProffieOS voicepack common is
+      // 214-225 files against a font's 110. Synchronous hash of the whole tree, then a statSync
+      // per file against the CARD, with nothing yielding in between.
+      const { collectFileRecordsAsync, breathe } = require('./soundFontFileHash');
+      const recs = await collectFileRecordsAsync(srcDir);
+      if (recs && _shownPic) recs.push({ relPath: _shownPic.relPath, size: _shownPic.size, fileHash: _shownPic.fileHash });
+      if (recs) {
+        // [B-402] Returned, not written — see the twin in soundFontEntries. One writer, at the
+        // end of the whole operation.
+        const observed = new Map();
+        for (const r of recs) {
+          if (!r || r.fileHash === '<empty>') continue;
+          await breathe();
+          try {
+            const st = fs.statSync(path.join(targetDir, r.relPath));
+            observed.set(r.relPath, [st.size, Math.round(st.mtimeMs), r.fileHash]);
+          } catch {}
+        }
+        _observedOut = [...observed];
+        _observedItem = targetName;
+      }
+    } catch {}
+    // RETURNED, NOT DROPPED ([B-364]) - same defect and same fix as the entry export.
+    return { ok: true, destPath: targetDir, refused: _exportRefused, replacedLeftover,
+             observedItem: _observedItem, observed: _observedOut };
+  } catch (err) {
+    // Best-effort cleanup of a partial copy so the user doesn't end up with
+    // half a common folder mixed in with their other content.
+    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch {}
+    // AND PUT THEIR FOLDER BACK. [B-420, 2026-09-24] This branch is any failure that is not
+    // a cancel - an unreadable source, a full card, a write that threw. Before the set-aside
+    // existed there was nothing to restore, because the old folder had already been deleted; now
+    // there is, and failing to put it back would be the same data loss arriving by a different
+    // door. Best effort: if the restore itself fails the folder is still whole under
+    // ORIGINAL.<name>, so it is named in the error rather than silently abandoned.
+    let _restoreNote = '';
+    if (asideDir && fs.existsSync(asideDir)) {
+      try { await fs.promises.rename(asideDir, path.join(destDir, targetName)); }
+      catch { _restoreNote = ` Your previous folder is still at "ORIGINAL.${targetName}".`; }
+    }
+    return { ok: false, error: String(err && err.message || err) + _restoreNote };
+  }
+}
+
+// Read raw bytes of a single file inside a common's files/ tree. Used by
+// the in-app text viewer (.txt/.md/.rtf/etc. that may live alongside wavs).
+// Path is validated via _resolveFilesPath to stay inside files/.
+function readCommonFileBytes(userData, uuid, subPath) {
+  if (!uuid || !subPath) throw new Error('Missing uuid or subPath');
+  const target = _resolveFilesPath(userData, uuid, subPath);
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+    throw new Error(`File not found: ${subPath}`);
+  }
+  return fs.readFileSync(target);
+}
+
+// Walk a common's tree to count files + sum bytes, excluding the
+// root-level meta.json (matches the content hash's scope). Same shape
+// as the entry-side helper; used both for stamping the content hash
+// and for the cheap-signal safety check.
+function _walkCommonContentSignals(commonDir) {
+  let fileCount = 0;
+  let totalBytes = 0;
+  const walk = (absDir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
+    catch { return; }
+    // The freshness signals and the per-file manifest must count the same set, or the
+    // signals validate a manifest describing something else. One predicate, shared.
+    const isContent = require('./soundFontFileHash').isContentFile;
+    for (const e of entries) {
+      const abs = path.join(absDir, e.name);
+      if (e.isDirectory()) {
+        walk(abs, relBase ? `${relBase}/${e.name}` : e.name);
+      } else if (e.isFile()) {
+        if (!isContent(e.name, relBase || '')) continue;
+        fileCount++;
+        try { totalBytes += fs.statSync(abs).size; } catch {}
+      }
+    }
+  };
+  walk(commonDir, '');
+  return { fileCount, totalBytes };
+}
+
+// Compute + persist the content hash for a common folder. Mirrors the
+// entry-side helper exactly: hash the tree, walk the signals, write
+// contentHash + contentFileCount + contentTotalBytes + contentHashedAt
+// onto meta. Clears the dirty flag on success.
+//
+// Field naming: contentFileCount / contentTotalBytes are the canonical
+// signal field names, shared with the sources + entries helpers so the
+// persistent-hash contract is identical across all three buckets.
+function recomputeCommonContentHash(userData, uuid) {
+  if (!uuid) return null;
+  const commonDir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(commonDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  const { hashItemDir } = require('./soundFontFileHash');
+  const hash = hashItemDir(commonDir);
+  if (!hash) return null;
+  // Per-file manifest beside the sources' and entries' ([B-327]): this is what
+  // lets buildIndex offer common content as link targets, so fonts and commons
+  // pool against each other in both directions. Refreshed here because this
+  // helper already runs at creation and whenever edits resolve their dirty
+  // flag - the same lifecycle the tree hash rides. A stale row is safe:
+  // findExisting re-hashes before ever handing out a link target.
+  try {
+    const fh = require('./soundFontFileHash');
+    const recs = fh.collectFileRecords(path.join(commonDir, 'files')) || [];
+    fh.writeFileHashManifest(
+      path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`), recs);
+  } catch {}
+  const { fileCount, totalBytes } = _walkCommonContentSignals(commonDir);
+  meta.contentHash = hash;
+  meta.contentFileCount = fileCount;
+  meta.contentTotalBytes = totalBytes;
+  meta.contentHashedAt = new Date().toISOString();
+  meta.contentHashDirty = false;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+  return hash;
+}
+
+// Rebuild a common folder from a directory of files, tied to a source that already
+// exists. [B-493]
+//
+// The restore counterpart to the customized-common half of a source export. It is NOT an
+// import: the source is already in the library, so nothing is created for it here, and the
+// restored folder points at the same immutable subtree the original did.
+//
+// Collisions take the app-wide underscore suffix rather than asking, the same convention
+// the entry restore uses - an archive brought back beside a surviving copy must land, not
+// stop and wait.
+function createCommonFromFolder(userData, { folderPath, name, sourceUuid, sourceSubPath,
+                                            metadata, provenance } = {}) {
+  if (!folderPath || !fs.existsSync(folderPath)) return { ok: false, error: 'Missing folder' };
+  const base = String(name || 'Common').trim() || 'Common';
+  let finalName = base;
+  for (let n = 2; nameInUse(userData, finalName); n++) finalName = `${base}_${n}`;
+  ensureCommonRoot(userData);
+  const uuid = crypto.randomUUID();
+  const dir = path.join(commonRoot(userData), uuid);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    _linkOrCopyDirRecursive(folderPath, path.join(dir, 'files'));
+    const _markers = _dropOurMarkers(path.join(dir, 'files'));
+    const extra = { ...(metadata || {}) };
+    delete extra.name;
+    const meta = {
+      schemaVersion: 1,
+      uuid,
+      name: finalName,
+      // The record's own history, so a round trip leaves no trace of the delete. Falls
+      // back to now when the archive carried none.
+      createdAt: (provenance && provenance.createdAt) || new Date().toISOString(),
+      importedFrom: 'Restored from source archive',
+      ...extra,
+      ...(sourceUuid ? { sourceUuid, sourceSubPath: sourceSubPath || '' } : {}),
+      ...(_markers.length ? { markerFiles: _markers } : {}),
+    };
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
+    try { recomputeCommonContentHash(userData, uuid); } catch {}
+    return { ok: true, uuid, name: finalName };
+  } catch (err) {
+    _cleanupPartial(dir);
+    return { ok: false, error: `Restore failed: ${err.message}` };
+  }
+}
+
+// Is this common folder different from the source subtree it came from? [B-493]
+//
+// A common folder is a working copy of a source, exactly as a font entry is; the only
+// difference is the metadata naming the subtree (`sourceSubPath` here, `candidatePath`
+// there). The comparison itself is `diffAgainstSource`, shared with the entry side.
+//
+// THE REFERENCE POINT IS THE STORED SOURCE, NOT THE SOURCE AS IT STANDS NOW. A stored
+// source archive is immutable, so this is a fixed comparison that cannot drift.
+//
+// NOTHING IS EXTRACTED AND NOTHING IS RE-HASHED. Both sides already keep per-file
+// manifests: the common's own under `.filehashes/commons`, and the source's covering
+// every file in the archive.
+//
+// Returns { ok, known, customized, added, removed, changed }. `known: false` means the
+// answer is unavailable - a missing manifest, no sourceSubPath - and a caller must show
+// NOTHING rather than guessing: a common wrongly flagged as the user's own work is worse
+// than an unflagged one.
+//
+// NO TAG IS WRITTEN. The entry side rides a "Customized" tag on the same determination;
+// commons carry no tags array at all (0 of 15 on a real library), so adding one is a UI
+// decision rather than a consequence of this reader.
+function getCommonCustomization(userData, uuid) {
+  const unknown = { ok: true, known: false, customized: false, added: 0, removed: 0, changed: 0 };
+  if (!uuid) return unknown;
+  const dir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(dir, 'meta.json');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return unknown; }
+  if (!meta || !meta.sourceUuid || meta.sourceSubPath == null) return unknown;
+
+  // FRESHNESS FIRST, against the disk rather than against the dirty flag. The flag only
+  // becomes true if a writer remembers to set it; getCommonContentHash compares the live
+  // file count and byte total against the stored ones and recomputes on any mismatch,
+  // which no addition or deletion can slip past. That also refreshes the per-file
+  // manifest this reads, since the recompute writes it.
+  try { getCommonContentHash(userData, uuid); } catch {}
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return unknown; }
+  if (!meta) return unknown;
+
+  // THE STAMP, so a list can afford to ask. Customization is a fact about the folder, so it
+  // is stored on the folder and keyed to the content hash it was derived from, which makes
+  // it self-invalidating. Without it the commons sidebar pays a full signal walk per row on
+  // every render - 15 rows of ~220 files is thousands of stats to paint a marker. Same shape
+  // and same reasoning as the entry side, which carries it for a 220-card grid.
+  // srcUuid is part of the key because re-pointing a common at a different source changes
+  // the comparison even when its own bytes did not.
+  const st = meta.customization;
+  // v2: a picture at the top of the folder no longer counts ([B-511]); the renderer reads the
+  // same number when it paints the sidebar from the stamp.
+  if (!meta.contentHashDirty && meta.contentHash && st && st.v === 2
+      && st.forHash === meta.contentHash && st.srcUuid === meta.sourceUuid) {
+    return { ok: true, known: true, customized: !!st.customized,
+             added: st.added | 0, removed: st.removed | 0, changed: st.changed | 0, cached: true };
+  }
+  // Persist a KNOWN answer only. An unknown usually means a manifest is missing and those
+  // get backfilled, so stamping one would make a recoverable gap permanent.
+  const stamp = (res) => {
+    try {
+      const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      m.customization = {
+        v: 2,
+        customized: res.customized, added: res.added, removed: res.removed, changed: res.changed,
+        forHash: m.contentHash || null, srcUuid: m.sourceUuid || null,
+        at: new Date().toISOString(),
+      };
+      fs.writeFileSync(metaPath, JSON.stringify(m, null, 2));
+    } catch {}
+    return res;
+  };
+
+  const fh = require('./soundFontFileHash');
+  const cm = fh.readFileHashManifest(
+    path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`));
+  if (!cm || !Array.isArray(cm.records)) return unknown;
+
+  // Two locations, the order the source layer uses: the breadcrumb beside the archive
+  // first, then the central store.
+  const sDir = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid);
+  const sm = fh.readFileHashManifest(path.join(sDir, '.jmt-source-manifest.json'))
+    || fh.readFileHashManifest(fh.fileHashManifestPath(userData, 'sources', meta.sourceUuid));
+  if (!sm || !Array.isArray(sm.records)) return unknown;
+
+  const d = fh.diffAgainstSource(cm.records, _sourceRecordsWithoutMarkers(sm.records, meta), meta.sourceSubPath);
+  if (!d.known) return unknown;
+  return stamp({ ok: true, known: true, customized: (d.added + d.removed + d.changed) > 0,
+                 added: d.added, removed: d.removed, changed: d.changed });
+}
+
+// [B-587] Each file's standing against the common's source, for its Files list. The font side's
+// comparison, on the common's own manifests. Returns { ok, known, files, sourceDirs }; known:false means no
+// source to compare with, and the caller shows no states.
+function getCommonFileStates(userData, uuid) {
+  const unknown = { ok: true, known: false, files: [] };
+  if (!uuid) return unknown;
+  const cust = getCommonCustomization(userData, uuid);
+  if (!cust || !cust.known) return unknown;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(path.join(commonRoot(userData), uuid, 'meta.json'), 'utf8')); }
+  catch { return unknown; }
+  const fh = require('./soundFontFileHash');
+  const cm = fh.readFileHashManifest(path.join(userData, 'soundFonts', '.filehashes', 'commons', `${uuid}.json`));
+  const sDir = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid);
+  const sm = fh.readFileHashManifest(path.join(sDir, '.jmt-source-manifest.json'))
+    || fh.readFileHashManifest(fh.fileHashManifestPath(userData, 'sources', meta.sourceUuid));
+  if (!cm || !sm || !Array.isArray(cm.records) || !Array.isArray(sm.records)) return unknown;
+  const inSource = (k) => fs.existsSync(path.join(sDir, 'source', ...(meta.sourceSubPath ? [meta.sourceSubPath] : []), ...k.split('/')));
+  const st = fh.fileStatesAgainstSource(cm.records, _sourceRecordsWithoutMarkers(sm.records, meta), meta.sourceSubPath, { inSource });
+  if (!st) return unknown;
+  return { ok: true, known: true, files: st.files, sourceDirs: st.sourceDirs };
+}
+
+// [B-587] Put a file back from the common's source, linked as its other files are, at the same place.
+function restoreCommonFileFromSource(userData, uuid, relPath) {
+  const root = path.join(commonRoot(userData), String(uuid || ''));
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(path.join(root, 'meta.json'), 'utf8')); } catch { return { ok: false, error: 'Common folder not found' }; }
+  const rel = String(relPath || '').replace(/\\/g, '/');
+  if (!rel || rel.split('/').some(p => p === '..' || p === '')) return { ok: false, error: 'Bad path' };
+  if (!meta.sourceUuid) return { ok: false, error: 'This common folder has no source to restore from' };
+  const src = path.join(userData, 'soundFonts', 'sources', meta.sourceUuid, 'source',
+    ...(meta.sourceSubPath ? [meta.sourceSubPath] : []), ...rel.split('/'));
+  if (!fs.existsSync(src)) return { ok: false, error: 'The source does not have this file' };
+  const dest = _resolveFilesPath(userData, uuid, rel);
+  if (fs.existsSync(dest)) return { ok: false, error: 'A file is already there' };
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    try { fs.linkSync(src, dest); } catch { fs.copyFileSync(src, dest); }
+    markCommonContentDirty(userData, uuid);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+// Mark a common folder as content-modified — cheap meta.json write of
+// one boolean. Set by every content-modifying op so the eventual
+// rehash knows to recompute. Many ops collapse into one rehash.
+function markCommonContentDirty(userData, uuid) {
+  if (!uuid) return;
+  const metaPath = path.join(commonRoot(userData), uuid, 'meta.json');
+  if (!fs.existsSync(metaPath)) return;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return; }
+  if (meta.contentHashDirty) return;
+  meta.contentHashDirty = true;
+  try { fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2)); }
+  catch {}
+}
+
+// Called from the renderer when a common-folder detail modal closes —
+// triggers a batched rehash IF the common is flagged dirty. No-op
+// otherwise.
+function resolveCommonContentDirty(userData, uuid) {
+  if (!uuid) return null;
+  const metaPath = path.join(commonRoot(userData), uuid, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty) return null;
+  return recomputeCommonContentHash(userData, uuid);
+}
+
+// Trusted read of a common's content hash. Stored hash trusted when
+// (a) meta.contentHashDirty is not set AND (b) the cheap-signal walk
+// matches stored fileCount + totalBytes. Either failing forces a
+// recompute. The dirty flag is the primary signal; the cheap-signal
+// walk is the backup catch.
+function getCommonContentHash(userData, uuid) {
+  if (!uuid) return null;
+  const commonDir = path.join(commonRoot(userData), uuid);
+  const metaPath = path.join(commonDir, 'meta.json');
+  if (!fs.existsSync(metaPath)) return null;
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+  catch { return null; }
+  if (!meta.contentHashDirty
+      && meta.contentHash
+      && typeof meta.contentFileCount === 'number'
+      && typeof meta.contentTotalBytes === 'number') {
+    const live = _walkCommonContentSignals(commonDir);
+    if (live.fileCount === meta.contentFileCount && live.totalBytes === meta.contentTotalBytes) {
+      return meta.contentHash;
+    }
+  }
+  return recomputeCommonContentHash(userData, uuid);
+}
+
+// [B-398] Measurement only: markAsync/mark return the ORIGINAL function when the probe is off.
+const _sp = require('./stallProbe');
+module.exports = {
+  addCommonAlias,
+  forgetCommonAlias,
+  samePackCommon,
+  commonRoot,
+  ensureCommonRoot,
+  listCommons,
+  getCommon,
+  nameInUse,
+  nextNumberedName,
+  importCommonFromFolder,
+  importCommonFromZip,
+  classifyIncomingCommon,
+  scanIncomingCommon,
+  inspectIncomingCommonZip,
+  inspectIncomingCommonFolder,
+  renameCommon,
+  duplicateCommon,
+  deleteCommon,
+  getCommonCustomization,
+  getCommonFileStates,
+  restoreCommonFileFromSource,
+  createCommonFromFolder,
+  setCommonGroup,
+  setCommonGroupMany,
+  setCommonDescription,
+  renameCommonGroup,
+  deleteCommonGroup,
+  listCommonFiles,
+  addFilesToCommon,
+  commonSoundsHeld,
+  renameCommonFile,
+  deleteCommonFile,
+  createCommonSubfolder,
+  copyCommonFiles: _sp.mark('copyCommonFiles', copyCommonFiles),
+  moveCommonFiles,
+  readCommonFileBytes,
+  commonFolderExistsAt,
+  exportCommonAsZip,
+  exportCommonToFolder: _sp.markAsync('copy:common', exportCommonToFolder),
+  writeCommonReadme,
+  readCommonMarkerAt,
+  commonMatchesAt: _sp.markAsync('compare:common', commonMatchesAt),
+  recomputeCommonContentHash,
+  getCommonContentHash,
+  markCommonContentDirty,
+  resolveCommonContentDirty,
+};

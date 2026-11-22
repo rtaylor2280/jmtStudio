@@ -22,11 +22,44 @@ const crypto  = require('crypto');
 const path    = require('path');
 const fs      = require('fs');
 const { app } = require('electron');
+// Safe to import: coreVersions pulls in nothing from this module, so there is no cycle, and reusing
+// its version normalisation beats a second copy of the two-part / three-part rule living here.
+const coreVersions = require('./coreVersions');
 
-// Must stay in sync with CORE_VERSION in toolchain.js
-const CORE_VERSION = '4.6.0';
+// The core version is NOT a constant here any more, and deliberately not
+// imported from toolchain either.
+//
+// It used to be a copy of toolchain's constant with a comment asking whoever
+// edited one to remember the other. That was survivable while exactly one core
+// was ever installed. Now the core is chosen per ProffieOS version, and a cache
+// key computed from a stale copy of the version is not a cosmetic bug: two
+// builds against different cores collide on one key and the second one gets
+// handed the first one's binary. A stale binary flashed to a board is the worst
+// outcome this app has.
+//
+// So every entry point that needs it takes it as an explicit argument and
+// refuses to guess. Importing toolchain would also be a require cycle, since
+// toolchain already imports this module.
 
 const MAX_ENTRIES_PER_LINEAGE = 5;
+
+// Identifies WHICH algorithm produced an entry's configHash. Stamped into metadata.json on write
+// and checked by evictStaleHashEntries() on launch: an entry keyed by a different algorithm can
+// never be hit again, so it is provably dead and safe to delete.
+//
+// BUMP THIS whenever computeConfigHash's output changes for the same input — including changes to
+// stripCommentsForHash, normalizeForHash, or computeRelevantStylesContent. Forgetting to bump does
+// not corrupt anything; it just leaves unreachable entries occupying disk until the per-lineage cap
+// pushes them out, which is the exact condition this field exists to end.
+//
+//   1 — pre-1.8: raw text with only `// @jmt:` lines removed
+//   2 — 1.8: comments stripped and whitespace normalised, on both config and styles
+//
+// This is also why legacy-hash MIGRATION was deliberately not built. Migrating meant renaming
+// directories on the cache LOOKUP path — a write inside the one function that decides whether to
+// trust a prebuilt binary. Stamping the version instead gets the cleanup half with no such risk,
+// and every future hash change becomes self-cleaning rather than a one-off chore.
+const CONFIG_HASH_VERSION = 2;
 
 // ── Paths ──────────────────────────────────────────────
 
@@ -51,15 +84,34 @@ function getBuildOutputPath() {
 // store and this file stays a small, single-purpose flash safety net.
 const BUILD_PROVENANCE_FILE = '_jmt_build_meta.json';
 
-function writeBuildProvenance(buildOutputPath, proffieOSHash) {
+function writeBuildProvenance(buildOutputPath, proffieOSHash, configHash = null, buildPkgHash = null) {
   try {
     fs.mkdirSync(buildOutputPath, { recursive: true });
     fs.writeFileSync(
       path.join(buildOutputPath, BUILD_PROVENANCE_FILE),
-      JSON.stringify({ proffieOSHash, writtenAt: new Date().toISOString() }, null, 2),
+      JSON.stringify({ proffieOSHash, configHash, buildPkgHash,
+                       writtenAt: new Date().toISOString() }, null, 2),
       'utf8'
     );
   } catch { /* sidecar is advisory — failure shouldn't abort a successful compile */ }
+}
+
+/**
+ * Does the build sitting in build-output belong to THIS config and these build settings?
+ *
+ * The build folder is a real place holding a real build, and until 2026-08-23 nothing could say
+ * whose. That gap cost a flash: a compile succeeded, the cache save failed, and the next cache
+ * lookup missed - so the app cleared its belief in a build that was sitting right there, valid, and
+ * refused to flash it. A miss means "nothing is STORED", which says nothing about the folder.
+ *
+ * Found in one sentence: "shouldn't the build folder already be populated at this point
+ * and not need cached version? sure it couldn't save it, but it should be still available at the
+ * moment right?" Yes. This is how the app can now answer that instead of guessing. (B-216)
+ */
+function buildOutputMatches(configHash, buildPkgHash) {
+  const prov = readBuildProvenance(getBuildOutputPath());
+  if (!prov || !prov.configHash || !prov.buildPkgHash) return false;
+  return prov.configHash === configHash && prov.buildPkgHash === buildPkgHash;
 }
 
 function readBuildProvenance(buildOutputPath) {
@@ -82,6 +134,16 @@ function readBuildProvenance(buildOutputPath) {
  */
 function computeRelevantStylesContent(configContent, stylesContent) {
   if (!stylesContent) return '';
+
+  // Strip comments here too, for three reasons beyond making comment edits free:
+  //  1. The `usingRe` anchor below requires the line to END in `;`. A trailing `// note` broke
+  //     that, so the style silently dropped out of the hash entirely — an edit to it then would
+  //     not have invalidated the cache. Stripping makes MORE usings parse, never fewer.
+  //  2. Style Library output carries inline /* … */ inside the expression, so the captured code
+  //     was carrying comment text into the hash.
+  //  3. Transitive dependency resolution below tests `\bName\b` against captured code. A comment
+  //     merely MENTIONING another style's name created a false dependency.
+  stylesContent = normalizeForHash(stripCommentsForHash(stylesContent));
 
   // Parse all `using Name = Code;` from the styles file (compacted single-line form)
   const usingsMap = {};
@@ -118,20 +180,83 @@ function computeRelevantStylesContent(configContent, stylesContent) {
 }
 
 /**
+ * Removes C and C++ comments, preserving string literals.
+ *
+ * This MUST be a single left-to-right state machine, NOT sequential regexes. A block-comment
+ * regex run over raw text first mistakes a decorative banner like `//*******` for a block-comment
+ * OPEN (its `//` + `*` contains the substring `/*`) and swallows every real line up to the next
+ * `*​/`. Found 2026-07-30 on wild configs 2880_2 / 3011_20 / 3184_5 while building the precompile
+ * lint; it never surfaced on in-house configs because none of them use `//*` banners. Users do.
+ * String literals are copied verbatim so a `/*` inside "..." stays inert.
+ *
+ * Comments become spaces and newlines are preserved, so the caller still sees line structure.
+ * normalizeForHash() is what actually collapses that away.
+ */
+function stripCommentsForHash(src) {
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === '"') {                       // string literal — copy verbatim
+      out += c; i++;
+      while (i < n && src[i] !== '"') {
+        if (src[i] === '\\' && i + 1 < n) { out += src[i] + src[i + 1]; i += 2; continue; }
+        out += src[i]; i++;
+      }
+      if (i < n) { out += src[i]; i++; }
+    } else if (c === '/' && d === '/') {   // line comment — blank to EOL, keep the newline
+      while (i < n && src[i] !== '\n') { out += ' '; i++; }
+    } else if (c === '/' && d === '*') {   // block comment — blank until close, keep newlines
+      out += '  '; i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { out += src[i] === '\n' ? '\n' : ' '; i++; }
+      if (i < n) { out += '  '; i += 2; }
+    } else { out += c; i++; }
+  }
+  return out;
+}
+
+/**
+ * Collapses whitespace so formatting-only edits hash identically.
+ *
+ * Stripping alone achieves nothing: comments are blanked TO SPACES, so a comment of a different
+ * length still leaves different whitespace behind and the hash still moves. This is the half that
+ * makes the transform do its job.
+ *
+ * Blank lines are dropped, which changes line numbering. That is safe here and was verified rather
+ * than assumed (2026-08-07): every __LINE__ in ProffieOS lives in its own headers (common.h,
+ * looper.h, current_preset.h, …), and each file carries its own __LINE__, so the config's line
+ * count cannot shift any of them. The only casualty is line numbers in compiler diagnostics, which
+ * are not the binary.
+ */
+function normalizeForHash(text) {
+  return text
+    .split('\n')
+    .map(l => l.replace(/[ \t]+/g, ' ').trim())
+    .filter(l => l !== '')
+    .join('\n');
+}
+
+/**
  * Computes a stable hash of config content.
  * Strips @jmt: metadata lines before hashing — timestamp/board changes
  * on save do not represent a meaningful config change.
+ * Comments and formatting are stripped too: they cannot reach codegen, so an edit to one must not
+ * cost a full recompile. Note this makes the hash COARSER, which is the risky direction — a broken
+ * stripper means two different configs collide and Studio restores a binary that is not the user's
+ * source. That is why the stripper above is the one already hardened on real user configs.
  * Only styles referenced by the config (and their helpers) contribute to the hash.
  */
 function computeConfigHash(content, stylesContent = '') {
-  const stripped = content
-    .split('\n')
-    .filter(l => {
-      const t = l.trim();
-      return !t.startsWith('// @jmt:') && t !== '// Jedi Master Tech';
-    })
-    .join('\n')
-    .trim();
+  const stripped = normalizeForHash(stripCommentsForHash(
+    content
+      .split('\n')
+      .filter(l => {
+        const t = l.trim();
+        return !t.startsWith('// @jmt:') && t !== '// Jedi Master Tech';
+      })
+      .join('\n')
+  ));
   const h = crypto.createHash('sha256').update(stripped, 'utf8');
   // Only factor in styles if this config actually includes my_styles.h
   if (stylesContent && /^\s*#include\s+"[^"]*my_styles\.h"\s*$/m.test(stripped)) {
@@ -145,8 +270,15 @@ function computeConfigHash(content, stylesContent = '') {
  * Computes a stable hash of the build package identity.
  * Any change to FQBN, USB mode, core version, or ProffieOS source produces a new hash.
  */
-function computeBuildPackageHash(fqbn, usb, proffieOSHash) {
-  const identity = `fqbn=${fqbn}|usb=${usb}|core=${CORE_VERSION}|os=${proffieOSHash || ''}`;
+function computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion) {
+  // Throwing beats defaulting. A missing core version would silently produce a
+  // key that two different cores both match, and the symptom would be a stale
+  // binary on someone's board rather than an error anyone could trace back
+  // here. Loud and early is the only safe failure for a cache identity.
+  if (!coreVersion) {
+    throw new Error('computeBuildPackageHash requires an explicit coreVersion');
+  }
+  const identity = `fqbn=${fqbn}|usb=${usb}|core=${coreVersion}|os=${proffieOSHash || ''}`;
   return crypto.createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 16);
 }
 
@@ -162,9 +294,21 @@ function extractConfigId(content) {
 // ── Eviction ───────────────────────────────────────────
 
 /**
- * Reads all configHash subdirectories under a buildPkg directory,
- * groups them by configId (null = legacy), and removes the oldest
- * entries beyond MAX_ENTRIES_PER_LINEAGE within each group.
+ * Keeps each config's MAX_ENTRIES_PER_LINEAGE most recent builds inside one buildPkg directory.
+ *
+ * EVICTION RELEASES A CLAIM; IT DELETES ONLY WHAT NOBODY CLAIMS. [B-209]
+ * One entry can serve several configs (configIds). Counted under its creator alone, config A's
+ * sixth build deleted an entry config B still relied on, and B silently paid a full rebuild for
+ * something that was on disk. Now an entry past a config's limit loses that config's id, and the
+ * directory goes only when its configIds is empty. A shared build counts in every claimant's
+ * lineage, so each config's five are its own five.
+ *
+ * "Empty" must mean every owner released it, not that none was ever recorded. Configs never saved
+ * by JMT Studio have no config_id, so their entries have a null creator and an empty array from
+ * birth. Those keep the old rule, a shared keep-five by age, and never take the release path.
+ *
+ * Age is when the build was last USED (lastUsedAt, stamped by adoptEntry), falling back to when it
+ * was compiled. A build hit this morning is not the oldest thing a config has.
  */
 function evictOldEntries(buildPkgHash) {
   const pkgDir = path.join(getCacheRoot(), buildPkgHash);
@@ -178,32 +322,44 @@ function evictOldEntries(buildPkgHash) {
     if (!fs.existsSync(metaPath)) continue;
     try {
       const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      const creator = meta.configId || null;
+      // Entries from before configIds existed seed it from the creator.
+      const claims = Array.isArray(meta.configIds) ? meta.configIds.filter(Boolean)
+                   : (creator ? [creator] : []);
       entries.push({
-        configHash: entry.name,
-        configId:   meta.configId || null,
-        compiledAt: meta.compiledAt || '',
-        dir:        path.join(pkgDir, entry.name),
+        meta, metaPath, creator, claims,
+        released: false,
+        age:  meta.lastUsedAt || meta.compiledAt || '',
+        dir:  path.join(pkgDir, entry.name),
       });
     } catch {
       // Corrupt metadata — skip
     }
   }
+  const newestFirst = (a, b) => (b.age > a.age ? 1 : b.age < a.age ? -1 : 0);
+  const remove = (e) => { try { fs.rmSync(e.dir, { recursive: true, force: true }); } catch {} };
 
-  // Group by configId (null entries share a single legacy group)
-  const groups = new Map();
-  for (const e of entries) {
-    const key = e.configId || '__legacy__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(e);
-  }
+  // Never owned: the old shared keep-five by age.
+  const unowned = entries.filter(e => !e.creator).sort(newestFirst);
+  for (const e of unowned.slice(MAX_ENTRIES_PER_LINEAGE)) remove(e);
 
-  // Within each group: sort newest-first, delete beyond the limit
-  for (const group of groups.values()) {
-    group.sort((a, b) => (b.compiledAt > a.compiledAt ? 1 : -1)); // newest first
-    const toDelete = group.slice(MAX_ENTRIES_PER_LINEAGE);
-    for (const e of toDelete) {
-      try { fs.rmSync(e.dir, { recursive: true, force: true }); } catch {}
+  // Owned: each claimant releases what falls past its own limit.
+  const owned = entries.filter(e => e.creator);
+  const claimants = new Set(owned.flatMap(e => e.claims));
+  for (const id of claimants) {
+    const lineage = owned.filter(e => e.claims.includes(id)).sort(newestFirst);
+    for (const e of lineage.slice(MAX_ENTRIES_PER_LINEAGE)) {
+      e.claims = e.claims.filter(c => c !== id);
+      e.released = true;
     }
+  }
+  for (const e of owned) {
+    if (!e.claims.length) { remove(e); continue; }
+    if (!e.released) continue;
+    try {
+      e.meta.configIds = e.claims;
+      fs.writeFileSync(e.metaPath, JSON.stringify(e.meta, null, 2));
+    } catch { /* bookkeeping must never fail a build */ }
   }
 }
 
@@ -221,6 +377,208 @@ function startupEviction() {
       }
     }
   } catch {}
+}
+
+/**
+ * Deletes individual cache entries whose configHash was produced by a superseded algorithm.
+ *
+ * Companion to evictOrphanedBuildPkgs, and it covers the case that one cannot see: when the hash
+ * function changes, the entries go dead but their buildPkg directory stays perfectly alive (the OS
+ * did not change, only how configs are keyed). Nothing else reclaims them — the per-lineage cap
+ * only pushes them out once six newer builds of the SAME configId exist, so a rarely-compiled
+ * config keeps its dead entry forever.
+ *
+ * Same exactness argument as the orphan sweep: an entry keyed by a different algorithm can never
+ * be produced by a current lookup, so deleting it cannot cost a real hit.
+ *
+ * A missing `configHashVersion` means the entry predates the stamp, i.e. version 1. If a future
+ * regression stopped WRITING the field, every entry would be re-declared stale on each launch —
+ * wasteful, but never incorrect: the worst outcome is recompiling, not restoring a wrong binary.
+ *
+ * @returns {{removed: number, bytes: number}}
+ */
+function evictStaleHashEntries() {
+  const result = { removed: 0, bytes: 0 };
+  const cacheRoot = getCacheRoot();
+  if (!fs.existsSync(cacheRoot)) return result;
+
+  let pkgs;
+  try { pkgs = fs.readdirSync(cacheRoot, { withFileTypes: true }); } catch { return result; }
+
+  for (const pkg of pkgs) {
+    if (!pkg.isDirectory()) continue;
+    const pkgDir = path.join(cacheRoot, pkg.name);
+    let entries;
+    try { entries = fs.readdirSync(pkgDir, { withFileTypes: true }); } catch { continue; }
+
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const entryDir = path.join(pkgDir, e.name);
+      const metaPath = path.join(entryDir, 'metadata.json');
+
+      let version;
+      try {
+        if (!fs.existsSync(metaPath)) continue;   // unidentifiable -> leave alone
+        version = JSON.parse(fs.readFileSync(metaPath, 'utf8')).configHashVersion || 1;
+      } catch { continue; }
+
+      if (version === CONFIG_HASH_VERSION) continue;
+
+      let bytes = 0;
+      try {
+        for (const f of fs.readdirSync(entryDir, { withFileTypes: true })) {
+          if (f.isFile()) { try { bytes += fs.statSync(path.join(entryDir, f.name)).size; } catch {} }
+        }
+        fs.rmSync(entryDir, { recursive: true, force: true });
+        result.removed++;
+        result.bytes += bytes;
+      } catch {}
+    }
+
+    // Directory left with nothing but its own manifest is dead weight; drop it too.
+    try {
+      const left = fs.readdirSync(pkgDir, { withFileTypes: true });
+      if (!left.some(x => x.isDirectory())) fs.rmSync(pkgDir, { recursive: true, force: true });
+    } catch {}
+  }
+
+  return result;
+}
+
+/**
+ * Deletes whole buildPkg directories whose proffieOSHash no longer belongs to any installed OS
+ * version. Those entries are provably unreachable: buildPkgHash is derived from that OS hash, so
+ * if no installed version hashes to it, no lookup can ever produce that directory again.
+ *
+ * This exists because eviction was DEPTH-limited but not BREADTH-limited. MAX_ENTRIES_PER_LINEAGE
+ * caps entries per configId lineage inside a directory; nothing capped the number of directories.
+ * A new one is minted by a new OS version, a board change, a USB-mode change, and every JMT add-on
+ * update — so the cache grew without bound and the dead weight was invisible. Measured on a dev
+ * profile 2026-08-07: 1.6 GB across 17 buildPkg directories, most of them unreachable.
+ *
+ * Exactness is the point. A size cap or an age cap can delete a build the user is about to want;
+ * an orphaned OS hash cannot be hit by definition, so this can never cost a real hit.
+ *
+ * The same argument applies to the CORE, which became a second way a directory can be stranded once
+ * the core stopped being hardcoded. buildPkgHash is derived from the core version too, so a
+ * directory built with a core that is no longer installed can never be produced by a lookup again.
+ * Removing a toolchain used to leave its builds behind permanently: unusable, invisible, and
+ * occupying space. An unreachable cached compile should always be reclaimed — that is already the
+ * rule for the hash algorithm and the OS version, and the core is simply the third case.
+ *
+ * Note the asymmetry with the toolchain itself, which is deliberate. Reclaiming an unreachable BUILD
+ * costs nothing, so it happens automatically. Removing the TOOLS costs a download that may be
+ * metered or unavailable, so that stays user-initiated and is never done here.
+ *
+ * PROTECTED CORES IS WIDER THAN "INSTALLED", AND THE DIFFERENCE MATTERS.
+ *
+ * arduino-cli holds exactly ONE version of a platform per data directory - installing 3.6 uninstalls
+ * 4.6 - so "installed" is a moving target that says nothing about intent. Keyed on that alone, this
+ * sweep would delete every 4.6 build the moment somebody switched to 3.6, which is precisely the
+ * switch-back-and-it-still-works property the cache exists to provide.
+ *
+ * So a core is protected if it is available ANYWHERE (the user's system tree or any of our per-core
+ * trees) OR still named by an installed ProffieOS version. The second half covers the case where a
+ * core vanishes outside the app: another tool upgrades the system 2.2 away while a version is still
+ * pinned to it. Intent survives the disappearance, so the builds are kept and the user is offered
+ * the download. Only when nothing has it and nothing wants it are the builds provably dead.
+ *
+ * @param {Set<string>|string[]} validOsHashes  every hash an installed version currently produces
+ * @param {Set<string>|string[]} protectedCores every core available anywhere or referenced by a version
+ * @returns {{removed: string[], bytes: number, skipped: string|null, coreCheckSkipped: boolean}}
+ */
+function evictOrphanedBuildPkgs(validOsHashes, protectedCores) {
+  const valid = validOsHashes instanceof Set ? validOsHashes : new Set(validOsHashes || []);
+  const cores = new Set(
+    Array.from(protectedCores instanceof Set ? protectedCores : (protectedCores || []))
+      .map(coreVersions.normalizeVersion)
+  );
+  // `removed` counts DIRECTORIES; `builds` counts what the user counts.
+  //
+  // A buildPkg directory holds one entry per config compiled against that
+  // fqbn/usb/core/os combination, so removing one directory can remove several
+  // builds. The log said "removed 1 orphaned build package(s)" while the Cached
+  // Builds row dropped from 9 to 7 - both true, about different units, and
+  // together they read as a miscount. The user's unit is the build, and nothing
+  // outside this file has ever heard of a package. (2026-08-15)
+  const result = { removed: [], builds: 0, bytes: 0, skipped: null, coreCheckSkipped: false };
+
+  // THE GUARD THAT MATTERS: an empty set means "no installed version hashes to anything", which is
+  // never true in practice — it means enumeration or hashing failed. Proceeding would read every
+  // directory as orphaned and delete the entire cache. Fail closed.
+  if (valid.size === 0) { result.skipped = 'no valid OS hashes supplied'; return result; }
+
+  // Same guard, narrower blast radius. An empty set means enumeration failed, not that no core is
+  // protected - the app could not have compiled anything without one, and every installed ProffieOS
+  // version names one. Skip only the core rule rather than the whole sweep, so a core-side failure
+  // cannot disable OS-orphan cleanup that is working perfectly well.
+  if (cores.size === 0) result.coreCheckSkipped = true;
+
+  const cacheRoot = getCacheRoot();
+  if (!fs.existsSync(cacheRoot)) return result;
+
+  let dirs;
+  try { dirs = fs.readdirSync(cacheRoot, { withFileTypes: true }); }
+  catch (e) { result.skipped = e.message; return result; }
+
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue;
+    const pkgDir = path.join(cacheRoot, d.name);
+
+    // Read the key components from any entry inside. Every entry under one buildPkg shares them by
+    // construction, since the directory name is their hash. Unreadable or empty -> leave it alone;
+    // we do not delete what we cannot identify.
+    let osHash = null, entryCore = null;
+    try {
+      for (const sub of fs.readdirSync(pkgDir, { withFileTypes: true })) {
+        if (!sub.isDirectory()) continue;
+        const metaPath = path.join(pkgDir, sub.name, 'metadata.json');
+        if (!fs.existsSync(metaPath)) continue;
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        osHash    = meta.proffieOSHash || null;
+        entryCore = meta.coreVersion   || null;
+        if (osHash) break;
+      }
+    } catch { continue; }
+
+    if (!osHash) continue;
+
+    // ORPHANED means any component of buildPkgHash can no longer be produced, so no lookup can ever
+    // land here again. The key is fqbn|usb|core|os. fqbn and usb are always available - every board
+    // and USB mode is declared by whatever core is installed - so the two that can actually vanish
+    // are the OS version and the core. Both are checked here. If a component is ever added to the
+    // key, it needs a check added here too, or the directories it strands become invisible dead
+    // weight exactly as the core's did.
+    const osGone   = !valid.has(osHash);
+    // A missing coreVersion is a pre-1.8 entry, not evidence of a vanished core. Never inferred as
+    // orphaned; the stale-hash sweep is what reclaims those.
+    const coreGone = !result.coreCheckSkipped && !!entryCore &&
+                     !cores.has(coreVersions.normalizeVersion(entryCore));
+
+    if (!osGone && !coreGone) continue;
+
+    let bytes = 0;
+    try {
+      (function measure(dir) {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) measure(full);
+          else { try { bytes += fs.statSync(full).size; } catch {} }
+        }
+      })(pkgDir);
+      // Counted BEFORE the delete, from the same walk that measured the bytes.
+      let entries = 0;
+      for (const e of fs.readdirSync(pkgDir, { withFileTypes: true })) {
+        if (e.isDirectory() && fs.existsSync(path.join(pkgDir, e.name, 'metadata.json'))) entries++;
+      }
+      fs.rmSync(pkgDir, { recursive: true, force: true });
+      result.removed.push(d.name);
+      result.builds += entries;
+      result.bytes += bytes;
+    } catch {}
+  }
+
+  return result;
 }
 
 // ── Cache write ────────────────────────────────────────
@@ -242,7 +600,7 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
       buildPkgHash,
       fqbn:        meta.fqbn,
       usb:         meta.usb,
-      coreVersion: CORE_VERSION,
+      coreVersion: meta.coreVersion,
     }, null, 2), 'utf8');
   }
 
@@ -261,14 +619,35 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
   // Write metadata
   const metadata = {
     configHash,
+    // Which algorithm produced configHash. Without this an entry keyed by an older algorithm is
+    // indistinguishable from a live one, so it can only be reclaimed by aging out — a config
+    // compiled twice a year would hold its dead entry indefinitely.
+    configHashVersion: CONFIG_HASH_VERSION,
     buildPkgHash,
     configId:      meta.configId || null,
+    // ONE ENTRY CAN BELONG TO SEVERAL CONFIGS. computeConfigHash strips comments, and
+    // the @jmt: markers - including config_id itself - are comments. So two configs
+    // that differ only in their metadata block hash identically and share this entry.
+    // That is desirable: a cosmetic edit must not cost a rebuild. What was wrong is
+    // that the entry could only name ONE of them, and the second config never wrote
+    // anything (it takes the cache hit), so its dependence was invisible and could
+    // never be reconstructed afterwards.
+    // `configId` above is kept as the CREATOR and for entries written before this.
+    // (2026-08-19: "we need 1 to many and easiest way is to save the config ids
+    // as an array. How we decide to work with those can be later.") Eviction reads it:
+    // each config releases its own claim, and the entry goes when none is left. [B-209]
+    configIds:     meta.configId ? [meta.configId] : [],
     fqbn:          meta.fqbn,
     usb:           meta.usb,
     proffieOSHash: meta.proffieOSHash,
-    coreVersion:   CORE_VERSION,
+    coreVersion:   meta.coreVersion,
     compiledAt:    meta.compiledAt,
     toolVersion:   meta.toolVersion,
+    // How long this build actually took. Stored ON the entry rather than derived later, so the
+    // Clear-cache warning can state what the user would really pay instead of guessing. An invented
+    // "10 to 15 minutes" is wrong by 25x at both ends of the real range — a light config builds in
+    // about 70 seconds, a heavy one in over half an hour. Null for entries written before this.
+    compileDurationMs: meta.compileDurationMs ?? null,
   };
   fs.writeFileSync(path.join(cacheDir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
 
@@ -276,7 +655,7 @@ function saveToCache(buildOutputPath, configHash, buildPkgHash, meta) {
   // to be sent matches the current OS source state.
   writeBuildProvenance(buildOutputPath, meta.proffieOSHash);
 
-  // Evict oldest entries beyond MAX_ENTRIES_PER_LINEAGE for this configId
+  // Release this directory's claims beyond MAX_ENTRIES_PER_LINEAGE per config
   evictOldEntries(buildPkgHash);
 
   return { ok: true, cacheDir };
@@ -296,6 +675,7 @@ function lookupCache(configHash, buildPkgHash) {
   try {
     const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     if (metadata.configHash !== configHash || metadata.buildPkgHash !== buildPkgHash) return null;
+    if (!_jmtEntryGenuine(cacheDir, metadata, metaPath)) return null;
     return { cacheDir, metadata };
   } catch {
     return null;
@@ -303,29 +683,65 @@ function lookupCache(configHash, buildPkgHash) {
 }
 
 /**
+ * A build filed under a JMT plugin must have linked the JMT plugin's library [B-672].
+ *
+ * The key records the plugin REQUESTED. On 2026-11-13 a "4.6.0 JMT" build that had linked
+ * Arduino15's stock library (the B-668 isolation bug) sat under the JMT key and was flashed as JMT
+ * firmware. The build's own map file names the library it linked, so it is read once, and the
+ * verdict is stamped on the entry so the next lookup (they run while typing) costs nothing. An entry
+ * that fails, or has no map to read, is a miss: the compile that follows replaces it.
+ */
+function _jmtEntryGenuine(cacheDir, metadata, metaPath) {
+  if (!/-jmt$/.test(String(metadata.coreVersion || ''))) return true;
+  if (metadata.jmtLibLinked === true) return true;
+  let ok = false;
+  try {
+    const map = fs.readdirSync(cacheDir, { recursive: true }).find((f) => /\.map$/i.test(String(f)));
+    if (map) {
+      const text = fs.readFileSync(path.join(cacheDir, String(map)), 'utf8');
+      const lib = /^.*libstm32l4\d+\.a.*$/m.exec(text);
+      ok = !!lib && /[\\/]\d+\.\d+\.\d+-jmt[\\/]/i.test(lib[0]);
+    }
+  } catch { ok = false; }
+  if (ok) {
+    try { metadata.jmtLibLinked = true; fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2)); } catch {}
+  }
+  return ok;
+}
+
+/**
  * Restores a cached build to the build output directory.
  * Returns { ok, buildPath, metadata } on hit, or { ok: false } on miss.
  */
-function restoreToOutput(configHash, buildPkgHash) {
+
+
+/**
+ * Records that a config relies on an already-cached build, WITHOUT restoring it.
+ *
+ * Save As is the case this exists for. The copy inherits a build that is already
+ * on disk and already flashable, so it depends on that entry from the instant it
+ * is written - but it changes no build input, so no cache check fires and the
+ * dependence is never recorded. Running a full restore just to append one field
+ * would re-copy the entire build tree to change a string.
+ *
+ * Returns true only when an entry existed and now names this config.
+ */
+function claimEntry(configHash, buildPkgHash, configId) {
+  if (!configId) return false;
   const entry = lookupCache(configHash, buildPkgHash);
-  if (!entry) return { ok: false };
-
-  const buildOutputPath = getBuildOutputPath();
-  fs.mkdirSync(buildOutputPath, { recursive: true });
-
-  for (const f of fs.readdirSync(entry.cacheDir, { withFileTypes: true })) {
-    if (f.isFile() && f.name !== 'metadata.json') {
-      fs.copyFileSync(
-        path.join(entry.cacheDir, f.name),
-        path.join(buildOutputPath, f.name)
-      );
+  if (!entry) return false;
+  try {
+    if (!Array.isArray(entry.metadata.configIds)) {
+      entry.metadata.configIds = entry.metadata.configId ? [entry.metadata.configId] : [];
     }
-  }
-
-  // Restored build's provenance comes from the cache entry's metadata.
-  writeBuildProvenance(buildOutputPath, entry.metadata.proffieOSHash);
-
-  return { ok: true, buildPath: buildOutputPath, metadata: entry.metadata };
+    if (entry.metadata.configIds.includes(configId)) return true;
+    entry.metadata.configIds.push(configId);
+    fs.writeFileSync(
+      path.join(entry.cacheDir, 'metadata.json'),
+      JSON.stringify(entry.metadata, null, 2)
+    );
+    return true;
+  } catch { return false; }
 }
 
 // ── Public API ─────────────────────────────────────────
@@ -334,33 +750,130 @@ function restoreToOutput(configHash, buildPkgHash) {
  * Given config content + build parameters, checks the cache and restores if hit.
  * Returns { hit, buildPath?, metadata? }
  */
-function checkAndRestore(configContent, fqbn, usb, proffieOSHash, stylesContent = '') {
+/**
+ * Claim path for callers that hold config content rather than raw hashes.
+ * Mirrors checkAndRestore's inputs exactly so the two can never disagree about
+ * which entry a given config maps to.
+ */
+function claimForConfig(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '', explicitConfigId = null) {
   const configHash   = computeConfigHash(configContent, stylesContent);
-  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
-  const result       = restoreToOutput(configHash, buildPkgHash);
-  if (!result.ok) return { hit: false };
-  return { hit: true, buildPath: result.buildPath, metadata: result.metadata };
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
+  return claimEntry(configHash, buildPkgHash, explicitConfigId || extractConfigId(configContent));
 }
+
+/**
+ * Answers "is there a stored build for this?" and WRITES NOTHING.
+ *
+ * This is what every UI-driven caller wants, and until 2026-08-23 there was no such function - the
+ * only lookup available also copied the whole entry over build-output. Ten call sites used it, one
+ * of them a 600 ms debounce on TYPING, so the build folder was being rewritten behind the user
+ * constantly. A flash makes the board re-enumerate, that fired the port handler, and the restore
+ * landed on top of the firmware the flash was mid-way through sending. (B-216)
+ *
+ * The rule this restores, which is what the app was always supposed to do: the build folder is
+ * written when a build is actually needed, and never because something changed.
+ *
+ * Returns the entry's directory so a caller that DOES need the build can read it where it lies,
+ * rather than copying it somewhere first.
+ */
+function checkOnly(configContent, fqbn, usb, proffieOSHash, coreVersion, stylesContent = '', explicitConfigId = null) {
+  const configHash   = computeConfigHash(configContent, stylesContent);
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
+  const entry = lookupCache(configHash, buildPkgHash);
+  // Two independent questions, and the caller needs both. A cache miss with a matching build folder
+  // is still a flashable state - that is exactly the case a failed save produces.
+  const inOutput = buildOutputMatches(configHash, buildPkgHash);
+  if (!entry) return { hit: false, buildOutputMatches: inOutput, configHash, buildPkgHash };
+  return {
+    hit: true,
+    buildOutputMatches: inOutput,
+    buildDir: entry.cacheDir,
+    metadata: entry.metadata,
+    configHash,
+    buildPkgHash,
+    configId: explicitConfigId || extractConfigId(configContent),
+  };
+}
+
+/**
+ * Records that an entry was actually USED: stamps lastUsedAt and appends the adopting configId.
+ *
+ * Separated from the lookup on purpose. A check is not a use - the old code stamped both on every
+ * restore, which meant typing in the editor counted as using a build. Callers invoke this at the
+ * moment they adopt the entry (skipping a compile, or flashing from it), so the record describes
+ * what happened rather than what was considered.
+ *
+ * Writes only inside the cache entry. Never touches build-output.
+ */
+function adoptEntry(configHash, buildPkgHash, adoptingConfigId = null) {
+  const entry = lookupCache(configHash, buildPkgHash);
+  if (!entry) return { ok: false };
+  try {
+    entry.metadata.lastUsedAt = new Date().toISOString();
+    if (adoptingConfigId) {
+      if (!Array.isArray(entry.metadata.configIds)) {
+        entry.metadata.configIds = entry.metadata.configId ? [entry.metadata.configId] : [];
+      }
+      if (!entry.metadata.configIds.includes(adoptingConfigId)) {
+        entry.metadata.configIds.push(adoptingConfigId);
+      }
+    }
+    fs.writeFileSync(path.join(entry.cacheDir, 'metadata.json'),
+                     JSON.stringify(entry.metadata, null, 2));
+  } catch { /* bookkeeping must never fail a build or a flash */ }
+  return { ok: true, buildDir: entry.cacheDir, metadata: entry.metadata };
+}
+
+// checkAndRestore() and restoreToOutput() were REMOVED on 2026-08-23. Do not bring them back.
+//
+// They copied a cache entry over build-output, and were reachable from ten UI paths including a
+// 600 ms debounce on typing. That is how a flash sent another config's firmware: a flash makes the
+// board re-enumerate, port detection fired a "check", and the check rewrote the file dfu-util was
+// mid-way through reading. It is also how another board's build.options.json reached a build tree
+// whose object files came from somewhere else (B-196) - the entry holds no core/, libraries/ or
+// sketch/, so restoring it bought no incremental speed while asserting a consistency that was false.
+//
+// Nothing needs this. A build is read WHERE IT LIVES: build-output after a compile, the entry
+// itself after a hit. Use checkOnly() to ask, adoptEntry() to record a use.
+
 
 /**
  * Saves a completed compile to the cache.
  * Extracts configId from configContent automatically.
  * Called from toolchain.js after a successful compile.
  */
-function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, compiledAt, toolVersion, stylesContent = '') {
+function cacheCompileResult(buildOutputPath, configContent, fqbn, usb, proffieOSHash, coreVersion, compiledAt, toolVersion, stylesContent = '', compileDurationMs = null, explicitConfigId = null) {
   const configHash   = computeConfigHash(configContent, stylesContent);
-  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash);
-  const configId     = extractConfigId(configContent);
+  const buildPkgHash = computeBuildPackageHash(fqbn, usb, proffieOSHash, coreVersion);
+  // The @jmt block is STRIPPED from the editor on load (index.html: `clean:
+  // stripJmtLines(content)`) and re-injected only on save, so what the compile path
+  // hands us has never contained config_id. Extraction from content was therefore
+  // dead on arrival - every entry since the field was added recorded null. The
+  // renderer holds the id in memory and now passes it explicitly; extraction stays
+  // as the fallback for any caller that does have a full config. (2026-08-19)
+  const configId     = explicitConfigId || extractConfigId(configContent);
   return saveToCache(buildOutputPath, configHash, buildPkgHash, {
-    fqbn, usb, proffieOSHash, compiledAt, toolVersion, configId,
+    fqbn, usb, proffieOSHash, coreVersion, compiledAt, toolVersion, configId, compileDurationMs,
   });
 }
 
 module.exports = {
+  _jmtEntryGenuine,
   computeConfigHash,
   computeBuildPackageHash,
-  checkAndRestore,
+  checkOnly,
+  buildOutputMatches,
+  writeBuildProvenance,
+  adoptEntry,
+  getBuildOutputPath,
+  claimForConfig,
   cacheCompileResult,
   readBuildProvenance,
   startupEviction,
+  evictOrphanedBuildPkgs,
+  evictStaleHashEntries,
+  CONFIG_HASH_VERSION,
+  // Exported so toolchain's _configFeatures counts the same text this hashes. Two strippers is
+  // how the metrics and the cache key drift apart.
+  stripCommentsForHash,
 };

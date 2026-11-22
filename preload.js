@@ -2,6 +2,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
 
+  // THE PLATFORM, AS A VALUE RATHER THAN A CALL. [B-254] It never changes, so an IPC round
+  // trip would buy nothing and force every caller to be async. 'win32' | 'darwin' | 'linux'.
+  // NOT navigator.platform or a userAgent sniff - those describe the Chromium build and are
+  // spoofable and deprecated. This is the real process.
+  platform: process.platform,
+
   // ── File operations ──────────────────────────────────
   openFile:      ()                     => ipcRenderer.invoke('dialog:open'),
   readFile:      (filePath)             => ipcRenderer.invoke('file:read', filePath),
@@ -15,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeRecentFile:  (filePath)  => ipcRenderer.invoke('store:removeRecentFile', filePath),
   getSetting: (key, def)         => ipcRenderer.invoke('store:getSetting', key, def),
   setSetting: (key, value)       => ipcRenderer.invoke('store:setSetting', key, value),
+  dataRailStatus: ()             => ipcRenderer.invoke('dataRail:status'),
+  dataRailCheck: ()              => ipcRenderer.invoke('dataRail:check'),
   readDefaultTemplate: ()        => ipcRenderer.invoke('template:readDefault'),
   resetDefaultTemplate: ()       => ipcRenderer.invoke('template:resetDefault'),
   getTemplateStatus: ()          => ipcRenderer.invoke('template:getStatus'),
@@ -37,18 +45,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Toolchain ────────────────────────────────────────
   initToolchain: ()              => ipcRenderer.invoke('toolchain:initialize'),
-  compile: (configContent, fqbn, buildOptions) => 
+  compile: (configContent, fqbn, buildOptions) =>
     ipcRenderer.invoke('toolchain:compile', { configContent, fqbn, buildOptions }),
-  flash:   (port, fqbn)          => ipcRenderer.invoke('toolchain:flash', { port, fqbn }),
+  benchCompile: (configContent, fqbn, buildOptions, optList) =>
+    ipcRenderer.invoke('toolchain:benchCompile', { configContent, fqbn, buildOptions, optList }),
+  // sourceDir = WHERE THIS BUILD IS: build-output after a compile, the cache entry after a hit.
+  // The flash reads the .elf from there instead of assuming build-output holds it. (B-216)
+  flash:   (port, fqbn, expectedSN, sourceDir, record) => ipcRenderer.invoke('toolchain:flash', { port, fqbn, expectedSN, sourceDir, record }),
   getToolStatus:  ()             => ipcRenderer.invoke('toolchain:getStatus'),
   abortCompile:   ()             => ipcRenderer.invoke('toolchain:abort'),
   getAppVersion:      ()         => ipcRenderer.invoke('app:getVersion'),
   isDevMode:          ()         => ipcRenderer.invoke('app:isDevMode'),
   getArduinoDataPath: ()         => ipcRenderer.invoke('app:getArduinoDataPath'),
-  checkCache: (configContent, fqbn, usb) =>
-    ipcRenderer.invoke('cache:check', { configContent, fqbn, usb }),
+  // Read-only. Returns { hit, buildDir, metadata, configHash, buildPkgHash, configId }.
+  checkCache: (configContent, fqbn, usb, configId) =>
+    ipcRenderer.invoke('cache:check', { configContent, fqbn, usb, configId }),
+  adoptCache: (configHash, buildPkgHash, configId) =>
+    ipcRenderer.invoke('cache:adopt', { configHash, buildPkgHash, configId }),
+  claimCache: (configContent, fqbn, usb, configId) =>
+    ipcRenderer.invoke('cache:claim', { configContent, fqbn, usb, configId }),
   getCacheSize:    () => ipcRenderer.invoke('cache:getSize'),
-  clearCache:      () => ipcRenderer.invoke('cache:clear'),
+  clearBuilds:     () => ipcRenderer.invoke('cache:clearBuilds'),
+  resetWorkspace:  () => ipcRenderer.invoke('cache:resetWorkspace'),
+  // Reset Build Space. Survey first so the confirm can state what will actually
+  // happen this time, then reset. Two calls on purpose: the modal has to be able
+  // to say "only working files" or "also build tools you are not using" without
+  // the caller guessing which.
+  surveyBuildSpace: () => ipcRenderer.invoke('space:survey'),
+  resetBuildSpace:  () => ipcRenderer.invoke('space:reset'),
   getDataSize:     () => ipcRenderer.invoke('cache:getDataSize'),
 
   // ── Port detection ───────────────────────────────────
@@ -56,6 +80,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listPortsRaw:       () => ipcRenderer.invoke('ports:listRaw'),
   getRecommendedPort: () => ipcRenderer.invoke('ports:getRecommended'),
   setPortPolling: (enabled) => ipcRenderer.send('ports:setPolling', enabled),
+  // [B-664] Is there a card SD Export can write to? Pushed on change; asked fresh at a click.
+  getCardPresence: (opts) => ipcRenderer.invoke('cards:presence', opts || {}),
+  onCardsChanged: (cb) => {
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on('cards:changed', handler);
+    return () => ipcRenderer.removeListener('cards:changed', handler);
+  },
   onPortsChanged: (cb) => {
     const handler = () => cb();
     ipcRenderer.on('ports:changed', handler);
@@ -67,6 +98,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeSerial: ()                      => ipcRenderer.invoke('serial:close'),
   writeSerial: (text)                  => ipcRenderer.invoke('serial:write',  { text }),
   isSerialOpen: ()                     => ipcRenderer.invoke('serial:isOpen'),
+  probeBoardVersion: (port)            => ipcRenderer.invoke('serial:probeVersion', { port }),
+  // Board Forensics [B-543]
+  forensicsSummary:        (serial)                   => ipcRenderer.invoke('forensics:summary', { serial }),
+  forensicsSetOfferDeclined: (serial, declined = true) => ipcRenderer.invoke('forensics:setOfferDeclined', { serial, declined }),
+  forensicsCapture:        (port, serial, inBootloader) => ipcRenderer.invoke('forensics:capture', { port, serial, inBootloader }),
+  forensicsDfuSerials:     ()                         => ipcRenderer.invoke('forensics:dfuSerials'),
+  forensicsDfuStamp:       (serial)                   => ipcRenderer.invoke('forensics:dfuStamp', { serial }),
+  forensicsRecordLastFlash: (serial, record)          => ipcRenderer.invoke('forensics:recordLastFlash', { serial, record }),
+  forensicsRestore:        (port, serial, captureId, flashId) => ipcRenderer.invoke('forensics:restore', { port, serial, captureId, flashId }),
+  forensicsRecords:        (serial)                   => ipcRenderer.invoke('forensics:records', { serial }),
+  forensicsBuildStamp:     (sourceDir)                => ipcRenderer.invoke('forensics:buildStamp', { sourceDir }),
+  forensicsLog:            (serial, type, data)       => ipcRenderer.invoke('forensics:log', { serial, type, data }),
+  onForensicsProgress: (cb) => {
+    const handler = (_, d) => cb(d);
+    ipcRenderer.on('forensics:progress', handler);
+    return () => ipcRenderer.removeListener('forensics:progress', handler);
+  },
+  restartBoardAfterEject: (boardSerial, portPath) => ipcRenderer.invoke('board:restartAfterEject', { boardSerial, portPath }),
+  boardPortForSerial: (boardSerial) => ipcRenderer.invoke('board:portForSerial', { boardSerial }),
+  boardSdSharedInApp: (portPath) => ipcRenderer.invoke('board:sdSharedInApp', { portPath }),
+  boardForgetSdShared: (portPath) => ipcRenderer.invoke('board:forgetSdShared', { portPath }),
   onSerialData: (cb) => {
     const handler = (_, data) => cb(data);
     ipcRenderer.on('serial:data', handler);
@@ -98,11 +150,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── ProffieOS versions ───────────────────────────────────
   listProffieVersions: ()                        => ipcRenderer.invoke('proffieOS:listVersions'),
   getSelectedVersion:  ()                        => ipcRenderer.invoke('proffieOS:getSelected'),
+  getOSVersionMap:     ()                        => ipcRenderer.invoke('proffieOS:osVersionMap'),
+  getAddonsVersionFor: (configContent, versionName) => ipcRenderer.invoke('proffieOS:addonsVersionFor', { configContent, versionName }),
   getArgumentNames:    (versionName)             => ipcRenderer.invoke('proffieOS:getArgumentNames', versionName),
   selectVersion:       (name)                    => ipcRenderer.invoke('proffieOS:selectVersion', name),
   selectFolder:        ()                        => ipcRenderer.invoke('dialog:selectFolder'),
   validateVersionSource: (sourcePath)            => ipcRenderer.invoke('proffieOS:validateSource', sourcePath),
   importVersion:       (sourcePath, versionName, proffieVersion) => ipcRenderer.invoke('proffieOS:importVersion', { sourcePath, versionName, proffieVersion }),
+  // [B-488] The import modal's Cancel, for both of its paths (Import and
+  // Duplicate), plus the file count so the dialog can show that work is moving
+  // rather than only that it is busy.
+  cancelVersionImport: ()                                        => ipcRenderer.invoke('versions:importCancel'),
+  // [B-424] Stops a link download in flight. The archive is routinely 100 MB+,
+  // so this is the longest wait on the import side.
+  cancelLinkImport:    ()                                        => ipcRenderer.invoke('linkImport:cancel'),
+  // [B-424] Stops a common-folder import mid-copy. The partial is discarded.
+  cancelCommonImport:  ()                                        => ipcRenderer.invoke('common:importCancel'),
+  // [B-475] Attaching a receipt is streamed now, so it can report bytes and be
+  // stopped per chunk. A cancel throws the staged bytes away.
+  cancelAttachmentAdd: ()                                        => ipcRenderer.invoke('attachments:addCancel'),
+  onAttachmentAddProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('attachments:addProgress', handler);
+    return () => ipcRenderer.removeListener('attachments:addProgress', handler);
+  },
+  onVersionImportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('versions:importProgress', handler);
+    return () => ipcRenderer.removeListener('versions:importProgress', handler);
+  },
   listVersionsDetails: ()                      => ipcRenderer.invoke('versions:listDetails'),
   readVersionNotes:    (name)                  => ipcRenderer.invoke('versions:readNotes', name),
   writeVersionNotes:   (name, content)         => ipcRenderer.invoke('versions:writeNotes', { name, content }),
@@ -112,8 +188,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openVersionFolder:   (name)                  => ipcRenderer.invoke('versions:openFolder', name),
   exportVersion:       (name)                  => ipcRenderer.invoke('versions:export', name),
   listVersionDir:      (name, subPath)         => ipcRenderer.invoke('versions:listDir', { name, subPath }),
+  importProp:          (name, sourcePath, overwrite) => ipcRenderer.invoke('versions:importProp', { name, sourcePath, overwrite }),
+  addedProps:          (name)                  => ipcRenderer.invoke('versions:addedProps', { name }),
+  removeProp:          (name, file)            => ipcRenderer.invoke('versions:removeProp', { name, file }),
+  planPropCopy:        (from, file, to)        => ipcRenderer.invoke('versions:planPropCopy', { from, file, to }),
+  copyProp:            (from, file, to)        => ipcRenderer.invoke('versions:copyProp', { from, file, to }),
   readVersionFile:     (name, subPath)         => ipcRenderer.invoke('versions:readFile', { name, subPath }),
   searchVersionFiles:  (name, query)           => ipcRenderer.invoke('versions:search', { name, query }),
+  versionNameIndex:    (name, stamp)           => ipcRenderer.invoke('versions:nameIndex', { name, stamp }),
+
+  // ── Proffieboard core, chosen per ProffieOS version ──────
+  // Which core a version builds against. Exposed per version rather than
+  // app-wide because a config that fits on 3.6 can overflow 4.6 by kilobytes,
+  // and on a 256 KB V2/V2.2 that decides whether the build links at all.
+  listCoreVersions:    ()                      => ipcRenderer.invoke('core:listAvailable'),
+  getCoreForVersion:   (name)                  => ipcRenderer.invoke('core:getForVersion', name),
+  // Pass null as coreVersion to clear the choice and follow latest again.
+  setCoreForVersion:   (name, coreVersion)     => ipcRenderer.invoke('core:setForVersion', { name, coreVersion }),
+  // The JMT plugin [B-668]: make it beside its stock version and move that version's pins onto it.
+  upgradeToJmtPlugin:  (base)                  => ipcRenderer.invoke('core:upgradeToJmt', { base }),
+  jmtPluginOfferState: ()                      => ipcRenderer.invoke('core:jmtOfferState'),
+  jmtPluginOfferAnswered: (base)               => ipcRenderer.invoke('core:jmtOfferAnswered', { base }),
+  installCoreVersion:  (coreVersion)           => ipcRenderer.invoke('core:install', { coreVersion }),
+  // Stop an install in flight and delete what it had written. The dropdown is
+  // locked while one runs, so this is the only way out of a long download.
+  cancelCoreInstall:   (coreVersion)           => ipcRenderer.invoke('core:cancelInstall', { coreVersion }),
+  // Which half of "getting a core" is running: 'index', 'downloading',
+  // 'installing', or null when it is over.
+  onCoreInstallProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('core:installProgress', handler);
+    return () => ipcRenderer.removeListener('core:installProgress', handler);
+  },
+  // What switching this version to another core would really cost, from what
+  // is recorded rather than estimated. Same rule as the Clear-cache dialog.
+  coreSwitchImpact:    (versionName, toCore)   => ipcRenderer.invoke('cache:coreSwitchImpact', { versionName, toCore }),
   fetchReleases:       ()                       => ipcRenderer.invoke('versions:fetchReleases'),
   downloadRelease:     (downloadUrl, versionName, proffieVersion) => ipcRenderer.invoke('versions:downloadRelease', { downloadUrl, versionName, proffieVersion }),
   onDownloadProgress:  (cb) => {
@@ -134,16 +243,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── DFU ──────────────────────────────────────────────
   detectDFU:    () => ipcRenderer.invoke('dfu:detect'),
-  flashDFU:     () => ipcRenderer.invoke('dfu:flash'),
-  downloadDfuSetup:  () => ipcRenderer.invoke('dfu:downloadSetup'),
-  installDfuSetup:   () => ipcRenderer.invoke('dfu:installSetup'),
-  cleanupDfuSetup:   () => ipcRenderer.invoke('dfu:cleanupSetup'),
+  flashDFU:     (sourceDir, serial, record) => ipcRenderer.invoke('dfu:flash', { sourceDir, serial, record }),
+  ensureDfuDriver:   () => ipcRenderer.invoke('dfu:ensureDriver'),
+  checkWebUsb:       (serial) => ipcRenderer.invoke('webusb:check', serial),
+  fixWebUsb:         (serial) => ipcRenderer.invoke('webusb:fix', serial),
   onDfuSetupStatus: (cb) => {
     const handler = (_, msg) => cb(msg);
     ipcRenderer.on('dfu:setupStatus', handler);
     return () => ipcRenderer.removeListener('dfu:setupStatus', handler);
   },
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  scanSdCards: () => ipcRenderer.invoke('sdcard:scan'),
+  pickFolder: () => ipcRenderer.invoke('sdcard:pickFolder'),
+  scanPath: (p) => ipcRenderer.invoke('sdcard:scanPath', p),
+  listSdDir: (p) => ipcRenderer.invoke('sdcard:listDir', p),
+  volumeInfo: (p) => ipcRenderer.invoke('sdcard:volumeInfo', p),
+  // Async health walk ([B-348]): direct-file check, incremental folder
+  // badges, cancel, and the progress stream that feeds the browser footer.
+  sdExecutables: (p) => ipcRenderer.invoke('sdcard:executables', p),
+  sdFolderShape: (p) => ipcRenderer.invoke('sdcard:folderShape', p),
+  readSdText: (p) => ipcRenderer.invoke('sdcard:readText', p),
+  readSdBytes: (p) => ipcRenderer.invoke('sdcard:readBytes', p),
+  findSdConfigs: (p) => ipcRenderer.invoke('sdcard:findConfigs', p),
+  analyzeSdFonts: (p) => ipcRenderer.invoke('sdcard:analyzeFonts', p),
+  copyOutSd: (srcPath, destDir) => ipcRenderer.invoke('sdcard:copyOut', { srcPath, destDir }),
 
   checkForUpdate:  (force) => ipcRenderer.invoke('app:checkForUpdate', { force: !!force }),
   downloadUpdate:  (downloadUrl, assetName) => ipcRenderer.invoke('app:downloadUpdate', { downloadUrl, assetName }),
@@ -157,6 +280,395 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAppClosing:    (cb) => ipcRenderer.on('app:closing', cb),
   doClose:         () => ipcRenderer.send('app:doClose'),
 
+  // Splash lifecycle — used by the build panel to defer auto-opening
+  // the log section until after the splash window has fully destroyed,
+  // so the first-paint layout race that briefly let the panel grab the
+  // full window during toolchain setup is avoided.
+  onSplashDismissed: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('app:splash-dismissed', handler);
+    return () => ipcRenderer.removeListener('app:splash-dismissed', handler);
+  },
+  isSplashDismissed: () => ipcRenderer.invoke('app:isSplashDismissed'),
+  installCheck: () => ipcRenderer.invoke('app:installCheck'),
+
+  // ── Sound Fonts Library ───────────────────────────────
+  soundFontsExists:        ()                       => ipcRenderer.invoke('soundFonts:exists'),
+  createSoundFonts:        ()                       => ipcRenderer.invoke('soundFonts:create'),
+  listSoundFonts:          ()                       => ipcRenderer.invoke('soundFonts:listFonts'),
+  listSoundFontsWithMeta:  ()                       => ipcRenderer.invoke('soundFonts:listFontsWithMeta'),
+  scanSoundFontFolder:     (folderPath)             => ipcRenderer.invoke('soundFonts:scanFolder', folderPath),
+  onSoundFontExportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('soundFonts:exportProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:exportProgress', handler);
+  },
+
+  // Per-file progress for a single source export (reading + reconstruct + compress phases).
+  // Payload: { phase, fileCount, totalFiles, bytesDone, totalBytes, currentFile }.
+  onSourceExportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('soundFonts:sourceExportProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:sourceExportProgress', handler);
+  },
+
+  // Progress for the import-time "Optimizing storage…" dedup (phase 'optimize').
+  onOptimizeProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('soundFonts:optimizeProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:optimizeProgress', handler);
+  },
+
+  // ── Sound Fonts — sources (Phase 1) ───────────────────
+  listSources:           ()           => ipcRenderer.invoke('sources:list'),
+  cleanupOrphanSources:  ()           => ipcRenderer.invoke('sources:cleanupOrphans'),
+  finalizeStagedSource:  (params)     => ipcRenderer.invoke('sources:finalizeStaged', params),
+  restoreCustomized:     (params)     => ipcRenderer.invoke('sources:restoreCustomized', params),
+  discardCustomized:     (params)     => ipcRenderer.invoke('sources:discardCustomized', params),
+  matchSourceCandidates: (params)     => ipcRenderer.invoke('sources:matchCandidates', params),
+  measureSourceImport:   (params)     => ipcRenderer.invoke('sources:measureImport', params),
+  ensureSourceManifest:  (params)     => ipcRenderer.invoke('sources:ensureManifest', params),
+  bulkImportPickRoot:    ()           => ipcRenderer.invoke('bulkImport:pickRoot'),
+  bulkImportScan:        (params)     => ipcRenderer.invoke('bulkImport:scan', params),
+  bulkImportRun:         (params)     => ipcRenderer.invoke('bulkImport:run', params),
+  bulkImportAnalyze:     (params)     => ipcRenderer.invoke('bulkImport:analyze', params),
+  bulkImportDiscardPrepared: (params) => ipcRenderer.invoke('bulkImport:discardPrepared', params),
+  bulkImportMatchGuided: (params)     => ipcRenderer.invoke('bulkImport:matchGuided', params),
+  bulkImportCancel:      ()           => ipcRenderer.invoke('bulkImport:cancel'),
+  onBulkImportProgress:  (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('bulkImport:progress', handler);
+    return () => ipcRenderer.removeListener('bulkImport:progress', handler);
+  },
+  bulkImportEnrichGuided: (params)    => ipcRenderer.invoke('bulkImport:enrichGuided', params),
+  candidatePreviews: (params)         => ipcRenderer.invoke('soundFonts:candidatePreviews', params),
+  bulkImportEnrichCancel: ()          => ipcRenderer.invoke('bulkImport:enrichCancel'),
+  bulkImportReadCandidateFile: (params) => ipcRenderer.invoke('bulkImport:readCandidateFile', params),
+  onBulkImportEnrichProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('bulkImport:enrichProgress', handler);
+    return () => ipcRenderer.removeListener('bulkImport:enrichProgress', handler);
+  },
+  sourceExistsByHash:    (hash)       => ipcRenderer.invoke('sources:existsByHash', hash),
+  importSource:          (params)     => ipcRenderer.invoke('sources:import', params),
+  importSourceCancel:    ()           => ipcRenderer.invoke('sources:importCancel'),
+  deleteSource:          (params)     => ipcRenderer.invoke('sources:delete', params),
+  updateSourceMeta:      (params)     => ipcRenderer.invoke('sources:updateMeta', params),
+  optimizeSource:        (params)     => ipcRenderer.invoke('sources:optimize', params),
+  onSourceImportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sources:importProgress', handler);
+    return () => ipcRenderer.removeListener('sources:importProgress', handler);
+  },
+  linkImportStart:       (params)     => ipcRenderer.invoke('linkImport:start', params),
+  linkImportBrowser:     (params)     => ipcRenderer.invoke('linkImport:browser', params),
+  linkImportBrowserCancel: ()         => ipcRenderer.invoke('linkImport:browserCancel'),
+  linkImportCleanup:     (params)     => ipcRenderer.invoke('linkImport:cleanup', params),
+  linkCaptureOpen:       (params)     => ipcRenderer.invoke('linkCapture:open', params),
+  linkCaptureClose:      ()           => ipcRenderer.invoke('linkCapture:close'),
+  linkCaptureFonts:      (fonts)      => ipcRenderer.send('linkCapture:fonts', { fonts }),
+  onLinkCapturePick: (cb) => {
+    const h = (_e, p) => cb(p);
+    ipcRenderer.on('linkCapture:pick', h);
+    return () => ipcRenderer.removeListener('linkCapture:pick', h);
+  },
+  // macOS: Studio is blocked by the page while an app browser shows over it. [QA09 M24]
+  onAppBrowserLock: (cb) => {
+    const h = (_e, p) => cb(p);
+    ipcRenderer.on('appBrowser:lock', h);
+    return () => ipcRenderer.removeListener('appBrowser:lock', h);
+  },
+  appBrowserFront: () => ipcRenderer.send('appBrowser:front'),
+  onLinkCaptureUndo: (cb) => {
+    const h = (_e, p) => cb(p);
+    ipcRenderer.on('linkCapture:undo', h);
+    return () => ipcRenderer.removeListener('linkCapture:undo', h);
+  },
+  onLinkImportProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('linkImport:progress', handler);
+    return () => ipcRenderer.removeListener('linkImport:progress', handler);
+  },
+
+  // Format-dispatch reads (slice 2)
+  browseSource:          (params)     => ipcRenderer.invoke('sources:browse', params),
+  listSourceFiles:       (params)     => ipcRenderer.invoke('sources:listFiles', params),
+  listSourceInnerZipFiles: (params)   => ipcRenderer.invoke('sources:listInnerZipFiles', params),
+  readSourceFile:        (params)     => ipcRenderer.invoke('sources:readFile', params),
+  // [B-203] Size a source before any bar goes up, so the checks look like every other door.
+  sourceExportSize:      (params)     => ipcRenderer.invoke('sources:exportSize', params),
+  exportSourceToDownloads: (params)   => ipcRenderer.invoke('sources:exportToDownloads', params),
+  // Many sources as ONE operation, with an all-or-nothing rollback on cancel. [B-420, 2026-09-23]
+  // The delete flows hand over 1 or many and get back what landed; a cancel returns nothing landed
+  // because the finished ones are removed too.
+  exportManySourcesToDownloads: (params) => ipcRenderer.invoke('sources:exportManyToDownloads', params),
+  pickExportDir:           (params)   => ipcRenderer.invoke('dialog:pickExportDir', params),
+  onExportPickerOpened:    (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('dialog:exportPickerOpened', handler);
+    return () => ipcRenderer.removeListener('dialog:exportPickerOpened', handler);
+  },
+  // [B-420] The single-FILE twin, so the renderer owns that picker too and the shared runner
+  // can own everything after it. Returns { ok, destFile } or { ok:false, canceled }.
+  pickExportFilePath:      (params)   => ipcRenderer.invoke('dialog:pickExportFilePath', params),
+  showItemInFolder:        (p)        => ipcRenderer.invoke('shell:showItemInFolder', p),
+  exportLog:               (params)   => ipcRenderer.invoke('logs:export', params),
+  openFolder:              (p)        => ipcRenderer.invoke('shell:openFolder', p),
+  onFileOpsCopyProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('fileOps:copyProgress', handler);
+    return () => ipcRenderer.removeListener('fileOps:copyProgress', handler);
+  },
+  detectSourceVendor:    (params)     => ipcRenderer.invoke('sources:detectVendor', params),
+  detectSourceCandidates: (params)    => ipcRenderer.invoke('sources:detectCandidates', params),
+
+  // Library entries (Phase 1, slice 5)
+  listEntries:           ()           => ipcRenderer.invoke('entries:list'),
+  entryExistsByName:     (name)       => ipcRenderer.invoke('entries:existsByName', name),
+  entryCustomization:    (params)     => ipcRenderer.invoke('entries:customization', params),
+  inspectFontFolder:     (params)     => ipcRenderer.invoke('sources:inspectFolder', params),
+  createEntry:           (params)     => ipcRenderer.invoke('entries:create', params),
+  replaceEntryFiles:     (params)     => ipcRenderer.invoke('entries:replaceFiles', params),
+  duplicateEntry:        (params)     => ipcRenderer.invoke('entries:duplicate', params),
+  updateEntryMeta:       (params)     => ipcRenderer.invoke('entries:updateMeta', params),
+  forgetFormerName:      (params)     => ipcRenderer.invoke('entries:forgetFormerName', params),
+  addImportAliases:      (params)     => ipcRenderer.invoke('entries:addImportAliases', params),
+  renameEntries:         (params)     => ipcRenderer.invoke('entries:renameMany', params),
+  deleteEntry:           (params)     => ipcRenderer.invoke('entries:delete', params),
+  markEntrySeen:         (params)     => ipcRenderer.invoke('entries:markSeen', params),
+  markEntryNew:          (params)     => ipcRenderer.invoke('entries:markNew', params),
+  listEntriesBySource:   (params)     => ipcRenderer.invoke('entries:listBySource', params),
+  listSourceDocs:        (params)     => ipcRenderer.invoke('sources:listDocs', params),
+  readSourceDocBytes:    (params)     => ipcRenderer.invoke('sources:readDocBytes', params),
+  exportSourceDoc:       (params)     => ipcRenderer.invoke('sources:exportDoc', params),
+  listAttachments:       (params)     => ipcRenderer.invoke('attachments:list', params),
+  openAttachment:        (params)     => ipcRenderer.invoke('attachments:open', params),
+  unlinkAttachment:      (params)     => ipcRenderer.invoke('attachments:unlink', params),
+  listAllAttachments:    ()           => ipcRenderer.invoke('attachments:listAll'),
+  linkAttachments:       (params)     => ipcRenderer.invoke('attachments:link', params),
+  readAttachment:        (params)     => ipcRenderer.invoke('attachments:read', params),
+  sourcesForAttachment:  (params)     => ipcRenderer.invoke('attachments:sourcesFor', params),
+  linkAttachmentToSources: (params)   => ipcRenderer.invoke('attachments:linkToSources', params),
+  pickAttachmentFile:    ()           => ipcRenderer.invoke('attachments:pickFile'),
+  addAttachmentToSources: (params)    => ipcRenderer.invoke('attachments:addToSources', params),
+  removeAttachmentEverywhere: (params) => ipcRenderer.invoke('attachments:removeEverywhere', params),
+  listEntryDocs:         (params)     => ipcRenderer.invoke('entries:listDocs', params),
+  listEntryFiles:        (params)     => ipcRenderer.invoke('entries:listFiles', params),
+  entryFileStates:       (params)     => ipcRenderer.invoke('entries:fileStates', params),
+  restoreEntryFile:      (params)     => ipcRenderer.invoke('entries:restoreFile', params),
+
+  // Reorganize ops (entry detail modal)
+  reorganizeDetect:      (params)     => ipcRenderer.invoke('reorganize:detect', params),
+  reorganizeGroup:       (params)     => ipcRenderer.invoke('reorganize:group', params),
+  reorganizeFlatten:     (params)     => ipcRenderer.invoke('reorganize:flatten', params),
+  reorganizeReorder:     (params)     => ipcRenderer.invoke('reorganize:reorder', params),
+  reorganizeFindReplace: (params)     => ipcRenderer.invoke('reorganize:findReplace', params),
+  reorganizeRenumber:    (params)     => ipcRenderer.invoke('reorganize:renumber', params),
+  hashFiles:             (params)     => ipcRenderer.invoke('hash:files', params),
+  sfExportFiles:         (params)     => ipcRenderer.invoke('sfFile:export', params),
+  // ONE CANCEL FOR EVERY EXPORT DOOR. Takes no argument on purpose: it cancels whatever is in
+  // flight rather than a run the renderer has to identify. Aiming a cancel at one remembered run
+  // is the exact bug written up in bulkImportGate.js, where it happened twice. [B-005 item 4]
+  exportCancel:          ()           => ipcRenderer.invoke('export:cancel'),
+  // [B-364] Acting on a program the export refused to carry. Both re-verify the
+  // bytes in the main process before removing anything.
+  sfProgramImpound:      (params)     => ipcRenderer.invoke('sfProgram:impound', params),
+  sfProgramRelease:      (params)     => ipcRenderer.invoke('sfProgram:release', params),
+  sfProgramDiscard:      (params)     => ipcRenderer.invoke('sfProgram:discard', params),
+  sfProgramDelete:       (params)     => ipcRenderer.invoke('sfProgram:delete', params),
+  sfProgramQuarantine:   (params)     => ipcRenderer.invoke('sfProgram:quarantine', params),
+  fileOpsCopy:           (params)     => ipcRenderer.invoke('fileOps:copy', params),
+  fileOpsSameFile:       (params)     => ipcRenderer.invoke('fileOps:sameFile', params),
+  fileOpsMove:           (params)     => ipcRenderer.invoke('fileOps:move', params),
+  fileOpsDelete:         (params)     => ipcRenderer.invoke('fileOps:delete', params),
+  fileOpsRename:         (params)     => ipcRenderer.invoke('fileOps:rename', params),
+  fileOpsCreateSubfolder:(params)     => ipcRenderer.invoke('fileOps:createSubfolder', params),
+  fileOpsAddFiles:       (params)     => ipcRenderer.invoke('fileOps:addFiles', params),
+  selectAudioFiles:      (params)     => ipcRenderer.invoke('dialog:selectAudioFiles', params),
+  readEntryDocBytes:     (params)     => ipcRenderer.invoke('entries:readDocBytes', params),
+  exportEntryDoc:        (params)     => ipcRenderer.invoke('entries:exportDoc', params),
+  exportEntryToFolder:   (params)     => ipcRenderer.invoke('entries:exportToFolder', params),
+  // Plan a whole export up front so the progress bar can be sized before it is drawn.
+  // `known` carries what the compare scan already hashed, so the plan does not re-read it.
+  // { names, destDir, known? } -> { ok, plans: { [name]: plan }, workBytes }
+  planFolderWrites:      (params)     => ipcRenderer.invoke('entries:planFolderWrites', params),
+  // [B-203] Will the write fit? 0.3ms, statfs only - safe to call before any write.
+  checkExportDest:       (params)     => ipcRenderer.invoke('exportDest:check', params),
+  // [B-203] What is the destination attached to? ~1.9s (one PowerShell spawn), so start
+  // it early and read it later. Never await it between a click and the work starting.
+  // [B-005 item 4] Since 2026-09-21 this answers ONLY "is it a card through a
+  // Proffieboard". If all you need is removable-or-not, use identifyExportDest - it is the
+  // same fact for 1/20th of the time, and buying the walk to get it was why several doors
+  // quietly never offered a safe eject.
+  classifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:classify', params),
+  exportDestReachable:   (params)     => ipcRenderer.invoke('exportDest:reachable', params),
+  // [B-005 item 4] "What have we just been handed?" ~85ms, no PowerShell. Returns
+  // { removable, kind } or null for "cannot tell". Cheap enough to sit on a write path.
+  identifyExportDest:    (params)     => ipcRenderer.invoke('exportDest:identify', params),
+  // [B-424] { files, bytes } for a picked file or folder. Feeds the IMPORT side's slow-card
+  // threshold, which had no way to size a source before the copy started - a file picker returns
+  // paths, and the font import learns its total only from progress events once it is running.
+  measurePath:           (params)     => ipcRenderer.invoke('path:measure', params),
+  // [B-005 item 4] THE ONE PREFLIGHT. Fit refusal + board-card warning in a single call,
+  // and it returns `boardCard` and `removable` so the cancel-cleanup rule and the safe-eject
+  // offer reuse that answer instead of each paying for their own device lookup.
+  // Pass classify:true only when the answer is wanted; it is the ~1.9s spawn.
+  preflightExportDest:   (params)     => ipcRenderer.invoke('exportDest:preflight', params),
+  // [B-005 item 4] Safe eject. Takes a DRIVE LETTER, not a path - one physical reader can
+  // hold two letters, so the eject is per-volume or it takes a sibling card with it.
+  // Resolves with one of three honest outcomes: ejected / returned / busy. Never a success
+  // it cannot verify: the shell verb is fire-and-forget, so the module watches the media go.
+  // [B-005 item 4] Removes ONLY a folder this app set aside - main refuses anything whose
+  // name does not start with "DELETE.". Not a general-purpose delete, deliberately.
+  removePath:            (params)     => ipcRenderer.invoke('fs:removeSetAside', params),
+  // Takes { destDir }, NOT a drive letter. The module resolves a destination to whatever
+  // its platform watches (E:\, /Volumes/NAME, /media/<user>/NAME), so this contract does not
+  // change when macOS and Linux are implemented behind it.
+  ejectMedia:            (params)     => ipcRenderer.invoke('media:eject', params),
+  isMediaPresent:        (params)     => ipcRenderer.invoke('media:present', params),
+  // Per-OS words, asked for once. So a Mac build never says "Windows", and a message that
+  // describes a Windows-only BEHAVIOUR (the drive letter that stays behind) is absent rather
+  // than translated. See media:vocabulary in main.js.
+  // Returns { mountPath, label } or null. Null is the platform saying "nothing to eject here",
+  // which is how the renderer avoids owning any opinion about what a volume path looks like.
+  resolveMedia:          (params)     => ipcRenderer.invoke('media:resolve', params),
+  mediaVocabulary:       ()           => ipcRenderer.invoke('media:vocabulary'),
+  mediaNote:             (params)     => ipcRenderer.invoke('media:note', params),
+  // [B-402] One manifest write per operation, called at the very end. See main.js.
+  syncManifestState:     (params)     => ipcRenderer.invoke('syncManifest:state', params),
+  syncManifestCommit:    (params)     => ipcRenderer.invoke('syncManifest:commit', params),
+  // [B-229] SD Export only — the readme, plus the config when the setting allows it.
+  writeProvenance:       (params)     => ipcRenderer.invoke('provenance:write', params),
+  entryFolderExistsAt:   (params)     => ipcRenderer.invoke('entries:existsAt', params),
+  resolveEntryContentDirty: (params)  => ipcRenderer.invoke('entries:resolveContentDirty', params),
+  selectSaveDestination: ()           => ipcRenderer.invoke('dialog:selectSaveDestination'),
+
+  // Common folder management (Sound Fonts → side panel)
+  listCommons:           ()           => ipcRenderer.invoke('common:list'),
+  commonNameInUse:       (params)     => ipcRenderer.invoke('common:nameInUse', params),
+  importCommonFromFolder:(params)     => ipcRenderer.invoke('common:importFromFolder', params),
+  classifyIncomingCommon:(params)     => ipcRenderer.invoke('common:classifyIncoming', params),
+  scanIncomingCommon:    (params)     => ipcRenderer.invoke('common:scanIncoming', params),
+  importCommonFromZip:   (params)     => ipcRenderer.invoke('common:importFromZip', params),
+  inspectIncomingCommonZip: (params)  => ipcRenderer.invoke('common:inspectIncomingZip', params),
+  inspectIncomingCommonFolder: (params) => ipcRenderer.invoke('common:inspectIncomingFolder', params),
+  renameCommon:          (params)     => ipcRenderer.invoke('common:rename', params),
+  addCommonAlias:        (params)     => ipcRenderer.invoke('common:addAlias', params),
+  forgetCommonAlias:     (params)     => ipcRenderer.invoke('common:forgetAlias', params),
+  duplicateCommon:       (params)     => ipcRenderer.invoke('common:duplicate', params),
+  deleteCommon:          (params)     => ipcRenderer.invoke('common:delete', params),
+  commonCustomization:   (params)     => ipcRenderer.invoke('common:customization', params),
+  commonFileStates:      (params)     => ipcRenderer.invoke('common:fileStates', params),
+  restoreCommonFile:     (params)     => ipcRenderer.invoke('common:restoreFile', params),
+  listCommonFiles:       (params)     => ipcRenderer.invoke('common:listFiles', params),
+  addCommonFiles:        (params)     => ipcRenderer.invoke('common:addFiles', params),
+  listJmtSounds:         (params)     => ipcRenderer.invoke('common:jmtSounds', params),
+  addJmtSounds:          (params)     => ipcRenderer.invoke('common:addJmtSounds', params),
+  renameCommonFile:      (params)     => ipcRenderer.invoke('common:renameFile', params),
+  deleteCommonFile:      (params)     => ipcRenderer.invoke('common:deleteFile', params),
+  createCommonSubfolder: (params)     => ipcRenderer.invoke('common:createSubfolder', params),
+  copyCommonFiles:       (params)     => ipcRenderer.invoke('common:copyFiles', params),
+  moveCommonFiles:       (params)     => ipcRenderer.invoke('common:moveFiles', params),
+  readCommonFileBytes:   (params)     => ipcRenderer.invoke('common:readFileBytes', params),
+  findCommonPicture:     (params)     => ipcRenderer.invoke('common:findPicture', params),
+  findEntryPicture:      (params)     => ipcRenderer.invoke('entries:findPicture', params),
+  findSourcePicture:     (params)     => ipcRenderer.invoke('sources:findPicture', params),
+  setSourcePicture:      (params)     => ipcRenderer.invoke('sources:setPicture', params),
+  clearSourcePicture:    (params)     => ipcRenderer.invoke('sources:clearPicture', params),
+  sourcePictureToTemp:   (params)     => ipcRenderer.invoke('sources:pictureToTemp', params),
+  getSourceOwnPicture:   (params)     => ipcRenderer.invoke('sources:ownPicture', params),
+  selectPicture:         ()           => ipcRenderer.invoke('dialog:selectPicture'),
+  pictureFromCopied:     (params)     => ipcRenderer.invoke('picture:fromCopied', params),
+  pictureToPng:          (params)     => ipcRenderer.invoke('picture:toPng', params),
+  onPicturesLanded: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('pictures:landed', handler);
+    return () => ipcRenderer.removeListener('pictures:landed', handler);
+  },
+  commonFolderExistsAt:  (params)     => ipcRenderer.invoke('common:folderExistsAt', params),
+  commonMatchesAt:       (params)     => ipcRenderer.invoke('common:matchesAt', params),
+  writeCommonMarker:     (params)     => ipcRenderer.invoke('common:writeMarker', params),
+  pickExportZipPath:     (params)     => ipcRenderer.invoke('common:pickExportZipPath', params),
+  exportCommonAsZip:     (params)     => ipcRenderer.invoke('common:exportAsZip', params),
+  exportCommonToFolder:  (params)     => ipcRenderer.invoke('common:exportToFolder', params),
+  resolveCommonContentDirty: (params) => ipcRenderer.invoke('common:resolveContentDirty', params),
+  setCommonGroup:        (params)     => ipcRenderer.invoke('common:setGroup', params),
+  setCommonDescription:  (params)     => ipcRenderer.invoke('common:setDescription', params),
+  setCommonGroupMany:    (params)     => ipcRenderer.invoke('common:setGroupMany', params),
+  renameCommonGroup:     (params)     => ipcRenderer.invoke('common:renameGroup', params),
+  deleteCommonGroup:     (params)     => ipcRenderer.invoke('common:deleteGroup', params),
+
+  // Shared Tracks folder (maps to /tracks/ at SD card root)
+  // [B-318] The library size figure. Returns the LAST KNOWN value immediately and recomputes
+  // behind the caller, so nothing ever waits on a 15,000-file walk. The fresh figure arrives
+  // on onSoundFontsSizeUpdated.
+  soundFontsSize:        ()           => ipcRenderer.invoke('soundFonts:size'),
+  onSoundFontsSizeUpdated: (handler) => {
+    const fn = (_e, figure) => handler(figure);
+    ipcRenderer.on('soundFonts:sizeUpdated', fn);
+    return () => ipcRenderer.removeListener('soundFonts:sizeUpdated', fn);
+  },
+  sharedTracksExists:    ()           => ipcRenderer.invoke('sharedTracks:exists'),
+  soundFontsIsEmpty:     ()           => ipcRenderer.invoke('soundFonts:isEmpty'),
+  sharedTracksCreate:    ()           => ipcRenderer.invoke('sharedTracks:create'),
+  sharedTracksListFiles: ()           => ipcRenderer.invoke('sharedTracks:listFiles'),
+  sharedTracksAddFiles:  (params)     => ipcRenderer.invoke('sharedTracks:addFiles', params),
+  // [B-400] One subscription for every +Add door; the payload is {done,total,name} in BYTES.
+  onSoundFontByteProgress: (cb) => {
+    const handler = (_, d) => cb(d);
+    ipcRenderer.on('soundFonts:byteProgress', handler);
+    return () => ipcRenderer.removeListener('soundFonts:byteProgress', handler);
+  },
+  sharedTracksRenameFile:(params)     => ipcRenderer.invoke('sharedTracks:renameFile', params),
+  sharedTracksForgetAlias:(params)    => ipcRenderer.invoke('sharedTracks:forgetAlias', params),
+  sharedTracksAddAlias:  (params)     => ipcRenderer.invoke('sharedTracks:addAlias', params),
+  sharedTracksDeleteFile:(params)     => ipcRenderer.invoke('sharedTracks:deleteFile', params),
+  sharedTracksDelete:    ()           => ipcRenderer.invoke('sharedTracks:delete'),
+  sharedTracksFolderExistsAt:(params) => ipcRenderer.invoke('sharedTracks:folderExistsAt', params),
+  sharedTracksExistsAt:      (params) => ipcRenderer.invoke('sharedTracks:existsAt', params),
+  sharedTracksPlanExport:    (params) => ipcRenderer.invoke('sharedTracks:planExport', params),
+  onSharedTracksPlanProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sharedTracks:planProgress', handler);
+    return () => ipcRenderer.removeListener('sharedTracks:planProgress', handler);
+  },
+  listDestFolders:       (params)     => ipcRenderer.invoke('soundFonts:listDestFolders', params),
+  entryMatchesAt:        (params)     => ipcRenderer.invoke('soundFonts:entryMatchesAt', params),
+  recordFolderAt:        (params)     => ipcRenderer.invoke('soundFonts:recordFolderAt', params),
+  sharedTracksExportToFolder:(params) => ipcRenderer.invoke('sharedTracks:exportToFolder', params),
+  sharedTracksReadFileBytes:(params)  => ipcRenderer.invoke('sharedTracks:readFileBytes', params),
+
+  // Voicepack catalog + downloader (Sound Fonts → common folder → Get Voicepack)
+  voicepackGetCatalog:   ()           => ipcRenderer.invoke('voicepack:getCatalog'),
+  voicepackDownloadSample:(params)    => ipcRenderer.invoke('voicepack:downloadSample', params),
+  voicepackInstall:      (params)     => ipcRenderer.invoke('voicepack:install', params),
+  sfBackupPrep:          (params)     => ipcRenderer.invoke('sfBackup:prep', params),
+  sfBackupExport:        (params)     => ipcRenderer.invoke('sfBackup:export', params),
+  sfBackupCancel:        (params)     => ipcRenderer.invoke('sfBackup:cancel', params),
+  selectBackupExportPath:()           => ipcRenderer.invoke('dialog:selectBackupExportPath'),
+  selectBackupImportPath:()           => ipcRenderer.invoke('dialog:selectBackupImportPath'),
+  sfBackupInspect:       (params)     => ipcRenderer.invoke('sfBackup:inspect', params),
+  sfBackupApplyReplace:  (params)     => ipcRenderer.invoke('sfBackup:applyReplace', params),
+  sfBackupSurveyMerge:   (params)     => ipcRenderer.invoke('sfBackup:surveyMerge', params),
+  sfBackupApplyMerge:    (params)     => ipcRenderer.invoke('sfBackup:applyMerge', params),
+  onSfBackupProgress:    (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('sfBackup:progress', handler);
+    return () => ipcRenderer.removeListener('sfBackup:progress', handler);
+  },
+  selectCommonFiles:     ()           => ipcRenderer.invoke('dialog:selectCommonFiles'),
+  selectCommonSource:    (params)     => ipcRenderer.invoke('dialog:selectCommonSource', params),
+  onEntryCreateProgress: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('entries:createProgress', handler);
+    return () => ipcRenderer.removeListener('entries:createProgress', handler);
+  },
+  selectSoundFontSource: (params) => ipcRenderer.invoke('dialog:selectSoundFontSource', params),
+
   readClipboard:   () => ipcRenderer.invoke('clipboard:read'),
+  clipboardImageToTemp: (params) => ipcRenderer.invoke('clipboard:imageToTemp', params),
+  clipboardCleanupTemp: (params) => ipcRenderer.invoke('clipboard:cleanupTemp', params),
+  clipboardClearForCopy: () => ipcRenderer.invoke('clipboard:clearForCopy'),
+  clipboardHasImage: () => ipcRenderer.invoke('clipboard:hasImage'),
 
 });

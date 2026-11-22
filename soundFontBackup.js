@@ -1,0 +1,4211 @@
+// Sound Font library backup — exports the entire SF library tree under
+// userData/soundFonts/ into a single .jmt-soundfontlibrary.zip with a
+// manifest.json at the root so the file is self-identifying and a future
+// import can validate before extracting.
+//
+// Layout inside the zip:
+//   manifest.json
+//   sources/<uuid>/...     — raw source archives + per-source meta.json
+//   entries/<name>/...     — extracted font folders + per-entry meta.json
+//   common/<uuid>/...      — common folder roots + per-common meta.json
+//
+// Library-state settings (currently just the starred-common uuid) are
+// embedded in manifest.json so an empty-install restore lands at the exact
+// prior visual state.
+
+const fs = require('fs');
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
+const path = require('path');
+const soundFontEntries = require('./soundFontEntries');
+// [B-478] Phase marks for the main-thread stall probe. Inert unless the probe is armed
+// (userData/.stall-probe), so this costs nothing in a normal run. It is required here
+// because a 40.6 SECOND main-process block during a backup export was captured on
+// 2026-10-11 and the probe could only report it as "(idle - nothing marked)" - the whole
+// export path marked no phases, so the one instrument that saw the freeze could not say
+// which part of it was blocking.
+const stallProbe = require('./stallProbe');
+
+const SCHEMA_VERSION = 2;
+const BACKUP_TYPE = 'jmt-soundfontlibrary';
+
+// [B-498] THE ZIP HOLDS NO LIBRARY FOLDERS. Every file's bytes are stored once under STORE_DIR
+// with a name that is only a number, and PATHS_FILE maps each library path to the object holding
+// its bytes, with every folder listed so empty ones come back too. Files that share one copy on
+// disk are stored once. Unzipped by hand, nothing in it looks like a font, so nothing in it can be
+// copied to a card by mistake; the file named README_NAME says what it is and how to restore it.
+// `_openBackupZip` reads it back as if it still held the library's paths.
+const STORE_DIR = 'store';
+const PATHS_FILE = 'paths.json';
+// No program claims it, so a stored object opened by hand opens nothing.
+const OBJECT_EXT = '.jmtdata';
+const README_NAME = 'READ ME - This is a JMT Studio backup. Restore it from JMT Studio, do not unzip it.txt';
+function _readableDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+function _readmeText(appVersion, exportedAt) {
+  return [
+    'This is a backup of a JMT Studio sound font library.',
+    '',
+    'It is not a folder of fonts. Inside, every sound is stored once under a number, so the',
+    'files in here cannot be copied to an SD card or opened as fonts. Unzipping it gets you',
+    'nothing you can use.',
+    '',
+    'To restore it: open JMT Studio, go to Sound Fonts, click Backup, then Import Backup, and',
+    'choose this file. Merge adds it to the library you have; Replace puts the library back',
+    'exactly as it was when this backup was made.',
+    '',
+    `Made by JMT Studio ${appVersion || ''} on ${_readableDate(exportedAt)}.`.replace(/ +/g, ' '),
+    '',
+  ].join('\r\n');
+}
+
+// The per-file hash records, kept OUTSIDE the item folders so they can never leak onto an
+// SD card through an export path:
+//     soundFonts/.filehashes/entries/<entryUuid>.json
+//     soundFonts/.filehashes/sources/<sourceUuid>.json
+//     soundFonts/.filehashes/commons/<commonUuid>.json
+//
+// WHY BACKUP CARES  [B-399]. soundFontCompare.buildLibraryIndex reads the ENTRIES
+// records and has NO fallback: a font with no record is counted unmatchable and skipped, so
+// the whole "do I already own this?" answer disappears for it. The sources and commons
+// records do fall back to a live walk, which makes them a speed cache — the entries ones are
+// correctness. A restore rmSyncs the entire soundFonts root before unpacking, so before this
+// was carried a restore did not merely fail to bring the index back, it DELETED a working
+// one. Found 2026-09-16 as the cause of [B-397]: 151 fonts on disk, zero records, and the
+// "Already in your library (skipped)" row gone from both importers.
+//
+// The subdirectory names are NOT uniform and that is not a typo — the on-disk bucket is
+// `library` but its records live under `entries`, and `common` maps to `commons`. Those
+// spellings are load-bearing; a wrong one silently empties an index instead of erroring.
+const FILEHASH_DIR = '.filehashes';
+const FILEHASH_SUBDIR = { library: 'entries', sources: 'sources', common: 'commons' };
+
+// [B-297] Loose files that sit at a bucket ROOT rather than inside an item directory. The
+// seen-backfill marker lives in the library root so a restored library carries its own migration
+// state, which only works if the archive carries it.
+//
+// Every site that reads a zip entry name and keys off its first path segment has to classify
+// these out, because `library/.seen-backfill-done` splits into a bucket and an id exactly like
+// `library/Ahsoka/hum.wav` does: the inspect count, the merge survey's per-item aggregate and the
+// restore's per-item lists each turn it into a phantom font named `.seen-backfill-done`.
+const CARRIED_MARKERS = ['library/.seen-backfill-done', '_jmt_library_meta.json'];
+const POOL_DIR = 'pool';
+const _isCarriedMarker = (zipName) =>
+  CARRIED_MARKERS.includes(String(zipName || '').replace(/\\/g, '/'));
+
+// [B-498] Open a backup so every reader sees the library's own paths. The zip stores bytes under
+// numbered objects; this answers entries() with one entry per library path (and one per folder,
+// as a directory entry, which is how folders came back before), and extract() of a path pulls its
+// object. A path whose object is already on disk from this same read is linked to it rather than
+// written again, so files that shared one copy when backed up share one copy when restored.
+// Every reader goes through here and keeps the four calls it already made.
+async function _openBackupZip(zipPath, options) {
+  const zip = openZipOwned(zipPath, options);
+  let index = null;
+  try {
+    const raw = await zip.entries();
+    if (raw[PATHS_FILE]) index = JSON.parse((await zip.entryData(PATHS_FILE)).toString('utf8'));
+    if (!index || !index.files) return zip;
+    const view = {};
+    if (raw['manifest.json']) view['manifest.json'] = raw['manifest.json'];
+    for (const d of index.dirs || []) view[`${d}/`] = { name: `${d}/`, isDirectory: true, size: 0 };
+    const objectOf = new Map();
+    for (const [p, object] of Object.entries(index.files)) {
+      const r = raw[object];
+      if (!r) continue;
+      view[p] = { name: p, isDirectory: false, size: r.size };
+      objectOf.set(p, object);
+    }
+    const firstTarget = new Map();   // object -> where it was first written
+    const pathsOf = new Map();       // object -> every library path that names it
+    for (const [p, object] of objectOf) {
+      if (!pathsOf.has(object)) pathsOf.set(object, []);
+      pathsOf.get(object).push(p);
+    }
+    // A Replace keeps unchanged items by moving them, not extracting them, so the first name of an
+    // object written in this read can have a sibling already on disk under the same root. Linking
+    // to it keeps the two sharing one copy as they did when backed up; the bytes are compared
+    // first, because in a merge a path of the same name can be the user's own, different, file.
+    const { hashFile } = require('./soundFontFileHash');
+    const linkToSibling = (name, object, target) => {
+      const rel = name.split('/').join(path.sep);
+      if (!target.endsWith(rel)) return;
+      const root = target.slice(0, target.length - rel.length);
+      let own = null;
+      for (const p of pathsOf.get(object) || []) {
+        if (p === name) continue;
+        const abs = root + p.split('/').join(path.sep);
+        try {
+          if (!fs.statSync(abs).isFile() || fs.statSync(abs).size !== fs.statSync(target).size) continue;
+          if (own === null) own = hashFile(target);
+          if (!own || hashFile(abs) !== own) continue;
+          const tmp = `${target}.link-tmp`;
+          try { fs.rmSync(tmp, { force: true }); } catch {}
+          try { fs.linkSync(abs, tmp); fs.renameSync(tmp, target); }
+          finally { try { fs.rmSync(tmp, { force: true }); } catch {} }
+          return;
+        } catch { /* missing, unreadable or not linkable: try the next */ }
+      }
+    };
+    return {
+      entries: async () => view,
+      entryData: (name) => zip.entryData(objectOf.get(name) || name),
+      extract: async (name, target) => {
+        const object = objectOf.get(name);
+        if (!object) return zip.extract(name, target);
+        const first = firstTarget.get(object);
+        if (first && path.resolve(first) !== path.resolve(target)) {
+          try {
+            if (fs.statSync(first).size === view[name].size) {
+              try { fs.rmSync(target, { force: true }); } catch {}
+              fs.linkSync(first, target);
+              return 1;
+            }
+          } catch { /* gone or not linkable: write the bytes */ }
+        }
+        const r = await zip.extract(object, target);
+        firstTarget.set(object, target);
+        if ((pathsOf.get(object) || []).length > 1) linkToSibling(name, object, target);
+        return r;
+      },
+      close: () => zip.close(),
+    };
+  } catch (err) {
+    try { await zip.close(); } catch {}
+    throw err;
+  }
+}
+
+// [B-511] A source's own picture is kept in the attachments store but is not proof of purchase, so
+// every count shown as "proofs of purchase" leaves it out. Its bytes still count toward size.
+function _isPictureDir(abs) {
+  return require('./soundFontAttachments').isPictureAttachmentDir(abs);
+}
+function _countItems(bucket, root, dirs) {
+  return bucket === 'attachments' ? dirs.filter((d) => !_isPictureDir(path.join(root, d.name))).length : dirs.length;
+}
+
+// Side-effect call into soundFontEntries: its _readEntryMeta backfills
+// entryUuid into any legacy meta.json that doesn't have one. Running
+// listEntries here means the backup's downstream disk reads (export
+// hashing + archive writes + merge classification) all see meta with
+// the uuid persisted, instead of a half-populated mid-flight state.
+function _ensureLibraryBackfill(userData) {
+  try { soundFontEntries.listEntries(userData); } catch {}
+}
+
+// Warm any source whose candidates haven't been stamped onto meta yet so
+// the backup carries them. Same idempotency contract as the rest of the
+// "ensure" helpers in this module: cold caches get warmed, warm caches are
+// untouched. The cost is a one-time detection per cold source (typically
+// fast; multi-board bundles like Power_Of_Many_Bundle pay the inner-zip
+// walk once and then ride free into every subsequent backup + restore +
+// open). Failures are swallowed because a stamp miss for one source
+// shouldn't block the backup — that source just stays cold and will warm
+// on next open.
+async function _ensureCandidateCaches(userData) {
+  const soundFontSources = require('./soundFontSources');
+  const { CANDIDATES_SCHEMA_VERSION } = require('./soundFontCandidates');
+  const sourcesDir = _sourcesRoot(userData);
+  if (!fs.existsSync(sourcesDir)) return;
+  let entries;
+  try { entries = fs.readdirSync(sourcesDir, { withFileTypes: true }); }
+  catch { return; }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const metaPath = path.join(sourcesDir, e.name, 'meta.json');
+    let meta;
+    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); }
+    catch { continue; }
+    const cachedSchema = Number(meta.candidatesSchemaVersion) || 0;
+    if (cachedSchema === CANDIDATES_SCHEMA_VERSION && Array.isArray(meta.candidates)) continue;
+    try { await soundFontSources.recomputeAndStampCandidates(userData, e.name); } catch {}
+  }
+}
+
+// Path helpers — match the layout the rest of the SF modules use so this
+// stays the single source of truth for "what does the library look like
+// on disk."
+function _soundFontsRoot(userData) {
+  return path.join(userData, 'soundFonts');
+}
+function _sourcesRoot(userData) {
+  return path.join(_soundFontsRoot(userData), 'sources');
+}
+function _entriesRoot(userData) {
+  // On-disk directory is "library" (legacy naming from when the module
+  // landed). User-facing copy still says "fonts" — this is the only place
+  // the disk name leaks into the backup layout.
+  return path.join(_soundFontsRoot(userData), 'library');
+}
+function _commonRoot(userData) {
+  return path.join(_soundFontsRoot(userData), 'common');
+}
+
+// Recursive byte sum for a directory tree. Used both for the manifest's
+// total-bytes field and for the export progress accounting (we tick bytes
+// after each file lands in the archive). Silent on per-file errors so a
+// transient permissions blip doesn't abort the whole survey.
+// Returns the fs error code when a file cannot be opened for reading, or null when it can.
+//
+// AN OPEN, NOT `fs.access`. Measured 2026-10-12 against a file carrying a Windows DENY ace:
+//     fs.accessSync(p, R_OK)  ->  OK
+//     fs.openSync(p, 'r')     ->  EPERM
+// An access check cannot see an ACL denial, so a readability sweep built on it reports a clean
+// library and the export still stops on the file.
+//
+// The descriptor is closed in the `finally`. A probe that leaks one would recreate the hold that
+// [B-479] was opened for, on every file in the library.
+function _probeReadable(abs) {
+  let fd = null;
+  try { fd = fs.openSync(abs, 'r'); return null; }
+  catch (e) { return (e && e.code) || 'EUNKNOWN'; }
+  finally { if (fd !== null) { try { fs.closeSync(fd); } catch {} } }
+}
+
+// The display name of a top-level item, for telling the user WHERE a file is in their library
+// rather than only where it is on disk. `sources` and `common` are uuid-named on disk, so the
+// name has to come out of their meta; `library` directories are the font name already.
+//
+// ONLY EVER CALLED FOR A FILE THAT FAILED, which is what makes the meta read free: an ordinary
+// export resolves nothing because nothing is unreadable.
+function _friendlyTop(userData, bucket, top) {
+  if (!top) return '';
+  const abs = path.join(_soundFontsRoot(userData), bucket, top);
+  try {
+    if (bucket === 'sources') {
+      const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+      return (m && (m.bundleName || m.originalName)) || '';
+    }
+    if (bucket === 'common') {
+      const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+      return (m && m.name) || '';
+    }
+    if (bucket === 'attachments') {
+      const a = JSON.parse(fs.readFileSync(path.join(abs, 'attachment.json'), 'utf8'));
+      return (a && (a.label || a.name)) || '';
+    }
+  } catch { /* an unnamed item still reports its path, which is the part that must not fail */ }
+  return bucket === 'library' ? top : '';
+}
+
+// The source a dropped item belongs to, so a font and the source it came from report as ONE
+// loss rather than two unrelated ones. 2026-10-15.
+//
+// ONE KEY TO MANY ITEMS, not a pair: a bundle source owns several fonts, and a bad sector inside
+// shared bytes can take the source and more than one of them in the same run.
+//
+// The drop decision stays per item. A readable source whose font is damaged is still carried -
+// it is the original purchase archive and the half that can rebuild the font, so combining the
+// REPORT is not combining the RULE.
+function _sourceGroupKey(userData, bucket, top) {
+  if (!top) return null;
+  if (bucket === 'sources') return `src:${top}`;
+  if (bucket !== 'library') return null;
+  try {
+    const m = JSON.parse(fs.readFileSync(
+      path.join(_soundFontsRoot(userData), 'library', top, 'meta.json'), 'utf8'));
+    return m && m.sourceUuid ? `src:${m.sourceUuid}` : null;
+  } catch { return null; }
+}
+
+// A survey with the agreed skips taken out of it. [2026-10-15]
+//
+// ONE FUNCTION FOR THE PROMISE AND THE REPORT. The confirm screen states what the backup will
+// contain and the manifest records what it does contain; those are the same arithmetic over the
+// same inputs, and two copies of it would be two numbers to keep in agreement forever. The
+// confirm screen asked the user to drop items and then quoted a figure that still counted them.
+//
+// COUNTS ARE PER ITEM FOR EVERY BUCKET EXCEPT sharedTracks, which counts wav files. So a skipped
+// file inside a font does not change `counts.library` - the font is still there, one file lighter
+// - while a skipped track does reduce `counts.sharedTracks`, and a dropped item takes one off its
+// bucket as well as its bytes.
+//
+// The survey itself is left alone: it drives the progress bar and the destination fit check,
+// which are about work to be done rather than bytes stored.
+function applySkipAdjustment(survey, { skipped = [], skippedItems = [] } = {}) {
+  const bytesByBucket = {};
+  let tracks = 0;
+  for (const s of skipped) {
+    bytesByBucket[s.bucket] = (bytesByBucket[s.bucket] || 0) + (s.bytes || 0);
+    if (s.bucket === 'sharedTracks' && /\.wav$/i.test(s.name || '')) tracks++;
+  }
+  const perBucket = {};
+  for (const s of skippedItems) {
+    perBucket[s.bucket] = (perBucket[s.bucket] || 0) + 1;
+    bytesByBucket[s.bucket] = (bytesByBucket[s.bucket] || 0) + (s.bytes || 0);
+  }
+  const counts = { ...(survey.counts || {}) };
+  if (tracks) counts.sharedTracks = Math.max(0, (counts.sharedTracks || 0) - tracks);
+  for (const b of Object.keys(perBucket)) {
+    if (counts[b] != null) counts[b] = Math.max(0, counts[b] - perBucket[b]);
+  }
+  const totals = { ...(survey.totals || {}) };
+  let totalBytes = survey.totalBytes || 0;
+  let filesBytes = survey.filesBytes || totalBytes;
+  for (const b of Object.keys(bytesByBucket)) {
+    const n = bytesByBucket[b];
+    if (totals[b] != null) totals[b] = Math.max(0, totals[b] - n);
+    totalBytes = Math.max(0, totalBytes - n);
+    filesBytes = Math.max(0, filesBytes - n);
+  }
+  return { counts, totals, totalBytes, filesBytes };
+}
+
+// What agreeing to the skip would actually cost, so the question can state it. [B-478]
+//
+// The gate must not say "back up without 1 file" when the answer removes a whole font. This
+// returns the same split the exporter applies - loose tracks go file by file, anything inside an
+// item takes the item with it - so the sentence the user reads and the rule the export enforces
+// come from one function rather than two that have to be kept in agreement.
+function describeSkipConsequence(userData, unreadable) {
+  const root = path.resolve(_soundFontsRoot(userData));
+  const files = [];
+  const itemsByKey = new Map();
+  for (const u of unreadable || []) {
+    const rel = path.relative(root, path.resolve(u.path));
+    const segs = (!rel || rel.startsWith('..')) ? [] : rel.split(path.sep);
+    if (segs.length < 2 || segs[0] === 'sharedTracks') {
+      // bucket + bytes so the same adjustment that builds the manifest can run on this, and the
+      // confirm screen quotes a figure that already has the agreed skips out of it.
+      let bytes = 0;
+      try { bytes = fs.statSync(u.path).size; } catch {}
+      files.push({ ...u, bucket: u.bucket || segs[0] || '', bytes });
+      continue;
+    }
+    const [bucket, top] = segs;
+    const key = `${bucket}/${top}`;
+    if (itemsByKey.has(key)) { itemsByKey.get(key).unreadable++; continue; }
+    const abs = path.join(root, bucket, top);
+    let count = 0;
+    let bytes = 0;
+    const tally = (dir) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { tally(p); continue; }
+        if (!e.isFile()) continue;
+        count++;
+        try { bytes += fs.statSync(p).size; } catch {}
+      }
+    };
+    tally(abs);
+    itemsByKey.set(key, {
+      bucket, top, path: abs, item: _friendlyTop(userData, bucket, top),
+      groupKey: _sourceGroupKey(userData, bucket, top),
+      files: count, bytes, unreadable: 1,
+    });
+  }
+  return { files, items: [...itemsByKey.values()] };
+}
+
+// `unreadable`, when passed, collects { path, code } for every file that cannot be opened.
+// The probe rides this walk rather than taking its own: it is the same set of files, and a
+// second pass would double the syscalls to learn nothing new. Measured 2026-10-12 on an
+// 11,730-file library: 2,167 ms for the whole sweep.
+// `links`, when given, is { ids: Set, repeatBytes: 0 } shared across the whole survey: a file with
+// a second name whose id was already seen adds its size to repeatBytes. [BUG-022] The archive
+// stores such a file once (B-498), so the room the backup needs is the total minus repeatBytes.
+// [BUG-023] SOUND IS STORED, NOT COMPRESSED. Measured on 601 MB of a real library's wav files:
+// deflate level 6 ran at 15 MB/s and saved 7.7%; level 1, 17 MB/s; store, 375 MB/s. A 14.7 GB
+// library took 21 m to back up to an internal drive, nearly all of it the compressor. Files that
+// are already compressed or barely compress go in as they are; text (configs, meta, notes) still
+// deflates, where it pays. Store is a standard zip method, so every reader restores it.
+const _STORE_EXT = /\.(wav|mp3|ogg|flac|m4a|aac|opus|zip|7z|rar|png|jpe?g|gif|webp|mp4|mov|pdf)$/i;
+function _storeUncompressed(name) { return _STORE_EXT.test(String(name || '')); }
+
+function _dirBytes(dir, unreadable, where, links) {
+  let total = 0;
+  if (!fs.existsSync(dir)) return total;
+  const walk = (cur) => {
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      const abs = path.join(cur, e.name);
+      if (e.isDirectory()) walk(abs);
+      else if (e.isFile()) {
+        if (links) links.files = (links.files || 0) + 1;
+        try {
+          if (links) {
+            // bigint: an NTFS file id does not fit a double, and two files must never share a key.
+            const st = fs.statSync(abs, { bigint: true });
+            total += Number(st.size);
+            if (st.nlink > 1n) {
+              const id = `${st.dev}:${st.ino}`;
+              if (links.ids.has(id)) links.repeatBytes += Number(st.size);
+              else links.ids.add(id);
+            }
+          } else {
+            total += fs.statSync(abs).size;
+          }
+        } catch {}
+        if (unreadable) {
+          const code = _probeReadable(abs);
+          // The bucket and item travel with the finding so the dialog can say "in your Revan
+          // sound font" instead of only printing a path. Captured here because this is the
+          // only point that knows which top-level item the walk is inside.
+          if (code) unreadable.push({ path: abs, name: e.name, code, ...(where || {}) });
+        }
+      }
+    }
+  };
+  walk(dir);
+  return total;
+}
+
+// [BUG-031] The footer's "of files" rule for the whole library: every name under the sound fonts
+// folder, including the content pool and the library's own bookkeeping, which the bucket totals
+// leave out. Display only; the bar and the fit check keep their own figures.
+function _filesBytes(userData, bucketBytes) {
+  const root = _soundFontsRoot(userData);
+  let extra = 0;
+  let names;
+  try { names = fs.readdirSync(root, { withFileTypes: true }); } catch { return bucketBytes; }
+  for (const d of names) {
+    const abs = path.join(root, d.name);
+    if (d.isDirectory()) {
+      if (d.name === 'sharedTracks') {
+        let st;
+        try { st = fs.readdirSync(abs, { withFileTypes: true }); } catch { st = []; }
+        for (const e of st) {
+          if (e.isFile() && !/\.wav$/i.test(e.name)) { try { extra += fs.statSync(path.join(abs, e.name)).size; } catch {} }
+          else if (e.isDirectory()) extra += _dirBytes(path.join(abs, e.name));
+        }
+      } else if (!['sources', 'library', 'common', 'attachments'].includes(d.name)) {
+        extra += _dirBytes(abs);
+      } else {
+        // Markers at a bucket's top level; the bucket totals walk only its folders.
+        let top;
+        try { top = fs.readdirSync(abs, { withFileTypes: true }); } catch { top = []; }
+        for (const e of top) if (e.isFile()) { try { extra += fs.statSync(path.join(abs, e.name)).size; } catch {} }
+      }
+    } else if (d.isFile()) {
+      try { extra += fs.statSync(abs).size; } catch {}
+    }
+  }
+  return bucketBytes + extra;
+}
+
+// Survey what's in the library — count + size per bucket. Bucket keys
+// match the on-disk directory names ('sources', 'library', 'common',
+// 'sharedTracks', 'attachments') so the archive layout, manifest counts,
+// and restore code all use the same vocabulary. Renderer translates
+// 'library' to "fonts" for display. sharedTracks is a flat singleton
+// folder (counts = number of .wav files, not subdirs). attachments is
+// dir-keyed like sources/common, but the dir NAME is the content sha256,
+// which is what lets the restore side dedup without hashing anything.
+// THE ASYNC TWIN, AND IT IS A UI BUG FIX RATHER THAN A PERFORMANCE ONE. [B-420, 2026-09-24]
+//
+// Reported: Cancel on the prep screen "does nothing". Instrumented rather than theorised, and the
+// console settled it — the handler WAS attached, the button WAS enabled with `pointerEvents: auto`,
+// and **no click event was ever dispatched during the 1,917 ms the survey ran**. The report:
+// *"never saw it."* The screen was never on screen.
+//
+// CAUSE: `surveyLibrary` is a synchronous recursive stat walk, and it runs in the MAIN process.
+// Electron coordinates both frame presentation AND input dispatch through the browser process, so
+// while main is blocked the renderer can set `active`, build its frame and attach handlers — and
+// none of it reaches the glass, while the user's clicks queue behind the walk. The modal existed in
+// the DOM for the whole survey and was never painted or clickable.
+// That is why every renderer-side theory failed: the renderer was never the blocked process
+// (measured at 16% CPU throughout). Nothing in the renderer could have fixed this.
+//
+// THE SYNC VERSION STAYS. `exportBackup` calls it internally at a point where nothing is on
+// screen waiting, and rewriting that path would be a change with no symptom behind it.
+//
+// [B-398] established the pattern this follows: yield inside every per-item pass so the window
+// keeps answering Windows. Same helper, same reason.
+// `opts.probeReadability` adds a readability check to the walk and returns everything that could
+// not be opened, so the export can ask about it BEFORE anything is archived. Without it the first
+// unreadable file ends a run that may already have written gigabytes, and archiver gives no way
+// back: its EPERM arrives as a stream-level `error`, so the partial zip can never be finished.
+// Measured 2026-10-12 - ten good files archived, 188 MB on disk, `finalize()` still unsettled.
+async function surveyLibraryAsync(userData, opts) {
+  const { breathe } = require('./soundFontFileHash');
+  const unreadable = (opts && opts.probeReadability) ? [] : null;
+  const buckets = ['sources', 'library', 'common', 'attachments'];
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  // [BUG-022] Same four buckets, same dev:ino rule as the archive's own repeat count, so the room
+  // asked for is the room the archive takes. sharedTracks is left out there too.
+  const links = { ids: new Set(), repeatBytes: 0, files: 0 };
+  // [BUG-023] Bytes per top-level item, keyed `bucket/dirName`, so a later pass over the same
+  // items can report progress in bytes rather than in items of very different sizes.
+  const itemBytes = {};
+  for (const b of buckets) {
+    const root = path.join(_soundFontsRoot(userData), b);
+    if (!fs.existsSync(root)) continue;
+    let names;
+    try { names = fs.readdirSync(root, { withFileTypes: true }); }
+    catch { continue; }
+    const dirs = names.filter(d => d.isDirectory());
+    counts[b] = _countItems(b, root, dirs);
+    // THE BREATH IS PER TOP-LEVEL ITEM, NOT PER BUCKET. A bucket is four iterations; a single
+    // multi-GB voicepack is the thing that actually holds the loop, and yielding between buckets
+    // would leave the longest stretch exactly as blocking as it is now.
+    for (let di = 0; di < dirs.length; di++) {
+      const d = dirs[di];
+      await breathe();
+      // [BUG-023] A caller with a progress line gets a count per item, so a long survey is seen
+      // to move.
+      // The RAW directory name rides along; the display name is resolved after the walk, only
+      // for what actually failed. Resolving here would read a meta.json per top-level item on
+      // every probed export to answer a question almost nobody asks.
+      const _ib = _dirBytes(path.join(root, d.name), unreadable,
+        unreadable ? { bucket: b, top: d.name } : null, links);
+      totals[b] += _ib;
+      itemBytes[`${b}/${d.name}`] = _ib;
+      // [BUG-023] Files so far, with no total: this is the first pass, so none is known yet.
+      if (opts && typeof opts.onItem === 'function') {
+        try { opts.onItem({ bucket: b, files: links.files }); } catch {}
+      }
+    }
+  }
+  const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+  if (fs.existsSync(stRoot)) {
+    let stEntries;
+    try { stEntries = fs.readdirSync(stRoot, { withFileTypes: true }); }
+    catch { stEntries = []; }
+    let since = 0;
+    for (const e of stEntries) {
+      if (!e.isFile()) continue;
+      if (!/\.wav$/i.test(e.name)) continue;
+      // A flat folder of small files: breathing on every one of a hundred tracks costs more than
+      // it buys, so it yields in batches. The loop still never runs long enough to drop a frame.
+      if (++since >= 25) { since = 0; await breathe(); }
+      counts.sharedTracks++;
+      links.files++;
+      // Counted before the probe. The survey reports what is in the library; whether a file can
+      // be read is a separate question, and the exclusion happens downstream once the user has
+      // answered it.
+      const stAbs = path.join(stRoot, e.name);
+      // A shared track is often the same stored file as a track inside a font, so it takes the same
+      // once-only rule as every other bucket: without it the on-disk figure counted those bytes
+      // twice (QA09 M28: 1.48 GB before the backup, 1.35 GB after).
+      try {
+        const st = fs.statSync(stAbs, { bigint: true });
+        totals.sharedTracks += Number(st.size);
+        if (st.nlink > 1n) {
+          const id = `${st.dev}:${st.ino}`;
+          if (links.ids.has(id)) links.repeatBytes += Number(st.size);
+          else links.ids.add(id);
+        }
+      } catch {}
+      if (unreadable) {
+        const code = _probeReadable(stAbs);
+        // sharedTracks is a flat bucket with no top-level item, so there is nothing to name
+        // beyond the bucket itself.
+        if (code) unreadable.push({ path: stAbs, name: e.name, code, bucket: 'sharedTracks' });
+      }
+    }
+  }
+  const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks
+    + totals.attachments;
+  // Display names resolved LAST and only for failures, so an ordinary export reads no meta at all.
+  if (unreadable) {
+    for (const u of unreadable) {
+      if (u.top) u.item = _friendlyTop(userData, u.bucket, u.top);
+    }
+  }
+  // onDiskBytes: what the archive will hold, each linked file once. The fit check asks for this.
+  const onDiskBytes = Math.max(0, totalBytes - links.repeatBytes);
+  const filesBytes = _filesBytes(userData, totalBytes);
+  return { counts, totals, totalBytes, filesBytes, onDiskBytes, fileCount: links.files, itemBytes,
+           unreadable: unreadable || [] };
+}
+
+// DO NOT CALL THIS FROM THE MAIN PROCESS. USE `surveyLibraryAsync`. [B-478, 2026-10-11]
+//
+// This walk is synchronous, so while it runs the event loop cannot dispatch input: the window
+// stops answering clicks and Windows paints "Not Responding". `exportBackup` called it for
+// months and that is one of the blocking spans behind the freezes recorded on 2026-10-11.
+//
+// Measured on the real library (12.13 GB, 22k files), 50 ms heartbeat alongside:
+//     surveyLibrary       3,649 ms, heartbeat ticked  0 times
+//     surveyLibraryAsync  3,256 ms, heartbeat ticked 44 times
+// Identical result, 12,128,949,076 bytes, and the async form is not slower.
+//
+// It is kept rather than deleted because it has no production caller left to break and
+// `test/backup-prep-autostart.test.js` slices source text around its declaration. If you are
+// reaching for a library survey, the answer is the async one.
+function surveyLibrary(userData) {
+  const buckets = ['sources', 'library', 'common', 'attachments'];
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  const totals = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  for (const b of buckets) {
+    const root = path.join(_soundFontsRoot(userData), b);
+    if (!fs.existsSync(root)) continue;
+    let names;
+    try { names = fs.readdirSync(root, { withFileTypes: true }); }
+    catch { continue; }
+    const dirs = names.filter(d => d.isDirectory());
+    counts[b] = _countItems(b, root, dirs);
+    for (const d of dirs) totals[b] += _dirBytes(path.join(root, d.name));
+  }
+  // sharedTracks — flat folder, count .wav files at top level only.
+  const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+  if (fs.existsSync(stRoot)) {
+    let stEntries;
+    try { stEntries = fs.readdirSync(stRoot, { withFileTypes: true }); }
+    catch { stEntries = []; }
+    for (const e of stEntries) {
+      if (!e.isFile()) continue;
+      if (!/\.wav$/i.test(e.name)) continue;
+      counts.sharedTracks++;
+      try { totals.sharedTracks += fs.statSync(path.join(stRoot, e.name)).size; } catch {}
+    }
+  }
+  const totalBytes = totals.sources + totals.library + totals.common + totals.sharedTracks + totals.attachments;
+  return { counts, totals, totalBytes, filesBytes: _filesBytes(userData, totalBytes) };
+}
+
+// Throughput benchmark for the destination path. Writes a small temp file
+// next to the eventual zip and measures wall-clock to derive an MB/s rate.
+// 16 MB is large enough to swamp filesystem cache noise on a typical SSD
+// without being heavy enough to feel like work to the user. Falls back to
+// a conservative 30 MB/s if the benchmark fails outright.
+async function benchmarkDestination(destDirOrFile) {
+  // The proposed zip path won't exist yet (we benchmark BEFORE writing) —
+  // fall through to the parent dir in that case. Real directories are
+  // used directly; everything else also falls back to the parent.
+  let destDir;
+  try {
+    const st = fs.statSync(destDirOrFile);
+    destDir = st.isDirectory() ? destDirOrFile : path.dirname(destDirOrFile);
+  } catch {
+    destDir = path.dirname(destDirOrFile);
+  }
+  const tmpPath = path.join(destDir, `.jmt-bench-${Date.now()}.tmp`);
+  const SIZE = 16 * 1024 * 1024;
+  const buf = Buffer.alloc(SIZE, 0xAA);
+  let mbps = 30;
+  try {
+    const start = Date.now();
+    await fs.promises.writeFile(tmpPath, buf);
+    const elapsedMs = Math.max(1, Date.now() - start);
+    mbps = (SIZE / (1024 * 1024)) / (elapsedMs / 1000);
+  } catch {}
+  try { await fs.promises.unlink(tmpPath); } catch {}
+  // Clamp to a sane band — a single benchmark can be noisy on a cold cache
+  // or hammered drive; bounding it keeps the user-facing estimate honest.
+  mbps = Math.max(5, Math.min(500, mbps));
+  return mbps;
+}
+
+// Estimate seconds-to-complete given total bytes + measured throughput.
+function estimateSeconds(totalBytes, mbps) {
+  if (!totalBytes || !mbps) return 0;
+  return totalBytes / (mbps * 1024 * 1024);
+}
+
+// Suggested default filename for the save dialog. ISO date stamp keeps
+// repeated backups sortable in a folder.
+function suggestedFileName() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `jmt-soundfontlibrary-${stamp}.zip`;
+}
+
+// Snapshot the library-state settings that travel with the backup. Kept
+// tight on purpose — only true library state, not session prefs or tab
+// visibility toggles. New entries here need to be load-bearing for "fresh
+// install + import = exact prior state."
+function _captureLibrarySettings(prefs) {
+  return {
+    starredCommon: prefs.starredCommon || '',
+  };
+}
+
+// Export the SF library to destPath as a .jmt-soundfontlibrary.zip. The
+// caller is expected to pass an AbortSignal so cancellation can land mid-
+// archive — partial zips are deleted on cancel/error so a half-baked file
+// never gets mistaken for a valid backup.
+//
+// progress callback is invoked with { phase, processedBytes, totalBytes,
+// currentItem } as items stream in. The renderer uses these to drive the
+// progress modal label and percentage.
+async function exportBackup({
+  userData,
+  destPath,
+  appVersion,
+  prefs = {},
+  // [B-478] Absolute paths the user agreed to leave out after the readability gate named them.
+  skipPaths = [],
+  onProgress = () => {},
+  signal = null,
+}) {
+  if (!destPath) throw new Error('Missing destPath');
+  _ensureLibraryBackfill(userData);
+  // Warm cold candidate caches before the survey + zip. Stamped values
+  // become part of meta.json which lands in the backup archive — restores
+  // get the cache for free, no recomputation needed on the receiving side.
+  // BOTH OF THESE RUN BEFORE A SINGLE BYTE IS ZIPPED, AND ONE OF THEM IS SYNCHRONOUS.
+  // Marked rather than diagnosed: a 40,626 ms main-process stall was measured during an
+  // export on 2026-10-11 and the probe had no phase to pin it to. These two labels are the
+  // discriminator - the next armed run says which, instead of anyone reasoning about it.
+  //
+  // Worth knowing while reading this, NOT a conclusion: `surveyLibrary` is not awaited, so it
+  // walks the library synchronously on the main process. The other full-library walk in this
+  // app - `soundFontLibrarySize.js` - was deliberately written to "breathe between
+  // directories so the app stays answerable while it runs", and that was done BECAUSE the
+  // window went Not Responding. That walk measured 7,698 ms on this library. Same tree, and
+  // only one of the two yields.
+  // ── THE EXPORT USED THE BLOCKING TWIN OF A WALK THAT ALREADY HAD A YIELDING ONE ──
+  //
+  // `surveyLibrary` is synchronous and this is the main process, so for its whole duration the
+  // loop cannot dispatch input: the window stops answering, nothing is clickable, and Windows
+  // paints "Not Responding". `surveyLibraryAsync` was already written, already exported from
+  // this same module, and already used by the destination preflight.
+  //
+  // MEASURED on the real library 2026-10-11 (12.13 GB, 22k files), with a 50 ms heartbeat
+  // running alongside to record what the UI would feel:
+  //     surveyLibrary       3,649 ms wall,  heartbeat ticked   0 times - loop fully blocked
+  //     surveyLibraryAsync  3,256 ms wall,  heartbeat ticked  44 times, worst gap 416 ms
+  // Both returned 12,128,949,076 bytes. Same answer, same work, and the async form is not
+  // slower - the only difference is whether the app can answer while it runs.
+  //
+  // THIS IS ONE BLOCKING SPAN, NOT THE WHOLE FAULT. The stalls recorded during real exports on
+  // 2026-10-11 were 40,626 ms and 11,193 ms, and 3.6 s does not account for those. The phase
+  // marks here are what will name the rest; do not read this fix as closing the question.
+  await stallProbe.around('sfBackup:ensureCandidateCaches',
+    () => _ensureCandidateCaches(userData));
+  // [BUG-023] Every stage before the first byte reports a stage and a count. The screen showed
+  // only an elapsed clock for the first minutes of a large backup, and read as stuck.
+  onProgress({ verb: 'Reading', stage: 'reading' });
+  const _surveyOpts = {
+    onItem: ({ bucket, files }) => onProgress({ verb: 'Reading', stage: 'reading', bucket, files }),
+  };
+  const survey = await stallProbe.around('sfBackup:surveyLibrary',
+    () => surveyLibraryAsync(userData, _surveyOpts));
+  const _breathe = require('./soundFontFileHash').breathe;
+
+  // Content-hash pre-pass. One sha256 per top-level item, written into
+  // the manifest so the Replace-import survey can do a true byte-level
+  // skip-or-extract decision instead of the older fileCount+totalBytes
+  // proxy + directory-set heuristic. Costs one full read of the library
+  // up front; cheaper than the unbounded user-trust risk of "looked
+  // identical, wasn't actually." Per-item progress emits so the UI can
+  // tick a counter (large libraries with paid voicepacks can take
+  // tens of seconds at this step on a spinning disk).
+  const { hashItemDir } = require('./soundFontFileHash');
+  const contentHashes = { sources: {}, library: {}, common: {} };
+  // Pre-scan each bucket up front: per-bucket top-level item arrays
+  // (drives both phase counters), plus per-item file counts (drives
+  // the per-font / per-folder archive labels). One disk walk now
+  // instead of duplicate walks per phase.
+  const bucketTops = { sources: [], library: [], common: [], attachments: [] };
+  const filesPerTopItem = new Map();
+  // Commons live on disk under <uuid>/ — the user-facing label needs the
+  // friendly name from meta.json. Read it once during pre-scan and look
+  // it up by uuid in the archive entry handler.
+  const commonNameByUuid = new Map();
+  // Sources also live on disk under <uuid>/ — same idea for the
+  // currentItem display path. The bucket label stays aggregate
+  // ("Source Files") but the per-file line under the bar reads
+  // "sources/<friendly>/file.ext" instead of leaking a raw uuid.
+  const sourceNameByUuid = new Map();
+  // Attachment dirs are named by content sha256. A 64-hex string flashing
+  // past in the progress label tells the user nothing, so resolve each to
+  // its display name the same way the chips do (label, else filename).
+  const attachmentNameById = new Map();
+  // [B-369] Files the backup will not carry, and the absolute paths to skip when the
+  // archiver walks the same trees. Collected during the count pass below.
+  const { checkCarryableFile } = require('./sdCardDetect');
+  const refused = [];
+  const refusedAbs = new Set();
+  // [B-478] Files the user was shown at the readability gate and chose to go without. They join
+  // `refusedAbs` so the archiver skips them and the per-item counts stay in step, but they are
+  // reported on their own channel: `refused` means a program this app REMOVES from the library,
+  // and these are the user's own files, untouched and still on disk.
+  const skipSet = new Set((skipPaths || []).map(p => path.resolve(String(p))));
+  const skipped = [];
+
+  // AN ITEM THAT IS NOT FULLY READABLE IS NOT CARRIED AT ALL. [B-478 ruling, 2026-10-12]
+  //
+  // A font with one unreadable file would otherwise restore looking complete and be missing a
+  // sound, which is a worse artifact than its absence: the readable files are still on the
+  // user's disk, so nothing is lost by leaving the item out, while a partial copy is a trap for
+  // whoever opens the backup later. It also removes the stale-identity problem by construction -
+  // an item's stored contentHash / contentFileCount / contentTotalBytes travel inside its own
+  // meta.json, and a partial item would carry a record describing content the archive lacks.
+  //
+  // DERIVED HERE RATHER THAN SENT BY THE DIALOG. The rule belongs to the exporter: a caller that
+  // passes a file path must not be able to produce a partial item by not knowing about this.
+  //
+  // sharedTracks is exempt because it has no items - it is a flat bucket of independent tracks,
+  // each its own thing, with no record claiming the others are present.
+  const _sfRootAbs = path.resolve(_soundFontsRoot(userData));
+  const droppedItems = new Set();   // "bucket/top"
+  // How many files inside each dropped item could not be read. The report states the FAULT, and
+  // the fault is a count of unreadable files - not the item's size, which is a consequence.
+  const droppedUnreadable = new Map();   // "bucket/top" -> count
+  for (const abs of skipSet) {
+    const rel = path.relative(_sfRootAbs, abs);
+    if (!rel || rel.startsWith('..')) continue;
+    const segs = rel.split(path.sep);
+    if (segs.length < 2) continue;
+    const [bucket, top] = segs;
+    if (bucket === 'sharedTracks') continue;
+    const key = `${bucket}/${top}`;
+    droppedItems.add(key);
+    droppedUnreadable.set(key, (droppedUnreadable.get(key) || 0) + 1);
+  }
+  const skippedItems = [];
+  // [B-498] A file with a second name on disk is stored once, so its later names write nothing.
+  // Their bytes come off the bar's total here, in the same pass that counts files.
+  const _countedIds = new Set();
+  let _repeatBytes = 0;
+  const _noteRepeat = (abs) => {
+    try {
+      const st = fs.statSync(abs, { bigint: true });
+      if (st.nlink < 2n) return;
+      const id = `${st.dev}:${st.ino}`;
+      if (_countedIds.has(id)) _repeatBytes += Number(st.size);
+      else _countedIds.add(id);
+    } catch {}
+  };
+  // [BUG-023] Each stage before the write is timed on its own, so the stall log says which one
+  // a slow start belongs to.
+  stallProbe.begin('sfBackup:checkFiles');
+  let _checkedFiles = 0;
+  const _checkFilesTotal = Math.max(0, (survey.fileCount || 0) - ((survey.counts && survey.counts.sharedTracks) || 0));
+  onProgress({ verb: 'Checking', stage: 'checking', files: 0, filesTotal: _checkFilesTotal });
+  for (const bucket of ['sources', 'library', 'common', 'attachments']) {
+    const root = path.join(_soundFontsRoot(userData), bucket);
+    if (!fs.existsSync(root)) continue;
+    let topEntries;
+    try { topEntries = fs.readdirSync(root, { withFileTypes: true }); }
+    catch { continue; }
+    for (const top of topEntries) {
+      if (!top.isDirectory()) continue;
+      const abs = path.join(root, top.name);
+      // DROPPED BEFORE IT REACHES bucketTops, so nothing downstream can archive it: the bucket
+      // loop walks this list, the progress gates are keyed off it, and the manifest counts it.
+      // Removing the item here is what makes "not fully readable, not carried" true everywhere
+      // rather than in one place that a later change could miss.
+      if (droppedItems.has(`${bucket}/${top.name}`)) {
+        let files = 0;
+        let bytes = 0;
+        const tally = (dir) => {
+          let items;
+          try { items = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+          for (const it of items) {
+            const p = path.join(dir, it.name);
+            if (it.isDirectory()) { tally(p); continue; }
+            if (!it.isFile()) continue;
+            files++;
+            try { bytes += fs.statSync(p).size; } catch {}
+          }
+        };
+        tally(abs);
+        skippedItems.push({ bucket, top: top.name, path: abs, files, bytes,
+                            unreadable: droppedUnreadable.get(`${bucket}/${top.name}`) || 0 });
+        continue;
+      }
+      bucketTops[bucket].push({ name: top.name, abs });
+      // archive.directory() emits 'entry' events for files AND
+      // sub-directories. The user-facing counter should only track
+      // files, so the pre-scan and the entry handler must agree on
+      // "files only."
+      let count = 0;
+      const walk = (dir) => {
+        let items;
+        try { items = fs.readdirSync(dir, { withFileTypes: true }); }
+        catch { return; }
+        for (const it of items) {
+          if (it.isDirectory()) { walk(path.join(dir, it.name)); continue; }
+          if (!it.isFile()) continue;
+          const fileAbs = path.join(dir, it.name);
+          // THE SKIP COMES BEFORE THE CARRY TEST, AND BEFORE THE ATTACHMENTS EXEMPTION BELOW.
+          // An unreadable attachment stops the archive exactly like any other file, so the one
+          // bucket that is exempt from the program check is not exempt from this.
+          if (skipSet.has(path.resolve(fileAbs))) {
+            // Same location fields the gate carried, so the completion screen can describe the
+            // file the same way the question did rather than falling back to a bare path.
+            // `bytes` is what the manifest subtracts; stat still answers on a file that cannot
+            // be opened, which is why the size is available at all.
+            let bytes = 0;
+            try { bytes = fs.statSync(fileAbs).size; } catch {}
+            skipped.push({ path: fileAbs, name: it.name, bucket, top: top.name, bytes });
+            refusedAbs.add(fileAbs);
+            continue;
+          }
+          // DECLINE HERE, WHERE THE COUNT IS MADE ([B-369]). The backup gates each
+          // top item on its entry events - `await _gateFor(topKey).promise` resolves
+          // only once `filesPerTopItem` entries have arrived - so a file filtered out
+          // of the archive WITHOUT being removed from this count hangs the export
+          // forever, mid-write. Declining in the same pass that counts keeps the two
+          // in step by construction rather than by a subtraction that can drift.
+          //
+          // ATTACHMENTS ARE DELIBERATELY EXEMPT. Proof of purchase is the one place a
+          // macro-enabled document is allowed, in and out (2026-09-11), and
+          // programs cannot reach it because soundFontAttachments guards on add. Running
+          // the carry test here would strip the user's receipts out of their own backup.
+          if (bucket !== 'attachments') {
+            const v = checkCarryableFile(fileAbs, it.name);
+            if (v.blocked) {
+              // [B-394] CARRY THE MANAGED IDENTITY, or this finding can only be
+              // reported and never acted on. soundFontRemoval addresses a file as
+              // (kind, id, relPath) against its OWN root, and those roots are not the
+              // bucket root this relPath is relative to:
+              //     entry  -> library/<id>          common -> common/<id>/files
+              //     source -> sources/<id>/source   sharedTracks -> sharedTracks
+              // So strip the top-level segment, and for source/common the store's own
+              // subdirectory too. _sfImpoundRefusals already honours a per-record
+              // _kind/_id, so a whole-library batch needs nothing new on the renderer.
+              const _relFromRoot = path.relative(root, fileAbs).split(path.sep).join('/');
+              const _segs = _relFromRoot.split('/');
+              const _topId = _segs.shift();
+              if ((bucket === 'sources' && _segs[0] === 'source')
+                  || (bucket === 'common' && _segs[0] === 'files')) _segs.shift();
+              const _kind = bucket === 'library' ? 'entry'
+                          : bucket === 'sources' ? 'source'
+                          : bucket === 'common'  ? 'common' : null;
+              refused.push({ relPath: _relFromRoot, _kind, _id: _topId, _itemRel: _segs.join('/'),
+                name: it.name, kind: v.kind, reason: v.reason, disguised: !!v.disguised });
+              refusedAbs.add(fileAbs);
+              continue;
+            }
+          }
+          _noteRepeat(fileAbs);
+          count++;
+        }
+      };
+      walk(abs);
+      filesPerTopItem.set(`${bucket}/${top.name}`, count);
+      // [BUG-023] Files checked, out of the survey's file count. Each file is one header read, so
+      // files are an even unit here. The breath between items keeps the app answering (Cancel
+      // included); this pass held the main process for minutes on a large library.
+      _checkedFiles += count;
+      onProgress({ verb: 'Checking', stage: 'checking', bucket,
+                   files: _checkedFiles, filesTotal: _checkFilesTotal });
+      await _breathe();
+      if (signal && signal.aborted) {
+        stallProbe.end('sfBackup:checkFiles');
+        const e = new Error('Cancelled'); e.cancelled = true; throw e;
+      }
+      if (bucket === 'common') {
+        try {
+          const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+          if (m && m.name) commonNameByUuid.set(top.name, m.name);
+        } catch {}
+      }
+      if (bucket === 'sources') {
+        try {
+          const m = JSON.parse(fs.readFileSync(path.join(abs, 'meta.json'), 'utf8'));
+          const friendly = (m && (m.bundleName || m.originalName)) || '';
+          if (friendly) sourceNameByUuid.set(top.name, friendly);
+        } catch {}
+      }
+      if (bucket === 'attachments') {
+        try {
+          const a = JSON.parse(fs.readFileSync(path.join(abs, 'attachment.json'), 'utf8'));
+          const friendly = (a && (a.label || a.name)) || '';
+          if (friendly) attachmentNameById.set(top.name, friendly);
+        } catch {}
+      }
+    }
+  }
+  // sharedTracks: flat bucket, count individual .wav files.
+  let sharedTracksItemCount = 0;
+  try {
+    const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+    if (fs.existsSync(stRoot)) {
+      for (const f of fs.readdirSync(stRoot, { withFileTypes: true })) {
+        if (!f.isFile() || !/\.wav$/i.test(f.name)) continue;
+        // Same reasoning as the bucket walk: this count IS the gate for the shared
+        // tracks bucket, so a declined file has to leave the count with it. And the
+        // .wav filter above is a shape test, not a safety one - a program renamed to
+        // hum.wav passes it, which is exactly what the content check is for.
+        const fAbs = path.join(stRoot, f.name);
+        if (skipSet.has(path.resolve(fAbs))) {
+          let bytes = 0;
+          try { bytes = fs.statSync(fAbs).size; } catch {}
+          skipped.push({ path: fAbs, name: f.name, bucket: 'sharedTracks', bytes });
+          refusedAbs.add(fAbs);
+          continue;
+        }
+        const v = checkCarryableFile(fAbs, f.name);
+        if (v.blocked) {
+          refused.push({ _kind: 'sharedTracks', _id: '', _itemRel: f.name, relPath: f.name, name: f.name, kind: v.kind,
+            reason: v.reason, disguised: !!v.disguised });
+          refusedAbs.add(fAbs);
+          continue;
+        }
+        _noteRepeat(fAbs);
+        sharedTracksItemCount++;
+      }
+    }
+  } catch {}
+  stallProbe.end('sfBackup:checkFiles');
+
+  // HASH PHASE — per-bucket aggregate counters, "Preparing" verb so
+  // the user doesn't see the implementation term. Each phase emits
+  // per-item progress; the label shape matches the archive phase so
+  // the user reads one continuous mental model across both halves.
+  //
+  // Library + common route through the stored-hash helpers, which read
+  // meta.contentHash when the cheap-signal safety net passes (file
+  // count + total bytes match the on-disk reality). Skips the full
+  // tree walk + sha256 for items that haven't been touched since the
+  // last hash, which is the steady state. First export after this
+  // slice triggers backfill — same cost as the old behavior; later
+  // exports return near-instantly. Sources stay on hashItemDir
+  // because source hashes live on source meta separately (different
+  // identity model) and don't go through this path.
+  const sfEntriesMod = require('./soundFontEntries');
+  const sfCommonMod = require('./soundFontCommon');
+  const sfSourcesMod = require('./soundFontSources');
+  // [B-394] THE HASH MUST DESCRIBE WHAT THE ARCHIVE CARRIES, NOT WHAT IS ON DISK.
+  //
+  // The cached per-item hashes below are computed over the WHOLE tree. The count pass
+  // above DECLINES blocked files (checkCarryableFile) and they never reach the zip. So
+  // for any item holding a refused file the cached hash described a SUPERSET of the
+  // archive - permanently, for that backup - and every later import reported a phantom
+  // conflict on an item whose files are byte-identical. Found 2026-09-16 when a Replace
+  // still read "2 differ" against a library it had just written itself.
+  //
+  // ONLY ITEMS THAT ACTUALLY LOST A FILE PAY FOR IT. With nothing declined the whole
+  // tree IS the archive, so the cached hash is already correct and the fast path stands.
+  // refusedAbs is complete before this runs: the decline loop is synchronous and ends
+  // at the top of exportBackup; hashPhaseBucket is awaited long after it.
+  const _refusedUnder = (abs) => {
+    const prefix = abs.endsWith(path.sep) ? abs : abs + path.sep;
+    for (const r of refusedAbs) if (r.startsWith(prefix)) return true;
+    return false;
+  };
+  // Hash the CARRIED set through the SAME canonical serialization as the cached path -
+  // identical records in, identical digest out - so a clean item hashes the same either
+  // way and only a refusal changes the answer.
+  const _carriedHash = (abs) => {
+    const { collectFileRecords, hashRecords } = require('./soundFontFileHash');
+    const keep = (rel) => !refusedAbs.has(path.join(abs, rel.split('/').join(path.sep)));
+    const records = collectFileRecords(abs, null, keep);
+    return records === null ? null : hashRecords(records);
+  };
+  const hashForItem = (bucket, name, abs) => {
+    if (bucket !== 'attachments' && _refusedUnder(abs)) return _carriedHash(abs);
+    if (bucket === 'library') return sfEntriesMod.getEntryContentHash(userData, name);
+    if (bucket === 'common')  return sfCommonMod.getCommonContentHash(userData, name);
+    // Sources are uuid-keyed on disk and effectively immutable post-
+    // import — once the hash is stamped onto source meta.json, every
+    // subsequent export reads it back instead of re-hashing multi-GB
+    // voicepacks. Cheap-signal safety net catches manual on-disk edits.
+    if (bucket === 'sources') return sfSourcesMod.getSourceContentHash(userData, name);
+    return hashItemDir(abs);
+  };
+  const hashPhaseBucket = async (bucket, bucketLabel) => {
+    const items = bucketTops[bucket];
+    for (let i = 0; i < items.length; i++) {
+      if (signal && signal.aborted) {
+        const e = new Error('Cancelled');
+        e.cancelled = true;
+        throw e;
+      }
+      const item = items[i];
+      // Sources and commons live under uuid-keyed dirs on disk; resolve
+      // to the friendly name so the user-facing line doesn't leak a
+      // raw uuid. Library items are already name-keyed.
+      let friendlyItemName = item.name;
+      if (bucket === 'sources' && sourceNameByUuid.has(item.name)) {
+        friendlyItemName = sourceNameByUuid.get(item.name);
+      } else if (bucket === 'common' && commonNameByUuid.has(item.name)) {
+        friendlyItemName = commonNameByUuid.get(item.name);
+      }
+      onProgress({
+        verb: 'Preparing',
+        stage: 'preparing',
+        bucket,
+        currentItem: `${bucket}/${friendlyItemName}`,
+        topItemName: bucketLabel,
+        topItemFilesProcessed: i + 1,
+        topItemFilesTotal: items.length,
+        // [BUG-023] BYTES, NOT ITEMS. Items differ in size by a thousand times, so a count sits
+        // still on one large voicepack. An item already fingerprinted counts its bytes at once;
+        // that is true, the bytes are accounted for, they just did not need reading.
+        preparedBytes: _preparedBytes,
+        prepareTotalBytes: _prepareTotalBytes,
+      });
+      const h = hashForItem(bucket, item.name, item.abs);
+      if (h) contentHashes[bucket][item.name] = h;
+      _preparedBytes += _itemBytesOf(bucket, item.name);
+      await _breathe();
+    }
+  };
+  const _itemBytesOf = (bucket, name) =>
+    Number((survey.itemBytes && survey.itemBytes[`${bucket}/${name}`]) || 0);
+  let _preparedBytes = 0;
+  let _prepareTotalBytes = 0;
+  for (const b of ['sources', 'library', 'common']) {
+    for (const it of bucketTops[b]) _prepareTotalBytes += _itemBytesOf(b, it.name);
+  }
+  for (const [b, label] of [['sources', 'Source Files'], ['library', 'Font Files'],
+                            ['common', 'Common Folder Files']]) {
+    stallProbe.begin(`sfBackup:prepare:${b}`);
+    try { await hashPhaseBucket(b, label); }
+    finally { stallProbe.end(`sfBackup:prepare:${b}`); }
+  }
+  onProgress({ verb: 'Preparing', stage: 'preparing',
+               preparedBytes: _prepareTotalBytes, prepareTotalBytes: _prepareTotalBytes });
+
+  // Build the manifest first so a corrupted partial zip still gets the
+  // type marker even if it doesn't finish.
+  // THE MANIFEST DESCRIBES THE ARCHIVE, NOT THE LIBRARY. [B-478, 2026-10-12]
+  //
+  // `survey` ran before any file was known to be unreadable, so its counts and totals include
+  // files this archive does not contain. Shipping those numbers makes the archive overstate
+  // itself: a backup carrying ten tracks would claim twelve, and nothing inside it would say
+  // otherwise. The adjustment is applied to copies - `survey` still drives the progress bar and
+  // the destination fit check, which are both about work to be done rather than bytes stored.
+  //
+  // COUNTS ARE PER ITEM FOR EVERY BUCKET EXCEPT sharedTracks, which counts wav files. So a
+  // skipped file inside a font does not change `counts.library` - the font is still in the
+  // archive, one file lighter - while a skipped track does reduce `counts.sharedTracks`.
+  const { counts: _manifestCounts, totals: _manifestTotals, totalBytes: _manifestTotalBytes,
+          filesBytes: _manifestFilesBytes } = applySkipAdjustment(survey, { skipped, skippedItems });
+  // THE BAR'S DENOMINATOR IS WHAT WILL BE WRITTEN. [2026-10-15] A dropped item is never walked by
+  // the archive loop, so its bytes can never arrive - a bar measured against the raw survey stops
+  // short of its own total by exactly the weight of what the user agreed to leave out. It also
+  // disagreed with the figure the confirm screen had quoted seconds earlier.
+  //
+  // THE DESTINATION FIT CHECK STILL USES THE RAW SURVEY, deliberately: asking for room the backup
+  // may not need is the safe direction, and the check runs before the skip is even agreed.
+  // [B-498] And it is what will be WRITTEN: a second name for a stored file costs nothing, so the
+  // bar runs against the library's size on disk rather than the sum of every name's size.
+  const _archiveTotalBytes = Math.max(0, _manifestTotalBytes - _repeatBytes);
+
+  const manifest = {
+    type: BACKUP_TYPE,
+    schemaVersion: SCHEMA_VERSION,
+    appVersion: appVersion || '',
+    exportedAt: new Date().toISOString(),
+    counts: _manifestCounts,
+    // onDiskBytes: what the library takes on disk, each shared file once - the footer's second
+    // figure, and the bytes this archive actually holds before compression. [B-498]
+    totals: { ..._manifestTotals, totalBytes: _manifestTotalBytes, filesBytes: _manifestFilesBytes, onDiskBytes: _archiveTotalBytes },
+    settings: _captureLibrarySettings(prefs),
+    // Per-item canonical content hashes, see soundFontFileHash.js for
+    // what's included and excluded. Backups without this field fall
+    // through to the legacy count+bytes path on import — backward
+    // compat is preserved by absence.
+    contentHashes,
+  };
+
+  const archiver = require('archiver');
+  // Atomic-write pattern: stream to a sibling .partial file, then rename
+  // atomically into the user's chosen destPath on success. Two wins:
+  //   1. The user's chosen filename is never a partially-written zip:
+  //      it either doesn't exist yet or it's the final, complete file.
+  //      Cloud-sync agents (Drive/OneDrive/Dropbox) never see the
+  //      streaming write at the user-visible path; they only see the
+  //      finished file appear via rename.
+  //   2. On cancel, the user-facing path was never created, so there's
+  //      no "looks like a backup but isn't" hazard. The .partial file
+  //      may linger if we can't delete it (own write-stream handle, sync
+  //      agent lock), but it's visibly intermediate by name.
+  const partialPath = destPath + '.partial';
+  const ws = fs.createWriteStream(partialPath);
+  // forceZip64: archive can grow past the 2 GiB signed-32-bit boundary
+  // that zip-stream (archiver's underlying writer) enforces on the
+  // classic zip32 format. A multi-GB Sound Fonts library will routinely
+  // exceed that ceiling. Modern unzippers (Windows Explorer, 7-Zip,
+  // node-stream-zip) all handle zip64 transparently; the overhead is
+  // a few bytes of extended local headers per entry, no per-file size
+  // ceiling, no archive-wide size ceiling.
+  const archive = archiver('zip', { zlib: { level: 6 }, forceZip64: true });
+
+  // Hook cancellation. Aborting the archiver mid-stream + closing the
+  // write stream lets us clean up the partial file in the finally block.
+  // Registry of deferred gates so a cancel can settle them. Declared HERE, above
+  // onAbort, because an already-aborted signal calls onAbort during setup - before the
+  // helpers below exist. A const read in its temporal dead zone throws, and node --check
+  // cannot see it. [B-420]
+  const _abortGates = [];
+  let cancelled = false;
+  // Mark a SYNCHRONOUS span for the stall probe without changing what it does. Each inner
+  // try/catch below is left exactly where it was, so behaviour is identical with the probe
+  // armed or not. [B-478]
+  const _span = (label, fn) => {
+    stallProbe.begin(label);
+    try { return fn(); } finally { stallProbe.end(label); }
+  };
+  const onAbort = () => {
+    cancelled = true;
+    // CANCEL ITSELF BLOCKS THE LOOP, AND THIS IS WHERE THAT GETS LOCATED. [B-478, 2026-10-11]
+    // A cancel during an export produced an 8,129 ms stall that the probe could only file as
+    // "(idle - nothing marked)". A STALL means the event loop could not tick, which rules out
+    // the partial-file unlink below - that is promise-based and would cost wall time without
+    // blocking - and points at something synchronous in here. Three steps, three labels, so
+    // the next cancel names the one that blocks instead of anyone reasoning about it.
+    // Note this path has already been tuned once: the gate release below is [B-420]'s fix for
+    // a cancel that took minutes. This is a different span inside a path someone optimised.
+    //
+    // *** RELEASE EVERY PENDING GATE FIRST. [B-420, 2026-09-21]
+    // The dispatch loop may be parked on a bucket gate that only the archiver can resolve,
+    // and abort() stops it resolving. Settle them BEFORE aborting or the loop never gets to
+    // see `cancelled` at all, and the cancel hangs until an outer ceiling fires. This is the
+    // line that turns a minutes-long cancel into a one-second one, and it is the real answer
+    // to the measurement: "I barely coppied anything to it... why is cancel taking so long?"
+    _span('sfBackup:cancel:releaseGates',
+      () => { for (const g of _abortGates) { try { g.resolve(); } catch {} } });
+    _span('sfBackup:cancel:archiveAbort', () => { try { archive.abort(); } catch {} });
+    // abort() does not close the file it is reading. Measured 2026-10-11 against archiver
+    // 5.3.2: `_task.source.destroyed` is false after abort() and only becomes true when the
+    // stream is destroyed here. `_abort()` calls `_queue.kill()`, which drops QUEUED tasks and
+    // never touches the one in flight, and `_shutdown()` only runs when the queue is already
+    // idle. So every cancel left one file open until the process exited.
+    // Reaches into archiver internals because the in-flight source is not exposed; guarded on
+    // every hop and pinned to archiver 5.3.2.
+    // The OUTCOME is recorded as its own phase label so a real cancel can be checked rather
+    // than assumed. The probe has no free-text log, but a phase name is text, so the result
+    // lands in the PHASE DURATIONS block as `sfBackup:cancel:result:<outcome>`. Costs nothing
+    // when the probe is disarmed - begin/end are no-ops then.
+    // Without this, a cancel only ever proved the release CODE ran, never that a handle went.
+    _span('sfBackup:cancel:releaseInFlight', () => {
+      let outcome = 'noInFlightSource';
+      try {
+        const src = archive && archive._task && archive._task.source;
+        if (!src) {
+          outcome = 'noInFlightSource';
+        } else if (typeof src.destroy !== 'function') {
+          outcome = 'sourceHasNoDestroy';
+        } else if (src.destroyed) {
+          outcome = 'alreadyDestroyed';
+        } else {
+          src.destroy();
+          outcome = src.destroyed ? 'destroyed' : 'destroyDidNotTake';
+        }
+      } catch { outcome = 'threw'; }
+      try {
+        const tag = 'sfBackup:cancel:result:' + outcome;
+        stallProbe.begin(tag); stallProbe.end(tag);
+      } catch {}
+    });
+    _span('sfBackup:cancel:streamDestroy', () => { try { ws.destroy(); } catch {} });
+  };
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  // Single-attempt unlink with a hard wall. fs.promises.unlink on Windows
+  // can block indefinitely at the OS level when the file is held open
+  // by ANY process, including our own not-yet-fully-closed write
+  // stream. Node provides no way to cancel an in-flight unlink. The
+  // race below lets us stop WAITING after the wall; the unlink itself
+  // continues in the background and may eventually succeed (in which
+  // case the residualPath we report becomes a harmless lie that the
+  // user discovers as a missing file when they go to clean it up).
+  // .catch() is attached to the unlink promise BEFORE the race so a
+  // rejection arriving after the wall doesn't become an unhandled
+  // rejection that destabilizes the main process.
+  // WAIT FOR OUR OWN HANDLE, THEN RETRY. [B-420, 2026-09-21 — the question found this]
+  //
+  // The ask was why there is a deadline at all: "if there's concern then let them abort knowing we
+  // couldn't release the card... but we already had a quick method with renaming so shouldn't
+  // be an issue." The right answer turned out to be that the deadline was guarding a race we
+  // had ALREADY FIXED ELSEWHERE, in this same codebase, THE SAME MORNING.
+  //
+  // THE RACE: `onAbort` calls `ws.destroy()`, which is ASYNCHRONOUS, and cleanup then tried
+  // to unlink the very file that stream was still closing. The comment above described the
+  // symptom exactly — unlink blocks at the OS level while the file is held open by "ANY
+  // process, including our own not-yet-fully-closed write stream" — and then worked around it
+  // with a 3 s wall instead of removing the cause. That stalled teardown past the 5 s cancel
+  // ceiling on slow media, which is what produced the false "Export stopped".
+  //
+  // `sfExportCopy.dropPartial` solved this on the font path hours earlier: wait for the
+  // stream's 'close' event, then retry the unlink on EBUSY/EPERM. Same shape, same OS, same
+  // fix — it simply never got carried across. Two files, one defect, one of them already
+  // patched. That is the cost of fixing a defect rather than a defect CLASS.
+  //
+  // The 2 s wait is a floor on the stream, not on the unlink: once 'close' has fired the
+  // handle is gone and the unlink is immediate. The retry ladder covers the case where Windows
+  // has not caught up yet, which is exactly what it is for on the font path.
+  const cleanupPartialFile = async (p) => {
+    await new Promise((r) => {
+      try {
+        if (ws.destroyed && ws.closed) return r();
+        ws.once('close', r);
+      } catch { return r(); }
+      setTimeout(r, 2000);     // never hang the cancel on a stream that will not close
+    });
+    // ASYNC, NEVER `unlinkSync`. [B-420] My first cut used the sync form, copied from the
+    // font path where it is fine - small files, after a confirmed close. Here the target is a
+    // multi-gigabyte archive on a card that writes at ~773 ms/file, and the comment above
+    // warns unlink can block at the OS level. A synchronous block there freezes the whole main
+    // process, which is the symptom this entire fix exists to remove. The original code used
+    // `fs.promises.unlink` for exactly this reason and I undid it.
+    //
+    // Each attempt is still raced, so even a blocking unlink cannot trap us - but note the
+    // difference from the code this replaced: the race is now a SAFETY NET on a call that
+    // should already be instant (the handle is closed above), not the mechanism we rely on.
+    const tryOnce = (fn) => new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(v); } };
+      fn().then(() => finish('ok'), (e) => finish((e && e.code) || 'err'));
+      setTimeout(() => finish('timeout'), 3000);
+    });
+    for (let i = 0; i < 5; i++) {
+      const r = await tryOnce(() => fs.promises.unlink(p));
+      if (r === 'ok' || r === 'ENOENT') return { removed: true, residual: null };
+      if (r !== 'EBUSY' && r !== 'EPERM') break;   // timeout or a real error - stop retrying
+      await new Promise((r2) => setTimeout(r2, 50 * (i + 1)));
+    }
+    // IF WE CANNOT DELETE IT, NAME IT. The design, and it is the same convention as the
+    // font path: "so essentially we want to delete it... but if we can't, then at least it's
+    // named DELETE.Ahsoka etc..."
+    //
+    // A `.partial` left behind is already inert, but it is OUR word for it — `DELETE.` is a
+    // word the user reads without being taught, on a card they are looking at in Explorer.
+    // And the other rule holds: no product name in it. "don't blame us for this by putting
+    // our name int it. juswt mark it for delete... human readable."
+    //
+    // A rename can fail too — Windows refuses it while a handle is open without
+    // FILE_SHARE_DELETE — so this is a better fallback, never a guarantee. Whatever the file
+    // ends up called is what gets reported, so the message names the file that is actually
+    // there rather than the one we hoped to leave.
+    // Async and raced for the same reason as the unlink above - a rename against a held
+    // handle can block too, and a sync one would block the main process with it.
+    try {
+      const marked = path.join(path.dirname(p), `DELETE.${path.basename(p)}`);
+      await tryOnce(() => fs.promises.unlink(marked));      // a previous attempt's marker
+      if (await tryOnce(() => fs.promises.rename(p, marked)) === 'ok') {
+        return { removed: false, residual: marked };
+      }
+    } catch {}
+    return { removed: false, residual: p };
+  };
+  // Hard outer ceiling on cancel response. If anything inside the main
+  // flow hangs past this point after abort (archive.finalize stuck on
+  // a slow drain, ws never emitting 'close', whatever), we forcibly
+  // throw cancelled and return, leaving the in-flight work to die in
+  // the background. The renderer never gets trapped in an endless
+  // "Cleaning up…" state even if our own teardown deadlocks.
+  // deadlineTimer is cleared in the finally if work wins the race, so
+  // the deadline promise never rejects and there's no late unhandled
+  // rejection floating in the loop.
+  // THE CEILING WAS 5 SECONDS AND IT WAS REPORTING A LIE. [B-420, 2026-09-21]
+  //
+  // On a card mounted through a Proffieboard a write is ~773 ms per file, so archive teardown
+  // routinely takes longer than 5 s. The deadline fired, the renderer was told the export had
+  // STOPPED, and the archiver kept streaming to the card in the background. What the user saw next:
+  // starting another backup appeared to lock the app up, because `dialog.showSaveDialog` was
+  // queued behind work that was supposedly finished. The read of it was exactly right - "we
+  // said it was done but it wasn't."
+  //
+  // AND THE CONSEQUENCE NAMED THAT MATTERS MORE THAN THE LOCKUP: "if they then wanted
+  // to safe eject the board they couldn't." A false "stopped" on a board card means the eject
+  // fails with files still open - or worse, someone who has been told it stopped pulls the
+  // card. Safe eject is one of the four requirements this entry exists to deliver; reporting a
+  // clean finish we cannot vouch for defeats it.
+  //
+  // SO THE DEADLINE NO LONGER REPORTS COMPLETION. Two changes:
+  //   • 120 s instead of 5 s - a true last-resort ceiling, not a routine path. Slow media now
+  //     finishes inside it, and the UI stays honestly on "Cancelling… (finishing current
+  //     file)" while it does, which is the state the user should see.
+  //   • if it DOES fire, the error is marked `teardownIncomplete` so nothing downstream claims
+  //     the card is safe. We stop saying "done" when what we mean is "we stopped waiting."
+  //
+  // The original 5 s existed for a real reason - do not trap the renderer in an endless
+  // "Cleaning up…" if our own teardown deadlocks - and that reason still holds. What changes is
+  // that the escape hatch now tells the truth instead of dressing a timeout up as success.
+  // THE RULING, AND IT REPLACES THE CLOCK ENTIRELY: "only reason to abort and tell them
+  // it's unknown is if the drive stops communicating..."
+  //
+  // That is exactly right, and it is a better condition than elapsed time in both directions.
+  // A slow board card is not an error - it is slow, and the honest response is to keep waiting
+  // with the UI saying so. A drive that has been yanked is not slow - it is gone, and no amount
+  // of waiting will resolve it. A timer cannot tell those apart; presence can.
+  //
+  // SO THE ABORT CONDITION IS MEDIA PRESENCE, NOT A DEADLINE. Polled every 500 ms once a
+  // cancel is requested, using the same `existsSync`-on-the-mount-point instrument built for
+  // safe eject this morning - measured then across a board card, a USB reader and a built-in
+  // slot, all three reading false the moment the media went.
+  //
+  // THE LONG BACKSTOP IS KEPT AND I AM FLAGGING IT RATHER THAN HIDING IT. Strictly, the rule
+  // says only drive loss earns "unknown", and a genuine deadlock with the drive still present
+  // would now hang forever. Ten minutes is far outside any real teardown (the known cause - our
+  // own unlink racing an unclosed handle - is fixed above), so it should never fire; it exists
+  // so a future deadlock cannot leave the app unclosable. It reports the SAME honest "we
+  // stopped waiting" state, never a clean finish.
+  const _volumeRoot = (() => {
+    try {
+      const m = /^([A-Za-z]):/.exec(path.resolve(partialPath));
+      if (m) return `${m[1].toUpperCase()}:\\`;
+      return path.parse(path.resolve(partialPath)).root || null;
+    } catch { return null; }
+  })();
+  let deadlineTimer = null;
+  let presencePoll = null;
+  const cancelDeadline = new Promise((_, reject) => {
+    if (!signal) return;
+    const bail = (why) => {
+      const e = new Error('Cancelled');
+      e.cancelled = true;
+      e.residualPath = partialPath;
+      // Work is still in flight. Nothing downstream may tell the user the destination is
+      // finished with - no completion notice, and above all no safe-eject offer on a card we
+      // are still holding open. [B-420]
+      e.teardownIncomplete = true;
+      e.mediaGone = (why === 'media-gone');
+      reject(e);
+    };
+    const onAbortDeadline = () => {
+      if (_volumeRoot) {
+        presencePoll = setInterval(() => {
+          let there = true;
+          try { there = fs.existsSync(_volumeRoot); } catch { there = true; }
+          if (!there) bail('media-gone');
+        }, 500);
+      }
+      deadlineTimer = setTimeout(() => bail('backstop'), 600000);
+    };
+    if (signal.aborted) onAbortDeadline();
+    else signal.addEventListener('abort', onAbortDeadline, { once: true });
+  });
+
+  let processedBytes = 0;
+  // Per-bucket counter state for the archive phase. Sources and
+  // sharedTracks aggregate at the bucket level (counter = item index
+  // / total items in bucket). Library and common are per-item — each
+  // font / common folder has its own file counter that climbs as
+  // its files stream into the zip.
+  const archiveSources = { idx: 0, total: bucketTops.sources.length, seenTops: new Set() };
+  const archiveSharedTracks = { idx: 0, total: sharedTracksItemCount };
+  // attachments aggregate the same way sources do — the counter is the
+  // item index, not a file index, because a receipt is one item to the
+  // user no matter how the store lays it out (file + sidecar json).
+  const archiveAttachments = { idx: 0, total: bucketTops.attachments.length, seenTops: new Set() };
+  // Bucket-level file counters drive the inter-bucket gates. archiver
+  // can interleave entries across bucket boundaries too (the whole
+  // sources/ bucket dispatches as one archive.directory() call which
+  // starts streaming while we move on to library) so the dispatch
+  // loop awaits each bucket's full file count before queuing the next.
+  let sourcesFilesEmitted = 0;
+  const sourcesFilesExpected = bucketTops.sources.reduce(
+    (sum, it) => sum + (filesPerTopItem.get(`sources/${it.name}`) || 0), 0
+  );
+  let sharedTracksFilesEmitted = 0;
+  let attachmentsFilesEmitted = 0;
+  const attachmentsFilesExpected = bucketTops.attachments.reduce(
+    (sum, it) => sum + (filesPerTopItem.get(`attachments/${it.name}`) || 0), 0
+  );
+  // EVERY GATE MUST BE ABLE TO SETTLE ON ABORT. [B-420, 2026-09-21 — the measurement]
+  //
+  // THIS IS WHY CANCEL TOOK MINUTES REGARDLESS OF HOW LITTLE WAS WRITTEN. Reported:
+  // "I barely coppied anything to it... why is cancel taking so long? it might ahve been like
+  // a couple mb." It was never I/O. The dispatch loop does
+  //
+  //     archive.directory(...);  if (expected > 0) await gate.promise;
+  //
+  // and a gate resolves when the archiver has emitted that bucket's expected entry count.
+  // `archive.abort()` stops it emitting - so the gate NEVER RESOLVES and the loop parks on a
+  // promise that cannot settle. Every `if (cancelled) break` sits BEFORE an await, so the flag
+  // has no way to reach a loop already suspended.
+  //
+  // Registering the resolvers lets `onAbort` settle them all at once. The loop then unwinds
+  // immediately, `archive.finalize()` is skipped by the `if (!cancelled)` guards, `done`
+  // settles, and teardown finishes in the time it takes to close a stream.
+  //
+  // AND THIS IS WHAT THE OLD 5-SECOND DEADLINE WAS REALLY HIDING. It was not covering a
+  // slow drive; it was escaping this deadlock - by reporting a clean cancel that had not
+  // happened. Removing the lie without fixing the hang made the wait honest and much longer,
+  // which is what hit at 1m58s. The lesson is the one from this morning, again: a timeout
+  // standing in for a diagnosis buries the defect instead of removing it.
+  const _gate = () => {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    const g = { promise, resolve };
+    _abortGates.push(g);
+    return g;
+  };
+  const sourcesBucketGate = (() => {
+    const g = _gate();
+    return g;
+  })();
+  const sharedTracksBucketGate = (() => {
+    const g = _gate();
+    return g;
+  })();
+  const attachmentsBucketGate = (() => {
+    const g = _gate();
+    return g;
+  })();
+  const archiveLibFile = new Map();   // fontName -> filesEmittedSoFar
+  const archiveComFile = new Map();   // folderName -> filesEmittedSoFar
+  // Per-item completion gates. archiver's internal queue does NOT
+  // guarantee strict serialization between archive.directory() calls in
+  // practice — the entry stream can interleave files from sibling top
+  // items, which surfaces as the per-font label flipping back and forth
+  // (Ahsoka 50, Apocalypse 1, Ahsoka 51, …). To fix, the dispatch loop
+  // awaits this gate per item: when the entry handler observes the
+  // counter reach the pre-scan total for that item, the gate resolves
+  // and the next archive.directory() call gets queued. One font at a
+  // time, contiguously.
+  const itemDoneGates = new Map(); // topKey -> { promise, resolve }
+  const _gateFor = (topKey) => {
+    if (!itemDoneGates.has(topKey)) {
+      itemDoneGates.set(topKey, _gate());
+    }
+    return itemDoneGates.get(topKey);
+  };
+  // [B-498] Where each library file's bytes go. A file's identity is its file id when it has more
+  // than one name on disk (bigint: an NTFS id can exceed a double), else its own path, so the
+  // first name archived carries the bytes and every later name is only a row in PATHS_FILE.
+  const _objectOf = new Map();       // identity -> object name
+  const _pathOf = new Map();         // object name -> the library path that carried its bytes
+  const _paths = {};                 // library path -> object name
+  const _dirs = new Set();
+  let _objectCount = 0;
+  const _addDirs = (rel) => {
+    const segs = String(rel || '').split('/').filter(Boolean);
+    for (let i = 1; i <= segs.length; i++) _dirs.add(segs.slice(0, i).join('/'));
+  };
+  const _place = (abs, rel, stats) => {
+    let id = `path:${abs}`;
+    if (stats && stats.nlink > 1) {
+      try { const s = fs.statSync(abs, { bigint: true }); id = `${s.dev}:${s.ino}`; } catch {}
+    }
+    const known = _objectOf.get(id);
+    if (known) { _paths[rel] = known; return { dup: true, object: known }; }
+    const object = `${STORE_DIR}/${String(++_objectCount).padStart(6, '0')}${OBJECT_EXT}`;
+    _objectOf.set(id, object);
+    _pathOf.set(object, rel);
+    _paths[rel] = object;
+    return { dup: false, object };
+  };
+  const _onEntry = (entry) => {
+    // Skip directory entries — archive.directory() emits an 'entry'
+    // for every sub-folder as well as every file. The user-facing
+    // counter and the pre-scan total both treat "files only" so we
+    // need to match here or the counter overshoots 100%.
+    const isDir = (entry.type === 'directory')
+      || (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory());
+    if (isDir) return;
+    if (entry.stats && entry.stats.size && !entry.repeat) processedBytes += entry.stats.size;
+    const parts = String(entry.name || '').split('/');
+    const bucket = parts[0] || '';
+    const topName = parts[1] || '';
+    if (!topName) return;
+    // Build the user-facing path: zip paths under sources/ and common/
+    // are keyed by uuid on disk, but the user shouldn't see raw uuids
+    // flashing through. Library zip paths are already name-keyed.
+    const displayName = (() => {
+      if (bucket === 'sources' && sourceNameByUuid.has(topName)) {
+        return `sources/${sourceNameByUuid.get(topName)}/${parts.slice(2).join('/')}`;
+      }
+      if (bucket === 'common' && commonNameByUuid.has(topName)) {
+        return `common/${commonNameByUuid.get(topName)}/${parts.slice(2).join('/')}`;
+      }
+      if (bucket === 'attachments') {
+        return `attachments/${attachmentNameById.get(topName) || topName}`;
+      }
+      return entry.name;
+    })();
+    if (bucket === 'sources') {
+      const topKey = `${bucket}/${topName}`;
+      if (!archiveSources.seenTops.has(topKey)) {
+        archiveSources.seenTops.add(topKey);
+        archiveSources.idx++;
+      }
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: _archiveTotalBytes,
+        currentItem: displayName,
+        topItemName: 'Source Files',
+        topItemFilesProcessed: archiveSources.idx,
+        topItemFilesTotal: archiveSources.total,
+      });
+      sourcesFilesEmitted++;
+      if (sourcesFilesExpected > 0 && sourcesFilesEmitted >= sourcesFilesExpected) {
+        sourcesBucketGate.resolve();
+      }
+    } else if (bucket === 'library' || bucket === 'common') {
+      const counterMap = bucket === 'library' ? archiveLibFile : archiveComFile;
+      const itemTotal = filesPerTopItem.get(`${bucket}/${topName}`) || 0;
+      const newIdx = (counterMap.get(topName) || 0) + 1;
+      counterMap.set(topName, newIdx);
+      // Library dirs are name-keyed; common dirs are uuid-keyed and
+      // must be translated to the friendly name from meta.json so the
+      // user doesn't see a raw uuid in the label.
+      const friendlyTop = bucket === 'common'
+        ? (commonNameByUuid.get(topName) || topName)
+        : topName;
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: _archiveTotalBytes,
+        currentItem: displayName,
+        topItemName: `${friendlyTop} Files`,
+        topItemFilesProcessed: newIdx,
+        topItemFilesTotal: itemTotal,
+      });
+      // Resolve the per-item gate once all files for this top item have
+      // arrived. The dispatch loop awaits this before queuing the next
+      // archive.directory() call so entries can't interleave.
+      if (itemTotal > 0 && newIdx >= itemTotal) {
+        _gateFor(`${bucket}/${topName}`).resolve();
+      }
+    } else if (bucket === 'sharedTracks') {
+      archiveSharedTracks.idx++;
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: _archiveTotalBytes,
+        currentItem: entry.name,
+        topItemName: 'Shared Tracks',
+        topItemFilesProcessed: archiveSharedTracks.idx,
+        topItemFilesTotal: archiveSharedTracks.total,
+      });
+      sharedTracksFilesEmitted++;
+      if (archiveSharedTracks.total > 0 && sharedTracksFilesEmitted >= archiveSharedTracks.total) {
+        sharedTracksBucketGate.resolve();
+      }
+    } else if (bucket === 'attachments') {
+      // Counter is per ITEM, not per file: the store writes a sidecar
+      // beside each attachment, and "2 of 3" jumping to "4 of 3" because
+      // of a json the user never saw would be a lie about the work.
+      const topKey = `${bucket}/${topName}`;
+      if (!archiveAttachments.seenTops.has(topKey)) {
+        archiveAttachments.seenTops.add(topKey);
+        archiveAttachments.idx++;
+      }
+      onProgress({
+        verb: 'Backing up',
+        processedBytes,
+        totalBytes: _archiveTotalBytes,
+        currentItem: displayName,
+        topItemName: 'Attachments',
+        topItemFilesProcessed: archiveAttachments.idx,
+        topItemFilesTotal: archiveAttachments.total,
+      });
+      attachmentsFilesEmitted++;
+      if (attachmentsFilesExpected > 0 && attachmentsFilesEmitted >= attachmentsFilesExpected) {
+        attachmentsBucketGate.resolve();
+      }
+    }
+  };
+  // The archive names entries by object; progress and the gates speak library paths.
+  archive.on('entry', (entry) => _onEntry({ ...entry, name: _pathOf.get(entry.name) || entry.name }));
+
+  // A file the archive cannot read must END the run, not park it. Measured 2026-10-11: one
+  // unreadable file leaves `archive.finalize()` unsettled forever - reproduced with three
+  // good files and one carrying a DENY ace, where the other three archived and finalize had
+  // still not settled after 20 seconds. The run reports a percentage and never moves again.
+  //
+  // Rejecting `done` below does not help, because at the moment of the error nothing is
+  // awaiting `done` yet - the run is parked on `await archive.finalize()` one frame later.
+  // `fatal` exists so that await can be raced against the failure.
+  let fatalError = null;
+  const noteFatal = (err) => {
+    if (!fatalError) {
+      fatalError = err;
+      // Same leak as the cancel path: the source being read when it died stays open.
+      try {
+        const src = archive && archive._task && archive._task.source;
+        if (src && typeof src.destroy === 'function' && !src.destroyed) src.destroy();
+      } catch {}
+    }
+  };
+  const fatal = new Promise((_, reject) => {
+    archive.on('error', err => { noteFatal(err); reject(err); });
+    archive.on('warning', err => {
+      // ENOENT means a file vanished mid-walk, which the walk can carry on past.
+      if (err.code === 'ENOENT') return;
+      noteFatal(err); reject(err);
+    });
+  });
+  fatal.catch(() => {});
+
+  const done = new Promise((resolve, reject) => {
+    ws.on('close', resolve);
+    ws.on('error', reject);
+    archive.on('error', reject);
+    archive.on('warning', err => {
+      // ENOENT warnings show up when files vanish mid-walk (rare); other
+      // warnings are surfaced as failures so we don't ship a backup with
+      // silent gaps.
+      if (err.code === 'ENOENT') return;
+      reject(err);
+    });
+  });
+  // Pre-attach a no-op catch IMMEDIATELY so a rejection arriving before
+  // the await in `work` (typically: ws.destroy() triggers pending write
+  // callbacks to fail with ERR_STREAM_DESTROYED, archiver propagates,
+  // done rejects) doesn't fire an UnhandledPromiseRejectionWarning in
+  // the Node console. Awaits later still see the rejection because
+  // .catch() creates a new derived promise; the original `done` keeps
+  // its rejection state and the await observes it independently.
+  done.catch(() => {});
+
+  archive.pipe(ws);
+
+  // Main streaming work wrapped so we can race it against cancelDeadline.
+  const work = (async () => {
+    // Manifest first so a partial-but-readable zip still identifies as
+    // ours when someone tries to peek into it.
+    archive.append(JSON.stringify(manifest, null, 2), { name: 'manifest.json' });
+
+    // Bucket-by-bucket archive order. For sources and sharedTracks the
+    // whole bucket is walked at once (one archive.directory call) since
+    // they're aggregate-labelled — interleaving within them doesn't
+    // affect the user-facing counter. For library and common, each
+    // top-level item is added separately so the per-item label stays
+    // stable on one font / folder while its files stream through, then
+    // flips to the next.
+    // [B-369] archiver's data function: return false to drop an entry. The entry carries
+    // `name` (relative to the walked root) and `stats` - there is NO sourcePath, so the
+    // absolute path is rebuilt from the root. Verified against archiver 5's core.js
+    // (onGlobMatch builds entryData from match.relative + match.stat), not assumed.
+    // Only files already declined during the COUNT pass are dropped here, so the gates
+    // and the archive stay in agreement.
+    // `bucket` is passed only for the WHOLE-BUCKET calls. Removing an item from `bucketTops` is
+    // what keeps it out of the library and common loops, and those walk one item at a time, so
+    // their root is the item itself and the first path segment is a file inside it.
+    //
+    // A DROPPED ITEM HAS TO BE REJECTED HERE TOO, not only out of `bucketTops`. The count pass
+    // skips a dropped item before the walk that fills `refusedAbs`, so its unreadable files are
+    // in no skip set at all - and sources and attachments are archived as one directory call
+    // that walks the item regardless. The archiver then reads a file the user was told would be
+    // left out, and the EPERM leaves finalize() unsettled forever.
+    const _skipRefused = (rootAbs, bucket) => (entry) => {
+      if (!entry || !entry.name) return entry;
+      if (bucket) {
+        const top = String(entry.name).split(/[\\/]/)[0];
+        // Before the directory check, so a dropped item's sub-directories are rejected too.
+        if (top && droppedItems.has(`${bucket}/${top}`)) return false;
+      }
+      if (entry.stats && typeof entry.stats.isDirectory === 'function' && entry.stats.isDirectory()) return entry;
+      return refusedAbs.has(path.join(rootAbs, entry.name)) ? false : entry;
+    };
+    // [B-498] Every directory call goes through here. A folder becomes a row in PATHS_FILE, a file
+    // becomes an object, and a second name for a file already stored becomes a row only. That row
+    // still counts as the file arriving, through the same handler the archive's own event feeds,
+    // so every per-item count and gate sees each file exactly once whether or not it was stored.
+    const _stored = (rootAbs, prefix, filter) => {
+      return (entry) => {
+        const e = filter ? filter(entry) : entry;
+        if (!e || !e.name) return e;
+        if (e.stats && typeof e.stats.isDirectory === 'function' && e.stats.isDirectory()) return false;
+        const rel = `${prefix}/${String(e.name).replace(/\\/g, '/')}`;
+        const placed = _place(path.join(rootAbs, e.name), rel, e.stats);
+        if (placed.dup) {
+          _onEntry({ name: rel, type: 'file', stats: e.stats, repeat: true });
+          return false;
+        }
+        e.name = placed.object;
+        e.prefix = '';
+        if (_storeUncompressed(rel)) e.store = true;
+        return e;
+      };
+    };
+    // A file appended from a buffer: stored once like the rest, and awaited so the next is not read
+    // until this one is written.
+    const _appendStored = async (buf, abs, rel) => {
+      let stats = null;
+      try { stats = fs.statSync(abs); } catch {}
+      const placed = _place(abs, rel, stats);
+      if (placed.dup) return;
+      const written = new Promise((resolve) => {
+        const onEntry = (e) => { if (e && e.name === placed.object) { archive.removeListener('entry', onEntry); resolve(); } };
+        archive.on('entry', onEntry);
+      });
+      archive.append(buf, { name: placed.object, ...(_storeUncompressed(rel) ? { store: true } : {}) });
+      await Promise.race([written, fatal]);
+    };
+    archive.append(_readmeText(appVersion, manifest.exportedAt), { name: README_NAME });
+    if (!cancelled) {
+      const srcRoot = path.join(_soundFontsRoot(userData), 'sources');
+      if (fs.existsSync(srcRoot)) {
+        archive.directory(srcRoot, 'sources', _stored(srcRoot, 'sources', _skipRefused(srcRoot, 'sources')));
+        // Wait for the entire sources bucket to flush before starting
+        // library, otherwise archiver interleaves sources entries with
+        // the first library entries and the user-facing label flips
+        // mid-bucket.
+        if (sourcesFilesExpected > 0) await sourcesBucketGate.promise;
+      }
+    }
+    if (!cancelled) {
+      const libRoot = path.join(_soundFontsRoot(userData), 'library');
+      if (fs.existsSync(libRoot)) {
+        for (const item of bucketTops.library) {
+          if (cancelled) break;
+          const topKey = `library/${item.name}`;
+          const expected = filesPerTopItem.get(topKey) || 0;
+          archive.directory(item.abs, topKey, _stored(item.abs, topKey, _skipRefused(item.abs)));
+          // Empty dirs would never resolve via the entry handler; just
+          // skip the await in that case so the loop doesn't hang.
+          if (expected > 0) await _gateFor(topKey).promise;
+        }
+      }
+    }
+    if (!cancelled) {
+      const comRoot = path.join(_soundFontsRoot(userData), 'common');
+      if (fs.existsSync(comRoot)) {
+        for (const item of bucketTops.common) {
+          if (cancelled) break;
+          const topKey = `common/${item.name}`;
+          const expected = filesPerTopItem.get(topKey) || 0;
+          archive.directory(item.abs, topKey, _stored(item.abs, topKey, _skipRefused(item.abs)));
+          if (expected > 0) await _gateFor(topKey).promise;
+        }
+      }
+    }
+    if (!cancelled) {
+      const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+      if (fs.existsSync(stRoot)) {
+        archive.directory(stRoot, 'sharedTracks', _stored(stRoot, 'sharedTracks', _skipRefused(stRoot)));
+        if (archiveSharedTracks.total > 0) await sharedTracksBucketGate.promise;
+      }
+    }
+    if (!cancelled) {
+      const attRoot = path.join(_soundFontsRoot(userData), 'attachments');
+      if (fs.existsSync(attRoot)) {
+        // FILTERED LIKE THE REST. Attachments are exempt from the carry test, never from the
+        // readability skip - an unreadable receipt stops the archive exactly like any other file.
+        archive.directory(attRoot, 'attachments', _stored(attRoot, 'attachments', _skipRefused(attRoot, 'attachments')));
+        if (attachmentsFilesExpected > 0) await attachmentsBucketGate.promise;
+      }
+    }
+    // [B-399] The per-file hash manifests, LAST and deliberately quiet.
+    //
+    // NO GATE, AND THAT IS SAFE ONLY BECAUSE IT IS LAST. The gates above exist to stop
+    // archiver interleaving two buckets and flipping the on-screen label mid-item; nothing
+    // follows this, and archive.finalize() does not resolve until every queued entry has
+    // been written. Adding a bucket AFTER this one without giving this one a gate would
+    // reintroduce exactly the interleaving the gates were built to prevent.
+    //
+    // NOT COUNTED IN survey.totalBytes, on purpose. That number is the size of the
+    // user's LIBRARY — their fonts — and it drives both the estimate and the bar. These
+    // manifests are derived data measured in hundreds of KB against multi-GB of audio (540
+    // KB for 19 commons on the library this was found on), so folding them in would make
+    // the reported library size subtly wrong in exchange for no perceptible accuracy. The
+    // bar stays honest because the work here is not perceptible, not because it is hidden.
+    //
+    // NOT CARRY-SCREENED EITHER. Every file here is JSON this app wrote itself, keyed by
+    // uuid, never user content — the refusal machinery has nothing to decide about them.
+    // [B-297] The bucket-root markers, carried at their real paths so a restored library brings
+    // its own migration state back. Ungated and unlabelled for the same reasons as the manifests
+    // below, and ahead of them so the manifests stay last.
+    //
+    // Read here instead of handing archiver the path: an unreadable file inside an ungated call
+    // leaves finalize() unsettled, which is [B-478]. These are a few bytes each.
+    if (!cancelled) {
+      for (const rel of CARRIED_MARKERS) {
+        let buf;
+        const abs = path.join(_soundFontsRoot(userData), rel);
+        try { buf = fs.readFileSync(abs); }
+        catch { continue; }
+        // The library meta rides WITHOUT its `size` stamp. [B-514] That is the footer's last
+        // measurement of the disk, true of this disk at this moment and of nothing a restore
+        // produces: a restore links more than the library did (measured 2026-10-21: 13.44 GB
+        // carried, 11.71 GB restored), and a carried stamp shows the old figure until the next walk.
+        if (rel === '_jmt_library_meta.json') {
+          try {
+            const m = JSON.parse(buf.toString('utf8'));
+            if (m && typeof m === 'object' && 'size' in m) {
+              delete m.size;
+              buf = Buffer.from(JSON.stringify(m, null, 2));
+            }
+          } catch { /* not JSON we understand: carry it as it is */ }
+        }
+        await _appendStored(buf, abs, rel);
+      }
+    }
+    // [B-498] Read one file at a time rather than walked by the archiver, which nothing awaits:
+    // PATHS_FILE is written last and has to see every one of these placed.
+    if (!cancelled) {
+      const fhRoot = path.join(_soundFontsRoot(userData), FILEHASH_DIR);
+      const fhFiles = [];
+      const walkFh = (dir, rel) => {
+        let items;
+        try { items = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const it of items) {
+          const abs = path.join(dir, it.name);
+          if (it.isDirectory()) walkFh(abs, `${rel}/${it.name}`);
+          else if (it.isFile()) fhFiles.push({ abs, rel: `${rel}/${it.name}` });
+        }
+      };
+      walkFh(fhRoot, FILEHASH_DIR);
+      for (const f of fhFiles) {
+        if (cancelled) break;
+        let buf;
+        try { buf = fs.readFileSync(f.abs); } catch { continue; }
+        await _appendStored(buf, f.abs, f.rel);
+      }
+    }
+    // [B-498] The content pool, flat, with its index. A Replace rebuilds the library from the
+    // zip, so a pool the zip does not carry comes back empty. One file at a time, each awaited
+    // before the next is read, so a large pool is never held in memory at once; read here rather
+    // than handed to archiver by path for the same [B-478] reason as the markers above.
+    if (!cancelled) {
+      const poolRoot = path.join(_soundFontsRoot(userData), POOL_DIR);
+      let poolFiles = [];
+      try { poolFiles = fs.readdirSync(poolRoot, { withFileTypes: true }).filter((f) => f.isFile()); } catch {}
+      for (const f of poolFiles) {
+        if (cancelled) break;
+        const abs = path.join(poolRoot, f.name);
+        if (skipSet.has(path.resolve(abs))) continue;
+        if (!f.name.startsWith('.') && checkCarryableFile(abs, f.name).blocked) continue;
+        let buf;
+        try { buf = fs.readFileSync(abs); } catch { continue; }
+        await _appendStored(buf, abs, `${POOL_DIR}/${f.name}`);
+      }
+    }
+    // Last, once every path is known. The folders come from one walk of the carried roots rather
+    // than from the archiver's walk, whose last folders can arrive after its last file.
+    if (!cancelled) {
+      const sfAbs = _soundFontsRoot(userData);
+      const walkDirs = (abs, rel) => {
+        if (droppedItems.has(rel)) return;
+        _addDirs(rel);
+        let items;
+        try { items = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
+        for (const it of items) if (it.isDirectory()) walkDirs(path.join(abs, it.name), `${rel}/${it.name}`);
+      };
+      for (const root of ['sources', 'library', 'common', 'sharedTracks', 'attachments', FILEHASH_DIR, POOL_DIR]) {
+        if (fs.existsSync(path.join(sfAbs, root))) walkDirs(path.join(sfAbs, root), root);
+      }
+      archive.append(JSON.stringify({ files: _paths, dirs: [..._dirs].sort() }), { name: PATHS_FILE });
+    }
+
+    // Raced against `fatal` so an unreadable file ends the run instead of parking it here
+    // forever. Without the race this await is where the export stops and never returns.
+    if (!cancelled) await Promise.race([archive.finalize(), fatal]);
+    await done.catch(() => {}); // swallow during cancel; race handles exits
+  })();
+
+  try {
+    await Promise.race([work, cancelDeadline]);
+  } catch (err) {
+    // Cancel deadline fired OR work threw. Either way, attempt cleanup
+    // of the .partial (best effort) and rethrow with the right shape.
+    // [B-420] Returns { removed, residual }: residual is null when it was deleted, the
+    // DELETE.-marked path when it could only be renamed, and the raw partial when even
+    // that failed. Reporting whatever it ACTUALLY ended up as is the point.
+    const cleaned = await cleanupPartialFile(partialPath);
+    if (err && err.cancelled) {
+      const e = new Error('Cancelled');
+      e.cancelled = true;
+      e.residualPath = cleaned.residual;
+      // Carried through, or the honest signal is lost one frame after it was created.
+      // [B-420] Only the DEADLINE path sets this; a cancel that tore down cleanly does not.
+      if (err.teardownIncomplete) e.teardownIncomplete = true;
+      throw e;
+    }
+    if (cancelled) {
+      const e = new Error('Cancelled');
+      e.cancelled = true;
+      e.residualPath = cleaned.residual;
+      throw e;
+    }
+    // NAME THE FILE. A backup that stops because one file could not be read is actionable
+    // only if the message says which one - the alternative is the user deleting folders to
+    // find it, which is what the afternoon of 2026-10-11 was spent doing. The path rides on
+    // the fs error; the code (EPERM / EACCES / EBUSY) is what distinguishes "something has it
+    // open" from "it is not there".
+    const srcPath = (fatalError && (fatalError.path || fatalError.data && fatalError.data.sourcePath)) || null;
+    if (srcPath) {
+      // THE FULL PATH, NOT THE BASENAME. [B-478, 2026-10-12] The basename is unique in a test
+      // fixture and useless in a real library, where the file that cannot be read is called
+      // hum.wav and there are hundreds of those. The renderer turns this line into a link.
+      const e = new Error(
+        `Could not read ${srcPath} - the backup was stopped so it cannot ship `
+        + `an archive that is quietly missing a file.`);
+      e.unreadablePath = srcPath;
+      e.code = fatalError.code || null;
+      e.residualPath = cleaned.residual;
+      throw e;
+    }
+    throw err;
+  } finally {
+    if (signal) {
+      try { signal.removeEventListener('abort', onAbort); } catch {}
+    }
+    if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
+    // AND THE PRESENCE POLL. [B-420] Added it and did not tear it down - a 500 ms
+    // `existsSync` against the destination volume, running forever after the export settled,
+    // on a card we may be trying to eject. Found by checking rather than assuming, one minute
+    // after writing it.
+    if (presencePoll) { clearInterval(presencePoll); presencePoll = null; }
+    // Belt-and-suspenders: if cancelDeadline is still pending here
+    // (work won the race or threw early), attach a no-op catch so a
+    // late-arriving rejection can't become an unhandled rejection.
+    cancelDeadline.catch(() => {});
+    // Same for work, in case its internal awaits throw after race
+    // already resolved.
+    work.catch(() => {});
+  }
+
+  if (cancelled) {
+    // [B-420] Returns { removed, residual }: residual is null when it was deleted, the
+    // DELETE.-marked path when it could only be renamed, and the raw partial when even
+    // that failed. Reporting whatever it ACTUALLY ended up as is the point.
+    const cleaned = await cleanupPartialFile(partialPath);
+    const e = new Error('Cancelled');
+    e.cancelled = true;
+    e.residualPath = cleaned.residual;
+    throw e;
+  }
+
+  // Success: atomic rename .partial → destPath. If destPath already
+  // exists (overwrite), try to remove it first; on Windows newer Node
+  // versions support overwrite-on-rename, but the explicit unlink is
+  // a belt-and-suspenders that also surfaces a useful error if the
+  // existing file is locked.
+  if (fs.existsSync(destPath)) {
+    try { await fs.promises.unlink(destPath); } catch {}
+  }
+  await fs.promises.rename(partialPath, destPath);
+  for (const s of skipped) { if (s.top) s.item = _friendlyTop(userData, s.bucket, s.top); }
+  for (const s of skippedItems) {
+    s.item = _friendlyTop(userData, s.bucket, s.top);
+    s.groupKey = _sourceGroupKey(userData, s.bucket, s.top);
+  }
+  return { destPath, manifest, refused, skipped, skippedItems };
+}
+
+// Read + validate a backup zip without unpacking it. Returns the manifest
+// + a survey of what's actually inside the zip (counts per bucket measured
+// from the entry list, so a tampered manifest doesn't silently mismatch
+// the real contents). Errors carry a `reason` code so the renderer can
+// branch UX between "not a backup" vs "wrong schema" vs "unreadable file".
+// A BACKUP ZIP IS AN ARBITRARY FILE ([B-370]). People hand these to each other, and
+// restore writes straight into the library, so it is an import door like any other and
+// gets the same policy: these files are never allowed in.
+//
+// CHECKED AFTER EXTRACTION, ON PURPOSE. Reading the bytes out of the archive first would
+// mean decompressing every entry twice; extracting then screening costs one 256-byte read
+// and the file is removed before anything can use it. The progress counters are left
+// alone deliberately - they report work performed, and making them agree with what was
+// KEPT would mean touching the same gating that makes the export side fragile.
+//
+// NEVER CALL THIS FOR attachments/. Proof of purchase is the one place a macro-enabled
+// document is allowed, so screening a restore there would strip the user's receipts out
+// of their own backup.
+// ── No duplicates, whichever door ──────────────────────────────────── [B-407]
+//
+// THE RULE, 2026-09-17, and it is absolute: "When we backup/import/merge it can't duplicate a
+// file. No duplicates ever." The scenario is what this has to pass: back up, delete a track, add
+// that same track to a FONT instead, then merge the backup back in. Those bytes are already in the
+// library — inside the font — so the restore must recognise them and link, never write a copy.
+//
+// THIS MODULE HAD ZERO CONTENT-INDEX REFERENCES. [B-399]'s entry described the mechanism
+// without naming it as a problem: merge "materialises items by raw extraction". Raw extraction
+// cannot know what the library already holds.
+//
+// AND THE SECOND HALF IS THE BIGGER WIN. Measured on a real backup: 18,465 wav entries, 5,649
+// distinct, so 4.24 GB of a 6.80 GB archive is the SAME audio stored again — hardlinks do not
+// survive a zip, so every name became its own entry. Recording each novel file as it lands means
+// the archive's internal duplication COLLAPSES on the way in rather than being faithfully rebuilt.
+//
+// Returns a function, or null when the index is unavailable. Every failure path degrades to the
+// plain extraction this always did: at worst a duplicate survives, never a lost file.
+function _makeContentDeduper(userData) {
+  let CI, index, hashFile;
+  try {
+    CI = require('./soundFontContentIndex');
+    index = CI.buildIndex(userData);
+    hashFile = require('./soundFontFileHash').hashFile;
+  } catch { return null; }
+  if (!CI || !index || !hashFile) return null;
+  return function dedupeExtracted(target) {
+    let h = null;
+    try {
+      if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return;
+      h = hashFile(target);
+    } catch { return; }
+    if (!h) return;
+    try {
+      const existing = CI.findExisting(index, h);
+      if (existing && path.resolve(existing) !== path.resolve(target)) {
+        // Temp-name-then-rename so an interruption leaves either the extracted file or the
+        // link, never a hole where the file should be. Same shape ingestFile uses.
+        const tmp = `${target}.dedupe-tmp`;
+        try { fs.rmSync(tmp, { force: true }); } catch {}
+        try {
+          fs.linkSync(existing, tmp);
+          fs.renameSync(tmp, target);
+        } finally {
+          // THE TEMP DOES NOT OUTLIVE THE ATTEMPT. A link that succeeds and a rename that
+          // fails leaves the extracted file correct and the temp beside it, where it reads
+          // as a file the source does not have - which is a file the user never added being
+          // reported as their own edit. Found 2026-10-17: one survivor from 2026-10-07,
+          // inside a common folder, 47 KB.
+          try { fs.rmSync(tmp, { force: true }); } catch {}
+        }
+        return;
+      }
+    } catch { /* cross-volume or failed link: keep the extracted copy */ }
+    // Novel content: this file is the canonical copy for anything identical later in the zip.
+    try { CI.recordContent(index, h, target); } catch {}
+  };
+}
+
+function _screenRestored(target, sink) {
+  try {
+    const { checkCarryableFile } = require('./sdCardDetect');
+    const v = checkCarryableFile(target, path.basename(target));
+    if (!v.blocked) return true;
+    try { fs.unlinkSync(target); } catch {}
+    if (sink) sink.push({ name: path.basename(target), kind: v.kind, reason: v.reason,
+      disguised: !!v.disguised });
+    return false;
+  } catch { return true; }
+}
+
+
+async function inspectBackup(zipPath) {
+  if (!zipPath) return { ok: false, reason: 'missing-path', error: 'Missing zip path' };
+  if (!fs.existsSync(zipPath)) return { ok: false, reason: 'missing-file', error: 'File not found' };
+  const StreamZip = require('node-stream-zip');
+  let zip;
+  try {
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
+  } catch (err) {
+    return { ok: false, reason: 'unreadable', error: String(err && err.message || err) };
+  }
+  try {
+    let entries;
+    try { entries = await zip.entries(); }
+    catch (err) { return { ok: false, reason: 'unreadable', error: String(err && err.message || err) }; }
+    const manifestEntry = entries['manifest.json'];
+    if (!manifestEntry) {
+      return { ok: false, reason: 'not-a-backup', error: 'This zip is not a JMT Studio Sound Font library backup.' };
+    }
+    let manifest;
+    try {
+      const buf = await zip.entryData('manifest.json');
+      manifest = JSON.parse(buf.toString('utf8'));
+    } catch (err) {
+      return { ok: false, reason: 'bad-manifest', error: 'The backup file is damaged or its manifest is not readable.' };
+    }
+    if (!manifest || manifest.type !== BACKUP_TYPE) {
+      return { ok: false, reason: 'not-a-backup', error: 'This zip is not a JMT Studio Sound Font library backup.' };
+    }
+    if (typeof manifest.schemaVersion !== 'number' || manifest.schemaVersion > SCHEMA_VERSION) {
+      return {
+        ok: false,
+        reason: 'newer-schema',
+        error: `This backup was created by a newer version of JMT Studio (schema ${manifest.schemaVersion}). Update JMT Studio to import it.`,
+      };
+    }
+    // Measure actual bucket contents from the entry list. Counts top-level
+    // subdirs under each nested bucket (sources/<uuid>, library/<name>,
+    // common/<uuid>). sharedTracks is flat — count .wav file entries
+    // directly (no top-dir layer). Bytes sum from entry sizes either way.
+    const buckets = {
+      sources: { count: 0, bytes: 0 },
+      library: { count: 0, bytes: 0 },
+      common: { count: 0, bytes: 0 },
+      sharedTracks: { count: 0, bytes: 0 },
+      attachments: { count: 0, bytes: 0 },
+    };
+    const topDirs = { sources: new Set(), library: new Set(), common: new Set(), attachments: new Set() };
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      if (_isCarriedMarker(e.name)) continue;
+      const parts = e.name.split('/');
+      const bucket = parts[0];
+      if (!buckets[bucket]) continue;
+      if (bucket === 'sharedTracks') {
+        // Flat: parts[1] is the filename. Count .wav files only.
+        if (!e.isDirectory && parts[1] && /\.wav$/i.test(parts[1])) {
+          buckets.sharedTracks.count++;
+          buckets.sharedTracks.bytes += (e.size || 0);
+        }
+        continue;
+      }
+      if (parts[1] && parts[1] !== '') topDirs[bucket].add(parts[1]);
+      if (!e.isDirectory) buckets[bucket].bytes += (e.size || 0);
+    }
+    for (const b of ['sources', 'library', 'common', 'attachments']) buckets[b].count = topDirs[b].size;
+    // Read from the zip: an attachment whose record says it is a picture is not proof of purchase.
+    for (const id of topDirs.attachments) {
+      try {
+        const rec = JSON.parse((await zip.entryData(`attachments/${id}/attachment.json`)).toString('utf8'));
+        if (rec && rec.role === 'picture') buckets.attachments.count--;
+      } catch {}
+    }
+    const observedTotal = buckets.sources.bytes + buckets.library.bytes + buckets.common.bytes + buckets.sharedTracks.bytes + buckets.attachments.bytes;
+    return {
+      ok: true,
+      manifest,
+      observed: {
+        counts: { sources: buckets.sources.count, library: buckets.library.count, common: buckets.common.count, sharedTracks: buckets.sharedTracks.count, attachments: buckets.attachments.count },
+        totals: { sources: buckets.sources.bytes, library: buckets.library.bytes, common: buckets.common.bytes, sharedTracks: buckets.sharedTracks.bytes, attachments: buckets.attachments.bytes, totalBytes: observedTotal },
+      },
+    };
+  } finally {
+    try { await zip.close(); } catch {}
+  }
+}
+
+// Replace-import: wipe the current SF library and restore from the backup
+// exactly. The whole operation is atomic from the user's perspective —
+// either the new library is fully in place or the original library is
+// untouched.
+//
+// Mechanism:
+//   1. Rename userData/soundFonts/ → userData/soundFonts.preimport-bak-<ts>/
+//      so the original is preserved as a complete tree (cheap rename, not a
+//      copy) and an interrupted extract leaves zero ambiguity about state.
+//   2. Create fresh userData/soundFonts/ and extract every entry into it.
+//   3. On success: delete the snapshot.
+//   4. On cancel/error: delete the partial new dir + rename snapshot back.
+//
+// progress callback fires per entry with { processedBytes, totalBytes,
+// currentItem }. Caller supplies an AbortSignal for cancellation.
+async function applyReplace({
+  userData,
+  zipPath,
+  onProgress = () => {},
+  signal = null,
+}) {
+  // [B-370] Anything a restore refused to write. Reported, never silent.
+  const restoreRefused = [];
+  if (!zipPath) throw new Error('Missing zipPath');
+  if (!userData) throw new Error('Missing userData');
+  const sfRoot = _soundFontsRoot(userData);
+  const snapshotPath = `${sfRoot}.preimport-bak-${Date.now()}`;
+
+  // Snapshot via rename. If the original doesn't exist yet (fresh install
+  // path), there's nothing to preserve — just skip the rename.
+  const hadOriginal = fs.existsSync(sfRoot);
+  if (hadOriginal) {
+    try { fs.renameSync(sfRoot, snapshotPath); }
+    catch (err) { throw new Error(`Could not snapshot existing library: ${err.message}`); }
+  }
+
+  // Pre-extract survey for the identical-skip optimization. surveyMerge
+  // expects the user's library at userData/soundFonts; we've just renamed
+  // it to snapshotPath, so a junction symlink at the original location
+  // lets the survey read the snapshot transparently. Done BEFORE creating
+  // the fresh sfRoot so the symlink can actually take that path.
+  const skipDirs = { sources: new Set(), library: new Set(), common: new Set() };
+  if (hadOriginal) {
+    let tmpLink = null;
+    try {
+      try {
+        fs.symlinkSync(snapshotPath, sfRoot, 'junction');
+        tmpLink = sfRoot;
+      } catch {
+        // Symlink failed (permissions, platform). Fall back to no
+        // optimization — wipe-and-extract everything.
+      }
+      if (tmpLink) {
+        const surveyRes = await surveyMerge({ userData, zipPath });
+        for (const it of surveyRes.sources?.identical || []) skipDirs.sources.add(it.id);
+        for (const it of surveyRes.library?.identical || []) skipDirs.library.add(it.id);
+        for (const it of surveyRes.common?.identical  || []) skipDirs.common.add(it.id);
+      }
+    } catch {
+      skipDirs.sources.clear();
+      skipDirs.library.clear();
+      skipDirs.common.clear();
+    } finally {
+      if (tmpLink) { try { fs.unlinkSync(tmpLink); } catch {} }
+    }
+  }
+
+  // Create the fresh root early so a no-entries backup still lands a valid
+  // empty dir rather than leaving the SF tab pointing at nothing.
+  try { fs.mkdirSync(sfRoot, { recursive: true }); }
+  catch (err) {
+    // Couldn't even make the new root — try to put things back exactly as
+    // they were so the user isn't worse off than when they started.
+    if (hadOriginal) {
+      try { fs.renameSync(snapshotPath, sfRoot); } catch {}
+    }
+    throw new Error(`Could not create library directory: ${err.message}`);
+  }
+
+  // [B-407] BUILT *AFTER* THE SNAPSHOT RENAME, AND THE TIMING IS THE WHOLE POINT. Replace has
+  // just moved the old library aside, so this index starts EMPTY and accumulates only what the
+  // archive lands. That is deliberate: linking new files to content inside the snapshot — which is
+  // deleted on success — would be reasoning about storage that is on its way out.
+  // What it still buys is the big one: the archive's OWN duplication collapses on the way in.
+  // Measured on the backup, 4.24 GB of 6.80 GB is the same audio stored again, because hardlinks
+  // do not survive a zip. Without this, a restore faithfully rebuilds every one of those copies.
+  const _dedupeExtracted = _makeContentDeduper(userData) || (() => {});
+
+  const StreamZip = require('node-stream-zip');
+  let zip;
+  try {
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
+  } catch (err) {
+    // Rollback before re-throwing.
+    try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
+    if (hadOriginal) {
+      try { fs.renameSync(snapshotPath, sfRoot); } catch {}
+    }
+    throw new Error(`Could not open backup zip: ${err.message}`);
+  }
+
+  let cancelled = false;
+  const onAbort = () => { cancelled = true; };
+  if (signal) {
+    if (signal.aborted) cancelled = true;
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  let manifest = null;
+  let processedBytes = 0;
+  let totalBytes = 0;
+  // Items we move from snapshot to fresh root because they're 100%
+  // identical to the backup. Tracked so a mid-run failure can move them
+  // back to the snapshot during rollback and the user lands exactly
+  // where they started. Both are hoisted to the function scope so the
+  // catch block can iterate them without a ReferenceError when the
+  // throw happens before their original (in-try) declarations would
+  // have executed — the empty-library case used to hit exactly that.
+  const reusedItems = []; // [{ snapshotAbs, freshAbs }, ...]
+  const reusedFiles = []; // { snapshotAbs, freshAbs } for sharedTracks rollback
+
+  try {
+    const entries = await zip.entries();
+    // Manifest first (small, needed for settings).
+    try {
+      const buf = await zip.entryData('manifest.json');
+      manifest = JSON.parse(buf.toString('utf8'));
+    } catch {}
+
+    // When the manifest carries per-item content hashes, surveyMerge
+    // already did a strict byte-level identical check (hash from
+    // manifest vs hash of the live tree). The directory-set heuristic
+    // below was the v1 stopgap for that gap; it's redundant when the
+    // hash is authoritative. Old backups without contentHashes still
+    // get the heuristic via the legacy path.
+    const hasManifestContentHashes = !!(manifest && manifest.contentHashes);
+
+    // Per-item directory-presence map for the verification step. For
+    // each backup item we record which directories the zip contains
+    // (both as implicit parents of files and explicit dir entries).
+    // The survey already vouched for file content via count+bytes (or
+    // source hash); the only realistic gap is on-disk dirs that the
+    // backup doesn't have, which the size aggregate can't see.
+    const zipDirsByItem = new Map(); // "bucket/id" → Set<relPath>
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name || e.name === 'manifest.json') continue;
+      const parts = e.name.split('/');
+      if (parts.length < 3) continue;
+      const itemKey = `${parts[0]}/${parts[1]}`;
+      if (!zipDirsByItem.has(itemKey)) zipDirsByItem.set(itemKey, new Set());
+      const dirsSet = zipDirsByItem.get(itemKey);
+      const innerParts = parts.slice(2);
+      const endIdx = e.isDirectory ? innerParts.length : innerParts.length - 1;
+      let acc = '';
+      for (let i = 0; i < endIdx; i++) {
+        acc = acc ? `${acc}/${innerParts[i]}` : innerParts[i];
+        if (acc) dirsSet.add(acc);
+      }
+    }
+
+    // Walk an item dir on disk, returning the set of subdirectory paths
+    // (relative to the item root). Empty folders the user added show up
+    // here, and the zip-side set won't contain them — that's the catch.
+    const onDiskDirsOf = (itemAbs) => {
+      const out = new Set();
+      const walk = (cur, rel) => {
+        let items;
+        try { items = fs.readdirSync(cur, { withFileTypes: true }); }
+        catch { return; }
+        for (const it of items) {
+          if (!it.isDirectory()) continue;
+          const rp = rel ? `${rel}/${it.name}` : it.name;
+          out.add(rp);
+          walk(path.join(cur, it.name), rp);
+        }
+      };
+      walk(itemAbs, '');
+      return out;
+    };
+
+    // Move truly-identical items from snapshot to fresh. Verify against
+    // the zip first — if the snapshot dir has anything the zip doesn't,
+    // or vice versa, drop the item from skipDirs so it gets re-extracted
+    // (catches "user added an empty folder, content bytes still match"
+    // case where survey's file-count + total-bytes check is too loose).
+    const totalToReuse = skipDirs.sources.size + skipDirs.library.size + skipDirs.common.size;
+    let reuseDone = 0;
+    if (totalToReuse > 0) {
+      onProgress({ phase: 'reusing', processedBytes: 0, totalBytes: 0, currentItem: `Reusing ${totalToReuse} unchanged items from your current library…` });
+    }
+    for (const bucket of ['sources', 'library', 'common']) {
+      const freshBucketDir = path.join(sfRoot, bucket);
+      try { fs.mkdirSync(freshBucketDir, { recursive: true }); } catch {}
+      for (const id of [...skipDirs[bucket]]) {
+        const snapAbs = path.join(snapshotPath, bucket, id);
+        const freshAbs = path.join(freshBucketDir, id);
+        if (!fs.existsSync(snapAbs)) {
+          skipDirs[bucket].delete(id);
+          continue;
+        }
+        // Only the directory set might disagree with the zip when the
+        // survey says identical — empty folders added (or removed)
+        // since the backup was taken. Symmetric check: every on-disk
+        // dir must be in the zip, every zip dir must be on-disk.
+        // Skipped entirely when the manifest carries content hashes
+        // (surveyMerge already did a strict comparison).
+        if (!hasManifestContentHashes) {
+          const onDiskDirs = onDiskDirsOf(snapAbs);
+          const zipDirs = zipDirsByItem.get(`${bucket}/${id}`) || new Set();
+          let mismatch = false;
+          for (const d of onDiskDirs) { if (!zipDirs.has(d)) { mismatch = true; break; } }
+          if (!mismatch) {
+            for (const d of zipDirs) { if (!onDiskDirs.has(d)) { mismatch = true; break; } }
+          }
+          if (mismatch) {
+            skipDirs[bucket].delete(id);
+            continue;
+          }
+        }
+        try {
+          fs.renameSync(snapAbs, freshAbs);
+          reusedItems.push({ snapshotAbs: snapAbs, freshAbs });
+        } catch {
+          skipDirs[bucket].delete(id);
+        }
+      }
+    }
+
+    // sharedTracks per-file identical-skip. The bucket-level dir move
+    // above doesn't apply (sharedTracks is flat files, not uuid-keyed
+    // subdirs); we instead build a per-file skip set, move identical
+    // files from snapshot to fresh, and let the extract loop skip the
+    // ones we already moved. Files compared by hash via the local +
+    // backup hash indexes — both ship in the sharedTracks folder so
+    // they're available before any extraction has happened.
+    const skipFiles = new Set();      // zip entry names to skip extracting
+    // reusedFiles hoisted to outer scope above so the catch can iterate
+    // it without a ReferenceError on early-throw paths.
+    if (hadOriginal) {
+      try {
+        // Load the snapshot's hash index. ensureIndex would mutate the
+        // snapshot dir which we want to leave pristine for rollback —
+        // so we read raw and tolerate a missing index by giving up the
+        // optimization (extract everything).
+        const hashMod = require('./soundFontSharedTracksHash');
+        const snapStRoot = path.join(snapshotPath, 'sharedTracks');
+        const snapIndexPath = path.join(snapStRoot, '.jmt-hashes.json');
+        let snapIndex = null;
+        if (fs.existsSync(snapIndexPath)) {
+          try { snapIndex = JSON.parse(fs.readFileSync(snapIndexPath, 'utf8')); } catch {}
+        }
+        // Load the backup's index from the zip.
+        let backupIndex = null;
+        try {
+          const buf = await zip.entryData('sharedTracks/.jmt-hashes.json');
+          backupIndex = JSON.parse(buf.toString('utf8'));
+        } catch {}
+        if (snapIndex && backupIndex && snapIndex.tracks && backupIndex.tracks) {
+          // Snapshot-side: map hash → snapshot filename so we can
+          // resolve a backup record to a snapshot file by content.
+          const snapHashToName = new Map();
+          for (const u of Object.keys(snapIndex.tracks)) {
+            const r = snapIndex.tracks[u];
+            if (r && r.hash && r.name) snapHashToName.set(r.hash, r.name);
+          }
+          // Ensure fresh sharedTracks dir exists for any moves.
+          const freshStRoot = path.join(sfRoot, 'sharedTracks');
+          try { fs.mkdirSync(freshStRoot, { recursive: true }); } catch {}
+          for (const buuid of Object.keys(backupIndex.tracks)) {
+            const br = backupIndex.tracks[buuid];
+            if (!br || !br.name || !br.hash) continue;
+            const snapName = snapHashToName.get(br.hash);
+            if (!snapName) continue; // backup file isn't in snapshot — must extract
+            const snapAbs = path.join(snapStRoot, snapName);
+            if (!fs.existsSync(snapAbs)) continue;
+            const freshAbs = path.join(freshStRoot, br.name);
+            try {
+              fs.renameSync(snapAbs, freshAbs);
+              reusedFiles.push({ snapshotAbs: snapAbs, freshAbs });
+              // Skip this entry during extraction since we've already
+              // satisfied it via move-from-snapshot.
+              skipFiles.add(`sharedTracks/${br.name}`);
+            } catch {
+              // Move failed (lock, permissions); fall back to extract.
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Survey total bytes up front, but only for entries we'll actually
+    // extract — skipped items aren't part of the progress denominator.
+    const isSkipped = (entryName) => {
+      if (skipFiles.has(entryName)) return true;
+      const parts = entryName.split('/');
+      if (parts.length < 2) return false;
+      const bucket = parts[0];
+      const id = parts[1];
+      return skipDirs[bucket] && skipDirs[bucket].has(id);
+    };
+    // Pre-pass: build totals once over the entries list.
+    //   - totalBytes: denominator for the bar (overall byte progress)
+    //   - filesPerTopItem: map "bucket/topName" → file count, so the
+    //     renderer can show "Restoring Apocalypse (234 of 567 files)"
+    //     as we process each top-level item.
+    //   - sourceNameByUuid: friendly name for source uuids (sources
+    //     are uuid-keyed on disk; library/common already use friendly
+    //     names as their dir names).
+    const filesPerTopItem = new Map();
+    const sourceUuidSet = new Set();
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name || e.name === 'manifest.json') continue;
+      const parts = e.name.split('/');
+      if (parts.length < 2) continue;
+      const bucket = parts[0];
+      // sharedTracks is a flat bucket — each file IS the top item.
+      const topName = bucket === 'sharedTracks'
+        ? (parts[parts.length - 1] || '')
+        : (parts[1] || '');
+      if (!topName) continue;
+      const topKey = `${bucket}/${topName}`;
+      if (bucket === 'sources') sourceUuidSet.add(topName);
+      if (e.isDirectory) continue;
+      if (isSkipped(e.name)) continue;
+      totalBytes += (e.size || 0);
+      filesPerTopItem.set(topKey, (filesPerTopItem.get(topKey) || 0) + 1);
+    }
+    const sourceNameByUuid = new Map();
+    for (const uuid of sourceUuidSet) {
+      try {
+        const buf = await zip.entryData(`sources/${uuid}/meta.json`);
+        const m = JSON.parse(buf.toString('utf8'));
+        const friendly = (m && (m.bundleName || m.originalName)) || '';
+        if (friendly) sourceNameByUuid.set(uuid, String(friendly).replace(/\.zip$/i, ''));
+      } catch {}
+    }
+    // Same translation for commons — they're also uuid-keyed on disk +
+    // in the zip, but the user sees friendly names everywhere else in
+    // the app and shouldn't see raw uuids flashing through during
+    // restore/merge.
+    const commonNameByUuid = new Map();
+    const commonUuidSet = new Set();
+    for (const key of Object.keys(entries)) {
+      const parts = (entries[key].name || '').split('/');
+      if (parts[0] === 'common' && parts[1]) commonUuidSet.add(parts[1]);
+    }
+    for (const uuid of commonUuidSet) {
+      try {
+        const buf = await zip.entryData(`common/${uuid}/meta.json`);
+        const m = JSON.parse(buf.toString('utf8'));
+        if (m && m.name) commonNameByUuid.set(uuid, m.name);
+      } catch {}
+    }
+    const friendlyTopName = (bucket, raw) => {
+      if (bucket === 'sources' && sourceNameByUuid.has(raw)) return sourceNameByUuid.get(raw);
+      if (bucket === 'common'  && commonNameByUuid.has(raw))  return commonNameByUuid.get(raw);
+      return raw;
+    };
+    // Translate a zip entry path so users see friendly names instead of
+    // raw uuids in the currentItem display ("sources/Ahsoka/source.zip"
+    // not "sources/76ec9d60-...-/source.zip"). Library entries are
+    // already name-keyed in the zip, and sharedTracks are flat — so the
+    // remap only fires for sources and commons.
+    const friendlyZipPath = (zipName) => {
+      const parts = String(zipName || '').split('/');
+      if (parts[0] === 'sources' && parts[1] && sourceNameByUuid.has(parts[1])) {
+        return `sources/${sourceNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+      }
+      if (parts[0] === 'common' && parts[1] && commonNameByUuid.has(parts[1])) {
+        return `common/${commonNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+      }
+      return zipName;
+    };
+    // Emit progress for reused items so the modal motion stays alive
+    // during the snapshot-rehome phase. Each reused item gets a single
+    // tick at its "100%" state.
+    if (reusedItems.length > 0) {
+      for (const r of reusedItems) {
+        const rawName = path.basename(r.freshAbs);
+        const bucketName = path.basename(path.dirname(r.freshAbs));
+        const friendlyName = friendlyTopName(bucketName, rawName);
+        const topKey = `${bucketName}/${rawName}`;
+        const filesInItem = filesPerTopItem.get(topKey) || 0;
+        onProgress({
+          processedBytes,
+          totalBytes,
+          currentItem: `${bucketName}/${friendlyName}`,
+          topItemName: friendlyName,
+          topItemFilesProcessed: filesInItem,
+          topItemFilesTotal: filesInItem,
+        });
+      }
+    }
+    // Pre-create empty directory entries up front. archiver emits
+    // these for empty effect dirs (e.g., a font with an empty blst/
+    // folder); we mkdirSync them once before the file-extract loop so
+    // the per-bucket iteration below only handles files.
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.isDirectory) continue;
+      if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      if (isSkipped(e.name)) continue;
+      const normalized = e.name.replace(/\\/g, '/');
+      const target = path.resolve(sfRoot, normalized);
+      if (!target.startsWith(path.resolve(sfRoot) + path.sep) && target !== path.resolve(sfRoot)) continue;
+      try { fs.mkdirSync(target, { recursive: true }); } catch {}
+    }
+
+    // Group files by bucket and (where useful) by top-level item.
+    // Sources and sharedTracks are AGGREGATE-labelled: each source is
+    // just source.zip + meta.json so a "1 of 2 files" per-source label
+    // would be noise, and each shared track is a single file so per-
+    // item labelling is meaningless. Library and common are PER-ITEM
+    // labelled: each font / common folder has many files and the
+    // user wants the current font name on screen as the work
+    // progresses.
+    //
+    // The label the renderer reads (topItemName) is constructed here
+    // already with the right noun ("Source Files", "Ahsoka Files",
+    // "Shared Tracks") so the renderer doesn't have to know about
+    // per-bucket grammar.
+    // NOTE: this object is the bucket ALLOWLIST — an entry whose first
+    // path segment is not a key here is silently dropped. Any new bucket
+    // added to exportBackup must be added here too or it round-trips into
+    // the zip and out of existence.
+    const bucketFiles = { sources: [], library: [], common: [], sharedTracks: [], attachments: [] };
+    // [B-399] The hash records are collected SEPARATELY rather than added to the allowlist
+    // above, because every consumer of that object attaches per-item labels, counters and
+    // grammar to its keys. They have no place in "Restoring Ahsoka (45 of 451 files)" —
+    // they restore as one quiet aggregate step at the end.
+    const hashManifestFiles = [];
+    // [B-297] Same treatment, same reason: these land at a bucket root, so the per-item grouping
+    // below would read one as a font directory.
+    const markerFiles = [];
+    // [B-498] The content pool: after every bucket, so each pooled file extracts beside the font
+    // files it already matches and `_dedupeExtracted` links it to them.
+    const poolFiles = [];
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (e.isDirectory) continue;
+      if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      if (isSkipped(e.name)) continue;
+      const parts = e.name.split('/');
+      const bucket = parts[0] || '';
+      if (_isCarriedMarker(e.name)) { markerFiles.push(e); continue; }
+      if (bucket === POOL_DIR && parts.length === 2) { poolFiles.push(e); continue; }
+      if (bucket === FILEHASH_DIR) { hashManifestFiles.push(e); continue; }
+      if (bucketFiles[bucket]) bucketFiles[bucket].push(e);
+    }
+
+    const extractFile = async (e) => {
+      const normalized = e.name.replace(/\\/g, '/');
+      const target = path.resolve(sfRoot, normalized);
+      if (!target.startsWith(path.resolve(sfRoot) + path.sep) && target !== path.resolve(sfRoot)) return false;
+      try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
+      try {
+        await zip.extract(e.name, target);
+        processedBytes += (e.size || 0);
+        // attachments/ is exempt - see _screenRestored.
+        // [B-407] Dedupe AFTER screening: a refused file is deleted there, and linking
+        // something about to be removed would leave a link to content we just refused.
+        if (!normalized.startsWith('attachments/')) {
+          if (_screenRestored(target, restoreRefused)) _dedupeExtracted(target);
+        } else {
+          _dedupeExtracted(target);
+        }
+        return true;
+      } catch (err) {
+        throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
+      }
+    };
+
+    // Phase order: sources → library → common → sharedTracks.
+    // Within sources and sharedTracks the label aggregates ("Source
+    // Files (N of M, P%)") with all files in the bucket flying by
+    // underneath. Within library and common the label flips per item
+    // ("Ahsoka Files (45 of 451, 10%)") and stays on that item until
+    // all of its files are extracted.
+
+    // --- AGGREGATE: sources ---
+    // Counter unit is SOURCES (top-level uuid), not files within
+    // sources — folder-format sources have their full extracted tree
+    // on disk so they contribute many files each, but the user's
+    // mental unit is "129 sources" not "2222 source files." File
+    // names still flash by underneath as each one extracts; the
+    // top-line counter advances when we move to a new uuid.
+    if (!cancelled && bucketFiles.sources.length > 0) {
+      const sourcesByUuid = new Map();
+      const sourceOrder = [];
+      for (const e of bucketFiles.sources) {
+        const parts = e.name.split('/');
+        const uuid = parts[1] || '';
+        if (!uuid) continue;
+        if (!sourcesByUuid.has(uuid)) {
+          sourcesByUuid.set(uuid, []);
+          sourceOrder.push(uuid);
+        }
+        sourcesByUuid.get(uuid).push(e);
+      }
+      const totalSources = sourceOrder.length;
+      for (let i = 0; i < totalSources; i++) {
+        if (cancelled) break;
+        const files = sourcesByUuid.get(sourceOrder[i]);
+        for (const e of files) {
+          if (cancelled) break;
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: friendlyZipPath(e.name),
+            topItemName: 'Source Files',
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: totalSources,
+          });
+        }
+      }
+    }
+
+    // --- PER-ITEM: library (fonts) ---
+    if (!cancelled && bucketFiles.library.length > 0) {
+      const byItem = new Map();
+      const itemOrder = [];
+      for (const e of bucketFiles.library) {
+        const parts = e.name.split('/');
+        const rawTopName = parts[1] || '';
+        if (!rawTopName) continue;
+        if (!byItem.has(rawTopName)) {
+          byItem.set(rawTopName, []);
+          itemOrder.push(rawTopName);
+        }
+        byItem.get(rawTopName).push(e);
+      }
+      for (const itemName of itemOrder) {
+        if (cancelled) break;
+        const files = byItem.get(itemName);
+        const itemTotal = files.length;
+        const labelName = `${itemName} Files`;
+        for (let i = 0; i < itemTotal; i++) {
+          if (cancelled) break;
+          const e = files[i];
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: e.name,
+            topItemName: labelName,
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: itemTotal,
+          });
+        }
+      }
+    }
+
+    // --- PER-ITEM: common folders ---
+    if (!cancelled && bucketFiles.common.length > 0) {
+      const byItem = new Map();
+      const itemOrder = [];
+      for (const e of bucketFiles.common) {
+        const parts = e.name.split('/');
+        const rawTopName = parts[1] || '';
+        if (!rawTopName) continue;
+        if (!byItem.has(rawTopName)) {
+          byItem.set(rawTopName, []);
+          itemOrder.push(rawTopName);
+        }
+        byItem.get(rawTopName).push(e);
+      }
+      for (const itemName of itemOrder) {
+        if (cancelled) break;
+        const files = byItem.get(itemName);
+        const itemTotal = files.length;
+        // commons are uuid-keyed; use the friendly name from meta.json
+        // for the label so the user sees the folder's display name.
+        const friendlyItemName = friendlyTopName('common', itemName);
+        const labelName = `${friendlyItemName} Files`;
+        for (let i = 0; i < itemTotal; i++) {
+          if (cancelled) break;
+          const e = files[i];
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: friendlyZipPath(e.name),
+            topItemName: labelName,
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: itemTotal,
+          });
+        }
+      }
+    }
+
+    // --- AGGREGATE: shared tracks ---
+    if (!cancelled && bucketFiles.sharedTracks.length > 0) {
+      const totalInBucket = bucketFiles.sharedTracks.length;
+      for (let i = 0; i < totalInBucket; i++) {
+        if (cancelled) break;
+        const e = bucketFiles.sharedTracks[i];
+        const ok = await extractFile(e);
+        if (!ok) continue;
+        onProgress({
+          processedBytes,
+          totalBytes,
+          currentItem: e.name,
+          topItemName: 'Shared Tracks',
+          topItemFilesProcessed: i + 1,
+          topItemFilesTotal: totalInBucket,
+        });
+      }
+    }
+
+    // --- AGGREGATE: attachments ---
+    // Counter unit is the attachment, not the file: each store dir holds
+    // the document plus a sidecar json, and counting the sidecar would
+    // double every number the user sees against a receipt they can count
+    // themselves.
+    if (!cancelled && bucketFiles.attachments.length > 0) {
+      const byId = new Map();
+      const idOrder = [];
+      for (const e of bucketFiles.attachments) {
+        const id = e.name.split('/')[1] || '';
+        if (!id) continue;
+        if (!byId.has(id)) { byId.set(id, []); idOrder.push(id); }
+        byId.get(id).push(e);
+      }
+      const totalAttachments = idOrder.length;
+      for (let i = 0; i < totalAttachments; i++) {
+        if (cancelled) break;
+        for (const e of byId.get(idOrder[i])) {
+          if (cancelled) break;
+          const ok = await extractFile(e);
+          if (!ok) continue;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: e.name.split('/').slice(2).join('/') || e.name,
+            topItemName: 'Attachments',
+            topItemFilesProcessed: i + 1,
+            topItemFilesTotal: totalAttachments,
+          });
+        }
+      }
+    }
+
+    // --- QUIET: the per-file hash manifests ---  [B-399]
+    // THE ORIGINAL BUG WAS THAT THIS STEP DID NOT EXIST. Backup archived five buckets
+    // and .filehashes was not one of them, so a restore returned the fonts and silently
+    // dropped the data that makes them COMPARABLE — and because the full-replace path
+    // rmSyncs the whole soundFonts root first, restoring into a HEALTHY library actively
+    // deleted a working index rather than merely failing to bring one back.
+    // One label for the whole set. They are uuid-keyed json; a name flying past here
+    // would tell the user nothing they could act on.
+    // [B-297] The bucket-root markers, extracted to their real paths with no label of their own:
+    // a name flying past here would tell the user nothing they could act on.
+    if (!cancelled && markerFiles.length > 0) {
+      for (const e of markerFiles) {
+        if (cancelled) break;
+        await extractFile(e);
+      }
+    }
+    if (!cancelled && poolFiles.length > 0) {
+      onProgress({ processedBytes, totalBytes, currentItem: 'Restoring the content pool…',
+                   topItemName: 'Content Pool', topItemFilesProcessed: 0, topItemFilesTotal: poolFiles.length });
+      for (const e of poolFiles) {
+        if (cancelled) break;
+        await extractFile(e);
+      }
+    }
+
+    if (!cancelled && hashManifestFiles.length > 0) {
+      onProgress({
+        processedBytes, totalBytes,
+        currentItem: 'Restoring file hashes…',
+        topItemName: 'File hashes',
+        topItemFilesProcessed: 0,
+        topItemFilesTotal: hashManifestFiles.length,
+      });
+      let n = 0;
+      for (const e of hashManifestFiles) {
+        if (cancelled) break;
+        const ok = await extractFile(e);
+        if (!ok) continue;
+        n++;
+        if (n === hashManifestFiles.length || (n % 25) === 0) {
+          onProgress({
+            processedBytes, totalBytes,
+            currentItem: 'Restoring file hashes…',
+            topItemName: 'File Hashes',
+            topItemFilesProcessed: n,
+            topItemFilesTotal: hashManifestFiles.length,
+          });
+        }
+      }
+    }
+
+    if (cancelled) {
+      throw Object.assign(new Error('Cancelled'), { cancelled: true });
+    }
+  } catch (err) {
+    // Rollback. Move reused items + reused per-file moves back to the
+    // snapshot first so the snapshot is whole again, then nuke fresh
+    // and rename snapshot back.
+    for (const r of reusedItems) {
+      try { fs.renameSync(r.freshAbs, r.snapshotAbs); } catch {}
+    }
+    for (const r of reusedFiles) {
+      try { fs.renameSync(r.freshAbs, r.snapshotAbs); } catch {}
+    }
+    try { fs.rmSync(sfRoot, { recursive: true, force: true }); } catch {}
+    if (hadOriginal) {
+      try { fs.renameSync(snapshotPath, sfRoot); } catch {}
+    }
+    try { await zip.close(); } catch {}
+    if (signal) { try { signal.removeEventListener('abort', onAbort); } catch {} }
+    throw err;
+  } finally {
+    if (signal) { try { signal.removeEventListener('abort', onAbort); } catch {} }
+  }
+  try { await zip.close(); } catch {}
+
+  // Success — discard the snapshot. Best-effort: if the rm fails the user
+  // still has a working library, just a leftover backup dir to clean up
+  // manually.
+  if (hadOriginal) {
+    try { fs.rmSync(snapshotPath, { recursive: true, force: true }); } catch {}
+  }
+
+  // A receipt no restored source holds is not kept: a receipt goes with its source. Before the
+  // tally, so the completion does not count what is about to go.
+  try { require('./soundFontAttachments').pruneUnlinkedAttachments(userData); } catch {}
+
+  // Tally what landed in the fresh library so the renderer's completion
+  // modal can stamp "Restored N sources, M fonts, P common folders." The
+  // bucket dirs are authoritative — counts whatever's actually on disk
+  // post-restore, which includes reused items moved from the snapshot.
+  const counts = { sources: 0, library: 0, common: 0, sharedTracks: 0, attachments: 0 };
+  for (const bucket of ['sources', 'library', 'common', 'attachments']) {
+    try {
+      const d = fs.readdirSync(path.join(sfRoot, bucket), { withFileTypes: true });
+      counts[bucket] = _countItems(bucket, path.join(sfRoot, bucket), d.filter(x => x.isDirectory()));
+    } catch {}
+  }
+  try {
+    const d = fs.readdirSync(path.join(sfRoot, 'sharedTracks'), { withFileTypes: true });
+    counts.sharedTracks = d.filter(x => x.isFile() && /\.wav$/i.test(x.name)).length;
+  } catch {}
+
+  // Restoring a pre-2026-09-02 backup lands sources whose meta links
+  // attachments the archive never carried. Drop those links here so the
+  // restored library's meta describes what is actually on disk.
+  try { require('./soundFontAttachments').pruneDanglingLinks(userData); } catch {}
+
+  return { manifest, counts, refused: restoreRefused };
+}
+
+async function surveyMerge({ userData, zipPath }) {
+  if (!zipPath) throw new Error('Missing zipPath');
+  if (!userData) throw new Error('Missing userData');
+  _ensureLibraryBackfill(userData);
+
+  const StreamZip = require('node-stream-zip');
+  let zip;
+  try {
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
+  } catch (err) {
+    throw new Error(`Could not open backup zip: ${err.message}`);
+  }
+  // Hash the on-disk item lazily so a Replace-import that needs the
+  // identical decision can compare against manifest.contentHashes when
+  // present. Cached so repeated calls (e.g. one per bucket) only walk
+  // the tree once per item.
+  //
+  // All three buckets (sources, library, common) route through their
+  // persistent-hash helpers (getXContentHash). Each reads stored
+  // meta.contentHash when the cheap-signal safety net
+  // (contentFileCount + contentTotalBytes match current on-disk state)
+  // passes; otherwise it recomputes and persists. Steady state: every
+  // item short-circuits to a stat-walk, no byte reading. sharedTracks
+  // and any future bucket fall through to direct hashItemDir.
+  const { hashItemDir } = require('./soundFontFileHash');
+  const sfEntriesMod = require('./soundFontEntries');
+  const sfCommonMod = require('./soundFontCommon');
+  const sfSourcesMod = require('./soundFontSources');
+  const sfRoot = _soundFontsRoot(userData);
+  const liveHashCache = new Map(); // "bucket/id" → hex or null
+  const liveHashOf = (bucket, id) => {
+    const k = `${bucket}/${id}`;
+    if (liveHashCache.has(k)) return liveHashCache.get(k);
+    let h = null;
+    if (bucket === 'library') h = sfEntriesMod.getEntryContentHash(userData, id);
+    else if (bucket === 'common') h = sfCommonMod.getCommonContentHash(userData, id);
+    else if (bucket === 'sources') h = sfSourcesMod.getSourceContentHash(userData, id);
+    else h = hashItemDir(path.join(sfRoot, bucket, id));
+    liveHashCache.set(k, h);
+    return h;
+  };
+  try {
+    const entries = await zip.entries();
+    // Manifest content hashes when present — drives the strict
+    // identical check for library/common (and overrides the source
+    // meta.hash for sources too, since the canonical-tree hash
+    // catches local edits the import-time stream hash cannot).
+    let manifestHashes = null;
+    try {
+      const mbuf = await zip.entryData('manifest.json');
+      const m = JSON.parse(mbuf.toString('utf8'));
+      if (m && m.contentHashes) manifestHashes = m.contentHashes;
+    } catch {}
+
+    // Build per-bucket per-top-dir aggregates from the zip's entry list.
+    // Library entries are keyed by their on-disk dir name (which is also
+    // the zip's dir name); the identity key (sourceUuid + candidatePath)
+    // gets populated from each entry's meta.json in a second pass below.
+    const zipSources = new Map(); // uuid -> { fileCount, totalBytes, hash, name }
+    const zipLibrary = new Map(); // dirName -> { fileCount, totalBytes, identity, ...curatedFields }
+    const zipCommon  = new Map(); // uuid -> { fileCount, totalBytes, displayName }
+
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name || e.name === '/' || e.name === 'manifest.json') continue;
+      if (_isCarriedMarker(e.name)) continue;
+      const parts = e.name.split('/');
+      if (parts.length < 2) continue;
+      const bucket = parts[0];
+      const id = parts[1];
+      if (!id) continue;
+      const isFile = !e.isDirectory;
+      const size = e.size || 0;
+      // Exclude per-item meta.json from content counts — it's metadata,
+      // not sound content, and its bytes shift on every rename/tag edit.
+      // Including it would let a pure rename fail the contentSame check by
+      // a few-bytes delta and falsely register as a content conflict.
+      const isItemMeta = parts.length === 3 && parts[2] === 'meta.json';
+      if (bucket === 'sources') {
+        if (!zipSources.has(id)) zipSources.set(id, { fileCount: 0, totalBytes: 0, hash: null, name: null });
+        const agg = zipSources.get(id);
+        if (isFile && !isItemMeta) { agg.fileCount++; agg.totalBytes += size; }
+      } else if (bucket === 'library') {
+        if (!zipLibrary.has(id)) zipLibrary.set(id, { fileCount: 0, totalBytes: 0, identity: null, name: id, meta: {} });
+        const agg = zipLibrary.get(id);
+        if (isFile && !isItemMeta) { agg.fileCount++; agg.totalBytes += size; }
+      } else if (bucket === 'common') {
+        if (!zipCommon.has(id)) zipCommon.set(id, { fileCount: 0, totalBytes: 0, displayName: null });
+        const agg = zipCommon.get(id);
+        if (isFile && !isItemMeta) { agg.fileCount++; agg.totalBytes += size; }
+      }
+    }
+
+    // Pull source meta from each source's meta.json — needed for the
+    // content hash. Source meta uses the field name `hash` (computed at
+    // import time, see soundFontSources.js: hash.digest('hex')); do not
+    // rename to `contentHash` here.
+    for (const uuid of zipSources.keys()) {
+      const metaPath = `sources/${uuid}/meta.json`;
+      if (!entries[metaPath]) continue;
+      try {
+        const buf = await zip.entryData(metaPath);
+        const meta = JSON.parse(buf.toString('utf8'));
+        const agg = zipSources.get(uuid);
+        agg.hash = meta.hash || null;
+        agg.name = meta.bundleName || meta.originalName || uuid;
+      } catch {}
+    }
+
+    // Pull common meta names for display.
+    for (const uuid of zipCommon.keys()) {
+      const metaPath = `common/${uuid}/meta.json`;
+      if (!entries[metaPath]) continue;
+      try {
+        const buf = await zip.entryData(metaPath);
+        const meta = JSON.parse(buf.toString('utf8'));
+        zipCommon.get(uuid).displayName = meta.name || uuid;
+      } catch {}
+    }
+
+    // User-curated meta fields for library entries. Drives the diff
+    // detection in classifyLibrary — anything in this list that differs
+    // between backup and current surfaces as a meta conflict. Excludes
+    // identity (sourceUuid + candidatePath), system fields (createdAt,
+    // updatedAt), and content fields (fileCount, totalBytes covered by
+    // contentDiffers separately). Labels are the UI display strings.
+    const LIBRARY_META_FIELDS = [
+      { key: 'name',                    label: 'name' },
+      { key: 'tags',                    label: 'tags',                normalize: (v) => Array.isArray(v) ? [...v].sort() : [] },
+      { key: 'description',             label: 'description',         normalize: (v) => v || '' },
+      { key: 'demoUrl',                 label: 'demo URL',            normalize: (v) => v || '' },
+      { key: 'linkedStyleLibraryEntry', label: 'linked style',        normalize: (v) => v || '' },
+      { key: 'purchased',               label: 'purchased flag',      normalize: (v) => !!v },
+      { key: 'author',                  label: 'author',              normalize: (v) => v || '' },
+      { key: 'acquisitionDate',         label: 'acquisition date',    normalize: (v) => v || '' },
+      { key: 'userNotes',               label: 'notes',               normalize: (v) => v || '' },
+    ];
+    // Two-tier identity:
+    //   primary: entryUuid (uuid per library folder, generated at
+    //            create/duplicate; legacy entries get a uuid backfilled
+    //            by soundFontEntries._readEntryMeta on first read).
+    //   legacy:  sourceUuid|candidatePath (provenance pair). Used as
+    //            a fallback so backups taken before entryUuid existed
+    //            still match against the current library.
+    // A library entry can have both. Duplicates from the same source
+    // share `legacy` but have distinct `primary`, which is exactly the
+    // case the merge classifier needs to disambiguate.
+    const readLibraryMeta = (meta, fallbackName) => {
+      const out = { identity: null, legacyIdentity: null, name: fallbackName, fields: {} };
+      out.identity = meta.entryUuid || null;
+      const su = meta.sourceUuid || '';
+      const cp = meta.candidatePath || '';
+      out.legacyIdentity = (su || cp) ? `${su}|${cp}` : null;
+      out.name = meta.name || fallbackName;
+      for (const f of LIBRARY_META_FIELDS) {
+        const raw = meta[f.key];
+        out.fields[f.key] = f.normalize ? f.normalize(raw) : raw;
+      }
+      return out;
+    };
+
+    // Pull library entry meta from the zip — identity (survives renames)
+    // plus every user-curated field for diff detection.
+    for (const dirName of zipLibrary.keys()) {
+      const metaPath = `library/${dirName}/meta.json`;
+      if (!entries[metaPath]) continue;
+      try {
+        const buf = await zip.entryData(metaPath);
+        const meta = JSON.parse(buf.toString('utf8'));
+        const parsed = readLibraryMeta(meta, dirName);
+        const agg = zipLibrary.get(dirName);
+        agg.identity = parsed.identity;
+        agg.legacyIdentity = parsed.legacyIdentity;
+        agg.name = parsed.name;
+        agg.meta = parsed.fields;
+      } catch {}
+    }
+
+    // Now read the current library off disk in the same shape.
+    const curSources = new Map();
+    const curLibrary = new Map();
+    const curCommon  = new Map();
+    const sfRoot = _soundFontsRoot(userData);
+
+    // YIELDS BETWEEN ITEMS. The survey runs on the main process, and on a full library it walked
+    // every file and checked every item in one unbroken run: measured 2026-10-21 at 31.8 s with
+    // the window reported Not Responding. One item at a time with a yield between is the same work
+    // with the app still answering.
+    const _yieldNow = () => new Promise((r) => setImmediate(r));
+    const readBucket = async (bucketName, target, getMeta) => {
+      const root = path.join(sfRoot, bucketName);
+      if (!fs.existsSync(root)) return;
+      let dirs;
+      try { dirs = fs.readdirSync(root, { withFileTypes: true }); }
+      catch { return; }
+      for (const d of dirs) {
+        await _yieldNow();
+        if (!d.isDirectory()) continue;
+        const dirPath = path.join(root, d.name);
+        let fileCount = 0, totalBytes = 0;
+        // Same meta.json exclusion as the zip-side aggregation — the
+        // item-root meta.json is metadata, not content. Including it
+        // would let a pure local rename slip a few-bytes delta into the
+        // contentSame check and falsely register as a content conflict.
+        const walk = (cur) => {
+          let items;
+          try { items = fs.readdirSync(cur, { withFileTypes: true }); }
+          catch { return; }
+          for (const it of items) {
+            const ap = path.join(cur, it.name);
+            if (it.isDirectory()) walk(ap);
+            else if (it.isFile()) {
+              if (cur === dirPath && it.name === 'meta.json') continue;
+              fileCount++;
+              try { totalBytes += fs.statSync(ap).size; } catch {}
+            }
+          }
+        };
+        walk(dirPath);
+        const extra = getMeta ? getMeta(dirPath) : {};
+        target.set(d.name, { fileCount, totalBytes, ...extra });
+      }
+    };
+    await readBucket('sources', curSources, (dirPath) => {
+      try {
+        const meta = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
+        return { hash: meta.hash || null, name: meta.bundleName || meta.originalName || '' };
+      } catch { return { hash: null, name: '' }; }
+    });
+    await readBucket('library', curLibrary, (dirPath) => {
+      try {
+        const meta = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
+        const parsed = readLibraryMeta(meta, '');
+        return {
+          identity: parsed.identity,
+          legacyIdentity: parsed.legacyIdentity,
+          name: parsed.name,
+          meta: parsed.fields,
+        };
+      } catch { return { identity: null, legacyIdentity: null, name: '', meta: {} }; }
+    });
+    await readBucket('common', curCommon, (dirPath) => {
+      try {
+        const meta = JSON.parse(fs.readFileSync(path.join(dirPath, 'meta.json'), 'utf8'));
+        return { displayName: meta.name || '' };
+      } catch { return { displayName: '' }; }
+    });
+
+    // Classify each backup item per category. The "identical" rule per
+    // bucket prefers manifest.contentHashes when present (catches any
+    // byte-level diff: file edit, rename, empty-folder add/remove),
+    // and falls through to the legacy proxy when absent for backward
+    // compat with older backup files.
+    const sourceManifestHashes = (manifestHashes && manifestHashes.sources) || null;
+    // The classifiers below are synchronous and ask liveHashOf as they go. Every item they can ask
+    // about is hashed here first, one at a time with a yield between, so they only read the cache.
+    if (manifestHashes) {
+      for (const [bucket, cur] of [['sources', curSources], ['library', curLibrary], ['common', curCommon]]) {
+        for (const id of cur.keys()) { liveHashOf(bucket, id); await _yieldNow(); }
+      }
+    }
+    const classifySources = () => {
+      const out = { identical: [], conflict: [], add: [], currentOnly: [] };
+      const matched = new Set();
+      for (const [uuid, z] of zipSources) {
+        const c = curSources.get(uuid);
+        if (!c) { out.add.push({ id: uuid, name: z.name || uuid, fileCount: z.fileCount, totalBytes: z.totalBytes }); continue; }
+        matched.add(uuid);
+        // Canonical-tree hash from the manifest vs the current on-disk
+        // tree hash. Catches local edits to a source (trim, file removal)
+        // that the import-time stream hash can't.
+        const identical = !!(sourceManifestHashes && sourceManifestHashes[uuid]
+          && sourceManifestHashes[uuid] === liveHashOf('sources', uuid));
+        if (identical) {
+          out.identical.push({ id: uuid, name: z.name || uuid });
+        } else {
+          // Source conflict always means content differs (sources don't
+          // carry user-curated meta the user typically edits, so meta-
+          // only conflicts aren't a thing here).
+          out.conflict.push({
+            id: uuid,
+            name: z.name || uuid,
+            contentDiffers: true,
+            metaDiffers: false,
+            backup: { fileCount: z.fileCount, totalBytes: z.totalBytes },
+            current: { fileCount: c.fileCount, totalBytes: c.totalBytes, name: c.name },
+          });
+        }
+      }
+      // currentOnly — sources in the live library that aren't in the
+      // backup at all. Drives the Replace-vs-Merge choice modal's
+      // "would be removed" tally so the user sees the destructive
+      // consequence before committing.
+      for (const [uuid, c] of curSources) {
+        if (matched.has(uuid)) continue;
+        out.currentOnly.push({ id: uuid, name: c.name || uuid, fileCount: c.fileCount, totalBytes: c.totalBytes });
+      }
+      return out;
+    };
+
+    // Library: identity-based matching so local renames are detected as
+    // the same item. Conflict info splits content-diff from meta-diff and
+    // includes a list of which specific meta fields differ so the UI can
+    // tell the user "Sound files identical, only metadata differs:
+    // acquisition date, tags" instead of a generic "metadata differs."
+    const libraryManifestHashes = (manifestHashes && manifestHashes.library) || null;
+    const classifyLibrary = () => {
+      const out = { identical: [], conflict: [], add: [], currentOnly: [] };
+      const matchedDirs = new Set();
+      // Primary identity (entryUuid) is unique per library folder, so a
+      // single-value lookup is unambiguous. Legacy identity
+      // (sourceUuid|candidatePath) is shared by duplicates, so its
+      // lookup is multi-valued: the matcher prefers the candidate
+      // whose dir name also matches the backup before falling through
+      // to first-found.
+      const curByEntryUuid = new Map();
+      const curByLegacy = new Map();
+      for (const [dirName, c] of curLibrary) {
+        if (c.identity) curByEntryUuid.set(c.identity, dirName);
+        if (c.legacyIdentity) {
+          if (!curByLegacy.has(c.legacyIdentity)) curByLegacy.set(c.legacyIdentity, []);
+          curByLegacy.get(c.legacyIdentity).push(dirName);
+        }
+      }
+      const eq = (a, b) => {
+        if (Array.isArray(a) && Array.isArray(b)) {
+          if (a.length !== b.length) return false;
+          for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+          return true;
+        }
+        return a === b;
+      };
+      const computeMetaDiff = (z, c) => {
+        const labels = [];
+        const details = [];
+        for (const f of LIBRARY_META_FIELDS) {
+          const zv = z.meta?.[f.key];
+          const cv = c.meta?.[f.key];
+          if (!eq(zv, cv)) {
+            labels.push(f.label);
+            // Carry raw values through so the renderer can show a real
+            // side-by-side comparison (the user has to see what changed,
+            // not just that something did).
+            details.push({ key: f.key, label: f.label, backup: zv, current: cv });
+          }
+        }
+        return { labels, details };
+      };
+      for (const [backupDirName, z] of zipLibrary) {
+        let curDirName = null;
+        // Priority order:
+        //   1. entryUuid (primary identity): unique per library folder,
+        //      so this is a clean 1-to-1 match across renames AND
+        //      duplicates.
+        //   2. sourceUuid|candidatePath (legacy identity): for backups
+        //      taken before entryUuid existed. Multi-valued because
+        //      duplicates share this key; prefer the dir-name match,
+        //      fall through to first.
+        //   3. Bare dir-name match: last-resort fallback for entries
+        //      that pre-date even the legacy identity.
+        if (z.identity && curByEntryUuid.has(z.identity)) {
+          curDirName = curByEntryUuid.get(z.identity);
+        }
+        if (!curDirName && z.legacyIdentity && curByLegacy.has(z.legacyIdentity)) {
+          const candidates = curByLegacy.get(z.legacyIdentity);
+          curDirName = candidates.find(n => n === backupDirName) || candidates[0];
+        }
+        if (!curDirName && curLibrary.has(backupDirName)) {
+          curDirName = backupDirName;
+        }
+        if (!curDirName) {
+          out.add.push({ id: backupDirName, name: z.name || backupDirName, fileCount: z.fileCount, totalBytes: z.totalBytes });
+          continue;
+        }
+        matchedDirs.add(curDirName);
+        const c = curLibrary.get(curDirName);
+        // Canonical-tree hash from the manifest vs the current on-disk
+        // tree hash. The manifest key is the BACKUP-time dir name
+        // (curDirName may have been locally renamed by the user);
+        // content identity ignores the name and is what we're checking
+        // here.
+        const contentDiffers = !(libraryManifestHashes
+          && libraryManifestHashes[backupDirName]
+          && libraryManifestHashes[backupDirName] === liveHashOf('library', curDirName));
+        const { labels: diffFields, details: diffDetails } = computeMetaDiff(z, c);
+        const metaDiffers = diffFields.length > 0;
+        if (!contentDiffers && !metaDiffers) {
+          out.identical.push({ id: backupDirName, name: z.name || backupDirName });
+        } else {
+          out.conflict.push({
+            id: backupDirName,
+            name: z.name || backupDirName,
+            contentDiffers,
+            metaDiffers,
+            diffFields,
+            diffDetails,
+            backup: { fileCount: z.fileCount, totalBytes: z.totalBytes, name: z.name || backupDirName },
+            current: { fileCount: c.fileCount, totalBytes: c.totalBytes, name: c.name || curDirName, dirName: curDirName },
+          });
+        }
+      }
+      // currentOnly — library entries in the live library that aren't
+      // present in the backup. Drives Replace's "would be removed" tally.
+      for (const [dirName, c] of curLibrary) {
+        if (matchedDirs.has(dirName)) continue;
+        out.currentOnly.push({ id: dirName, name: c.name || dirName, fileCount: c.fileCount, totalBytes: c.totalBytes });
+      }
+      return out;
+    };
+
+    // Common: uuid-based identity. Same content/meta split as library so
+    // the UI can show a meta-only diff (local rename) distinctly from a
+    // file-content diff.
+    const commonManifestHashes = (manifestHashes && manifestHashes.common) || null;
+    const classifyCommon = () => {
+      const out = { identical: [], conflict: [], add: [], currentOnly: [] };
+      const matched = new Set();
+      for (const [uuid, z] of zipCommon) {
+        const c = curCommon.get(uuid);
+        const zName = z.displayName || uuid;
+        if (!c) { out.add.push({ id: uuid, name: zName, fileCount: z.fileCount, totalBytes: z.totalBytes }); continue; }
+        matched.add(uuid);
+        const cName = c.displayName || uuid;
+        // Canonical-tree hash from the manifest vs the current on-disk
+        // tree hash.
+        const contentDiffers = !(commonManifestHashes
+          && commonManifestHashes[uuid]
+          && commonManifestHashes[uuid] === liveHashOf('common', uuid));
+        const metaDiffers = cName !== zName;
+        if (!contentDiffers && !metaDiffers) {
+          out.identical.push({ id: uuid, name: zName });
+        } else {
+          out.conflict.push({
+            id: uuid,
+            name: zName,
+            contentDiffers,
+            metaDiffers,
+            backup: { fileCount: z.fileCount, totalBytes: z.totalBytes },
+            current: { fileCount: c.fileCount, totalBytes: c.totalBytes, name: cName },
+          });
+        }
+      }
+      // currentOnly — commons in the live library that aren't in the
+      // backup. Drives Replace's "would be removed" tally.
+      for (const [uuid, c] of curCommon) {
+        if (matched.has(uuid)) continue;
+        out.currentOnly.push({ id: uuid, name: c.displayName || uuid, fileCount: c.fileCount, totalBytes: c.totalBytes });
+      }
+      return out;
+    };
+
+    // SharedTracks aren't part of the per-item conflict/add classification
+    // (they're a flat bucket of audio files, not user-curated entities)
+    // but the choice modal needs to know if backup vs current differ so
+    // "Library matches backup" can be honest about whether Replace would
+    // be a true no-op. Count alone is the cheap signal — a sharedTracks
+    // delta forces the "not identical" path even when sources/library/
+    // common all match.
+    let zipSharedTracksCount = 0;
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (!e.name) continue;
+      const parts = e.name.split('/');
+      if (parts[0] !== 'sharedTracks') continue;
+      if (e.isDirectory) continue;
+      if (parts.length === 2 && /\.wav$/i.test(parts[1])) zipSharedTracksCount++;
+    }
+    let curSharedTracksCount = 0;
+    try {
+      const stRoot = path.join(_soundFontsRoot(userData), 'sharedTracks');
+      if (fs.existsSync(stRoot)) {
+        for (const f of fs.readdirSync(stRoot, { withFileTypes: true })) {
+          if (f.isFile() && /\.wav$/i.test(f.name)) curSharedTracksCount++;
+        }
+      }
+    } catch {}
+    return {
+      ok: true,
+      sources: classifySources(),
+      library: classifyLibrary(),
+      common:  classifyCommon(),
+      sharedTracks: { backup: zipSharedTracksCount, current: curSharedTracksCount },
+    };
+  } finally {
+    try { await zip.close(); } catch {}
+  }
+}
+
+// Merge-import: extract only the items the user opted into, leaving the
+// rest of the current library untouched. Each item is processed in
+// isolation with its own per-item rollback log so a mid-run cancel
+// undoes just the writes from this run, leaving items the user already
+// committed to in their original-or-replaced state.
+//
+// plan shape (per category, keyed by identifier):
+//   sources: { uuid: 'install' | 'keep' | 'replace' }
+//   library: { name: 'install' | 'keep' | 'replace' | 'both' }
+//   common:  { uuid: 'install' | 'keep' | 'replace' }
+// Items missing from the plan are left alone (covers "current items not
+// in backup" and "identical items survey caller chose to skip silently").
+//
+// Per-item semantics:
+//   install — backup-only item, no current version exists; extract fresh
+//   keep    — collision exists, user wants to keep current; no-op
+//   replace — collision exists, user wants the backup's version; snapshot
+//             current to <name>.preimport-bak-<ts>/, extract backup, on
+//             success delete the snapshot, on cancel/error restore it.
+//             For library, the current dir name may differ from the backup
+//             name (identity match across a local rename), so the caller
+//             passes currentName explicitly so the right dir is replaced.
+//   both    — library only; extract backup version. Rename to "<name> (N)"
+//             only if the backup name would collide with something already
+//             on disk; if it's free (e.g. user renamed locally), just use
+//             the backup name as-is.
+async function applyMerge({
+  userData,
+  zipPath,
+  plan = { sources: {}, library: {}, common: {} },
+  onProgress = () => {},
+  signal = null,
+}) {
+  // [B-370] Anything a restore refused to write. Reported, never silent.
+  const restoreRefused = [];
+  if (!zipPath) throw new Error('Missing zipPath');
+  if (!userData) throw new Error('Missing userData');
+  const sfRoot = _soundFontsRoot(userData);
+  // Ensure all bucket roots exist so per-item extracts can write
+  // without re-creating the parent every time.
+  for (const b of ['sources', 'library', 'common']) {
+    try { fs.mkdirSync(path.join(sfRoot, b), { recursive: true }); } catch {}
+  }
+
+  const StreamZip = require('node-stream-zip');
+  let zip;
+  try {
+    zip = await _openBackupZip(zipPath, { skipEntryNameValidation: true });
+  } catch (err) {
+    throw new Error(`Could not open backup zip: ${err.message}`);
+  }
+
+  let cancelled = false;
+  const onAbort = () => { cancelled = true; };
+  if (signal) {
+    if (signal.aborted) cancelled = true;
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  // Rollback log — each entry knows how to undo itself. Order matters on
+  // rollback (LIFO) so a snapshot rename comes back AFTER its sibling
+  // partial-write is removed.
+  const rollbackLog = [];
+  const rollbackAll = () => {
+    while (rollbackLog.length > 0) {
+      const op = rollbackLog.pop();
+      try { op(); } catch {}
+    }
+  };
+
+  // Build the work list — { bucket, id, mode, currentName, itemBytes }
+  // per item. Plan values are either a string mode (sources / common) or
+  // an object { mode, currentName } (library, since the current on-disk
+  // name may differ from the backup id when an identity match crosses a
+  // local rename).
+  const entries = await zip.entries();
+  const work = [];
+  let totalBytes = 0;
+  const buckets = { sources: 'sources', library: 'library', common: 'common' };
+  for (const cat of Object.keys(buckets)) {
+    const bucket = buckets[cat];
+    const decisions = plan[cat] || {};
+    for (const id of Object.keys(decisions)) {
+      const raw = decisions[id];
+      const mode = typeof raw === 'string' ? raw : (raw && raw.mode);
+      const currentName = typeof raw === 'object' && raw ? (raw.currentName || id) : id;
+      const customName = typeof raw === 'object' && raw ? (raw.customName || '') : '';
+      if (!mode || mode === 'keep') continue;
+      // Sum bytes for this top-level subdir within the zip.
+      let itemBytes = 0;
+      const prefix = `${bucket}/${id}/`;
+      for (const key of Object.keys(entries)) {
+        if (!key.startsWith(prefix)) continue;
+        const e = entries[key];
+        if (!e.isDirectory) itemBytes += (e.size || 0);
+      }
+      work.push({ bucket, id, mode, currentName, customName, itemBytes });
+      totalBytes += itemBytes;
+    }
+  }
+
+  let processedBytes = 0;
+
+  // Per-bucket / per-mode tallies feed the renderer's completion-modal
+  // summary so the user sees what actually changed instead of a generic
+  // "Merge complete." line. The plan's "keep" decisions don't reach this
+  // loop (filtered to work[] above), but we still count them from the
+  // plan itself so the summary can mention "N kept yours" when the user
+  // resolved conflicts conservatively.
+  const counts = {
+    sources: { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
+    library: { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
+    common:  { added: 0, replaced: 0, keptBoth: 0, keptYours: 0 },
+    sharedTracks: { added: 0 },
+    attachments: { added: 0 },
+  };
+  for (const cat of Object.keys(counts)) {
+    if (cat === 'sharedTracks' || cat === 'attachments') continue;
+    const decisions = plan[cat] || {};
+    for (const id of Object.keys(decisions)) {
+      const raw = decisions[id];
+      const mode = typeof raw === 'string' ? raw : (raw && raw.mode);
+      if (mode === 'keep') counts[cat].keptYours++;
+    }
+  }
+
+  // Group user-chosen work items by bucket for the phased extract
+  // below. Each bucket's progress is labelled per the user's mental
+  // unit — sources/sharedTracks aggregate ("Source Files X of Y"),
+  // library/common per-item ("Ahsoka Files X of Y").
+  const workByBucket = { sources: [], library: [], common: [] };
+  for (const w of work) {
+    if (workByBucket[w.bucket]) workByBucket[w.bucket].push(w);
+  }
+
+  // Friendly-name maps for the two uuid-keyed buckets so the user-facing
+  // progress lines don't leak raw uuids. Sources and commons live under
+  // uuid dirs both in the zip and on disk; library is already name-keyed.
+  // Only build entries for items the user actually selected work for,
+  // since the maps are progress-only — no need to pay the meta.json
+  // reads for items being skipped.
+  const sourceNameByUuid = new Map();
+  const commonNameByUuid = new Map();
+  for (const w of workByBucket.sources) {
+    try {
+      const buf = await zip.entryData(`sources/${w.id}/meta.json`);
+      const m = JSON.parse(buf.toString('utf8'));
+      const friendly = (m && (m.bundleName || m.originalName)) || '';
+      if (friendly) sourceNameByUuid.set(w.id, String(friendly).replace(/\.zip$/i, ''));
+    } catch {}
+  }
+  for (const w of workByBucket.common) {
+    try {
+      const buf = await zip.entryData(`common/${w.id}/meta.json`);
+      const m = JSON.parse(buf.toString('utf8'));
+      if (m && m.name) commonNameByUuid.set(w.id, m.name);
+    } catch {}
+  }
+  // Translate a zip entry path so users see friendly names instead of
+  // raw uuids — same shape as applyReplace's helper.
+  const friendlyZipPath = (zipName) => {
+    const parts = String(zipName || '').split('/');
+    if (parts[0] === 'sources' && parts[1] && sourceNameByUuid.has(parts[1])) {
+      return `sources/${sourceNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+    }
+    if (parts[0] === 'common' && parts[1] && commonNameByUuid.has(parts[1])) {
+      return `common/${commonNameByUuid.get(parts[1])}/${parts.slice(2).join('/')}`;
+    }
+    return zipName;
+  };
+
+  // Pre-count tracks the sharedTracks evaluation will walk through.
+  // Counter advances per evaluation step (extract or skip-as-already-
+  // present) so the user sees motion through the whole bucket.
+  let sharedTracksEvalTotal = 0;
+  for (const key of Object.keys(entries)) {
+    if (!key.startsWith('sharedTracks/')) continue;
+    const e = entries[key];
+    if (!e.isDirectory && /\.wav$/i.test(e.name)) sharedTracksEvalTotal++;
+  }
+
+  // Pre-count the attachment ITEMS (store dirs) the backup carries. The
+  // counter is per item, not per file, so the sidecar json each store dir
+  // holds never shows up as work the user did not ask about.
+  const zipAttachmentIds = new Set();
+  for (const key of Object.keys(entries)) {
+    if (!key.startsWith('attachments/')) continue;
+    const id = key.split('/')[1];
+    if (id) zipAttachmentIds.add(id);
+  }
+
+  // [B-407] One deduper for this whole merge - built ONCE, above every extraction point.
+  // Per-file index building was the mistake made and caught the same evening in
+  // soundFontSharedTracks, where it would have cost ten seconds on a 62-file add.
+  const _dedupeExtracted = _makeContentDeduper(userData) || (() => {});
+
+  // Extract every file under a zip prefix into a target dir on disk.
+  // Validates path-escape per entry. The onFile callback fires per
+  // extracted file so the caller can emit bucket-specific progress
+  // (aggregate vs per-item) without the helper knowing about labels.
+  const extractPrefix = async (prefix, targetDir, onFile) => {
+    fs.mkdirSync(targetDir, { recursive: true });
+    // First pass — mkdir all dir entries; collect file entries.
+    const fileEntries = [];
+    for (const key of Object.keys(entries)) {
+      if (!key.startsWith(prefix)) continue;
+      const e = entries[key];
+      if (e.name === prefix) continue;
+      const relUnderTop = e.name.substring(prefix.length);
+      if (!relUnderTop) continue;
+      const target = path.resolve(targetDir, relUnderTop);
+      if (!target.startsWith(path.resolve(targetDir) + path.sep) && target !== path.resolve(targetDir)) continue;
+      if (e.isDirectory) {
+        try { fs.mkdirSync(target, { recursive: true }); } catch {}
+        continue;
+      }
+      fileEntries.push({ entry: e, target });
+    }
+    for (let i = 0; i < fileEntries.length; i++) {
+      if (cancelled) return;
+      const { entry: e, target } = fileEntries[i];
+      try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
+      try {
+        await zip.extract(e.name, target);
+        processedBytes += (e.size || 0);
+        if (!String(e.name).replace(/\\/g, '/').startsWith('attachments/')) {
+          // Screening first: a refused file is deleted here, and linking something we are
+          // about to remove would leave a link to content we just refused.
+          if (_screenRestored(target, restoreRefused)) _dedupeExtracted(target);
+        } else {
+          _dedupeExtracted(target);
+        }
+        if (onFile) onFile({ fileIdx: i + 1, fileTotal: fileEntries.length, fileName: e.name });
+      } catch (err) {
+        throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
+      }
+    }
+  };
+
+  // Process one work item's install/replace/both mode, invoking
+  // onFile per extracted file. The mode-specific snapshot/rename
+  // logic stays in place; only the progress emit shape moves to the
+  // caller.
+  // [B-399] Carry the per-file hash record for ONE merged item.
+  //
+  // WHY MERGE NEEDS ITS OWN, instead of unpacking the archive's whole .filehashes/
+  // folder the way a full restore does: a merge takes SOME items and leaves the rest, so
+  // unpacking all of them would plant records keyed to ids this library never received —
+  // orphan rows describing content that is not here, which is a worse lie than the missing
+  // rows this entry is about. Per item, by identity, or not at all.
+  //
+  // AND WITHOUT IT, A MERGED FONT IS PERMANENTLY INVISIBLE TO OWNERSHIP. Merge
+  // materialises items by raw zip extraction — no entry creation, no hash recompute — so
+  // nothing on this path would ever write one, and nothing anywhere rebuilds them. This is
+  // the one part of [B-399] that reaches a user who never restored anything.
+  //
+  // The key differs by bucket: sources and commons are uuid-keyed on disk so the id IS the
+  // key, but a library entry is keyed by the entryUuid inside its own meta.json — which is
+  // why this reads the meta that just landed rather than trusting the directory name. That
+  // also makes it correct for the "keep both" mode, where the item lands under a different
+  // directory name but keeps its identity.
+  //
+  // Best-effort: an archive taken before records were carried simply has none, and a font
+  // without one degrades exactly as it does today.
+  const carryHashRecord = async (bucket, id, targetDir) => {
+    const sub = FILEHASH_SUBDIR[bucket];
+    if (!sub) return;
+    let key = id;
+    if (bucket === 'library') {
+      try { key = JSON.parse(fs.readFileSync(path.join(targetDir, 'meta.json'), 'utf8')).entryUuid; }
+      catch { key = null; }
+      if (!key) return;
+    }
+    const zipName = `${FILEHASH_DIR}/${sub}/${key}.json`;
+    if (!entries[zipName]) return;
+    const dest = path.join(sfRoot, FILEHASH_DIR, sub, `${key}.json`);
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      // [B-407] NOT deduped, deliberately: these are the tiny per-file hash manifests, not audio.
+      // Linking JSON saves nothing and would entangle the hash store with the content index it
+      // describes.
+      await zip.extract(zipName, dest);
+      rollbackLog.push(() => { try { fs.rmSync(dest, { force: true }); } catch {} });
+    } catch {}
+  };
+
+  const processWorkItem = async (w, onFile) => {
+    const bucketRoot = path.join(sfRoot, w.bucket);
+    if (w.mode === 'install') {
+      const target = path.join(bucketRoot, w.id);
+      if (fs.existsSync(target)) return;
+      await extractPrefix(`${w.bucket}/${w.id}/`, target, onFile);
+      rollbackLog.push(() => { try { fs.rmSync(target, { recursive: true, force: true }); } catch {} });
+      await carryHashRecord(w.bucket, w.id, target);
+      if (counts[w.bucket]) counts[w.bucket].added++;
+    } else if (w.mode === 'replace') {
+      const currentDir = path.join(bucketRoot, w.currentName);
+      const target = path.join(bucketRoot, w.id);
+      const snap = `${currentDir}.preimport-bak-${Date.now()}`;
+      const hadOriginal = fs.existsSync(currentDir);
+      if (hadOriginal) {
+        try { fs.renameSync(currentDir, snap); }
+        catch (err) { throw new Error(`Snapshot failed for ${w.currentName}: ${err.message}`); }
+      }
+      rollbackLog.push(() => {
+        try { fs.rmSync(target, { recursive: true, force: true }); } catch {}
+        if (hadOriginal) { try { fs.renameSync(snap, currentDir); } catch {} }
+      });
+      await extractPrefix(`${w.bucket}/${w.id}/`, target, onFile);
+      if (hadOriginal) {
+        try { fs.rmSync(snap, { recursive: true, force: true }); } catch {}
+      }
+      rollbackLog[rollbackLog.length - 1] = () => {};
+      await carryHashRecord(w.bucket, w.id, target);
+      if (counts[w.bucket]) counts[w.bucket].replaced++;
+    } else if (w.mode === 'both') {
+      // Library only — keep the current alongside the backup version.
+      const sanitize = (s) => String(s || '').trim()
+        .replace(/\s+/g, '_')
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .slice(0, 200);
+      const userPick = sanitize(w.customName);
+      let chosenName;
+      if (userPick && !fs.existsSync(path.join(bucketRoot, userPick))) {
+        chosenName = userPick;
+      } else {
+        chosenName = w.id;
+        // First suffix is _2 ([B-343]): the original is implicitly number one.
+        let n = 1;
+        while (fs.existsSync(path.join(bucketRoot, chosenName))) {
+          n++;
+          chosenName = `${w.id}_${n}`;
+        }
+      }
+      const target = path.join(bucketRoot, chosenName);
+      await extractPrefix(`${w.bucket}/${w.id}/`, target, onFile);
+      rollbackLog.push(() => { try { fs.rmSync(target, { recursive: true, force: true }); } catch {} });
+      if (w.bucket === 'library' && chosenName !== w.id) {
+        const metaPath = path.join(target, 'meta.json');
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          meta.name = chosenName;
+          fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+        } catch {}
+      }
+      await carryHashRecord(w.bucket, w.id, target);
+      if (counts[w.bucket]) counts[w.bucket].keptBoth++;
+    }
+  };
+
+  // Emit one progress event indicating a bucket had nothing to do
+  // (all items confirmed-matching), then briefly hold so the user
+  // sees the message before the next phase overwrites it.
+  const emitBucketSkip = async (label) => {
+    onProgress({
+      processedBytes,
+      totalBytes,
+      currentItem: 'all already in your library',
+      topItemName: label,
+      topItemFilesProcessed: 0,
+      topItemFilesTotal: 0,
+    });
+    await new Promise(r => setTimeout(r, 800));
+  };
+
+  try {
+    // PHASE 1 — sources (aggregate). Counter unit is source archives
+    // (each work item = one source). Files within each source flash by
+    // in currentItem; the counter advances when crossing to the next
+    // source.
+    if (!cancelled) {
+      const items = workByBucket.sources;
+      if (items.length === 0) {
+        await emitBucketSkip('Source Files');
+      } else {
+        for (let i = 0; i < items.length; i++) {
+          if (cancelled) break;
+          const w = items[i];
+          await processWorkItem(w, ({ fileName }) => {
+            onProgress({
+              processedBytes,
+              totalBytes,
+              currentItem: friendlyZipPath(fileName),
+              topItemName: 'Source Files',
+              topItemFilesProcessed: i + 1,
+              topItemFilesTotal: items.length,
+            });
+          });
+        }
+      }
+    }
+
+    // PHASE 2 — library (per-item). Each font is its own scope, label
+    // flips to the font name with files within it counted out.
+    if (!cancelled) {
+      const items = workByBucket.library;
+      if (items.length === 0) {
+        await emitBucketSkip('Fonts');
+      } else {
+        for (const w of items) {
+          if (cancelled) break;
+          // Library is name-keyed in the zip; w.id is already the friendly name.
+          const labelName = `${w.id} Files`;
+          await processWorkItem(w, ({ fileIdx, fileTotal, fileName }) => {
+            onProgress({
+              processedBytes,
+              totalBytes,
+              currentItem: fileName,
+              topItemName: labelName,
+              topItemFilesProcessed: fileIdx,
+              topItemFilesTotal: fileTotal,
+            });
+          });
+        }
+      }
+    }
+
+    // PHASE 3 — common folders (per-item). Same shape as library, but
+    // commons are uuid-keyed both in the zip and on disk, so the label
+    // and the per-file path both need the friendly-name translation.
+    if (!cancelled) {
+      const items = workByBucket.common;
+      if (items.length === 0) {
+        await emitBucketSkip('Common Folders');
+      } else {
+        for (const w of items) {
+          if (cancelled) break;
+          const friendlyName = commonNameByUuid.get(w.id) || w.id;
+          const labelName = `${friendlyName} Files`;
+          await processWorkItem(w, ({ fileIdx, fileTotal, fileName }) => {
+            onProgress({
+              processedBytes,
+              totalBytes,
+              currentItem: friendlyZipPath(fileName),
+              topItemName: labelName,
+              topItemFilesProcessed: fileIdx,
+              topItemFilesTotal: fileTotal,
+            });
+          });
+        }
+      }
+    }
+
+    // Shared Tracks — flat folder, no per-item prompts. Rules per
+    // user spec, hash-aware:
+    //   1. Backup record's content (hash) already exists locally under
+    //      any filename  → skip (we already have the content)
+    //   2. Local has the same filename but different hash → keep local
+    //      (filename-collision: user's file wins)
+    //   3. Else → extract the backup file and record it in the local
+    //      hash index with the backup's UUID, so identity travels
+    if (!cancelled) {
+      const stPrefix = 'sharedTracks/';
+      const stRootAbs = path.join(sfRoot, 'sharedTracks');
+      const hasStEntries = Object.keys(entries).some(k => k.startsWith(stPrefix));
+      if (hasStEntries) {
+        try { fs.mkdirSync(stRootAbs, { recursive: true }); } catch {}
+        const stCreated = [];
+        // Read the backup's hash index from the zip if present. Older
+        // backups (pre-hash-index) won't have it — those fall through
+        // to filename-only identity for each extracted file.
+        let backupIndex = null;
+        try {
+          const buf = await zip.entryData('sharedTracks/.jmt-hashes.json');
+          const parsed = JSON.parse(buf.toString('utf8'));
+          if (parsed && parsed.tracks && typeof parsed.tracks === 'object') {
+            backupIndex = parsed;
+          }
+        } catch {}
+        // Read (and backfill) the local index — drives the content
+        // identity check for "already have this under any name".
+        const hashMod = require('./soundFontSharedTracksHash');
+        const localIndex = hashMod.ensureIndex(userData);
+        const localHashes = new Set();
+        const localNames = new Set();
+        for (const u of Object.keys(localIndex.tracks || {})) {
+          if (localIndex.tracks[u].hash) localHashes.add(localIndex.tracks[u].hash);
+          if (localIndex.tracks[u].name) localNames.add(localIndex.tracks[u].name);
+        }
+        // sharedTracks counter advances per evaluation step (extract
+        // OR skip-as-already-present) so the user sees motion through
+        // the whole bucket, not just the few that get extracted.
+        let stEvalDone = 0;
+        const emitSharedTracksProgress = (currentItemPath) => {
+          stEvalDone++;
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: currentItemPath,
+            topItemName: 'Shared Tracks',
+            topItemFilesProcessed: stEvalDone,
+            topItemFilesTotal: sharedTracksEvalTotal,
+          });
+        };
+        // Helper that extracts a single backup track + records it.
+        const extractTrack = async (entryName, fileName, backupRecord) => {
+          const target = path.join(stRootAbs, fileName);
+          await zip.extract(entryName, target);
+          if (!_screenRestored(target, restoreRefused)) return null;
+          // [B-407] TRACKS DO NOT GO THROUGH extractPrefix — they have their own extractor,
+          // so deduping only there would have missed the exact case it was specified: back up, delete
+          // a track, add it to a FONT instead, merge the backup. The track's bytes are in the
+          // library (inside the font) and must be linked, not written again. Enumerate by what
+          // WRITES, not by what looks like the main path — the lesson [B-370] taught and this
+          // week has repeated five times.
+          _dedupeExtracted(target);
+          stCreated.push(target);
+          const e = entries[entryName];
+          if (e) processedBytes += (e.size || 0);
+          emitSharedTracksProgress(entryName);
+          // Record into the local index. Carry the backup's UUID so the
+          // file's identity survives the round-trip across backups.
+          if (backupRecord && backupRecord.uuid) {
+            try {
+              hashMod.recordInsert(userData, {
+                uuid: backupRecord.uuid,
+                name: fileName,
+                size: backupRecord.size,
+                hash: backupRecord.hash,
+                addedAt: backupRecord.addedAt,
+                aliases: backupRecord.aliases,   // [B-643]
+              });
+              if (backupRecord.hash) localHashes.add(backupRecord.hash);
+              localNames.add(fileName);
+            } catch {}
+          } else {
+            // No backup record (legacy backup) — let recordAdd hash the
+            // file on disk and assign a fresh UUID.
+            try {
+              const r = hashMod.recordAdd(userData, fileName);
+              if (r && r.hash) localHashes.add(r.hash);
+              localNames.add(fileName);
+            } catch {}
+          }
+        };
+        // First pass: process files we DO have an index record for.
+        // Lets us make hash-based decisions without re-hashing the
+        // backup files on the fly. Every evaluation step (extract OR
+        // skip) advances the counter so the user sees motion through
+        // the whole bucket, not just the extracted subset.
+        const handledFiles = new Set(); // by filename
+        if (backupIndex) {
+          for (const buuid of Object.keys(backupIndex.tracks)) {
+            if (cancelled) break;
+            const br = backupIndex.tracks[buuid];
+            if (!br || !br.name) continue;
+            handledFiles.add(br.name);
+            const entryName = `${stPrefix}${br.name}`;
+            if (!entries[entryName]) continue; // index references a missing file (silent)
+            // Rule 1: content already present locally under ANY name.
+            if (br.hash && localHashes.has(br.hash)) { emitSharedTracksProgress(entryName); continue; }
+            // Rule 2: filename collision with different content (or
+            // local lacks a record for it — defensive). Local wins.
+            if (localNames.has(br.name) || fs.existsSync(path.join(stRootAbs, br.name))) { emitSharedTracksProgress(entryName); continue; }
+            // Rule 3: extract (extractTrack emits its own progress).
+            try {
+              await extractTrack(entryName, br.name, { uuid: buuid, ...br });
+            } catch (err) {
+              throw new Error(`Failed extracting ${entryName}: ${err && err.message || err}`);
+            }
+          }
+        }
+        // Second pass: any backup file the index didn't reference (or
+        // legacy backups with no index at all). Filename-only union.
+        // Same evaluation-step counter advancement as the first pass.
+        for (const key of Object.keys(entries)) {
+          if (cancelled) break;
+          if (!key.startsWith(stPrefix)) continue;
+          const e = entries[key];
+          if (e.isDirectory) continue;
+          const fileName = key.substring(stPrefix.length);
+          if (!fileName || fileName.includes('/')) continue;
+          if (handledFiles.has(fileName)) continue;
+          // Legacy sidecars — silent skip (these aren't .wav and don't
+          // count toward sharedTracksEvalTotal).
+          if (fileName === '.jmt-meta.json') continue;
+          if (fileName === '.jmt-hashes.json') continue;
+          if (!/\.wav$/i.test(fileName)) continue;
+          // Filename collision: local wins. Counter still advances.
+          if (fs.existsSync(path.join(stRootAbs, fileName))) { emitSharedTracksProgress(e.name); continue; }
+          try {
+            await extractTrack(e.name, fileName, null);
+          } catch (err) {
+            throw new Error(`Failed extracting ${e.name}: ${err && err.message || err}`);
+          }
+        }
+        rollbackLog.push(() => {
+          for (const p of stCreated) { try { fs.unlinkSync(p); } catch {} }
+        });
+        counts.sharedTracks.added = stCreated.length;
+      } else if (sharedTracksEvalTotal > 0) {
+        // sharedTracks bucket has no zip entries — shouldn't happen
+        // when hasStEntries is true above, but defensive for empty.
+      } else {
+        // No sharedTracks in backup — flash the bucket skip so the
+        // user sees the phase was checked, then move on.
+        await emitBucketSkip('Shared Tracks');
+      }
+    }
+
+    // ── Attachments (receipts / proof-of-purchase) ──
+    // The simplest bucket in the file, and deliberately so: a store dir is
+    // NAMED by the sha256 of its content, so "do I already have this?" is
+    // a directory-exists check. No hashing, no filename collisions, no
+    // local-wins rule — identical name means identical bytes.
+    //
+    // Attachments are not part of the merge PLAN and never will be. The
+    // user picks which fonts to merge; nobody wants to adjudicate their
+    // own receipts one at a time, and a receipt that arrives without its
+    // source is still the proof they paid for something. So they ride
+    // along unconditionally, and the links resolve or get pruned below.
+    if (!cancelled) {
+      const attPrefix = 'attachments/';
+      const attRootAbs = path.join(sfRoot, 'attachments');
+      if (zipAttachmentIds.size > 0) {
+        try { fs.mkdirSync(attRootAbs, { recursive: true }); } catch {}
+        const attCreated = [];
+        let attEvalDone = 0;
+        for (const id of zipAttachmentIds) {
+          if (cancelled) break;
+          attEvalDone++;
+          const destDir = path.join(attRootAbs, id);
+          const already = fs.existsSync(destDir);
+          onProgress({
+            processedBytes,
+            totalBytes,
+            currentItem: `${attPrefix}${id}`,
+            topItemName: 'Attachments',
+            topItemFilesProcessed: attEvalDone,
+            topItemFilesTotal: zipAttachmentIds.size,
+          });
+          if (already) continue;
+          try {
+            for (const key of Object.keys(entries)) {
+              if (!key.startsWith(`${attPrefix}${id}/`)) continue;
+              const e = entries[key];
+              if (e.isDirectory) continue;
+              const rel = key.substring(`${attPrefix}${id}/`.length);
+              if (!rel || rel.includes('/') || rel.includes('\\')) continue;
+              const target = path.join(destDir, rel);
+              fs.mkdirSync(destDir, { recursive: true });
+              // [B-407] NOT deduped, deliberately: attachments are proof-of-purchase documents
+              // with their own REFCOUNTED unlink (deleteSource unlinks by count). Hardlinking
+              // them into the content pool would give those bytes a second owner the refcount
+              // knows nothing about. Different lifecycle, different rules — revisit only with
+              // that refcount in hand.
+              await zip.extract(key, target);
+              processedBytes += (e.size || 0);
+            }
+            if (fs.existsSync(destDir)) attCreated.push(destDir);
+          } catch (err) {
+            throw new Error(`Failed extracting ${attPrefix}${id}: ${err && err.message || err}`);
+          }
+        }
+        rollbackLog.push(() => {
+          for (const p of attCreated) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} }
+        });
+        // Every attachment rode along; the ones no source in the library holds go now, before
+        // they are counted, because a receipt goes with its source.
+        try { require('./soundFontAttachments').pruneUnlinkedAttachments(userData); } catch {}
+        counts.attachments.added = attCreated.filter((p) => fs.existsSync(p) && !_isPictureDir(p)).length;
+      } else {
+        await emitBucketSkip('Attachments');
+      }
+    }
+
+    if (cancelled) {
+      throw Object.assign(new Error('Cancelled'), { cancelled: true });
+    }
+  } catch (err) {
+    rollbackAll();
+    try { await zip.close(); } catch {}
+    if (signal) { try { signal.removeEventListener('abort', onAbort); } catch {} }
+    throw err;
+  } finally {
+    if (signal) { try { signal.removeEventListener('abort', onAbort); } catch {} }
+  }
+
+  // Apply manifest settings (starredCommon) — only if the backup's value
+  // isn't already what we have; otherwise it's a no-op.
+  let manifestApplied = null;
+  try {
+    const buf = await zip.entryData('manifest.json');
+    const manifest = JSON.parse(buf.toString('utf8'));
+    manifestApplied = manifest;
+  } catch {}
+
+  try { await zip.close(); } catch {}
+  // Sources that arrived from the backup can carry attachment links whose
+  // files were never in it (any backup taken before 2026-09-02). Drop the
+  // links rather than leave meta claiming proof that does not exist.
+  try { require('./soundFontAttachments').pruneDanglingLinks(userData); } catch {}
+
+  return { manifest: manifestApplied, counts, refused: restoreRefused };
+}
+
+module.exports = {
+  SCHEMA_VERSION,
+  BACKUP_TYPE,
+  surveyLibrary,
+  surveyLibraryAsync,
+  describeSkipConsequence,
+  applySkipAdjustment,
+  benchmarkDestination,
+  estimateSeconds,
+  suggestedFileName,
+  exportBackup,
+  inspectBackup,
+  applyReplace,
+  surveyMerge,
+  applyMerge,
+  openBackupZip: _openBackupZip,
+  PATHS_FILE,
+  README_NAME,
+};

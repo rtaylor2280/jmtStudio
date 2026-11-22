@@ -1,0 +1,9 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:20:5: error: 'StyleRainBowPtr' was not declared in this scope; did you mean 'StyleRainbowPtr'?
+   20 |     StyleRainBowPtr<300, 800>(),
+      |     ^~~~~~~~~~~~~~~
+      |     StyleRainbowPtr
+<OS>\config\my_config.h:20:31: error: expected primary-expression before ')' token
+   20 |     StyleRainBowPtr<300, 800>(),
+      |                               ^

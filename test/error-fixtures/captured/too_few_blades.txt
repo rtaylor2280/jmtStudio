@@ -1,0 +1,10 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:611:
+<OS>\config\my_config.h:30:17: error: cannot convert 'Preset*' to 'BladeBase*' in initialization
+   30 |     CONFIGARRAY(presets) },
+      |                 ^~~~~~~
+      |                 |
+      |                 Preset*
+<OS>\common\preset.h:7:24: note: in definition of macro 'CONFIGARRAY'
+    7 | #define CONFIGARRAY(X) X, NELEM(X)
+      |                        ^

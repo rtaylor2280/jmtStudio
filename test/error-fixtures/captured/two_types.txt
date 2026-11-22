@@ -1,0 +1,75 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:46:
+<OS>\config\my_config.h:6:1: error: two or more data types in declaration of 'maxLedsPerStrip'
+    6 | const unsigned int float maxLedsPerStrip = 144;
+      | ^~~~~
+In file included from <OS>\styles\random_blink.h:15,
+                 from <OS>\ProffieOS.ino:512:
+<OS>\functions\random_blink.h:28:25: error: 'maxLedsPerStrip' was not declared in this scope
+   28 |   unsigned short bits_[(maxLedsPerStrip + 15)/ 16];
+      |                         ^~~~~~~~~~~~~~~
+<OS>\functions\random_blink.h: In member function 'void RandomBlinkF<MILLIHZ>::run(BladeBase*)':
+<OS>\functions\random_blink.h:19:43: error: 'bits_' was not declared in this scope; did you mean 'bit'?
+   19 |       for (size_t i = 0; i < shorts; i++) bits_[i] = rand();
+      |                                           ^~~~~
+      |                                           bit
+<OS>\functions\random_blink.h: In member function 'int RandomBlinkF<MILLIHZ>::getInteger(int)':
+<OS>\functions\random_blink.h:23:13: error: 'bits_' was not declared in this scope; did you mean 'bit'?
+   23 |     return (bits_[led>>4] >> (led & 0xf) & 1) * 32768;
+      |             ^~~~~
+      |             bit
+In file included from <OS>\ProffieOS.ino:603:
+<OS>\blades\ws2811_blade.h: At global scope:
+<OS>\blades\ws2811_blade.h:12:22: error: 'maxLedsPerStrip' was not declared in this scope
+   12 | Color16 color_buffer[maxLedsPerStrip + EXTRA_COLOR_BUFFER_SPACE];
+      |                      ^~~~~~~~~~~~~~~
+In file included from <OS>\blades\ws2811_blade.h:32:
+<OS>\blades\stm32l4_ws2811.h:40:38: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+   40 | Color16* volatile color_buffer_ptr = color_buffer;
+      |                                      ^~~~~~~~~~~~
+      |                                      color_buffer_ptr
+In file included from <OS>\common\capabilities.h:4,
+                 from <OS>\ProffieOS.ino:49:
+<OS>\blades\stm32l4_ws2811.h: In member function 'bool WS2811PinBase<BYTEORDER>::IsReadyForBeginFrame()':
+<OS>\blades\stm32l4_ws2811.h:618:27: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+  618 |     if (num_leds_ > NELEM(color_buffer)) {
+      |                           ^~~~~~~~~~~~
+<OS>\common\common.h:18:26: note: in definition of macro 'NELEM'
+   18 | #define NELEM(X) (sizeof(X)/sizeof((X)[0]))
+      |                          ^
+<OS>\blades\stm32l4_ws2811.h:622:18: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+  622 |     return NELEM(color_buffer) - color_buffer_size >= num_leds_;
+      |                  ^~~~~~~~~~~~
+<OS>\common\common.h:18:26: note: in definition of macro 'NELEM'
+   18 | #define NELEM(X) (sizeof(X)/sizeof((X)[0]))
+      |                          ^
+<OS>\blades\stm32l4_ws2811.h: In member function 'Color16* WS2811PinBase<BYTEORDER>::BeginFrame()':
+<OS>\blades\stm32l4_ws2811.h:634:16: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+  634 |     if (ret >= color_buffer + NELEM(color_buffer)) ret -= NELEM(color_buffer);
+      |                ^~~~~~~~~~~~
+      |                color_buffer_ptr
+<OS>\blades\stm32l4_ws2811.h: In member function 'void WS2811PinBase<BYTEORDER>::read(uint8_t*)':
+<OS>\blades\stm32l4_ws2811.h:674:50: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+  674 |     Color8 color = pos->dither(frame_num_, pos - color_buffer);
+      |                                                  ^~~~~~~~~~~~
+      |                                                  color_buffer_ptr
+In file included from <OS>\blades\ws2811_blade.h:64:
+<OS>\blades\spiled_pin.h: In member function 'virtual Color16* SpiLedPinBase::BeginFrame()':
+<OS>\blades\spiled_pin.h:66:12: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+   66 |     return color_buffer;
+      |            ^~~~~~~~~~~~
+      |            color_buffer_ptr
+<OS>\blades\spiled_pin.h: In member function 'virtual void SpiLedPinBase::EndFrame()':
+<OS>\blades\spiled_pin.h:71:16: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+   71 |       OutColor(color_buffer[i]);
+      |                ^~~~~~~~~~~~
+      |                color_buffer_ptr
+<OS>\blades\ws2811_blade.h: In member function 'virtual void WS2811_Blade::set(int, Color16)':
+<OS>\blades\ws2811_blade.h:153:20: error: 'color_buffer' was not declared in this scope; did you mean 'color_buffer_ptr'?
+  153 |     if (colors_ >= color_buffer && colors_ < color_buffer + NELEM(color_buffer) &&
+      |                    ^~~~~~~~~~~~
+      |                    color_buffer_ptr
+<OS>\blades\ws2811_blade.h: In function 'BladeBase* WS2811BladePtr()':
+<OS>\blades\ws2811_blade.h:378:25: error: 'maxLedsPerStrip' was not declared in this scope
+  378 |   static_assert(LEDS <= maxLedsPerStrip, "update maxLedsPerStrip");
+      |                         ^~~~~~~~~~~~~~~

@@ -1,0 +1,27 @@
+FAILED
+<OS>\sound\dynamic_mixer.h:193:32: error: expected primary-expression at end of input
+  193 |   int32_t volume_ = BOOT_VOLUME;
+      |                                ^
+<OS>\display\layer_controller.h: In member function 'virtual int VolumeVariableSource::percent()':
+<OS>\display\layer_controller.h:96:62: error: expected primary-expression before ',' token
+   96 |     return clampi32(dynamic_mixer.get_volume() * 100 / VOLUME, 0, 100);
+      |                                                              ^
+<OS>\functions\volume_level.h: In member function 'int VolumeLevelSVF::calculate(BladeBase*)':
+<OS>\functions\volume_level.h:16:55: error: expected primary-expression before ';' token
+   16 |     return dynamic_mixer.get_volume() * 32768 / VOLUME;
+      |                                                       ^
+<OS>\modes\settings_menues.h: In member function 'virtual int mode::SmoothVolumeMode<SPEC>::get()':
+<OS>\modes\settings_menues.h:29:32: error: expected primary-expression before ';' token
+   29 |     float ret = volume / VOLUME;
+      |                                ^
+<OS>\modes\settings_menues.h: In member function 'virtual void mode::SmoothVolumeMode<SPEC>::set(int)':
+<OS>\modes\settings_menues.h:44:45: error: invalid type argument of unary '*' (have 'float')
+   44 |                     << " final= " << VOLUME * powf(ret, VOLUME_MENU_GAMMA)
+      |                                             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+<OS>\modes\settings_menues.h:52:37: error: invalid type argument of unary '*' (have 'float')
+   52 |     dynamic_mixer.set_volume(VOLUME * ret);
+      |                                     ^~~~~
+<OS>\buttons\pots.h: In member function 'virtual void ChangeVolumeAnalogReceiver::Set(float)':
+<OS>\buttons\pots.h:21:37: error: invalid type argument of unary '*' (have 'float')
+   21 |     dynamic_mixer.set_volume(VOLUME * value);
+      |                                     ^~~~~~~

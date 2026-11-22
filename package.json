@@ -1,6 +1,6 @@
 {
   "name": "jmt-studio",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "description": "ProffieOS Configuration Tool by JMT",
   "author": "JMT <studio@jmtfoundry.com>",
   "homepage": "https://jmtfoundry.com",
@@ -8,15 +8,16 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win --x64",
+    "build": "node scripts/build-driver-helper.js && electron-builder --win --x64",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux --x64",
     "build:icons": "node scripts/build-icons.js",
-    "postinstall": "node scripts/copy-monaco.js"
+    "postinstall": "node scripts/copy-monaco.js && node scripts/build-driver-helper.js"
   },
   "build": {
     "appId": "com.jmt.proffieos-editor",
     "productName": "JMT-Studio",
+    "copyright": "Copyright 2026 Ryan Taylor. All rights reserved.",
     "npmRebuild": true,
     "directories": {
       "output": "dist"
@@ -24,7 +25,8 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico",
-      "sign": "build/sign.js"
+      "sign": "build/sign.js",
+      "signExts": [".node", ".dll"]
     },
     "nsis": {
       "oneClick": false,
@@ -35,6 +37,7 @@
       "shortcutName": "JMT Studio",
       "include": "build/installer.nsh"
     },
+    "beforePack": "build/fetch-catalogue.js",
     "afterSign": "build/notarize.js",
     "mac": {
       "target": "dmg",
@@ -59,13 +62,17 @@
     "deb": {
       "afterInstall": "build/linux-after-install.sh"
     },
+    "asarUnpack": [
+      "winDisksNative.js",
+      "winSystemNative.js",
+      "winNativeRun.js",
+      "node_modules/koffi/**/*",
+      "node_modules/@serialport/bindings-cpp/prebuilds/**/*"
+    ],
     "files": [
-      "main.js",
-      "preload.js",
-      "toolchain.js",
-      "portDetector.js",
-      "proffieos.js",
-      "cacheManager.js",
+      "*.js",
+      "fontCatalogueData.json",
+      "compileErrorData.locked.json",
       "renderer/**/*",
       "assets/**/*",
       "LICENSE.txt"
@@ -76,7 +83,12 @@
         "to": ".",
         "filter": [
           "arduino-cli/**/*",
-          "tools/**/*"
+          "tools/**/*",
+          "dfu-driver/*.inf",
+          "dfu-driver/*.cat",
+          "driver-helper/*.exe",
+          "licenses/**/*",
+          "jmt-plugin/**/*"
         ]
       }
     ]
@@ -90,6 +102,9 @@
     "sharp": "^0.34.5"
   },
   "dependencies": {
+    "archiver": "^5.3.2",
+    "koffi": "2.16.3",
+    "node-stream-zip": "^1.15.0",
     "serialport": "^13.0.0"
   }
 }

@@ -1,0 +1,13 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:27:96: error: no matching function for call to 'WS281XBladePtr<"144", bladePin, Color8::GRB, PowerPINS<21, 22> >()'
+   27 |   { 0, WS281XBladePtr<"144", bladePin, Color8::GRB, PowerPINS<bladePowerPin2, bladePowerPin3> >(),
+      |        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+In file included from <OS>\ProffieOS.ino:603:
+<OS>\blades\ws2811_blade.h:392:18: note: candidate: 'template<int LEDS, int DATA_PIN, Color8::Byteorder byteorder, class POWER_PINS, template<int <anonymous>, int <anonymous>, Color8::Byteorder <anonymous>, int <anonymous>, int <anonymous>, int <anonymous>, int <anonymous> > class PinClass, int frequency, int reset_us, int t0h, int t1h, int POWER_OFF_DELAY_MS> BladeBase* WS281XBladePtr()'
+  392 | class BladeBase *WS281XBladePtr() {
+      |                  ^~~~~~~~~~~~~~
+<OS>\blades\ws2811_blade.h:392:18: note:   template argument deduction/substitution failed:
+<OS>\config\my_config.h:27:96: error: '"144"' is not a valid template argument for type 'int' because string literals can never be used in this context
+   27 |   { 0, WS281XBladePtr<"144", bladePin, Color8::GRB, PowerPINS<bladePowerPin2, bladePowerPin3> >(),
+      |        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~

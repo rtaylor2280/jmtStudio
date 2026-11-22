@@ -1,0 +1,46 @@
+; jmt_proffie_winusb.inf
+; Binds the STM32 system bootloader (USB\VID_0483&PID_DF11) to WinUSB so that
+; dfu-util (libusb) can flash the Proffieboard on Windows. One fixed, signed
+; package — installed once and reused for every board, instead of libwdi
+; regenerating a fresh INF per install (which piled up 30+ copies in the store).
+;
+; Signed via JMT Studio's Azure Trusted Signing profile (same as the app).
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = USBDevice
+ClassGuid   = {88BAE032-5A81-49F0-BC3D-A4FF138216D6}
+Provider    = %ProviderName%
+CatalogFile = jmt_proffie_winusb.cat
+DriverVer   = 07/14/2026,1.0.0.0
+PnpLockdown = 1
+
+[Manufacturer]
+%ProviderName% = Standard,NTamd64,NTarm64
+
+[Standard.NTamd64]
+%DeviceName% = USB_Install, USB\VID_0483&PID_DF11
+
+[Standard.NTarm64]
+%DeviceName% = USB_Install, USB\VID_0483&PID_DF11
+
+; ---- Install a device using WinUSB ----
+[USB_Install]
+Include = winusb.inf
+Needs   = WINUSB.NT
+
+[USB_Install.Services]
+Include = winusb.inf
+Needs   = WINUSB.NT.Services
+
+[USB_Install.HW]
+AddReg = Dev_AddReg
+
+; A device interface GUID lets libusb/WinUSB open the device via CreateFile.
+; Fixed so it is stable across installs.
+[Dev_AddReg]
+HKR,,DeviceInterfaceGUIDs,0x00010000,"{6D4C2A1E-9B3F-4E8A-B7D2-1C5E8F0A9D34}"
+
+[Strings]
+ProviderName = "JMT Studio"
+DeviceName   = "Proffieboard Bootloader (WinUSB)"

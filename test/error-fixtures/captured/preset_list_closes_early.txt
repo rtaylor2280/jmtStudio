@@ -1,0 +1,11 @@
+FAILED
+<OS>\config\my_config.h:22:3: error: expected unqualified-id before '{' token
+   22 |   { "Font2;common", "tracks/track2.wav",
+      |   ^
+<OS>\config\my_config.h:24:12: error: expected unqualified-id before ',' token
+   24 |     "Two" },
+      |            ^
+<OS>\config\my_config.h:25:1: error: expected unqualified-id before '}' token
+   25 | };
+      | ^
+<OS>\config\my_config.h:25:1: error: expected declaration before '}' token

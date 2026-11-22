@@ -29,18 +29,176 @@ let _flashTargetPort          = null;
 let _flashTargetSN            = null;
 let selectedFqbn              = null;
 let compileSuccess      = false;   // true after successful compile this session
+let _flashFollowsCompile = false;   // true from a compile that goes on to flash until that flash shows its timers
 let cacheCheckPending   = false;   // true while cache check is in flight
+// WHERE the current build lives on disk, or null if there isn't one.
+//
+// compileSuccess says a build EXISTS; this says where. They used to be the same fact, because a
+// cache check copied the entry into the build folder as a side effect of being asked - from ten
+// callers, one of them a typing debounce. That copy is what could land on top of a running flash.
+// Now nothing copies: a fresh compile leaves the build in build-output, a cache hit leaves it in
+// the cache entry, and the flash reads whichever this points at. (B-216)
+let _currentBuildDir    = null;
+// The entry a cache hit came from, so we can stamp it as used at the moment it is actually used.
+let _currentBuildKey    = null;   // { configHash, buildPkgHash, configId }
+// ── [B-028] WHICH BUILD IS ACTUALLY ON THE BOARD ────────────────────────────
+//
+// The repro, app left open ~9h overnight: compiled+flashed (9:22 PM), disconnected the
+// board, ran a second compile purely to warm the cache (9:55 PM), left it. In the
+// morning the chips read "Compile restored from cache" + "Flash successful" together,
+// which says "the current file is on the board" — false twice over. The flash predates
+// the current build, and there was no board attached at all.
+//
+// THE FLASH CHIP WAS A SESSION FLAG, NOT A FACT ABOUT A BUILD. It said a flash had
+// succeeded at some point, never WHICH build it put there. Stamping the build identity
+// at flash time is what turns it back into a claim that can be checked.
+let _flashedBuildKey    = null;   // { configHash, buildPkgHash, configId, at } of what we FLASHED
+// The current config's identity, remembered so the chip can be re-evaluated by triggers that
+// do NOT run a cache check - a board appearing or disappearing changes the answer without
+// changing a single byte of the config. Written only by the cache check, which is where these
+// are learned. (2026-09-15)
+let _lastKnownConfigHash   = null;
+let _lastKnownBuildPkgHash = null;
+// Is the content in the editor a KNOWN BUILD? Carried from the cache check's own result rather
+// than read off `compileSuccess`, which is assigned INSIDE the hit branch - i.e. AFTER
+// _refreshFlashProvenance runs, since that call was hoisted above the branch so it fires on a
+// miss too. Reading the flag there saw a stale false and silently suppressed the hover on every
+// restart, where the label was right and the hover silently absent. Two correct changes, one
+// bad interaction. (2026-09-15)
+let _openContentIsBuilt    = false;
+// A FAILED FLASH IS STICKY, and this is the one state that must not soften.
+// A failure means the board is in an unknown and possibly partial state, which is WORSE than
+// stale - so it cannot be replaced by a dated "last flashed" fact on the next status refresh.
+// It used to be: the ownership guard tested /^Flash/, and "Flash error" passes that, so a cache
+// check with matching content wrote "Flash successful" straight over a failed flash. Cleared
+// only by a successful flash or by loading another file. (2026-09-15)
+let _flashFailed        = false;
+// The REASON, kept for the chip's hover. The hover was defaulting to the label, so it read
+// "Flash error" over "Flash error" - a sentence saying nothing that was not already on screen,
+// while the actual cause scrolled away in the build log. We hold that reason at exactly this
+// moment and nowhere else afterwards. (2026-09-15)
+let _flashErrorTip      = '';
+
+// First sentence of a multi-sentence error, for a tooltip. One line is the convention
+// (local/ui-conventions.md); the full text is in the log and the modal.
+function _firstSentence(s, cap = 96) {
+  const line = String(s || '').split('\n').map(x => x.trim()).find(Boolean) || '';
+  const m = line.match(/^(.{0,120}?[.!?])(?:\s|$)/);
+  const out = m ? m[1] : line;
+  return out.length > cap ? `${out.slice(0, cap - 3)}...` : out;
+}
+// AND THE MISLABEL HAD ITS OWN TRIGGER, pinned the same morning: clicking CLOSE on
+// the still-open build modal re-runs the content-hash cache check, which HITS — that
+// compile just populated the cache — and relabels this session's own build "restored
+// from cache". The check could not tell "this hit IS the build I just made" from
+// "restored a build from a previous session". So the session records what it built.
+const _sessionBuiltHashes = new Set();   // configHash values THIS session compiled for real
+let _cacheCheckSeq      = 0;       // only the newest checkCacheForConfig run may write state
+// Carried from a failed flash into the Bootloader Mode modal, which clears its own log on open.
+// Set only when the port the user picked was never identified as a Proffieboard.
+let _dfuPortNote        = null;
+
+// The last thing the toolchain indicator was told, so an install can take it over and give it back.
+//
+// That indicator is written once by `toolchain:initialize` at startup and never revisited, but a
+// plugin install started from the Versions panel goes through `core:install` on a different
+// channel. So the app said "Toolchain ready" beside a Compile button it had just disabled with
+// "Downloading and installing Proffieboard Plugin 3.6.0" - contradicting itself on one screen while
+// holding the answer in `_coreInstallInFlight`, which only `compileBlockedReason` ever read.
+// (2026-08-14)
+let _lastToolchainStatus = null;
+// True while a plugin install started by the MAIN process (ensureCore, at startup
+// or on a version switch) is running. The panel's own installs set
+// window._coreInstallInFlight; this one had no equivalent, so nothing in the
+// renderer knew it was happening. (2026-08-15)
+let _startupCoreInstall  = false;
+window.setToolchainBusy = (label) => {
+  setStatus('toolchain', 'pending', label);
+};
+window.clearToolchainBusy = () => {
+  if (_lastToolchainStatus) setStatus('toolchain', _lastToolchainStatus.state, _lastToolchainStatus.message);
+};
+// The selected ProffieOS version is pinned to a plugin that is not on the
+// machine. Distinct from "busy": nothing is arriving, and nothing will until the
+// user asks for it.
+//
+// That indicator is written once by toolchain:initialize at startup and never
+// revisited, so it went on reading "Toolchain ready" while the plugin the next
+// build needs was absent. Reachable three ways, not just one: cancelling an
+// install, an install that failed offline, or pinning to a plugin you have never
+// downloaded. Deliberately does NOT overwrite _lastToolchainStatus, so the real
+// startup answer is still there to restore. (2026-08-15)
+window.setToolchainPluginMissing = (version) => {
+  if (version) setStatus('toolchain', 'error', `Proffieboard Plugin ${version} is not installed`);
+  else if (_lastToolchainStatus) setStatus('toolchain', _lastToolchainStatus.state, _lastToolchainStatus.message);
+};
 let toolchainReady  = false;
 let isBusy          = false;   // true while compile/flash running
 let unsubs          = [];      // IPC listener cleanup functions
+// Splash-aware deferral for the toolchain-setup branch of onBuildStatus.
+// During first-launch toolchain install the IPC fires before the splash has
+// finished destroying, and opening the build log mid-paint produced a layout
+// glitch where the panel briefly grabbed the full window. We now defer that
+// single open until the splash-dismissed signal arrives; other openLog
+// callsites (compile fail, flash fail) run long after splash and never need
+// to wait.
+let _splashDismissed       = false;
+let _queuedOpenLogForSetup = false;
 let cachedPorts = [];
 let selectedUsb = 'cdc_webusb'; // default Serial + WebUSB
+// Only the newest refreshPorts run may write. Enumerating serial ports takes a
+// noticeable moment at startup, and the dropdown is live the whole time - so a
+// port picked during that window was overwritten the instant the in-flight
+// refresh came back and rebuilt the list. Same shape as _cacheCheckSeq: an async
+// run finishing after a newer user action and writing anyway. (2026-08-15)
+let _portRefreshSeq    = 0;
+// What port DETECTION last reported, kept so clearing a selection can restore it
+// rather than replacing it with a statement about the selection. (2026-08-15)
+let _lastPortDetectMsg = null;
 let _userChosePort     = false;   // true after user manually picks a port
 let _userChosenPortPath = null;   // the path they chose
+
+// PROMOTE THE DISPLAYED PORT TO A REAL SELECTION AT THE CLICK. [B-472, 2026-10-05]
+//
+// A port the app auto-selected is still the port the user is LOOKING AT, and from their
+// side there is no such thing as a tentative selection: what is on screen is what they
+// believe will happen. But refreshPorts only treats an EXPLICIT pick as binding -
+// `manualPath` beats `metaSN` beats `lastPort` - so an auto-selected target stayed
+// re-resolvable by any ports-changed event, including one the user caused themselves by
+// plugging a second board in a moment before clicking.
+//
+// Reproduced exactly that: one board on COM6, nothing picked, Duality plugged in
+// just before Flash, and the dropdown flipped to COM16 while the flash ran on COM6.
+// On a previous run the same mechanism sent a build to a test board and it did not
+// notice - "I never got my OS7 version on the real board because I had a test board
+// sitting on 6."
+//
+// THE AUTO-SELECT IS NOT THE BUG AND MUST NOT BE WEAKENED. It is what finds the board
+// a config remembers, and it was wants it: "that's great. that's what it should do... but it
+// has to lock in on a button press otherwise its unpredictable". Promoting at the click
+// gets that from machinery that already exists - no new state, no change to the
+// preference order, no change to auto-select.
+//
+// NOTHING SHOWING IS NOT A CHOICE. If no port is selected we deliberately promote
+// nothing, so a board arriving later can still be picked up - behaviour it was confirmed is
+// already correct and must not regress ("if no board was available at the time of compile
+// and one shows up... we can use that / we already do").
+function lockDisplayedPort() {
+  if (!selectedPort) return;
+  _userChosePort      = true;
+  _userChosenPortPath = selectedPort;
+}
 let compileTimerInterval  = null;
 let flashTimerInterval    = null;
 let contentDebounceTimer  = null;
 let _compileStartTime     = 0;
+// One-shot lead message typed into the flash hint line when an SD fix at the
+// flash gate resolved to a cached build (no recompile). Set by _flashAfterSdFix.
+let _sdFlashLeadMsg       = null;
+// One-shot message for the flash hint line, set when something happened during the build that
+// the user should see at the flash rather than only in the log. Same mechanism as the SD lead
+// message above, different trigger.
+let _pendingFlashHint     = null;
 
 // ── Compile hint typewriter ────────────────────────────
 let _hintActive          = false;
@@ -50,6 +208,7 @@ let _hintTypingTimer     = null;   // setInterval for character typing
 let _hintFadeTimeout     = null;   // hold-then-fade timer
 let _hintNextTimeout     = null;   // gap between messages
 let _hintDurationTimeout = null;   // clears last-compile duration before first hint
+let _leadHint            = null;   // one-off message shown first (e.g. SD-guard Easter egg)
 
 function _formatCompileDuration(seconds) {
   if (seconds < 60) return `${seconds} second${seconds !== 1 ? 's' : ''}`;
@@ -58,27 +217,17 @@ function _formatCompileDuration(seconds) {
   return s === 0 ? `${m} minute${m !== 1 ? 's' : ''}` : `${m}m ${s}s`;
 }
 
-function startCompileHints() {
+function startCompileHints(leadMessage) {
   stopCompileHints();
   _hintActive = true;
   _hintIndex  = 0;
+  _leadHint   = leadMessage || null;
 
-  const lastDuration = window.getLastCompileDuration?.();
-  if (lastDuration) {
-    const el = document.getElementById('bm-hint');
-    if (el) {
-      el.style.transition = 'none';
-      el.style.opacity = '1';
-      el.textContent = `Last compiled version of this config took about ${_formatCompileDuration(lastDuration)}.`;
-    }
-    // Clear 15s before the first hint appears
-    _hintDurationTimeout = setTimeout(() => {
-      const el = document.getElementById('bm-hint');
-      if (el && _hintActive) { el.style.opacity = '0'; setTimeout(() => { if (el) el.textContent = ''; }, 400); }
-    }, 45000);
-  }
-
-  _hintTimeout = setTimeout(_showNextHint, 60000);
+  // A lead (compile opener / Easter egg / fix message) types in immediately and
+  // holds; the authored hint cycle still begins at the 35s mark and replaces it,
+  // so the timed hints stay exactly as written.
+  if (_leadHint) _showNextHint();
+  _hintTimeout = setTimeout(_showNextHint, 35000);
 }
 
 function stopCompileHints() {
@@ -89,16 +238,23 @@ function stopCompileHints() {
   clearTimeout(_hintDurationTimeout);
   clearInterval(_hintTypingTimer);
   _hintTimeout = _hintFadeTimeout = _hintNextTimeout = _hintTypingTimer = _hintDurationTimeout = null;
+  _leadHint = null;
   const el = document.getElementById('bm-hint');
   if (el) { el.style.transition = 'none'; el.style.opacity = '0'; el.textContent = ''; }
 }
 
 function _showNextHint() {
   if (!_hintActive) return;
-  const hints = (typeof COMPILE_HINTS !== 'undefined') ? COMPILE_HINTS : [];
-  if (_hintIndex >= hints.length) return; // list exhausted — stop quietly
-
-  const text = hints[_hintIndex++];
+  let text, isLead = false;
+  if (_leadHint) {
+    text = _leadHint;   // one-off lead (opener / Easter egg / fix) shows before the cycle
+    _leadHint = null;
+    isLead = true;
+  } else {
+    const hints = (typeof COMPILE_HINTS !== 'undefined') ? COMPILE_HINTS : [];
+    if (_hintIndex >= hints.length) return; // list exhausted — stop quietly
+    text = hints[_hintIndex++];
+  }
   const el = document.getElementById('bm-hint');
   if (!el) return;
 
@@ -115,6 +271,7 @@ function _showNextHint() {
     if (i >= text.length) {
       clearInterval(_hintTypingTimer);
       _hintTypingTimer = null;
+      if (isLead) return; // lead holds until the 35s timer starts the authored cycle
       // Hold fully-typed for 12s, then fade out
       _hintFadeTimeout = setTimeout(() => {
         if (!_hintActive) return;
@@ -131,6 +288,108 @@ function _showNextHint() {
     }
   }, 28); // ~28ms/char ≈ 35 chars/sec
 }
+
+// PARKED DELIBERATELY, AND THIS IS NOT THE [B-434] DEAD-CODE SHAPE. [B-254, 2026-09-26]
+//
+// The hint below is complete and correct; it is simply not being shown yet. The entry it came
+// from described a phenomenon that turned out to be something else - the erase PROGRESS BAR that
+// only dfu-util 0.11 draws, which we ship on mac and linux and not on Windows - so what the line
+// should say, and whether it should be platform-split at all, is waiting on the version decision
+// rather than on this code.
+//
+// FLIPPING THIS ONE CONSTANT TURNS IT ON. That is the whole point of parking it this way:
+// nothing here has to be rebuilt or remembered, and the copy has already been measured against
+// the line it has to fit in.
+//
+// SO A DEAD-CODE SWEEP MUST NOT TAKE IT. [B-434] removed two IPC doors that had never had a
+// caller and that nobody had decided anything about - the danger there was code looking covered
+// while being unreachable. This is the opposite: a decision, written down, with an entry
+// pointing at it. Check [B-254] before deleting.
+const FLASH_HINTS_ENABLED = false;
+
+// THE HINT LINE UNDER THE BUILD BOX, AND WHO GETS IT. [B-254, 2026-09-26]
+//
+// EXTRACTED, NOT EXTENDED. This decision existed as an IDENTICAL 16-line block in doFlash()
+// and doFlashDFU(), and adding the platform default would have made it a longer duplicate in two
+// places. One occupant list, one order, one function - the second copy is the moment to stop.
+//
+// ONE LINE, THREE POSSIBLE OCCUPANTS, in priority order, and the order is the whole design:
+//   1. the SD-guard Easter egg - the user just chose to flash WITHOUT card protection, and
+//      nothing else competes with saying so at that moment
+//   2. a pending lead message - explains the action happening right now (why we recompiled
+//      after fixing the card). Cleared either way: a loser left set would surface on some later
+//      unrelated flash attached to nothing the user did, and a stale message is worse than none
+//   3. the platform hint - the default, and the reason this line was reserved
+// `sdFlash` IS A PARAMETER BECAUSE IT WAS NEVER MODULE-LEVEL, AND THAT IS WHAT BROKE IT.
+// [2026-09-28, found the morning after the extraction shipped] The lifted block referenced
+// four identifiers. THREE of them - `_sdFlashLeadMsg`, `_pendingFlashHint`, `FLASH_HINTS_ENABLED`
+// - are module-level and kept working. `_sdFlash` is a `const` local to doFlash() and doFlashDFU(),
+// so the extracted copy resolved three names and threw `ReferenceError` on the fourth.
+// It throws inside an async caller, so the rejection ABORTED THE REST OF THE FLASH: the modal
+// opened, the log box stayed empty, and the status line read "Not flashed". Nothing announced why.
+// The partial-survival is the trap worth remembering: an extraction that references mostly
+// module-level state LOOKS correct and runs correct until the one local is reached.
+function _typeFlashHint(sdFlash) {
+  if (sdFlash === 'flash-anyway') {
+    typeHintMessage('Flashing without SD card protection. I have a bad feeling about this…');
+    return;
+  }
+  if (_sdFlashLeadMsg || _pendingFlashHint) {
+    typeHintMessage(_sdFlashLeadMsg || _pendingFlashHint);
+    _sdFlashLeadMsg   = null;
+    _pendingFlashHint = null;
+    return;
+  }
+  if (!FLASH_HINTS_ENABLED) return;
+  const hint = _platformFlashHint();
+  if (hint) typeHintMessage(hint);
+}
+
+// WHAT THE HINT IS ACTUALLY ANSWERING: "it deleted my fonts". [B-254]
+//
+// Reported on the Crucible (topic 7957) by a Steam Deck user who believed the flash was wiping
+// their SOUND FONTS. It is not - a flash never touches the SD card. What was on screen was
+// dfu-util's ERASE pass drawing a progress bar to 100% before the download bar: two
+// identical-looking bars back to back, the first labelled Erase.
+//
+// THE CONDITION IS WHICH dfu-util IS BUNDLED, NOT WHICH OS. Measured 2026-09-26:
+//   · 0.9  (our Windows, and the Arduino package on ALL platforms) mentions erasing only as a
+//     verbose log line, "Erasing page size %i at address ...". No bar.
+//   · 0.11 (our mac + linux) draws a full `Erase [====] 100%` bar, same treatment as Download.
+// BOTH ERASE. Erasing before writing is how flash memory works; 0.11 simply narrates it. So this
+// is not a platform behaviour and must not be described to anyone as one.
+// The platform test below is therefore a STAND-IN for "does this build ship 0.11" - true as
+// written, and the thing to re-check before trusting it is the bundled version, not the OS.
+function _platformFlashHint() {
+  const p = (window.electronAPI && window.electronAPI.platform) || '';
+  if (p === 'win32') return 'This should only take a moment.';
+  // 72 chars. `#bm-hint` is nowrap + overflow:hidden, so it CLIPS rather than wraps; the
+  // longest hint already shipping in that line is 81, which is the budget this sits under.
+  if (p === 'darwin' || p === 'linux') {
+    return "Erase clears the old firmware first. Your SD card and fonts are untouched.";
+  }
+  return '';
+}
+
+// Types a one-off message into #bm-hint (the italicized, under-the-box hint line),
+// same treatment as the compile hints. Used for the SD-guard flash Easter egg,
+// where the hint cycle isn't running. Cancels any cycling hints; types once and
+// holds until the flash finishes (finishBuildModal -> stopCompileHints clears it).
+function typeHintMessage(text) {
+  stopCompileHints();
+  _hintActive = true;
+  const el = document.getElementById('bm-hint');
+  if (!el) return;
+  el.style.transition = 'none';
+  el.style.opacity    = '1';
+  el.textContent      = '';
+  let i = 0;
+  _hintTypingTimer = setInterval(() => {
+    if (!_hintActive) { clearInterval(_hintTypingTimer); _hintTypingTimer = null; return; }
+    el.textContent = text.slice(0, ++i);
+    if (i >= text.length) { clearInterval(_hintTypingTimer); _hintTypingTimer = null; }
+  }, 28);
+}
 let isDfuMode       = false;   // true when bootloader (DFU) mode is active
 let dfuDeviceReady  = false;   // true after DFU device detected in waiting modal
 let _portsBeforeDfu = [];      // port paths present before entering DFU — used to identify the newly-appeared board after flash
@@ -140,14 +399,31 @@ window._isFlashing = false;
 window.onEditorContentChanged = () => {
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
     cacheCheckPending = true;
     updateCompileButton();
-    setStatus('compile', 'warn', 'Config changed — recompile needed');
+    setStatus('compile', 'warn', 'Config changed, recompile needed');
   }
   // Debounced cache check: if user reverts content to a previously compiled state, restore
   clearTimeout(contentDebounceTimer);
   contentDebounceTimer = setTimeout(() => checkCacheForConfig(false), 600);
+};
+
+// Invalidate a successful compile from outside the editor-change path (e.g. the
+// SD guard switching the USB mode at flash time, which makes the built binary
+// stale). Mirrors the invalidation in onEditorContentChanged.
+window.invalidateCompile = (msg) => {
+  if (compileSuccess) {
+    compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
+    setFlashEnabled(false);
+    cacheCheckPending = true;
+    updateCompileButton();
+  }
+  setStatus('compile', 'warn', msg || 'Recompile needed');
 };
 
 // ── DOM refs ───────────────────────────────────────────
@@ -157,6 +433,12 @@ function el(id) {
   return els[id];
 }
 
+// NOTE: `isVersionSentinel` is a GLOBAL declared in index.html and used freely
+// here. Do NOT redeclare it — this file and index.html's inline script are both
+// classic scripts sharing one global lexical scope, so a `const`/`let` of that
+// name here is a SyntaxError that kills this whole file at parse time (and with
+// it every build-panel function). Cost that once, on 2026-07-29.
+
 // ── Init ───────────────────────────────────────────────
 async function initBuildPanel() {
   // Clean up any previous listeners
@@ -164,10 +446,50 @@ async function initBuildPanel() {
   unsubs = [];
 
   // Wire IPC listeners
+  // A plugin install has moved past intent into real work. Only now is there
+  // something in the log worth showing. (2026-08-15)
+  if (window.electronAPI.onCoreInstallProgress) {
+    unsubs.push(window.electronAPI.onCoreInstallProgress(({ phase }) => {
+      // Keyed on the phase ALONE, not on a flag set by the setup signal. That
+      // flag made opening depend on a message arriving first, which is a chain
+      // with a startup race in it - and the failure was silent, so a real
+      // download went unshown. A `downloading` phase happens only during a
+      // plugin install, so it is sufficient on its own. `index` is deliberately
+      // excluded: that step is a small catalogue fetch and it is where an
+      // offline attempt dies, which is the case that should NOT open a panel.
+      // (2026-08-15)
+      if (phase !== 'downloading') return;
+      if (_splashDismissed) openLog();
+      else _queuedOpenLogForSetup = true;
+    }));
+  }
   unsubs.push(window.electronAPI.onBuildLog(onBuildLog));
   unsubs.push(window.electronAPI.onBuildStatus(onBuildStatus));
   unsubs.push(window.electronAPI.onBuildDone(onBuildDone));
   unsubs.push(window.electronAPI.onPortsChanged(() => refreshPorts()));
+  // Splash-dismissed signal — release any queued openLog from a toolchain-setup
+  // event that fired before the splash finished. Also query the current state
+  // in case the signal fired before this listener was registered (race window
+  // on slow renderer startup).
+  unsubs.push(window.electronAPI.onSplashDismissed(() => {
+    _splashDismissed = true;
+    if (_queuedOpenLogForSetup) {
+      openLog();
+      _queuedOpenLogForSetup = false;
+    }
+  }));
+  window.electronAPI.isSplashDismissed().then(dismissed => {
+    if (!dismissed || _splashDismissed) return;
+    _splashDismissed = true;
+    if (_queuedOpenLogForSetup) {
+      openLog();
+      _queuedOpenLogForSetup = false;
+    }
+  });
+
+  // Each installed tree's real ProffieOS version, so a connected board's report
+  // can be compared against it. Cheap (one small read per tree, cached in main).
+  loadOSVersionMap();
 
   // ArgumentName enum is loaded lazily — base color swatches don't need it
   // (those come from the styles file), and the legacy hardcoded table covers
@@ -176,11 +498,60 @@ async function initBuildPanel() {
   // roundtrip when the user never touches Advanced.
 
   // Wire buttons
-  el('bp-btn-compile').addEventListener('click', doCompile);
+  el('bp-btn-compile').addEventListener('click', () => doCompile());
+  // Right-click Compile: Compile only first, since it is the reason to right-click, then Compile
+  // and flash (what a click does) so the menu explains itself. For a board plugged in that should
+  // not be flashed yet. [B-466]
+  el('bp-btn-compile').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const btn = el('bp-btn-compile');
+    if (!btn || btn.disabled || isBusy) return;
+    // Refused during the cache check, the same as a click [B-470]: the answer may be "already
+    // compiled", which disables Compile.
+    if (cacheCheckPending) { doCompile(); return; }
+    const menu = document.getElementById('preset-ctx-menu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    const close = () => {
+      menu.style.display = 'none';
+      document.removeEventListener('mousedown', outside, true);
+      _closeCompileMenu = null;
+    };
+    _closeCompileMenu = close;
+    const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
+    const mk = (label, run) => {
+      const it = document.createElement('div');
+      it.className = 'preset-ctx-item';
+      it.textContent = label;
+      it.addEventListener('mousedown', (ev) => {
+        ev.stopPropagation(); ev.preventDefault(); close();
+        // Asked again at the pick: the state can change while the menu is open, and a cache check
+        // that lands then disables Compile. A menu opened before that must not build past it.
+        if (btn.disabled || isBusy || cacheCheckPending) return;
+        run();
+      });
+      menu.appendChild(it);
+    };
+    mk('Compile only', () => doCompile({ compileOnly: true }));
+    mk('Compile and flash', () => doCompile());
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+    menu.style.top  = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+    menu.style.display = 'block';
+    setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+  });
+  // The tooltip names the board and port, which change without the button being redrawn; reading
+  // them again on hover keeps it true.
+  el('bp-btn-compile').addEventListener('pointerenter', applyCompileButtonState);
   el('bp-btn-flash').addEventListener('click', doFlash);
+  // Right-click Flash: Board Forensics [B-543]. Reaches a disabled Flash too (Chromium 122
+  // delivers contextmenu to disabled buttons), which matters: a board straight out of the
+  // package usually has nothing compiled for it yet.
+  el('bp-btn-flash').addEventListener('contextmenu', openFlashMenu);
   el('bp-btn-refresh-ports').addEventListener('click', async () => {
     const btn = el('bp-btn-refresh-ports');
     btn.style.animation = 'spin 0.7s linear infinite';
+    // A refresh asks for fresh information: the selected board is asked its version again.
+    if (!isBusy) forgetBoardOSVersion();
     await refreshPorts();
     btn.style.animation = '';
   });
@@ -200,7 +571,7 @@ async function initBuildPanel() {
     });
   });
   el('bp-log-toggle').addEventListener('click', toggleLog);
-  el('bp-log-clear').addEventListener('click', clearLog);
+  el('bp-log-clear').addEventListener('click', () => { clearLog(); closeLog(); });
   wireSerialMonitor();
   document.getElementById('input-board').addEventListener('change', onInputBoardChange);
   // Seed selectedFqbn from dropdown without triggering a cache check (no file open yet)
@@ -208,26 +579,65 @@ async function initBuildPanel() {
   const _initBoardOpt = _initBoardSel ? _initBoardSel.options[_initBoardSel.selectedIndex] : null;
   selectedFqbn = (_initBoardOpt && _initBoardOpt.dataset.fqbn) ? _initBoardOpt.dataset.fqbn : null;
   el('bp-usb-select').addEventListener('change', e => {
+    // [B-660] Some choices need words before they take effect. Put the select back on the
+    // current type, ask, and only a yes re-fires this handler through _applyUsbChoice.
+    if (!_usbChoiceApproved) {
+      const v = e.target.value;
+      if (v === '__advanced__' || _isAdvancedUsb(v)) {
+        e.target.value = selectedUsb;
+        _openAdvancedUsb();
+        return;
+      }
+    }
+    const prevUsb = selectedUsb;
     selectedUsb = e.target.value;
+    _syncAdvancedUsbOptions(selectedUsb);
     updateUsbChangedIndicator();
+    // USB mode is persisted per-config via the @jmt:usb marker, so a change is a
+    // saveable config edit — mark dirty like the other meta fields do.
+    window.markConfigDirty?.();
+    // Touchpoint 1: changing INTO a Mass Storage mode is the first chance to
+    // offer the SD-card guard. Programmatic setSelectedUsb (config load) does not
+    // fire this handler, so loads never trigger it; they warn at compile instead.
+    if (/msc/i.test(selectedUsb) && !/msc/i.test(prevUsb || '')) {
+      window._notePreMassStorageMode?.(prevUsb); // remember what to revert to
+      // [B-668] Then, live: the plugin's 4 GB Mass Storage bug is exactly this mode's risk, so a
+      // version still on a stock plugin with a JMT fix is offered it here. After the SD guard's own
+      // question, never stacked on it.
+      Promise.resolve(window.offerMountSdSettingOnSelect?.(selectedUsb))
+        .then(() => window.offerJmtPluginForUsb?.())
+        .catch(() => {});
+    }
+    // [B-170] The mirror, and the point of the whole entry: leaving Mass Storage
+    // makes MOUNT_SD_SETTING dead, and a dead define reads to its owner as SD
+    // protection they do not have. Comment it out here, at the control where the
+    // choice was actually made, rather than in front of a build later.
+    // Same guard shape as above — only on the TRANSITION out, never on every
+    // change, or re-picking a non-MSC mode would fire it again on an already
+    // commented define.
+    if (!/msc/i.test(selectedUsb) && /msc/i.test(prevUsb || '')) {
+      window.commentMountSdSettingOnLeave?.();
+    }
     if (compileSuccess) {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
-      setStatus('compile', 'warn', 'USB mode changed — recompile needed');
+      setStatus('compile', 'warn', 'USB mode changed, recompile needed');
     }
     cacheCheckPending = true;
     updateCompileButton();
-    checkCacheForConfig('USB mode changed — recompile needed');
+    checkCacheForConfig('USB mode changed, recompile needed');
   });
   document.getElementById('input-version').addEventListener('change', onOsVersionChange);
   document.getElementById('bm-close').addEventListener('click', () => {
     stopPortWatch();
+    _flashFollowsCompile = false;
     document.getElementById('build-modal').style.display = 'none';
-    window.electronAPI.cleanupDfuSetup();
   });
   document.getElementById('bm-v1-feedback-link').addEventListener('click', e => {
     e.preventDefault();
-    const subject = encodeURIComponent('JMT Studio — Proffieboard V1 Flash Feedback');
+    const subject = encodeURIComponent('JMT Studio: Proffieboard V1 Flash Feedback');
     const body    = encodeURIComponent('Hi,\n\nI just flashed a Proffieboard V1 using JMT Studio. Here\'s what happened:\n\n');
     window.electronAPI?.openExternal(`mailto:studio@jmtfoundry.com?subject=${subject}&body=${body}`);
   });
@@ -263,109 +673,39 @@ async function initBuildPanel() {
       return;
     }
 
-    if (setupBtn.dataset.phase === 'install') {
-      // Phase 2: Install the downloaded file
-      setupBtn.disabled    = true;
-      setupBtn.textContent = 'Installing...';
-      manualRow.style.display = 'none';
-      document.getElementById('bm-close').style.display = 'none';
-      document.getElementById('bm-status').textContent = 'Installing driver utility...';
-      setBarMode('knightrider');
-      appendModalLog('', false);
-      appendModalLog('──────────────────────────────────', false);
-
-      const unsub = window.electronAPI.onDfuSetupStatus(msg => appendModalLog(msg, false));
-      const result = await window.electronAPI.installDfuSetup();
-      unsub();
-
-      delete setupBtn.dataset.phase;
-      setupBtn.disabled = false;
-
-      if (result.ok) {
-        appendModalLog('✓ Driver installed successfully.', false);
-        appendModalLog('Waiting for Windows to register the driver...', false);
-        await new Promise(r => setTimeout(r, 2000));
-        appendModalLog('──────────────────────────────────', false);
-        startDfuWaitModal(true, _dfuRetryAutoFlash, true);
-      } else {
-        appendModalLog('', false);
-        appendModalLog(result.error || 'Installation was cancelled or failed.', true);
-        appendModalLog('Click Install DFU Tool to try again, or use a manual option below.', false);
-        setupBtn.textContent = '▶ Install DFU Tool';
-        setupBtn.dataset.phase = 'install';
-        manualRow.style.display = 'flex';
-        document.getElementById('bm-close').style.display = 'inline-block';
-      }
-      return;
-    }
-
-    // Phase 1: Download
+    // Windows: single-step install. Stage our Trusted-Signing-signed WinUSB
+    // package once and force-bind the board to it. No per-board download, no
+    // driver-store pile. Replaces the old download-and-run-proffie-dfu-setup
+    // two-phase flow.
     setupBtn.disabled    = true;
-    setupBtn.textContent = 'Downloading...';
+    setupBtn.textContent = 'Installing driver...';
     manualRow.style.display = 'none';
     document.getElementById('bm-close').style.display = 'none';
+    document.getElementById('bm-status').textContent = 'Installing DFU driver...';
+    setBarMode('knightrider');
     appendModalLog('', false);
     appendModalLog('──────────────────────────────────', false);
 
-    const unsub = window.electronAPI.onDfuSetupStatus(msg => appendModalLog(msg, false));
-    const result = await window.electronAPI.downloadDfuSetup();
+    const unsub  = window.electronAPI.onDfuSetupStatus(msg => appendModalLog(msg, false));
+    const result = await window.electronAPI.ensureDfuDriver();
     unsub();
 
     setupBtn.disabled = false;
 
     if (result.ok) {
-      appendModalLog('✓ proffie-dfu-setup.exe downloaded.', false);
-      appendModalLog('✓ SHA256 verified.', false);
-      appendModalLog('', false);
-      appendModalLog('Windows will ask for permission to run the installer — click Yes.', false);
-      appendModalLog('Click Install DFU Tool to continue.', false);
-      setupBtn.textContent = '▶ Install DFU Tool';
-      setupBtn.dataset.phase = 'install';
-      manualRow.style.display = 'flex';
-      document.getElementById('bm-close').style.display = 'inline-block';
-    } else if (result.hashMismatch) {
-      appendModalLog('', false);
-      appendModalLog('Downloaded file does not match our records.', true);
-      appendModalLog('Verify the current hash at the official setup page:', false);
-      const _hashLog = document.getElementById('bm-log');
-      const _hashLink = document.createElement('a');
-      _hashLink.textContent = 'pod.hubbe.net/proffieboard-setup.html';
-      _hashLink.href = '#';
-      _hashLink.style.cssText = 'color:#4af;text-decoration:underline;cursor:pointer;';
-      _hashLink.addEventListener('click', e => {
-        e.preventDefault();
-        window.electronAPI.openExternal('https://pod.hubbe.net/proffieboard-setup.html#os-specific-setup');
-      });
-      const _hashLinkWrap = document.createElement('span');
-      _hashLinkWrap.appendChild(_hashLink);
-      _hashLinkWrap.appendChild(document.createTextNode('\n'));
-      _hashLog.appendChild(_hashLinkWrap);
-      _hashLog.scrollTop = _hashLog.scrollHeight;
-      appendModalLog('', false);
-      appendModalLog(`  Expected:   ${result.expected}`, false);
-      appendModalLog(`  Downloaded: ${result.actual}`, false);
-      appendModalLog('', false);
-      appendModalLog('If the downloaded hash matches the site, you can proceed.', false);
-      setupBtn.style.display = 'none';
-      setupBtn.dataset.phase = 'install';
-      document.getElementById('bm-install-anyway').style.display = 'inline-block';
-      manualRow.style.display = 'flex';
-      document.getElementById('bm-close').style.display = 'inline-block';
+      appendModalLog('✓ DFU driver installed.', false);
+      appendModalLog('Verifying DFU connection...', false);
+      await new Promise(r => setTimeout(r, 800));
+      appendModalLog('──────────────────────────────────', false);
+      startDfuWaitModal(true, _dfuRetryAutoFlash, true);
     } else {
       appendModalLog('', false);
-      appendModalLog(result.error || 'Download failed.', true);
-      appendModalLog('Try a manual option below, or check your internet connection.', false);
-      setupBtn.textContent = '⬇ Download DFU Tool';
+      appendModalLog(result.detail || 'Driver install was cancelled or failed.', true);
+      appendModalLog("The driver was not installed. Try again, or email studio@jmtfoundry.com and we'll help you get it set up.", false);
+      setupBtn.textContent = '▶ Install DFU Driver';
       setupBtn.style.display = 'inline-block';
-      manualRow.style.display = 'flex';
       document.getElementById('bm-close').style.display = 'inline-block';
     }
-  });
-  document.getElementById('bm-install-anyway').addEventListener('click', () => {
-    document.getElementById('bm-install-anyway').style.display = 'none';
-    const setupBtn = document.getElementById('bm-dfu-setup');
-    setupBtn.dataset.phase = 'install';
-    setupBtn.click();
   });
   document.getElementById('bm-dfu-manual').addEventListener('click', () => {
     window.electronAPI.openExternal('https://pod.hubbe.net/proffieboard-setup.html#os-specific-setup');
@@ -375,7 +715,7 @@ async function initBuildPanel() {
   });
   document.getElementById('bm-dfu-feedback-link').addEventListener('click', e => {
     e.preventDefault();
-    const subject = encodeURIComponent('JMT Studio — DFU Setup Feedback');
+    const subject = encodeURIComponent('JMT Studio: DFU Setup Feedback');
     const body    = encodeURIComponent('Hi,\n\nHere\'s my experience with the DFU/Bootloader mode setup in JMT Studio:\n\n');
     window.electronAPI.openExternal(`mailto:studio@jmtfoundry.com?subject=${subject}&body=${body}`);
   });
@@ -385,8 +725,20 @@ async function initBuildPanel() {
     document.getElementById('bm-abort').textContent = 'Aborting...';
     await window.electronAPI.abortCompile();
   });
-  document.getElementById('bm-retry').addEventListener('click', () => {
+  document.getElementById('bm-webusb-fix').addEventListener('click', () => _onWebUsbFixClick());
+  document.getElementById('bm-retry').addEventListener('click', (e) => {
     document.getElementById('build-modal').style.display = 'none';
+    // [B-289] After an interrupted flash the button is the step the message names.
+    const step = document.getElementById('bm-status')?.dataset.interrupted === '1' ? e.currentTarget.dataset.interrupted : null;
+    delete e.currentTarget.dataset.interrupted;
+    e.currentTarget.textContent = '↺ Retry Flash';
+    _stopInterruptedWatch();
+    if (step === 'dfu-flash') {
+      // Already in the bootloader: enter Bootloader Mode, and flash once it confirms the board.
+      _setupDfuModeUI();
+      _checkDfuOnEntry().then(() => { if (dfuDeviceReady) doFlashDFU(); });
+      return;
+    }
     if (_dfuRetryRecheck) {
       _dfuRetryRecheck = false;
       startDfuWaitModal(true, _dfuRetryAutoFlash);
@@ -404,11 +756,79 @@ async function initBuildPanel() {
 
   // Initial port scan
   await refreshPorts();
+
+  // The JMT plugin [B-668]: asked on a first run of JMT Studio, after the toolchain is up so the
+  // plugin it set up has landed; otherwise only made, when the user already said yes. Not awaited:
+  // a dialog must not hold up startup.
+  setTimeout(() => { window.checkJmtPluginOffer?.({ ask: true }); }, 1500);
+}
+
+// ── Gate phase ─────────────────────────────────────────
+// Everything between pressing Compile and the build starting: the SD guard, preflight and the
+// dirty prompts. Preflight reads and searches the OS tree over IPC, so the window is long enough
+// to read as a dead click.
+//
+// It raises the app's busy overlay - the small centred card with the knight rider bar and one
+// line of text. Not the build modal: that one carries a log pane and an Abort, and during the
+// gates there is nothing to log and nothing to abort, so it renders as an empty terminal.
+//
+// It also covers the window where a second Compile click was possible: `isBusy` is not set
+// until the build starts, so doCompile's own re-entry guard did not reach the gates.
+//
+// IT CARRIES A CANCEL BECAUSE THIS WAIT CAN FAIL TO END. The checks read and search the OS tree
+// over IPC and neither handler has a timeout (main.js versions:readFile / versions:search), so a
+// search that never answers leaves the user with no way out but killing the app. Cancel cannot
+// abort work already in main; it stops WAITING on it and abandons the build, which is the part
+// the user is asking for.
+//
+// Raising it is this function's job; taking it down is the SUCCESSOR's, per the modal handoff
+// rule - the preflight dialog and the build modal each close it as they paint. The only closes
+// here are terminal ones: a cancel, or a gate the user declined.
+let _gateCancelled = false;
+
+function setGatePhase(on) {
+  if (typeof showBusy !== 'function') return;
+  if (on) {
+    _gateCancelled = false;
+    // "Preparing to compile", not "Checking your config": the window covers the guard, the
+    // checks AND the save prompts, so a label naming only the checking is wrong for the last
+    // third of it. One line names the umbrella; naming the current STEP is what the progress
+    // detail line is for, and this card does not have one.
+    showBusy('Preparing to compile...', { onCancel: () => { _gateCancelled = true; hideBusy(); } });
+  } else {
+    hideBusy();
+  }
 }
 
 // ── Compile ────────────────────────────────────────────
-async function doCompile() {
+// Set by "Compile only" for the build it starts; the compile's ending reads it and stops at
+// the finished build instead of flashing. Every other start, including the SD guard's
+// recompile, leaves it false and flashes. [B-466]
+let _compileOnly = false;
+
+async function doCompile(opts) {
   if (isBusy) return;
+  _compileOnly = !!(opts && opts.compileOnly);
+  // [B-470] A CLICK DURING THE CACHE CHECK IS REFUSED. The button stays enabled while the check
+  // runs, because disabling it blinked it on every config switch (tried and reverted 2026-10-21),
+  // and holding the click to act on it later was a delayed action nobody asked for. But letting it
+  // through started a full build the cache already had, and a full OS8 build of a 43-preset config
+  // is 29 min 28 s. So the click does nothing and the tooltip says why ("Checking for a build of
+  // this config"); a moment later the button is either disabled as already compiled or live. The
+  // refusal shows as the red glow the Paste cue uses when the clipboard holds nothing to paste.
+  if (cacheCheckPending) {
+    const btn = el('bp-btn-compile');
+    if (btn) {
+      btn.classList.remove('sf-url-paste-invalid');
+      void btn.offsetWidth;   // restart the animation if it is still running
+      btn.classList.add('sf-url-paste-invalid');
+      setTimeout(() => btn.classList.remove('sf-url-paste-invalid'), 3000);
+    }
+    return;
+  }
+  // Compile continues into a flash, so the target has to be fixed here too, not only in
+  // doFlash. See lockDisplayedPort. [B-472]
+  lockDisplayedPort();
   if (!toolchainReady) {
     appendLog('Toolchain not ready.', true);
     return;
@@ -425,58 +845,185 @@ async function doCompile() {
     return;
   }
 
+  // SD-corruption guard (primary gate): a Mass Storage USB mode with no
+  // MOUNT_SD_SETTING auto-mounts and can corrupt an inserted card. Warn here,
+  // before building the risky binary; "Add define & compile" injects it and the
+  // build below compiles it in. Runs before the dirty check so an added define
+  // is offered for saving too. The flash path keeps its own check as a net for
+  // cache-restored builds that never pass through here.
+  const _sdCompile = window.checkMassStorageSafety
+    ? await window.checkMassStorageSafety(selectedUsb, 'compile')
+    : true;
+  if (!_sdCompile || _gateCancelled) { setGatePhase(false); return; } // Cancel from the SD guard
+
+  // [B-668] Compiling a Mass Storage build on a standard plugin that has a JMT version: the same
+  // offer as picking the USB type. Whatever the answer, the compile goes on, with the plugin it leaves.
+  if (/msc/i.test(selectedUsb || '')) {
+    try { await window.offerJmtPluginForUsb?.(); } catch { /* the compile goes on */ }
+  }
+
+  // Preflight registry: every config-truth check we have, run once, reported in
+  // ONE dialog. Adding a check is adding an entry to preflight-checks.js — not an
+  // edit here. This call site should not need to change again. [B-224]
+  //
+  // Sits ahead of the dirty check for the same reason the two gates above do: a
+  // fix a check offers edits the config, so it must be offered for saving.
+  //
+  // THE WAIT STARTS HERE, NOT AT THE CLICK. This is the only gate that reads the OS tree over
+  // IPC; the guard above reads config text and returns in a frame. Raising the card before it
+  // would put a card on screen for no wait, and would sit under the guard's own dialog if it
+  // had one to show.
+  setGatePhase(true);
+  const _preflight = window.runPreflight
+    ? await window.runPreflight()
+    : true;
+  if (!_preflight || _gateCancelled) { setGatePhase(false); return; } // Cancel from the preflight gate
+
   // Dirty checks — prompt the user instead of auto-saving. Config first (Save As is
   // offered since the user may want to compile a copy at a new path), then Style
   // Library if applicable (fixed path, no Save As). Cancel from either bails out.
-  if (window.getIsDirty?.()) {
-    const fileName = window._currentFilePath
-      ? window._currentFilePath.split(/[\\/]/).pop()
-      : 'this config';
+  // A never-saved config takes this path too, even though it is not DIRTY: doNew()
+  // deliberately leaves a freshly loaded template clean, so the dirty flag alone
+  // would skip the prompt and the compile would have nowhere to write. Being
+  // pathless is the same problem as being dirty - there is no file on disk that
+  // matches what is about to be built - so it gets the same prompt. [B-198]
+  const _neverSaved = !window._currentFilePath;
+  if (window.getIsDirty?.() || _neverSaved) {
     // Hide Discard for compile — discarding would build from on-disk content (the
     // un-edited version), which is almost never what the user wants. Cancel / Save
-    // / Save As are the meaningful options.
-    const choice = await window.promptUnsaved(
-      `Unsaved changes in "${fileName}" — save before compiling?`,
-      { saveAs: true, discard: false }
-    );
-    if (choice === 'cancel') return;
+    // / Save As are the meaningful options. For a never-saved config there is no
+    // on-disk content at all, which is the other reason Discard makes no sense here.
+    const _msg = _neverSaved
+      ? 'This config has not been saved yet. Give it a name before compiling.'
+      : `Unsaved changes in "${window._currentFilePath.split(/[\\/]/).pop()}". Save before compiling?`;
+    // Save As is asked for unconditionally: promptUnsaved suppresses it whenever
+    // there is no file path, because "save as" is never valid for something that
+    // has never been saved. That rule lives there, once, so every caller gets it.
+    // The prompt is the SUCCESSOR, so it closes the busy card. Started without awaiting, the
+    // card closed, then the answer awaited - both are briefly present and no frame shows
+    // neither. A clean config reaches here with the card still up, because preflight only
+    // closes it when it has a dialog of its own to show.
+    const _unsaved = window.promptUnsaved(_msg, { saveAs: true, discard: false });
+    hideBusy();
+    const choice = await _unsaved;
+    if (choice === 'cancel') { setGatePhase(false); return; }
     // Cancelling the Save / Save As file picker (or a write failure) bails the
     // compile — same effect as picking Cancel on the dirty modal.
-    if (choice === 'save'   && !await window.doSave())   return;
-    if (choice === 'saveas' && !await window.doSaveAs()) return;
+    if (choice === 'save'   && !await window.doSave())   { setGatePhase(false); return; }
+    if (choice === 'saveas' && !await window.doSaveAs()) { setGatePhase(false); return; }
   }
   if (window._isStylesDirty?.()) {
-    const choice = await window.promptUnsaved(
-      'Unsaved changes in Style Library (my_styles.h) — save before compiling?',
+    const _stylesUnsaved = window.promptUnsaved(
+      'Unsaved changes in Style Library (my_styles.h). Save before compiling?',
       { discard: false }
     );
-    if (choice === 'cancel') return;
+    hideBusy();
+    const choice = await _stylesUnsaved;
+    if (choice === 'cancel') { setGatePhase(false); return; }
     if (choice === 'save')   await window.saveStylesFile();
+  }
+
+  // THE STYLE LIBRARY'S LINK, MOVED TO THE NEW FORM. [B-542] A config linked before the library was
+  // included by name points at it by its full path on this computer. That is the app's own file, so
+  // there is no reason to keep the old link: this is a notice, not a choice, and Cancel stops the
+  // compile. AFTER the save questions, so the config is saved and the update is saved on its own.
+  if (window.stylesIncludeNeedsUpdate?.()) {
+    const _notice = window.promptConfirm({
+      title: 'Style Library link updated',
+      message: 'JMT Studio now links your Style Library by name (my_styles.h) instead of by its full '
+        + 'path on this computer, so a config also builds on another computer.\n\n'
+        + 'This config still has the old link. It will be updated and saved, then compiled. Configs '
+        + 'you link from now on get the new link automatically.',
+      confirmText: 'Update and compile',
+      confirmKind: 'primary',
+      cancelText: 'Cancel',
+    });
+    hideBusy();
+    // Two buttons, so the answer is a boolean: true is Update and compile.
+    if (await _notice !== true) { setGatePhase(false); return; }
+    if (!await window.updateStylesIncludeAndSave()) { setGatePhase(false); return; }
   }
 
   // Re-read content in case Save As changed the path / metadata.
   const content = window.getEditorContent();
 
-  showBuildModal('⚙ Compiling...');
-  startCompileHints();
+  // The build modal is the successor here, so IT closes the busy overlay rather than the gate
+  // phase closing itself and leaving a hole. Opened first, in the same task.
+  showBuildModal('⚙ Compiling');
+  hideBusy();
+  const _recompileReason = window.consumeSdRecompileReason?.();
+  startCompileHints(_recompileReason || (_sdCompile === 'compile-anyway'
+    ? 'Compiling without SD card protection. I have a bad feeling about this…'
+    : 'Compiling ProffieOS with your config into firmware for the board…'));
   setBusy(true);
   clearLog();
   compileSuccess = false;
+  _currentBuildDir = null;
+  _currentBuildKey = null;
   setFlashEnabled(false);
   setStatus('compile', 'pending', 'Compiling...');
 
-  const result = await window.electronAPI.compile(content, selectedFqbn, { usb: selectedUsb });
+  // The config's own id, from the @jmt block. It cannot be read back out of the
+  // content we are sending: the block is stripped from the editor on load and only
+  // re-injected on save, so the compile path has never carried it. Passed
+  // explicitly so the cache can record WHICH config produced this build.
+  const result = await window.electronAPI.compile(content, selectedFqbn, { usb: selectedUsb, configId: window.getMetaConfigId?.() || null });
   setBusy(false);
   if (result.ok) {
     compileSuccess = true;
-    if (!isDfuMode) setFlashEnabled(selectedPortIsProffieboard && !!selectedPort); // DFU mode: onBuildDone sets flash state
+    _currentBuildDir = null;   // null = build-output, where the compile just wrote it
+    _currentBuildKey = null;
+    // The build compiled but could not be filed away for reuse. The log already says so in red,
+    // but the log is a wall of compiler output and scrolls; the flash hint line is the one place
+    // the user is definitely looking. Short form here, full reason with the OS error in the log.
+    if (result.cacheSaveError) _pendingFlashHint = 'Build not stored. This config will need a recompile next time.';
+    if (!isDfuMode) setFlashEnabled(!!selectedPort); // DFU mode: onBuildDone sets flash state
     updateCompileButton();
+    // [B-028] Record what this session actually BUILT. The compile result does not carry
+    // the content hash, and the cache check is the one place that learns it — so this
+    // asks for it once, with `afterCompile` so the hit is filed as ours rather than as a
+    // restore. Without this, the very next check (the build modal's Close button re-runs
+    // one) relabels this build "restored from cache".
+    try { await checkCacheForConfig(false, { afterCompile: true }); } catch {}
+  }
+}
+
+// After an SD fix at the flash gate, the config/USB changed. Prefer a cached
+// build for the corrected inputs (instant) over a full recompile; only rebuild
+// on a cache miss. Either way we end at a flash.
+async function _flashAfterSdFix() {
+  await window.checkCacheForConfig?.();   // restores build + sets compileSuccess on a HIT
+  if (compileSuccess) {
+    // Cache hit: the corrected build is already restored. Turn the "recompiling…"
+    // lead into a "using cached build…" message for the flash hint line, then
+    // flash without rebuilding.
+    const reason = window.consumeSdRecompileReason?.();
+    _sdFlashLeadMsg = reason ? reason.replace('recompiling…', 'using cached build…') : null;
+    doFlash();                            // routes to DFU internally; re-checks guard (now safe) + flashes
+  } else {
+    doCompile();                          // MISS: real build (consumes the reason for its hint), auto-flashes
   }
 }
 
 // ── Flash ──────────────────────────────────────────────
 async function doFlash() {
+  _clearInterruptedFlash();
   if (isDfuMode) { await doFlashDFU(); return; }
+  // Fix the target on the press, before anything can re-resolve it. DFU mode returns
+  // above because it has no port to lock. See lockDisplayedPort. [B-472]
+  lockDisplayedPort();
+
+  // Clear any note left by a PREVIOUS attempt, so this one can only ever carry
+  // its own.
+  //
+  // The note is set when a flash fails against a port we did not identify, and
+  // consumed by the Bootloader modal - but only if that modal opens. A failure
+  // that ends at "Flash Failed" instead (a touch-reset error, say) sets it and
+  // never spends it, and the note then surfaces in the NEXT DFU session, which
+  // may be a different port and a perfectly good board. One-shot on USE is not
+  // the same as one-shot per attempt, and only the second is true here.
+  // (2026-08-15)
+  _dfuPortNote = null;
 
   if (isBusy) return;
   if (!compileSuccess) {
@@ -484,17 +1031,80 @@ async function doFlash() {
     return;
   }
 
+  // NOTE: do NOT add a pre-flight guard that refuses when the selected port is not a recognised
+  // Proffieboard. One was tried on 2026-08-14 and removed the same hour: a board we do not
+  // recognise but which DOES answer the 1200-bps touch reset - a clone, a future revision, a custom
+  // build - is precisely the case ungating exists for, and a guard here refuses it before the reset
+  // is ever sent. The attempt has to happen. Anything that reads as "we know this will fail"
+  // belongs AFTER the attempt, where the touch reset has actually answered. (2026-08-14)
+
+  // SD-corruption guard. Returns: 'recompile' (a fix was applied at the gate,
+  // so recompile it and let the compile auto-flash), false (cancel), or
+  // true/'flash-anyway' (proceed; 'flash-anyway' logs the Easter egg below).
+  const _sdFlash = window.checkMassStorageSafety
+    ? await window.checkMassStorageSafety(selectedUsb, 'flash')
+    : true;
+  if (_sdFlash === 'recompile') { _flashAfterSdFix(); return; }
+  if (!_sdFlash) {
+    // Cancelled — the auto-flash-after-compile path pre-sets "flashing..." and
+    // hides Close, so restore a usable, closable state instead of stranding it.
+    if (el('bm-status')) el('bm-status').textContent = 'Flash cancelled. Click Flash to try again.';
+    if (el('bm-close'))  el('bm-close').style.display = 'inline-block';
+    if (el('bm-abort'))  el('bm-abort').style.display = 'none';
+    setFlashEnabled(true);
+    return;
+  }
+
   // Pre-flash port check — verify board is still present
-  if (!selectedPort || !selectedPortIsProffieboard) {
+  if (!selectedPort) {
     showWaitForBoardInModal();
     startPortWatch('wait-flash');
     return;
   }
   const rawPorts = await window.electronAPI.listPortsRaw();
   if (!rawPorts.find(p => p.path === selectedPort)) {
-    appendModalLog('Selected port disconnected — waiting for board...', true);
-    showWaitForBoardInModal();
-    startPortWatch('wait-flash');
+    // The board that was selected is gone. Swapping boards is normal - unplug one, plug
+    // the next in, flash - and the app should not stall waiting for a board the user has
+    // already replaced. Before giving up, ask what IS connected:
+    //   exactly one Proffieboard -> unambiguous, adopt it and carry on
+    //   none, or several         -> genuinely needs the user, so wait as before
+    // Without this the flash never even reaches the toolchain, so the serial-matching
+    // there never gets a chance to help. (2026-07-26: unplugged one board, plugged
+    // the other in, clicked Flash, and came back to a "Connect Board" prompt with a board
+    // sitting right there.)
+    let adopted = null;
+    try {
+      const detected = await window.electronAPI.getRecommendedPort();
+      const boards = (detected && detected.ok && detected.proffieports) || [];
+      if (boards.length === 1) adopted = boards[0];
+    } catch {}
+
+    if (adopted) {
+      appendModalLog(`${selectedPort} is gone. Using the connected board on ${adopted.path}.`, false);
+      selectedPort = adopted.path;
+      selectedPortSN = adopted.serialNumber || null;
+      selectedPortIsProffieboard = true;
+      _flashTargetPort = selectedPort;
+      _flashTargetSN   = selectedPortSN;
+      // Keep the dropdown honest - it should show the board being flashed.
+      try { if (portSelect) portSelect.value = adopted.path; } catch {}
+      if (typeof applyDetectedBoard === 'function') { try { applyDetectedBoard(adopted); } catch {} }
+      setStatus('port', 'ok', `Proffieboard on ${adopted.path}`);
+    } else {
+      appendModalLog('Selected port disconnected. Waiting for board...', true);
+      showWaitForBoardInModal();
+      startPortWatch('wait-flash');
+      return;
+    }
+  }
+
+  // A board that has not been recorded yet: asked inside the build modal. [B-543] The X closes the
+  // modal and nothing is flashed.
+  const _bfAnswer = await _forensicsAskBeforeFlash();
+  if (_bfAnswer === 'cancel') {
+    stopPortWatch();
+    document.getElementById('build-modal').style.display = 'none';
+    setFlashEnabled(true);
     return;
   }
 
@@ -502,8 +1112,7 @@ async function doFlash() {
   // or manual Retry) don't pile up. Persistent build-output panel keeps full history.
   stopCompileHints();
   stopCompileTimer();
-  document.getElementById('bm-title').textContent = '⚡ Flashing...';
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  setBuildTitle('⚡ Flashing', { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-abort').style.display = 'none';
@@ -511,6 +1120,42 @@ async function doFlash() {
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('build-modal').style.display = 'flex';
   startFlashTimer();
+  showFlashedBuildCompileTime();
+
+  // Optional first stage: board forensics, in this modal; the flash follows in the same one.
+  if (_bfAnswer === 'record') {
+    setBusy(true);
+    const _bfStage = await _forensicsStageInFlash();
+    setBusy(false);
+    if (_bfStage === 'cancel') {
+      stopFlashTimer();
+      setBuildTitle('Flash cancelled', { busy: false, color: 'var(--c-text-bright)' });
+      document.getElementById('bm-bar').className = '';
+      document.getElementById('bm-status').textContent = 'Nothing was flashed. Click Flash to try again.';
+      document.getElementById('bm-close').style.display = 'inline-block';
+      setFlashEnabled(true);
+      return;
+    }
+  }
+  // The board restarts after the read, and a Mac lists its port again about a second after the read ends
+  // (Windows usually before). Wait for it before calling it gone. [QA10]
+  if (!selectedPort && _bfAnswer === 'record') {
+    const until = Date.now() + BOARD_BACK_WAIT_MS;
+    while (!selectedPort && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 500));
+      try { await refreshPorts(); } catch {}
+    }
+  }
+  if (!selectedPort) {
+    stopFlashTimer();
+    appendModalLog('The board did not come back on USB, so the flash cannot start. Unplug it and plug it back in.', true);
+    showWaitForBoardInModal();
+    startPortWatch('wait-flash');
+    return;
+  }
+  setBuildTitle('⚡ Flashing', { busy: true, color: 'var(--c-text-bright)' });
+  document.getElementById('bm-status').textContent = '';
+  _typeFlashHint(_sdFlash);
   setBarMode('flash');
   window._isFlashing = true;
   await pauseSerialBeforeFlash();
@@ -526,8 +1171,553 @@ async function doFlash() {
   _flashTargetPort = selectedPort;
   _flashTargetSN   = selectedPortSN;
 
-  await window.electronAPI.flash(selectedPort, selectedFqbn);
+  // Send the serial too, not just the port. The port only drives the touch reset; without
+  // the serial dfu-util matches on VID:PID alone and flashes whichever board is in the
+  // bootloader. This value was already being frozen here and then left unused.
+  if (_currentBuildKey) {
+    // Stamp the entry as used at the moment it is used, not when it was merely looked at.
+    try { await window.electronAPI.adoptCache(_currentBuildKey.configHash,
+                                              _currentBuildKey.buildPkgHash,
+                                              _currentBuildKey.configId); } catch {}
+  }
+  await window.electronAPI.flash(selectedPort, selectedFqbn, _flashTargetSN, _currentBuildDir, _flashRecordInfo());
   setBusy(false);
+}
+
+// ── Board Forensics [B-543] ────────────────────────────
+// Reads a board, copies its firmware and keeps it per board serial; the first copy is the board's
+// original firmware and can be flashed back. Main does the work (boardForensics.js). This runs it in
+// the build modal: as an optional first stage of a flash, or on its own from a right-click on Flash.
+// Every line it reports goes to the modal log and to Build Output.
+let _closeFlashMenu = null;
+
+// What a successful flash records with the board [B-543]: the config the build key was computed over.
+function _flashRecordInfo() {
+  const p = window._currentFilePath || null;
+  let configText = null;
+  try { configText = window.getEditorContent(); } catch {}
+  return {
+    configText, configPath: p, configName: p ? p.split(/[\\/]/).pop().replace(/\.h$/i, '') : null,
+    usb: selectedUsb || null,
+    configHash: (_currentBuildKey && _currentBuildKey.configHash) || null,
+    buildPkgHash: (_currentBuildKey && _currentBuildKey.buildPkgHash) || null,
+  };
+}
+
+function _forensicsSN() {
+  const sn = String(selectedPortSN || '').trim();
+  return /^[0-9A-Fa-f]{12}$/.test(sn) ? sn.toUpperCase() : null;
+}
+
+// "ProffieOS v7.14" from a board's own report; an installed version's name ("Test ProffieOS 8.10 +JMT")
+// already says ProffieOS and is shown as it is.
+function _osLabel(v) { return /proffieos/i.test(String(v)) ? String(v) : `ProffieOS ${v}`; }
+
+async function openFlashMenu(e) {
+  e.preventDefault();
+  if (!_flashMenuAvailable()) return;
+  const menu = document.getElementById('preset-ctx-menu');
+  if (!menu) return;
+  const sn = _forensicsSN();
+  let summary = null;
+  if (sn) { try { summary = await window.electronAPI.forensicsSummary(sn); } catch {} }
+  menu.innerHTML = '';
+  const close = () => {
+    menu.style.display = 'none';
+    document.removeEventListener('mousedown', outside, true);
+    _closeFlashMenu = null;
+  };
+  _closeFlashMenu = close;
+  const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
+  const mk = (label, run, disabled = false, tip = '') => {
+    const it = document.createElement('div');
+    it.className = 'preset-ctx-item';
+    it.textContent = label;
+    if (tip) it.title = tip;
+    if (disabled) { it.style.opacity = '0.45'; it.style.cursor = 'default'; }
+    it.addEventListener('mousedown', (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      if (disabled) return;
+      close();
+      if (isBusy) return;
+      run();
+    });
+    menu.appendChild(it);
+  };
+  // Again only when the board runs firmware its history does not have: an exact copy is already kept.
+  let _alreadyHave = false;
+  if (summary && summary.recorded && _boardInstalled) {
+    try {
+      const recs = await window.electronAPI.forensicsRecords(sn);
+      _alreadyHave = ((recs && recs.recordings) || []).some(r => _sameStamp(r.stamp, _boardInstalled));
+    } catch {}
+  }
+  if (!_alreadyHave) mk(summary && summary.recorded ? 'Run board forensics again' : 'Run board forensics', () => runBoardForensics());
+  const _orig = summary && summary.hasOriginal ? (summary.captures || []).find(c => c.id === summary.original) : null;
+  if (summary && summary.hasOriginal) mk('Flash original firmware', () => flashOriginalFirmware(), false,
+    _orig && _sameStamp(_orig.installed, _boardInstalled) ? 'The board is already running this firmware.' : '');
+  if (summary && summary.known) mk('Show board records', () => showBoardRecords(sn));
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 220) + 'px';
+  menu.style.top  = Math.min(e.clientY, window.innerHeight - 110) + 'px';
+  menu.style.display = 'block';
+  setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+}
+
+// Right-click Flash > Show board records: what board forensics recorded for this board.
+async function showBoardRecords(sn) {
+  let r = null;
+  try { r = await window.electronAPI.forensicsRecords(sn); } catch {}
+  if (!r) return;
+  const overlay = document.getElementById('modal-board-records');
+  const body = document.getElementById('br-body');
+  const flashBtn = document.getElementById('br-flash-original');
+  document.getElementById('br-title').textContent = `Board ${r.serial}`;
+  document.getElementById('br-sub').textContent = r.generation ? `Proffieboard ${r.generation}` : '';
+  const fmt = (at) => new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const items = r.recordings;
+  // Opens on what the board is running now (the newest such entry), else the newest entry.
+  let selected = [...items].reverse().find(c => _sameStamp(c.stamp, _boardInstalled)) || items[items.length - 1] || null;
+  let _recsScroll = 1e9;   // opens on the newest rows (clamped to the end); after that, keeps where it was scrolled
+
+  const render = () => {
+    body.innerHTML = '';
+    const section = (label) => {
+      const s = document.createElement('div'); s.className = 'br-section';
+      const l = document.createElement('div'); l.className = 'br-label'; l.textContent = label;
+      s.appendChild(l); body.appendChild(s); return s;
+    };
+    const line = (parent, text) => {
+      const d = document.createElement('div'); d.className = 'br-line'; d.textContent = text;
+      parent.appendChild(d); return d;
+    };
+    const c = selected;
+    if (c && c.kind === 'forensics' && c.detail) {
+      const d = c.detail, o = d.firmware;
+      const s = section(c.isOriginal ? 'Original firmware' : 'Recorded firmware');
+      if (o.version) line(s, `ProffieOS ${o.version}${o.installed ? `, built ${o.installed}` : ''}`);
+      else if (o.installed) line(s, `Built ${o.installed}`);
+      if (o.neverFlashed) line(s, 'Never flashed: the flash was empty when it was recorded');
+      if (o.askFailed) line(s, 'Read in bootloader mode. The board did not answer when asked for its presets and blade setup.');
+      else if (o.readInBootloader && !(d.presets && d.presets.length)) line(s, 'Read in bootloader mode, so no presets or blade setup');
+      if (o.configFile) line(s, `Config file: ${o.configFile}`);
+      if (o.prop) line(s, `Prop: ${o.prop}`);
+      if (o.usedBytes != null && o.flashSize) {
+        const prot = o.rdpLevel === 0 ? ' · read protection off' : o.rdpLevel != null ? ' · read protection on' : '';
+        line(s, `${Math.round(o.usedBytes / 1024)} KB used of ${Math.round(o.flashSize / 1024)} KB${prot}`);
+      }
+      if (d.blades.length || d.display || o.buttons != null) {
+        const h = section('Hardware');
+        if (d.blades.length) line(h, d.blades.map((b, i) => `Blade ${i + 1}: ${b.leds} LEDs`).join(' · ')
+          + (d.blades[0].type ? ` (${d.blades[0].type})` : ''));
+        if (o.buttons != null) line(h, `${o.buttons} button${o.buttons === 1 ? '' : 's'}`);
+        if (d.display) line(h, '1 display');
+      }
+      if (d.presets.length) {
+        const p = section(`Presets (${d.presets.length})`);
+        const box = document.createElement('div'); box.className = 'br-presets';
+        box.textContent = d.presets.map((t, i) => `${String(i + 1).padStart(2)}  ${t}`).join('\n');
+        p.appendChild(box);
+      }
+    } else if (c && c.kind === 'flash') {
+      const d = c.detail;
+      const s = section('Flashed firmware');
+      if (d.configName) line(s, `Config: ${d.configName}`);
+      const vers = [d.proffieOSVersion ? _osLabel(d.proffieOSVersion) : '', d.coreVersion ? `core ${d.coreVersion}` : '',
+                    d.usb ? `USB ${d.usb}` : ''].filter(Boolean).join(' · ');
+      if (vers) line(s, vers);
+      if (d.firmwareBytes) line(s, `${Math.round(d.firmwareBytes / 1024)} KB firmware`);
+    }
+    if (items.length) {
+      const sec = section('Recordings');
+      // The recordings scroll on their own; the list keeps its place when a row is clicked.
+      const s = document.createElement('div'); s.className = 'br-recs';
+      sec.appendChild(s);
+      for (const it of items) {
+        const what = it.kind === 'flash'
+          ? `Flashed${it.configName ? ` ${it.configName}` : ''}`
+          : 'Board forensics';
+        // One line per recording: what happened on the left (cut off with an ellipsis, full text on
+        // hover), its tags pinned right. The version is in the details when the row is selected.
+        const d = line(s, '');
+        d.classList.add('br-rec');
+        if (it === selected) d.classList.add('br-rec-sel');
+        if (it.isOriginal) d.classList.add('br-rec-pinned');   // stays at the top while the list scrolls
+        const main = document.createElement('span'); main.className = 'br-rec-main';
+        main.textContent = `${fmt(it.at)} · ${what}`;
+        d.title = main.textContent + (it.version ? ` · ${_osLabel(it.version)}` : '');
+        d.appendChild(main);
+        const tags = [it.isOriginal ? 'original' : '', _sameStamp(it.stamp, _boardInstalled) ? 'on the board now' : ''].filter(Boolean);
+        if (tags.length) { const t = document.createElement('span'); t.className = 'br-tag br-rec-tags'; t.textContent = tags.join(' · '); d.appendChild(t); }
+        d.onclick = () => { _recsScroll = s.scrollTop; selected = it; render(); };
+      }
+      s.scrollTop = _recsScroll;
+    }
+    flashBtn.style.display = selected && selected.canFlash ? '' : 'none';
+    flashBtn.textContent = selected && selected.isOriginal ? 'Flash original firmware' : 'Flash this firmware';
+    flashBtn.title = selected && _sameStamp(selected.stamp, _boardInstalled) ? 'The board is already running this firmware.' : '';
+  };
+  render();
+
+  const close = () => {
+    overlay.classList.remove('active');
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key !== 'Escape') return;
+    const top = [...document.querySelectorAll('.modal-overlay.active')].pop();
+    if (top !== overlay) return;
+    e.preventDefault(); e.stopPropagation(); close();
+  };
+  document.getElementById('br-x').onclick = close;
+  document.getElementById('br-close').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  flashBtn.onclick = () => { const it = selected; close(); flashRecordedFirmware(it); };
+  document.addEventListener('keydown', onKey, true);
+  overlay.classList.add('active');
+  // The list can only scroll once the window is showing: bring the selected entry into view.
+  requestAnimationFrame(() => {
+    const box = body.querySelector('.br-recs');
+    const sel = body.querySelector('.br-rec-sel');
+    if (!box || !sel) return;
+    box.scrollTop = Math.max(0, sel.offsetTop - box.offsetTop - box.clientHeight + sel.offsetHeight);
+    _recsScroll = box.scrollTop;
+  });
+}
+
+// The build modal's bar: a fraction fills it, null runs the indeterminate sweep.
+function _bmBar(frac) {
+  const bar = document.getElementById('bm-bar');
+  if (!bar) return;
+  if (typeof frac !== 'number') { setBarMode('knightrider'); return; }
+  bar.classList.remove('bm-bar-knightrider', 'bm-bar-success', 'bm-bar-error');
+  bar.style.animation = 'none';
+  bar.style.position  = 'absolute';
+  bar.style.left      = '0';
+  bar.style.background = getComputedStyle(document.documentElement).getPropertyValue('--jmt-blue').trim();
+  bar.style.width     = Math.max(0, Math.min(1, frac)) * 100 + '%';
+}
+
+// Feeds main's forensics:progress into the build modal: stage label in the status line, fraction on
+// the bar, every log line into the modal log and Build Output. Returns the unsubscribe.
+function _forensicsDriveModal() {
+  const status = document.getElementById('bm-status');
+  return window.electronAPI.onForensicsProgress((p) => {
+    if (!p) return;
+    if (p.type === 'stage') {
+      if (status) status.textContent = p.detail && typeof p.fraction === 'number' ? `${p.label} · ${p.detail}` : (p.label || '');
+      _bmBar(typeof p.fraction === 'number' ? p.fraction : null);
+    } else if (p.type === 'log') {
+      // dfu-util's download lines also drive the bar, and stay in the log as they do on a regular flash.
+      const m = /^\s*Download\s*\[[^\]]*\]\s*(\d+)%\s+(\d+)\s+bytes/.exec(p.line);
+      if (m) {
+        _bmBar(Number(m[1]) / 100);
+        if (status) status.textContent = `${(status.textContent.split(' · ')[0]) || 'Flashing'} · ${Math.round(Number(m[2]) / 1024)} KB written`;
+      }
+      appendLog(p.line, p.isError);
+      appendModalLog(p.line, p.isError);
+    }
+  });
+}
+
+// Runs a capture inside the open build modal. Returns main's result.
+async function _forensicsCaptureInModal(sn, { bootloader = false } = {}) {
+  setBuildTitle('Running board forensics', { busy: true, color: 'var(--c-text-bright)' });
+  // Nothing else may run while the board is read: the bootloader wait screen's Flash Now and Close,
+  // and any setup or manual rows, are hidden for the run. The run's end sets the buttons again.
+  for (const id of ['bm-retry', 'bm-close', 'bm-dfu-setup', 'bm-manual-row']) {
+    const b = document.getElementById(id);
+    if (b) b.style.display = 'none';
+  }
+  const head = `--- Board forensics: ${sn} ${bootloader ? 'in bootloader mode' : 'on ' + selectedPort} ---`;
+  appendLog(head, false);
+  appendModalLog(head, false);
+  await pauseSerialBeforeFlash();
+  const off = _forensicsDriveModal();
+  let r;
+  try { r = await window.electronAPI.forensicsCapture(bootloader ? null : selectedPort, sn, bootloader); }
+  catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
+  try { off(); } catch {}
+  // The board can come back on a different port after leaving the bootloader (in bootloader mode it stays).
+  if (!bootloader) { try { await refreshPorts(); } catch {} }
+  const tail = r.ok
+    ? (r.isOriginal ? '--- Board recorded. Saved as its original firmware. ---' : '--- Board recorded. Saved beside its original firmware. ---')
+    : `--- Board forensics did not finish: ${r.error || 'unknown error'} ---`;
+  appendLog(tail, !r.ok);
+  appendModalLog(tail, !r.ok);
+  if (r.report && r.report.afterwards && r.report.afterwards.returnedToFirmware === false) {
+    const msg = 'The board has not come back on USB yet. If it stays dark, unplug it and plug it back in.';
+    appendLog(msg, true);
+    appendModalLog(msg, true);
+  }
+  return r;
+}
+
+function _forensicsOpenModal(title) {
+  showBuildModal(title);
+  stopCompileTimer();
+  document.getElementById('bm-timer-compile').style.display = 'none';
+  document.getElementById('bm-abort').style.display = 'none';
+  const lastEl = document.getElementById('bm-timer-last');
+  if (lastEl) { lastEl.textContent = ''; lastEl.style.display = 'none'; }
+  setBarMode('knightrider');
+}
+
+// Ends the way a compile or flash ends: finishBuildModal sets the title colour, bar, status and buttons.
+function _forensicsEndModal(ok, title, statusText, { isFlash = false } = {}) {
+  finishBuildModal(ok, title, statusText || '', { isFlash });
+}
+
+// Right-click Flash > Run board forensics.
+async function runBoardForensics() {
+  if (isBusy) return;
+  const sn = _forensicsSN();
+  if (!selectedPort || !sn) return;
+  setBusy(true);
+  _forensicsOpenModal('Running board forensics');
+  const r = await _forensicsCaptureInModal(sn);
+  setBusy(false);
+  // The board was reset, so what it reported before is stale. Forget it, THEN look for the board
+  // again so it is asked afresh, the order a regular flash uses.
+  forgetBoardOSVersion();
+  try { await refreshPorts(); } catch {}
+  _forensicsEndModal(r.ok, r.ok ? '✓ Board recorded' : '✗ Board forensics did not finish',
+    r.ok ? (window.isConfigOpen?.()
+      ? 'Right-click Flash to flash the original firmware back or show the board records.'
+      : 'Use Show Board Records to view it or flash the original firmware back.') : (r.error || ''));
+}
+
+// Right-click Flash > Flash original firmware.
+async function flashOriginalFirmware() {
+  if (isBusy) return;
+  const sn = _forensicsSN();
+  if (!sn) return;
+  let summary = null;
+  try { summary = await window.electronAPI.forensicsSummary(sn); } catch {}
+  if (!summary || !summary.hasOriginal) return;
+  const orig = (summary.captures || []).find(c => c.id === summary.original) || {};
+  return flashRecordedFirmware({ kind: 'forensics', id: summary.original, at: orig.at, isOriginal: true,
+    detail: { firmware: { version: orig.version || null, installed: orig.installed || null } } });
+}
+
+// Flashes a recording from the board's record: a forensics capture or an earlier flash.
+async function flashRecordedFirmware(item) {
+  if (isBusy || !item) return;
+  const sn = _forensicsSN();
+  if (!sn) return;
+  const isFlash = item.kind === 'flash';
+  const openName = window._currentFilePath ? window._currentFilePath.split(/[\\/]/).pop().replace(/\.h$/i, '') : '';
+  const notOpen = openName ? `, not the config you have open (${openName})` : '';
+  let title, message, confirmText, label;
+  if (isFlash) {
+    const d = item.detail || {};
+    title = 'Flash this firmware?';
+    message = `${d.configName || 'Config not known'}${d.proffieOSVersion ? ` · ${_osLabel(d.proffieOSVersion)}` : ''}\n`
+      + `Flashed ${new Date(item.at).toLocaleString()}.\n\n`
+      + 'This is the firmware that was flashed to the board then. It replaces what is on the board now.';
+    confirmText = 'Flash'; label = 'saved firmware';
+  } else {
+    const o = (item.detail && item.detail.firmware) || {};
+    const what = o.version ? `ProffieOS ${o.version}${o.installed ? `, built ${o.installed}` : ''}` : (item.isOriginal ? 'Original firmware' : 'Recorded firmware');
+    const when = item.at ? `Recorded ${new Date(item.at).toLocaleString()}.` : '';
+    title = item.isOriginal ? 'Flash original firmware?' : 'Flash this firmware?';
+    message = item.isOriginal
+      ? `${what}\n${when}\n\nThis is the firmware that was on the board when it was first recorded${notOpen}. It replaces what is on the board now.`
+      : `${what}\n${when}\n\nThis is the firmware that was on the board when this recording was made${notOpen}. It replaces what is on the board now.`;
+    confirmText = item.isOriginal ? 'Flash original' : 'Flash';
+    label = item.isOriginal ? 'original firmware' : 'recorded firmware';
+  }
+  const ok = await window.promptConfirm({ title, message, confirmText, confirmKind: 'primary' });
+  if (!ok) return;
+  const Label = label[0].toUpperCase() + label.slice(1);
+  setBusy(true);
+  _forensicsOpenModal(`Flashing ${label}`);
+  startFlashTimer();
+  const head = `--- Flashing ${label} to ${sn} ---`;
+  appendLog(head, false);
+  appendModalLog(head, false);
+  await pauseSerialBeforeFlash();
+  const off = _forensicsDriveModal();
+  let r;
+  try {
+    r = await window.electronAPI.forensicsRestore(selectedPort, sn, isFlash ? null : item.id, isFlash ? item.id : null);
+  } catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
+  try { off(); } catch {}
+  stopFlashTimer();
+  setBusy(false);
+  // Forget what the board reported before the flash, THEN look for it again so it is asked afresh.
+  forgetBoardOSVersion();
+  try { await refreshPorts(); } catch {}
+  let statusText;
+  if (r.ok) {
+    setStatus('flash', 'ok', `${Label} flashed`);
+    const what = isFlash ? 'the saved firmware' : item.isOriginal ? 'the original' : 'the recording';
+    const flashLine = r.flashMatches === true ? `The flash matches ${what} exactly. `
+      : r.flashMatches === false ? `The flash does not match ${what}. ` : '';
+    const v = r.version || {};
+    const reports = `${v.version ? `ProffieOS ${v.version}` : 'the same version'}${v.installed ? `, built ${v.installed}` : ''}`;
+    statusText = flashLine + (r.versionMatches === true
+      ? `The board reports ${reports}, the same as when it was recorded.`
+      : r.versionMatches === false
+        ? 'The board reports a different version than when it was recorded.'
+        : v.version ? `The board reports ${reports}.`
+          : 'The board did not answer a version check afterwards.');
+  } else {
+    statusText = r.error || `The ${label} was not flashed.`;
+  }
+  const tail = r.ok ? `--- ${Label} flashed ---` : `--- ${Label} not flashed: ${statusText} ---`;
+  appendLog(tail, !r.ok);
+  appendModalLog(tail, !r.ok);
+  const end = () => _forensicsEndModal(r.ok, r.ok ? '✓ Flash Complete' : '✗ Flash Failed', statusText, { isFlash: true });
+  // A recorded flash built with WebUSB gets the same WebUSB check as a regular flash. A forensics
+  // recording does not say how its firmware's USB was set up, so it is not checked.
+  const builtUsb = isFlash && item.detail && item.detail.usb;
+  if (r.ok && builtUsb && /webusb/i.test(builtUsb)) _finishFlashWithWebUsbCheck(sn, { usb: builtUsb, done: end });
+  else end();
+}
+
+// Asks a question inside the build modal, opening it if it is closed, so the question has the same
+// footprint as the compile and flash it sits between. The modal's other rows are hidden while it
+// asks and shown again after. Resolves with the clicked button's id, or 'close' for the X or Esc.
+function _askInBuildModal({ title, message, buttons }) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('build-modal');
+    const ask   = document.getElementById('bm-ask');
+    const msg   = document.getElementById('bm-ask-msg');
+    const row   = document.getElementById('bm-ask-btns');
+    const x     = document.getElementById('bm-x');
+    const statusRow = document.getElementById('bm-status')?.parentElement;
+    const hide = [document.getElementById('bm-bar-track'), document.getElementById('bm-log'),
+      document.getElementById('bm-board-select-wrap'), statusRow, document.getElementById('bm-manual-row'),
+      document.getElementById('bm-dfu-note'), document.getElementById('bm-timer-row')].filter(Boolean);
+    const saved = hide.map(n => n.style.display);
+    hide.forEach(n => { n.style.display = 'none'; });
+    stopCompileHints();
+    setBuildTitle(title, { busy: false, color: 'var(--c-text-bright)' });
+    msg.textContent = message;
+    row.innerHTML = '';
+    const done = (answer) => {
+      document.removeEventListener('keydown', onKey, true);
+      ask.style.display = 'none';
+      x.style.display = 'none';
+      x.onclick = null;
+      row.innerHTML = '';
+      hide.forEach((n, i) => { n.style.display = saved[i]; });
+      resolve(answer);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done('close'); } };
+    for (const b of buttons) {
+      const btn = document.createElement('button');
+      btn.className = b.primary ? 'modal-btn-primary' : 'modal-btn-cancel';
+      btn.textContent = b.text;
+      if (b.title) btn.title = b.title;
+      btn.onclick = () => done(b.id);
+      row.appendChild(btn);
+    }
+    x.onclick = () => done('close');
+    x.style.display = '';
+    ask.style.display = 'block';
+    modal.style.display = 'flex';
+    document.addEventListener('keydown', onKey, true);
+  });
+}
+
+// Asked before a flash opens its modal, like the flash's other questions. Returns 'record' (run board
+// forensics as the flash's first stage), 'flash' (go straight to the flash) or 'cancel'.
+async function _forensicsAskBeforeFlash({ sn: givenSN = null, bootloader = false } = {}) {
+  const sn = givenSN || _forensicsSN();
+  if (!sn || (!bootloader && !selectedPort)) return 'flash';
+  let summary = null;
+  try { summary = await window.electronAPI.forensicsSummary(sn); } catch { return 'flash'; }
+  if (summary && summary.known) {
+    // A board seen before: what this flash adds goes into its existing record [B-543].
+    const note = `Board ${sn} already has records in JMT Studio. This flash is added to them.`;
+    appendLog(note, false);
+    window.electronAPI.forensicsLog?.(sn, 'merged', { bootloader, recorded: !!summary.recorded })?.catch?.(() => {});
+  }
+  if (!summary) return 'flash';
+  // A board with records: is what is on it now in its history? Its build date (asked on connect, or
+  // read from the flash in bootloader mode) against every recording and flash. No match means it was
+  // flashed elsewhere, so it is offered like a new board. No date at all means it cannot be told.
+  let unrecorded = null;
+  if (summary.recorded) {
+    let stamp = null;
+    if (bootloader) {
+      appendLog(`Checking the firmware on ${sn} against its records...`, false);
+      _forensicsOpenModal("Checking the board's firmware against its records");
+      document.getElementById('bm-log').innerHTML = '';
+      for (const id of ['bm-retry', 'bm-close', 'bm-dfu-setup', 'bm-manual-row']) { const b = document.getElementById(id); if (b) b.style.display = 'none'; }
+      let st = null;
+      try { st = await window.electronAPI.forensicsDfuStamp(sn); } catch {}
+      stamp = st && !st.empty ? st.stamp : null;
+    } else {
+      stamp = _boardInstalled || null;
+    }
+    if (!stamp) return 'flash';
+    let recs = null;
+    try { recs = await window.electronAPI.forensicsRecords(sn); } catch {}
+    const known = ((recs && recs.recordings) || []).some(r => _sameStamp(r.stamp, stamp));
+    if (known) return 'flash';
+    unrecorded = stamp;
+    appendLog(`The firmware on ${sn} (built ${stamp}) is not in its records.`, false);
+    window.electronAPI.forensicsLog?.(sn, 'unrecorded-firmware', { installed: stamp, bootloader })?.catch?.(() => {});
+  } else if (summary.offerDeclined) {
+    return 'flash';
+  }
+  const remembered = (await window._jmtRememberedChoice?.('boardForensicsChoice')) || 'ask';
+  if (remembered === 'never') return 'flash';
+  if (remembered !== 'always') {
+    const bootSentence = bootloader ? ' This board is in bootloader mode, where its presets and blade setup cannot be read. '
+      + 'If it is running ProffieOS, JMT Studio starts it briefly to read them, then returns it to bootloader mode for the flash.' : '';
+    const choice = await _askInBuildModal(unrecorded ? {
+      title: "This board has firmware that hasn't been recorded",
+      message: `Its firmware was built ${unrecorded}, which matches nothing in this board's history. `
+        + 'JMT Studio can record it before flashing, so you can put it back later.' + bootSentence,
+      buttons: [
+        { id: 'lead',    text: 'Never record', title: window.REMEMBERED_CHOICE_TIP },
+        { id: 'cancel',  text: 'Not now' },
+        { id: 'middle',  text: 'Record this board' },
+        { id: 'confirm', text: 'Always record new boards', primary: true, title: window.REMEMBERED_CHOICE_TIP },
+      ],
+    } : {
+      title: 'This board has not been recorded yet',
+      message:
+        'JMT Studio can run board forensics on each new board before its first flash. It records the board '
+        + 'and saves the original firmware as first seen in JMT Studio, so you can flash it back at any time with '
+        + 'a right-click on Flash, no matter which config you have open. Every flash is recorded with the board '
+        + 'too, and can be flashed again from its records.'
+        + (bootloader ? ' This board is in bootloader mode, where its presets and blade setup cannot be read. '
+          + 'If it is running ProffieOS, JMT Studio starts it briefly to read them, then returns it to bootloader '
+          + 'mode for the flash.' : '') + '\n\n'
+        + 'In a future release, board history will show the configs used on each board and what the original '
+        + "firmware was built with: ProffieOS version, prop, presets, blade setup and more. What's recorded now "
+        + 'stays on this computer, so those features will work without connecting the board again.',
+      buttons: [
+        { id: 'lead',    text: 'Never record', title: window.REMEMBERED_CHOICE_TIP },
+        { id: 'cancel',  text: 'Not now' },
+        { id: 'middle',  text: 'Record this board' },
+        { id: 'confirm', text: 'Always record new boards', primary: true, title: window.REMEMBERED_CHOICE_TIP },
+      ],
+    });
+    if (choice === 'lead') { try { await window.electronAPI.setSetting('boardForensicsChoice', 'never'); } catch {} return 'flash'; }
+    if (choice === 'cancel') return 'flash';
+    if (choice !== 'middle' && choice !== 'confirm') return 'cancel';
+    if (choice === 'confirm') { try { await window.electronAPI.setSetting('boardForensicsChoice', 'always'); } catch {} }
+  }
+  return 'record';
+}
+
+// The first stage of a flash, inside the flash's open modal. Returns 'flash' or 'cancel'.
+async function _forensicsStageInFlash({ sn: givenSN = null, bootloader = false } = {}) {
+  const sn = givenSN || _forensicsSN();
+  if (!sn || (!bootloader && !selectedPort)) return 'flash';
+  const r = await _forensicsCaptureInModal(sn, { bootloader });
+  if (r && r.ok) return 'flash';
+  const go = await _askInBuildModal({
+    title: 'Board forensics did not finish',
+    message: `${(r && r.error) || 'The firmware was not copied.'}\n\nFlash anyway?`,
+    buttons: [{ id: 'cancel', text: 'Cancel' }, { id: 'flash', text: 'Flash anyway', primary: true }],
+  });
+  return go === 'flash' ? 'flash' : 'cancel';
 }
 
 // ── Port detection ─────────────────────────────────────
@@ -542,7 +1732,22 @@ function _setLinuxUdevNotice(show) {
 
 async function refreshPorts() {
   if (isDfuMode) return; // port selection is locked while in DFU mode
+  // AND LOCKED WHILE A FLASH RUNS. [B-471, 2026-10-05]
+  // A flash fires onPortsChanged by definition: the board leaves its port for DFU and comes
+  // back on a different one. Rebuilding the dropdown mid-flash made it disagree with the
+  // modal - it moved to COM16 while the flash correctly ran on COM6, and it could
+  // not tell afterwards which board had the firmware ("actually it did flash 6... not 16").
+  // The dropdown is the one surface people read, so a wrong value there loses the answer.
+  // The post-flash settle calls refreshPorts() again, so the display still lands on the new
+  // port - once, after, instead of during. Same guard already used at the serial-monitor and
+  // chip call sites for the same reason.
+  if (window._isFlashing) return;
+  const seq = ++_portRefreshSeq;
   const result = await window.electronAPI.getRecommendedPort();
+  // Superseded while we were enumerating. Returning without touching anything is
+  // the point: the newer run owns the dropdown, and rebuilding it here would
+  // discard whatever the user selected in the meantime.
+  if (seq !== _portRefreshSeq) return;
   _setLinuxSerialNotice(result.linuxSerialPermissionIssue || false);
   _setLinuxUdevNotice(result.linuxUdevRulesMissing || false);
 
@@ -573,6 +1778,16 @@ async function refreshPorts() {
     selectedPort = result.port.path;
     selectedPortIsProffieboard = true;
     applyDetectedBoard(result.port);
+    // A real board turning up outranks a manual pick of a port we never identified. That pick was
+    // a this-moment choice, not a standing preference, and leaving it set means it can win again
+    // later - the multi-board branch below explicitly prefers `manualPath` over everything. Drop
+    // it so a genuine Proffieboard is never passed over for a port that is not one. A manual
+    // choice of a REAL board is untouched. (2026-08-14)
+    if (_userChosePort && _userChosenPortPath &&
+        !result.proffieports.some(p => p.path === _userChosenPortPath)) {
+      _userChosePort      = false;
+      _userChosenPortPath = null;
+    }
     // SN-based filter scoping: same board re-enumerating (e.g. post-flash) → keep;
     // different physical board auto-selected → clear. The dropdown's `change`
     // event doesn't fire for programmatic `.value =`, so we have to call this
@@ -605,8 +1820,14 @@ async function refreshPorts() {
       portSelect.value = '';
       selectedPort = null;
       selectedPortIsProffieboard = false;
+      // [BUG-024] Nothing is selected, so the box says so: "—" first, as when no board is found. It
+      // showed the first board's port as though chosen, with nothing read from it.
+      const placeholder = document.createElement('option');
+      placeholder.value = ''; placeholder.textContent = '—';
+      portSelect.insertBefore(placeholder, portSelect.firstChild);
+      portSelect.value = '';
       clearDetectedBoard();
-      setStatus('port', 'warn', `${result.proffieports.length} Proffieboards — select port`);
+      setStatus('port', 'warn', `${result.proffieports.length} Proffieboards, select port`);
     }
   } else {
     // No Proffieboard detected — show all ports for manual inspection but don't select any
@@ -618,11 +1839,43 @@ async function refreshPorts() {
       opt.value = p.path; opt.textContent = p.path;
       portSelect.appendChild(opt);
     });
-    portSelect.value = '';
-    selectedPort = null;
-    selectedPortIsProffieboard = false;
-    clearDetectedBoard();
-    setStatus('port', 'warn', result.message);
+    // Keep a manual pick if that port is still present.
+    //
+    // This branch runs when NO Proffieboard is detected, which is exactly when a
+    // user is most likely to be choosing a port by hand - and it used to blank
+    // the selection unconditionally. The multi-board branch above has honoured
+    // `manualPath` all along; this one never did, so a pick made here was
+    // silently discarded by the next refresh. Since flashing was ungated, an
+    // unrecognised port is now a legitimate choice and has to survive.
+    // (2026-08-15)
+    const keep = (_userChosePort && _userChosenPortPath &&
+                  result.ports.some(p => p.path === _userChosenPortPath))
+                 ? _userChosenPortPath : null;
+    if (keep) {
+      portSelect.value = keep;
+      selectedPort = keep;
+      selectedPortIsProffieboard = false;
+      clearDetectedBoard();
+      // Detection message REMEMBERED, selection message SHOWN. The two are
+      // different statements and the status line reports the one that matches
+      // what is on screen: a port IS selected, so saying "No Proffieboard
+      // detected" describes the machine while the dropdown says COM4 - true,
+      // and about the wrong thing. Same wording onPortChange uses for a manual
+      // pick of an unidentified port, so the state reads the same however it
+      // was reached. The remembered one is restored when the pick is cleared.
+      // (2026-08-15)
+      _lastPortDetectMsg = result.message;
+      setStatus('port', 'warn', `Port: ${keep}`);
+    } else {
+      _userChosePort      = false;
+      _userChosenPortPath = null;
+      portSelect.value = '';
+      selectedPort = null;
+      selectedPortIsProffieboard = false;
+      clearDetectedBoard();
+      _lastPortDetectMsg = result.message;
+      setStatus('port', 'warn', result.message);
+    }
   }
 
   updatePortChangedIndicator();
@@ -632,14 +1885,21 @@ async function refreshPorts() {
   // board re-enumerating after flash keeps filters (SN matches); a different
   // board taking over the dropdown clears them (SN differs).
 
-  stopPortWatch();
+  // A flash waiting for its board is handed the board this refresh found. Stopping the wait alone left the
+  // flash waiting with nothing watching, and plugging the board in again did nothing. [QA10, Mac: the board
+  // was back 0.7 s after the wait began] With several boards, or none, the wait goes on and asks as before.
+  if (_portWatchContext === 'wait-flash') {
+    if (result.autoSelected && result.port) { stopPortWatch(); _selectPortAndFlash(result.port, result); }
+  } else {
+    stopPortWatch();
+  }
 
   // Reconcile flash state with current port + compile state
   if (!compileSuccess) {
     await checkCacheForConfig();          // may set compileSuccess + call setFlashEnabled
   } else {
     // compileSuccess already true — update button to reflect new port state
-    setFlashEnabled(selectedPortIsProffieboard && !!selectedPort);
+    setFlashEnabled(!!selectedPort);
   }
 
   // Auto-open the serial monitor when refreshPorts produces a port for the first
@@ -656,6 +1916,7 @@ async function refreshPorts() {
     await openSerialMonitor();
     el('bp-serial-input')?.focus();
   }
+  _refreshInterruptedFlashStatus();
 }
 
 // Adds the DFU mode sentinel as the last option in the port select
@@ -685,47 +1946,160 @@ const USB_LABELS = {
   cdc_dap:     'Serial + CMSIS-DAP',
   cdc_msc_dap: 'Serial + Mass Storage + CMSIS-DAP',
   cdc_webusb:  'Serial + WebUSB',
+  cdc_msc_webusb: 'Serial + Mass Storage + WebUSB',
   none:        'No USB',
 };
 
-function updateUsbChangedIndicator() {
-  const baseline = window.getBaselineUsb ? window.getBaselineUsb() : null;
-  const changed  = baseline !== null && selectedUsb !== baseline;
-  const usbEl    = el('bp-usb-select');
-  usbEl.classList.toggle('field-changed', changed);
-  usbEl.title = changed
-    ? `USB mode changed since last compile (was: ${USB_LABELS[baseline] || baseline}) — recompile before flashing`
-    : '';
+// ── USB type choices that need words first [B-660] ──
+// The rule (2026-11-10): the common types stay in the list; the rest sit behind
+// "Advanced…", and picking one shows what it is with a "know what you're doing" warning.
+// Mass Storage + WebUSB is a common type with no warning of its own: the card corruption it was
+// blamed for was the core's 4 GiB address wrap, fixed by the JMT plugin. [B-668]
+const USB_ADVANCED = [
+  { value: 'cdc_hid',     what: 'The board also acts as a USB keyboard and mouse. Only useful with code written to use it.' },
+  { value: 'cdc_msc_hid', what: 'The same, plus the SD card shows up as a drive.' },
+  { value: 'cdc_dap',     what: 'The board also acts as a CMSIS-DAP debug probe for other chips. For electronics development, not sabers.' },
+  { value: 'cdc_msc_dap', what: 'The same, plus the SD card shows up as a drive.' },
+  { value: 'none',        what: 'The board does not show up on USB at all. JMT Studio cannot see it or flash it the normal way; to flash again, hold BOOT, tap RESET, and use Bootloader Mode.' },
+];
+const _isAdvancedUsb = (v) => USB_ADVANCED.some(a => a.value === v);
+let _usbChoiceApproved = false;   // set only while _applyUsbChoice re-fires the change
+
+function _escUsb(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// An advanced type shows in the list only while it is the one selected; once another type is
+// picked it goes back behind "Advanced…" (2026-11-10).
+function _syncAdvancedUsbOptions(current) {
+  const sel = el('bp-usb-select');
+  if (!sel) return;
+  for (const a of USB_ADVANCED) {
+    const o = sel.querySelector(`option[value="${a.value}"]`);
+    if (o) o.hidden = a.value !== current;
+  }
 }
 
+// Make the select show `value` (un-hiding an advanced one) and run the normal change path.
+function _applyUsbChoice(value) {
+  const sel = el('bp-usb-select');
+  const opt = sel && sel.querySelector(`option[value="${value}"]`);
+  if (!opt) return;
+  opt.hidden = false;
+  sel.value = value;
+  _usbChoiceApproved = true;
+  try { sel.dispatchEvent(new Event('change')); } finally { _usbChoiceApproved = false; }
+}
+
+async function _openAdvancedUsb() {
+  const list = USB_ADVANCED.map(a =>
+    `<li><strong>${_escUsb(USB_LABELS[a.value])}</strong>: ${_escUsb(a.what)}</li>`).join('');
+  const res = await window.promptConfirm({
+    title: 'Advanced USB types',
+    messageHtml: `These are for special setups. <strong>Only pick one if you know you need it;</strong> `
+      + `if you are not sure, use a type from the main list.<ul style="margin:10px 0 0 18px;padding:0;line-height:1.5;">${list}</ul>`,
+    dropdown: { label: 'USB type', value: _isAdvancedUsb(selectedUsb) ? selectedUsb : USB_ADVANCED[0].value,
+                options: USB_ADVANCED.map(a => ({ value: a.value, label: USB_LABELS[a.value] })) },
+    confirmText: 'Use this type', confirmKind: 'primary', cancelText: 'Cancel',
+  });
+  if (res && res.confirmed && res.value) _applyUsbChoice(res.value);
+}
+
+// [B-385] THIS FIELD ANSWERS ONE QUESTION: does the current selection match the
+// LAST COMPILED VERSION? Settled 2026-09-14: "it's job is to show if the current
+// selection matches the last compiled version. that's it."
+//
+// IT USED TO COMPARE AGAINST THE SAVED FILE TOO, and that was the whole defect.
+// `baselineUsb` resets on Save, so saving cleared the red — and the red means
+// "recompile before flashing", which saving does nothing about. The message said
+// "since last compile" while the test it came from was "differs from the file on
+// disk" — reported as a lie, correctly. Those are different questions, the dirty
+// marker already answers the second one, and a build-readiness signal must never be
+// cleared by an action that builds nothing.
+//
+// THE FIRST FIX REWORDED THE SAVE BRANCH INSTEAD OF REMOVING IT. Better words on
+// the wrong comparison is still the wrong comparison. The correction: "looking at
+// the wrong field... it's supposed to compare compiled not saved."
+function updateUsbChangedIndicator() {
+  const builtUsb   = window.getCompiledUsb ? window.getCompiledUsb() : null;
+  const buildMoved = !!(builtUsb && selectedUsb && builtUsb !== selectedUsb);
+  // Compiled at some point, but that build recorded no USB mode, so the question
+  // cannot be answered. NOT red — nothing is known to have moved.
+  // `@jmt:compiled_usb` arrived 2026-08-15; every config built before that date
+  // lands here until its next compile. Measured over 88 real configs on 2026-09-14:
+  // 58 carry a compile timestamp, 12 carry the setting.
+  const compiledAt   = window.getCompiledAtLabel ? window.getCompiledAtLabel() : null;
+  const buildUnknown = !!(compiledAt && !builtUsb);
+  const usbEl = el('bp-usb-select');
+  usbEl.classList.toggle('field-changed', buildMoved);
+  usbEl.title = buildMoved
+    ? `Last built with ${USB_LABELS[builtUsb] || builtUsb}, recompile before flashing`
+    : buildUnknown
+      ? `Last compiled ${compiledAt}, but that build did not record its USB mode, so recompile to start checking it`
+      : '';
+}
+
+// Two things can make the port worth a second look, and they share the existing `.field-changed`
+// red rather than inventing a second warning colour.
+//
+// Flashing is no longer gated on the port being a recognised Proffieboard, so this is what replaces
+// the block: the control is live, and it says plainly that we did not find a board here. Marking is
+// not refusing - the user may know better, and `flash()` resolves identity by serial number anyway.
+// (2026-08-14)
 function updatePortChangedIndicator() {
   const lastPort = window.getLastPort ? window.getLastPort() : null;
   const changed  = lastPort !== null && selectedPort !== null && selectedPort !== lastPort;
+  const unknown  = !!selectedPort && !selectedPortIsProffieboard && !isDfuMode;
   const portEl   = el('bp-port-select');
-  portEl.classList.toggle('field-changed', changed);
-  portEl.title = changed
-    ? `Port changed since last compile (was: ${lastPort}) — verify the correct board is connected`
-    : '';
+  portEl.classList.toggle('field-changed', changed || unknown);
+  // "Not a Proffieboard" wins the tooltip when both apply: whether this port is a board at all
+  // matters more than whether it is the same one as last time.
+  portEl.title = unknown
+    ? 'No Proffieboard was detected on this port. Flashing will still try.'
+    : changed
+      ? `Port changed since last compile (was: ${lastPort}). Verify the correct board is connected.`
+      : '';
 }
 
 // Marks the Detected field when a Proffieboard is on the selected port.
 // Version (V2/V3) cannot be determined from USB data — user selects it via the Board dropdown.
+// The board last logged as detected, so the event log gets one line per arrival, not one per poll [B-543].
+let _loggedDetectedSN = null;
 function applyDetectedBoard(port) {
   if (!port) return;
   selectedPortSN = port.serialNumber || null;
+  if (/^[0-9A-Fa-f]{12}$/.test(String(selectedPortSN || '')) && selectedPortSN !== _loggedDetectedSN) {
+    _loggedDetectedSN = selectedPortSN;
+    window.electronAPI.forensicsLog?.(selectedPortSN, 'detected', { port: port.path, vendorId: port.vendorId || null,
+      productId: port.productId || null, platform: window.electronAPI.platform || null })?.catch?.(() => {});
+  }
+  applyFlashTitle();
   updateBoardDisplay(port.serialNumber ? `SN: ${port.serialNumber}` : 'Proffieboard');
   window.updateSnIndicator?.();
   setStatus('port', 'ok', `Proffieboard on ${port.path}`);
   updateCompileButton();
+  probeBoardOSVersion(port);
+  // [B-028] A board arriving changes the flash answer without changing a byte of the config,
+  // so the chip is re-read here directly. NOT left to the cache check below: that one is
+  // gated on selectedFqbn, and the board question does not depend on having an FQBN.
+  _refreshFlashProvenance();
   if (selectedFqbn) { cacheCheckPending = true; checkCacheForConfig(); }
 }
 
 // Clears the Detected field when no Proffieboard is on the selected port.
 function clearDetectedBoard() {
+  if (_loggedDetectedSN) {
+    window.electronAPI.forensicsLog?.(_loggedDetectedSN, 'disconnected', {})?.catch?.(() => {});
+    _loggedDetectedSN = null;
+  }
   selectedPortSN = null;
+  applyFlashTitle();
   updateBoardDisplay('');
   window.updateSnIndicator?.();
   updateCompileButton();
+  forgetBoardOSVersion();
+  // [B-028] The flashed board going away is reset state #1, and it was the unbuilt half of
+  // this entry's founding repro: the chip read "Flash successful" all night with nothing
+  // attached. Ordered after selectedPortSN is cleared so the check sees the new truth.
+  _refreshFlashProvenance();
 }
 
 function onPortChange(e) {
@@ -742,14 +2116,23 @@ function onPortChange(e) {
   if (!selectedPort) {
     clearDetectedBoard();
     setFlashEnabled(false);
-    setStatus('port', 'error', 'No port selected');
+    // Back to what DETECTION says, not to a statement about the dropdown.
+    //
+    // Clearing the selection returns you to the state you opened in, and that
+    // state is "no Proffieboard detected" - a fact about the machine. "No port
+    // selected" is true and useless: it reports the thing the user just did,
+    // and drops the only part that explains why they had to choose by hand.
+    // Same rule as the rest of today - say the fact that carries information.
+    // (2026-08-15)
+    setStatus('port', _lastPortDetectMsg ? 'warn' : 'error',
+              _lastPortDetectMsg || 'No port selected');
     return;
   }
   if (port) {
     if (port.isProffieboard) applyDetectedBoard(port);
     else { clearDetectedBoard(); setStatus('port', 'warn', `Port: ${selectedPort}`); }
   }
-  setFlashEnabled(selectedPortIsProffieboard && compileSuccess);
+  setFlashEnabled(compileSuccess);
   // Different physical board → drop any suppression filters from the previous one
   _onPortChangedClearFilters();
   // If serial monitor is active, reconnect to the new port
@@ -772,26 +2155,145 @@ function onInputBoardChange() {
 
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
-    setStatus('compile', 'warn', 'Board changed — recompile needed');
+    setStatus('compile', 'warn', 'Board changed, recompile needed');
   }
   selectedFqbn = newFqbn;
   cacheCheckPending = true;
   updateCompileButton();
-  checkCacheForConfig('Board changed — recompile needed');
+  checkCacheForConfig('Board changed, recompile needed');
 }
+
+// Changing the Proffieboard core changes the build identity exactly as a board
+// or USB change does, so the compiled state must be dropped the same way.
+//
+// Without this the Flash button stays armed over a binary produced by a
+// DIFFERENT core than the one the app now reports. The build cache itself is
+// safe, because the core is part of its key, but the CURRENT session's compiled
+// state is not keyed by anything - it is just a boolean. Same shape as flashing
+// the wrong board, and just as invisible to the person doing it.
+//
+// Called from the Versions panel, and only when the change lands on the
+// version currently selected for building.
+window.onCoreVersionChanged = function (label) {
+  const msg = label || 'Build core changed, recompile needed';
+  if (compileSuccess) {
+    compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
+    setFlashEnabled(false);
+    setStatus('compile', 'warn', msg);
+  }
+  cacheCheckPending = true;
+  updateCompileButton();
+  checkCacheForConfig(msg);
+  // Repaint the status bar's plugin label. It reads a cached value filled from
+  // the version details, and the pin has just changed underneath it, so without
+  // this the bar keeps naming the previous plugin until something else happens
+  // to refresh the selected version.
+  window._refreshSelectedVersionJmtState?.();
+};
 
 // ── IPC event handlers ─────────────────────────────────
-function onBuildLog({ line, isError }) {
-  appendLog(line, isError);
-  appendModalLog(line, isError);
+// A single expanded-template compile error can be tens of thousands of chars
+// wide (SingleValueAdapter<IntSVF<...>> chains plus an equally long caret
+// underline). Rendering raw lines that big chokes the DOM and buries the real
+// "file:line: error:" message. Cap what we render — the head always carries the
+// location and the actual error text. The full output still reaches the error
+// parser in the main process, so nothing diagnostic is lost.
+const MAX_LOG_LINE = 1000;
+function _truncateLogLine(line) {
+  if (typeof line !== 'string' || line.length <= MAX_LOG_LINE) return line;
+  return line.slice(0, MAX_LOG_LINE) + ` … [${line.length - MAX_LOG_LINE} more chars]`;
 }
 
-function onBuildStatus({ type, ok, needsProffieOS, message }) {
-  if (type === 'toolchain-setup') {
-    setStatus('toolchain', 'pending', 'Setting up build tools...');
-    openLog();
+function onBuildLog({ line, isError }) {
+  const shown = _truncateLogLine(line);
+  appendLog(shown, isError);
+  appendModalLog(shown, isError);
+}
+
+function onBuildStatus({ type, ok, needsProffieOS, message, coreVersion, running, detail }) {
+  // A background repair is fetching a plugin nothing is pinned to. The panel has
+  // to know, so it does not offer to install the same one again - but Compile
+  // stays available, because this plugin is not what the current build needs and
+  // blocking on it would be a lie about what is in the way. (2026-08-15)
+  if (type === 'plugin-heal') {
+    window._backgroundPluginInstall = running ? (coreVersion || true) : null;
+    // Say what this download IS. The log opens on the first real download phase,
+    // so without a header the user gets several hundred megabytes of arduino-cli
+    // output with nothing explaining why it started - they asked for nothing and
+    // something large began. One line of framing turns that from alarming into
+    // informative, and it is the same slot first-time setup already uses.
+    //
+    // "You can keep working" is a fact, not reassurance: this plugin is not the
+    // one the current build needs, which is exactly why Compile stays enabled.
+    // (2026-08-15)
     const notice = document.getElementById('bp-setup-notice');
+    if (notice) {
+      if (running) {
+        notice.textContent = coreVersion
+          ? `Proffieboard Plugin ${coreVersion} is expected but is not on this computer, so it is `
+            + `being restored in the background. You can keep working - nothing is waiting on it.`
+          : `A Proffieboard Plugin is expected but is not on this computer, so it is being restored `
+            + `in the background. You can keep working - nothing is waiting on it.`;
+        notice.style.display = '';
+      } else {
+        notice.style.display = 'none';
+      }
+    }
+    try { window.vpRefresh?.(); } catch {}
+    return;
+  }
+  if (type === 'toolchain-setup') {
+    setStatus('toolchain', 'pending', 'Setting up the Proffieboard Plugin...');
+    // Do NOT open the log here. This fires on the INTENT to install, and offline
+    // the attempt dies within a second or two - so the panel slid open, promised
+    // something was happening, and then sat empty or filled with arduino-cli's
+    // DNS failures. A panel that opens for nothing is worse than one that opens
+    // late.
+    //
+    // Opened instead on the first real phase from arduino-cli (see the
+    // subscription in initBuildPanel), which is emitted only once a download is
+    // genuinely under way. A failure before that point leaves the log shut and
+    // the status line carrying the message, which is all there is to say.
+    // (2026-08-15)
+    // The log opens on the first real download phase; see initBuildPanel.
+    const notice = document.getElementById('bp-setup-notice');
+    // NOT "First-time setup", and NOT "this only happens once". Both were true
+    // when a single plugin was hardcoded and the only way to see this banner was
+    // a fresh install. Since 1.8 a plugin is chosen per ProffieOS version, so
+    // this fires whenever a pinned one is absent: after picking a different
+    // plugin, after one is removed by another Arduino tool, after a reset. A
+    // returning user was being told it was their first time and that it would
+    // not recur, twice wrong in one sentence.
+    //
+    // Naming the version answers the question the old copy could not: it is not
+    // "setup", it is THIS version needing a plugin you do not have yet.
+    // (2026-08-15)
+    // A plugin install is running in the MAIN process, started by ensureCore
+    // rather than by the panel. Same flag the panel's own installs use, because
+    // the consequences are identical: Compile must stay blocked, the plugin
+    // dropdown must stay locked, and the Install button must not offer to start
+    // a second concurrent install of the plugin already arriving. Without this,
+    // the panel had no idea and offered exactly that. (2026-08-15)
+    _startupCoreInstall = true;
+    window._coreInstallInFlight = coreVersion || true;
+    updateCompileButton();
+    // Repaint the versions panel now rather than waiting for the next time
+    // something happens to render it. It may already have drawn "not installed,
+    // Install X" a moment before this signal arrived, and that stale offer would
+    // then stand for the whole download. (2026-08-15)
+    try { window.vpRefresh?.(); } catch {}
+    if (notice) {
+      notice.textContent = coreVersion
+        ? `Downloading and installing Proffieboard Plugin ${coreVersion}. This can take several `
+          + `minutes on a slower connection. Compile and flash will be available when it finishes.`
+        : `Downloading and installing the Proffieboard Plugin. This can take several minutes on a `
+          + `slower connection. Compile and flash will be available when it finishes.`;
+    }
     if (notice) notice.style.display = '';
     // Hide port/compile/flash during setup — the user has nothing to act on
     // there until the toolchain is ready, and showing them muddies the
@@ -808,7 +2310,22 @@ function onBuildStatus({ type, ok, needsProffieOS, message }) {
     // gated indicators competing for attention) — cleaner than yellow + visible
     // indicators when there's only one action the user can take.
     const state = !ok || needsProffieOS ? 'error' : 'ok';
+    // Remembered so a plugin install can borrow this indicator and hand it back unchanged.
+    _lastToolchainStatus = { state, message };
+    // The main-process install has finished, one way or the other. Release the
+    // lock and re-render the versions panel: it drew "not installed" while that
+    // was true, and nothing else would ever correct it - the plugin arrived
+    // without the panel being told, so it went on offering to install something
+    // already on disk. (2026-08-15)
+    if (_startupCoreInstall) {
+      _startupCoreInstall = false;
+      window._coreInstallInFlight = null;
+      updateCompileButton();
+      try { window.vpRefresh?.(); } catch {}
+    }
     setStatus('toolchain', state, message);
+    // [B-681] Missing installed files: the hover holds the launch notice's full words.
+    if (detail) { const t = el('bp-status-toolchain-text'); if (t) t.title = detail; }
     const notice = document.getElementById('bp-setup-notice');
     if (notice) notice.style.display = 'none';
     // Show port/compile/flash only when compile is actually reachable. Hide
@@ -819,43 +2336,312 @@ function onBuildStatus({ type, ok, needsProffieOS, message }) {
       const item = document.getElementById(`bp-status-${t}-item`);
       if (item) item.style.display = showSecondary ? '' : 'none';
     });
+    // The status has already narrowed this to a single possible action, so offer
+    // it instead of describing it. The row is otherwise empty here for exactly
+    // that reason — the other three indicators just got hidden.
+    const getBtn = document.getElementById('bp-btn-get-proffieos');
+    if (getBtn) getBtn.style.display = (ok && needsProffieOS) ? '' : 'none';
   } else if (type === 'compile') {
     if (ok === null) {
       setStatus('compile', 'pending', message);
     } else {
       setStatus('compile', ok ? 'ok' : 'error', ok ? 'Compile successful' : 'Compile error');
-      if (!ok) openLog();
+      // Same dead hover as the flash chip had: the label repeated over itself. extractCompileError
+      // has already turned the raw toolchain output into a readable sentence by the time it gets
+      // here, so the chip can carry its first line instead of nothing. (2026-09-15)
+      if (!ok) {
+        // `message` ONLY. This is onBuildStatus, which does not destructure `error` - main
+        // sends the reason AS the message (`message: result.ok ? ... : result.error`). An
+        // earlier version said `error || message` here, believing this was onBuildDone, and
+        // threw "error is not defined" on every failed compile and every failed flash, killing
+        // the handler before it could set the terminal label. (2026-09-15)
+        const tip = _firstSentence(message);
+        const ct  = el('bp-status-compile-text');
+        if (ct && tip && tip !== 'Compile error') ct.title = tip;
+        openLog();
+      }
     }
   } else if (type === 'flash') {
     if (ok === null) {
       setStatus('flash', 'pending', message);
     } else {
+      if (ok) {
+        // [B-028] STAMP WHAT WENT ON THE BOARD, not merely that something did.
+        // `_currentBuildKey` is set by the cache check that follows every compile, so by
+        // flash time it carries this build's identity. A null hash means we genuinely do
+        // not know which build this was — and that must read as unknown later, never as
+        // a match.
+        _flashedBuildKey = {
+          configHash:   (_currentBuildKey && _currentBuildKey.configHash) || null,
+          buildPkgHash: (_currentBuildKey && _currentBuildKey.buildPkgHash) || null,
+          configId:     (_currentBuildKey && _currentBuildKey.configId) || null,
+          // WHICH BOARD, from the frozen target rather than the live value. The touch-reset
+          // sequence nulls selectedPortSN before this handler runs, which is the same race
+          // that used to drop the file's @jmt:board_sn - see _flashTargetSN above.
+          // NULL ON A DFU FLASH, DELIBERATELY. That path sets no _flashTargetSN, and
+          // selectedPortSN still holds whatever board was selected BEFORE entering the
+          // bootloader - which may be a different board entirely. Stamping it produced a
+          // confident "A different board was flashed" about the board actually just flashed
+          // (2026-09-15). The real serial is only knowable once the board re-enumerates, and
+          // watchForSerialAfterDfu fills it in there. Until then unknown, which the mismatch
+          // check treats as "say nothing" rather than as a contradiction.
+          sn:           isDfuMode ? null : (_flashTargetSN || selectedPortSN || null),
+          at: Date.now(),
+        };
+      }
+      // A failure leaves the board in an unknown, possibly partial state - worse than
+      // stale - so the error is sticky until a flash actually succeeds. A success clears
+      // it, which is the only thing that legitimately can. (2026-09-15)
+      _flashFailed   = !ok;
+      // `message` only - see the note in the compile branch above. This line threw
+      // "error is not defined" and took the whole handler with it, which is why an
+      // interrupted flash sat on "Flashing on COM6..." forever. (2026-09-15)
+      _flashErrorTip = ok ? '' : _firstSentence(message);
       setStatus('flash', ok ? 'ok' : 'error', ok ? 'Flash successful' : 'Flash error');
-      if (!ok) openLog();
+      if (ok) _decorateFlashChip();
+      if (!ok) {
+        const ft = el('bp-status-flash-text');
+        // The reason if we have one; otherwise say where the reason IS. Either beats repeating
+        // "Flash error" back at someone who just read "Flash error".
+        if (ft) {
+          ft.title = (_flashErrorTip && _flashErrorTip !== 'Flash error')
+            ? _flashErrorTip
+            : 'The flash did not complete. The build log has the details.';
+        }
+        openLog();
+      }
     }
   }
 }
 
-function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sourceChanged }) {
+// ── [B-028] THE FLASH CHIP, RE-READ AGAINST THE CURRENT CONFIG ───────────────
+//
+// "Flash successful" beside "Compile restored from cache" says the current file is on
+// the board. Overnight that was false twice: the flash predated the current build, and
+// no board was attached. The chip was a session flag; these two make it a claim about a
+// specific build, checked against what is in the editor now.
+function _flashTimeLabel(at) {
+  if (!at) return '';
+  try {
+    return new Date(at).toLocaleString(undefined,
+      { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+// Hover provenance, so even a CURRENT flash says when it happened. Aged status reading
+// as history is the whole point; a chip with no timestamp cannot do that.
+//
+// THE LABEL AND THE HOVER HAVE DIFFERENT EVIDENCE RULES, deliberately, not as a
+// convenience. The LABEL speaks only about THIS SESSION - what we did, and whether it still
+// matches. The HOVER may read the persisted @jmt record, because a stored fact is honest as
+// history and dishonest as a present claim: it says what we once did, never that nothing has
+// happened since. So after a restart the chip goes quiet and the hover still tells you what
+// the file remembers. (2026-09-15)
+function _decorateFlashChip() {
+  const text = el('bp-status-flash-text');
+  if (!text) return;
+  if (_flashedBuildKey) {
+    const when = _flashTimeLabel(_flashedBuildKey.at);
+    const sn   = _flashedBuildKey.sn;
+    // Not `${text.textContent} - flashed ${when}`: that repeated the chip's own label back at
+    // the reader, which is the thing a hover must never do. The label says the state; the hover
+    // carries the specifics - WHEN, and WHICH BOARD.
+    // And it SAYS which, rather than printing a serial for the reader to compare against the
+    // Detected field by eye. The comparison was already made to choose the label, so printing
+    // a bare serial and leaving the reader to repeat it is the same failure as a tooltip that
+    // repeats its label. (2026-09-15.) Only reached once the SN
+    // has matched - a mismatch returns earlier with its own wording - so "this board" is safe.
+    if (when) text.title = sn ? `Flashed ${when} to this board (SN: ${sn})` : `Flashed ${when}`;
+    return;
+  }
+  // No flash this session. Anything we can say comes from the file's own record.
+  //
+  // THE SUBJECT IS THE FILE, NOT THE CONTENT IN THE EDITOR, and getting that wrong
+  // reproduced this entry's own bug in prose. An earlier draft said "This config records a
+  // flash on <date>", which reads as a claim about what is open right now - and the file can
+  // have been flashed and then edited a dozen times since. Found 2026-09-15: flashed 9:26,
+  // saved again at 10:16, hover still implied the open version was on the board.
+  //
+  // AND THE QUESTION IS UNANSWERABLE HERE, SO IT IS DECLINED OUT LOUD. The @jmt block
+  // records WHEN a flash happened and to WHICH board, but not the config hash that went with
+  // it - so after a restart there is nothing to compare the open content against. Better to
+  // name that gap than to let a true date imply a match nobody checked.
+  // THE RECORD IS ONLY WORTH SHOWING IF IT COULD POSSIBLY BE ABOUT WHAT IS OPEN.
+  // Found 2026-09-15 in dev testing: a config edited since its last compile showed the chip
+  // "Not flashed" and hovered "Last flashed Sep 15, 2:00 PM" - while the compile chip beside it
+  // read "Config changed, recompile needed". A config that has not even been compiled cannot
+  // ever have been flashed, and the proof is airtight: YOU CANNOT FLASH WHAT WAS NEVER BUILT.
+  // If the open content is not a known build, the file's flash
+  // record is certainly about some other version of it, and reporting it invites exactly the
+  // reading that produced.
+  // So the record is shown only when the open content IS a known build (compileSuccess, set by
+  // the cache check). Otherwise "Not flashed" is already the whole truth and anything added is
+  // noise that misleads. This is the THIRD correction to this hover in one day - the first two
+  // fixed its wording; this one fixes when it may speak at all.
+  if (!_openContentIsBuilt) return;
+
+  const metaWhen = _flashTimeLabel(window.getMetaFlashed?.() || null);
+  const metaSN   = window.getMetaBoardSN?.() || null;
+  // Even with no record there is something worth saying: the label "Not flashed" reads as a
+  // claim about the BOARD, and this scopes it to what we actually know - our own history.
+  if (!metaWhen) { text.title = 'JMT Studio has no record of flashing this config.'; return; }
+  // Say WHICH board, not just a serial. The record and the connected board are both in hand,
+  // so the comparison is ours to make rather than left to be made by eye against the
+  // Detected field. With nothing connected there is no comparison to state, so it names the serial and
+  // stops. (2026-09-15.)
+  if (!metaSN)        { text.title = `Last flashed ${metaWhen}`; return; }
+  if (!selectedPortSN) { text.title = `Last flashed ${metaWhen} to SN: ${metaSN}`; return; }
+  text.title = (selectedPortSN === metaSN)
+    ? `Last flashed ${metaWhen} to this board (SN: ${metaSN})`
+    : `Last flashed ${metaWhen} to a different board (SN: ${metaSN})`;
+}
+
+// Called when the cache check learns the CURRENT config's hash. Degrades rather than
+// clears: the board really does have something on it, and saying so with a date is more
+// use than going blank.
+// ONLY EVER DOWNGRADES. It must not resurrect a success the flash path never set,
+// and it must not fire when no flash has happened this session.
+function _refreshFlashProvenance(currentConfigHash, currentBuildPkgHash, isKnownBuild) {
+  // Remember the identity so triggers that run no cache check can re-evaluate: a board
+  // appearing or disappearing changes the answer without changing a byte of the config.
+  if (currentConfigHash   !== undefined) _lastKnownConfigHash   = currentConfigHash   || null;
+  if (currentBuildPkgHash !== undefined) _lastKnownBuildPkgHash = currentBuildPkgHash || null;
+  if (isKnownBuild        !== undefined) _openContentIsBuilt    = !!isKnownBuild;
+
+  const text = el('bp-status-flash-text');
+  const dot  = el('bp-status-flash-dot');
+  if (!text || !dot) return;
+
+  // OWNERSHIP IS A FACT, NOT A STRING MATCH. This used to test /^Flash/ against the
+  // label, which "Flash error" passes - so a routine cache check wrote "Flash successful"
+  // over a failed flash. Both owners are now asked directly.
+  if (window._isFlashing) return;   // the flash path owns the chip while it runs
+  if (_flashFailed) {               // a failed flash is sticky until the next flash
+    // Re-attach the reason: setStatus writes title = label, so any other chip update in
+    // between would otherwise leave the hover repeating "Flash error" again.
+    if (_flashErrorTip && _flashErrorTip !== 'Flash error') text.title = _flashErrorTip;
+    return;
+  }
+
+  // DFU IS A TRANSPORT, NOT A FACT ABOUT THE FIRMWARE, so it has no bearing here and this
+  // leaves the chip exactly as it was. The board CONNECTION METHOD has no bearing on what the
+  // firmware is (2026-09-15). A board in its bootloader still HOLDS whatever was flashed to it;
+  // it is only not executing it this instant.
+  // An earlier draft treated entering DFU as a reset state and wrote "Board in bootloader
+  // mode" over the chip. That overwrote a TRUE statement with one about how you are connected,
+  // lost the flash record for no reason, and duplicated the DFU indicator beside the port.
+  // Reset state #8 was never a reset state.
+  if (isDfuMode) return;
+
+  if (!_flashedBuildKey) {
+    // SESSION-SCOPED, AND THEREFORE ALWAYS TRUE. This used to read "Not flashed", which
+    // asserts a negative about the BOARD - not ours to claim, and plainly false for anyone
+    // who flashed from Arduino IDE, from another machine, or before this app opened. What
+    // the file remembers goes in the hover, where a stored fact is honest as history.
+    if (text.textContent !== 'Not flashed') {
+      setStatus('flash', '', 'Not flashed');
+    }
+    _decorateFlashChip();
+    return;
+  }
+
+  const when = _flashTimeLabel(_flashedBuildKey.at);
+
+  // ── WHICH BOARD ───────────────────────────────────────────────────────────
+  // Asked ahead of every question about the build, because a statement about the wrong board
+  // is wrong whatever its hashes say. "no board attached" was half of this entry's founding
+  // repro and the half that went unbuilt on 2026-09-13.
+  if (!selectedPortSN) {
+    // A connected board that reports no serial is the one genuine unknown here - there is
+    // nothing to key on. Distinguished from an empty port so we do not tell the user nothing
+    // is plugged in while they are looking at it.
+    // THE PORT CHIP ALREADY OWNS BOARD PRESENCE. An earlier draft said "No board connected
+    // - last flash <when>", sitting inches from a port chip reading "No Proffieboard detected".
+    // Two chips raising the same alarm, and the duplicate spent a whole status slot to do it.
+    // That is both wrong and a waste of a slot. So this states the ONE thing nothing
+    // else on screen carries - when we last flashed - and leaves presence to the chip that
+    // owns it. Neutral rather than warn for the same reason: the port chip is the alarm.
+    // (2026-09-15)
+    setStatus('flash', '', when ? 'Flashed' : 'Not flashed');
+    // Name the board here too, same reason as the success hover: with nothing plugged in,
+    // WHICH board was flashed is the useful specific - it is the one to plug back in.
+    const to = _flashedBuildKey.sn ? ` to SN: ${_flashedBuildKey.sn}` : '';
+    text.title = selectedPortIsProffieboard
+      ? `Flashed ${when}${to}. This board reports no serial number, so it cannot be matched.`
+      : `Flashed ${when}${to}. No board is connected now.`;
+    return;
+  }
+  if (_flashedBuildKey.sn && selectedPortSN !== _flashedBuildKey.sn) {
+    setStatus('flash', 'warn', 'A different board was flashed');
+    text.title = `Flashed SN: ${_flashedBuildKey.sn}${when ? ` at ${when}` : ''}, but SN: ${selectedPortSN} is connected now.`;
+    return;
+  }
+
+  // A target change makes the flashed binary wrong even when the config text is identical -
+  // a different board, USB type, OS version or applied add-on all land in buildPkgHash. It
+  // was being stamped at flash time and never compared, so switching the board dropdown from
+  // V2 to V3 left "Flash successful" standing over a V2 binary. Checked BEFORE the config
+  // hash because it is the more specific statement of the two. (2026-09-15)
+  if (_lastKnownBuildPkgHash && _flashedBuildKey.buildPkgHash &&
+      _lastKnownBuildPkgHash !== _flashedBuildKey.buildPkgHash) {
+    setStatus('flash', 'warn', 'Board has a build for a different target');
+    text.title = when
+      ? `Flashed ${when}, for a different board or ProffieOS version.`
+      : 'Flashed for a different board or ProffieOS version.';
+    return;
+  }
+
+  // Unknown on either side is NOT a mismatch. Claiming the board is stale because we
+  // failed to identify a build would be the same class of lie, pointed the other way.
+  if (!_lastKnownConfigHash || !_flashedBuildKey.configHash) return;
+  if (_lastKnownConfigHash === _flashedBuildKey.configHash) {
+    if (text.textContent !== 'Flash successful') {
+      setStatus('flash', 'ok', 'Flash successful');
+    }
+    _decorateFlashChip();
+    return;
+  }
+  // SPECIFICS GO IN THE TOOLTIP, NOT THE LABEL (2026-09-15). Every label here
+  // used to carry the timestamp, so the status bar grew wider as the state got worse and the
+  // scannable part was buried behind a date. The label is the STATE; the hover is where when,
+  // which board and which target belong.
+  setStatus('flash', 'warn', 'Board has an older build');
+  text.title = when
+    ? `Flashed ${when}, from a different version of this config.`
+    : 'Flashed from a different version of this config.';
+}
+
+function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sourceChanged, interrupted, coreVersion, osVersion, addonsVersion, compiledFqbn, compiledUsb }) {
   if (type === 'compile') {
     if (ok) {
       compileSuccess = true;
+      _currentBuildDir = null;   // build-output
+      _currentBuildKey = null;
       updateCompileButton();
       const durationSec = _compileStartTime ? Math.round((Date.now() - _compileStartTime) / 1000) : null;
-      if (window.setCompiledTimestamp) window.setCompiledTimestamp(undefined, durationSec);
+      _flashFollowsCompile = !_compileOnly;
+      if (window.setCompiledTimestamp) window.setCompiledTimestamp(undefined, durationSec, coreVersion, osVersion, compiledFqbn, compiledUsb, addonsVersion);
       stopCompileTimer();
       stopCompileHints();
       appendLog('\n✓ Firmware ready.', false);
 
-      if (isDfuMode) {
+      if (_compileOnly) {
+        // Compile only [B-466]: the build is done and kept; Flash is there when wanted.
+        _compileOnly = false;
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
+        document.getElementById('bm-abort').style.display = 'none';
+        document.getElementById('bm-close').style.display = 'inline-block';
+        document.getElementById('bm-status').textContent = 'Compiled, not flashed. Flash it from the toolbar whenever you are ready.';
+        setBarMode('success');
+        setFlashEnabled(isDfuMode ? !!dfuDeviceReady : !!selectedPort);
+      } else if (isDfuMode) {
         // DFU mode — don't watch serial ports
-        document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
         document.getElementById('bm-abort').style.display = 'none';
         setBarMode('success');
         if (dfuDeviceReady) {
           document.getElementById('bm-close').style.display = 'none';
-          document.getElementById('bm-status').textContent = 'DFU device ready — flashing...';
+          document.getElementById('bm-status').textContent = 'DFU device ready. Flashing...';
           setFlashEnabled(true);
           setTimeout(() => doFlash(), 1200);
         } else {
@@ -865,19 +2651,17 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
         }
       } else if (selectedPortIsProffieboard && selectedPort) {
         // Board already connected — show success then flash immediately
-        document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
         document.getElementById('bm-abort').style.display = 'none';
         document.getElementById('bm-close').style.display = 'none';
-        document.getElementById('bm-status').textContent = 'Board connected — flashing...';
+        document.getElementById('bm-status').textContent = 'Board connected. Flashing...';
         setBarMode('success');
         setFlashEnabled(true);
         setTimeout(() => doFlash(), 1200);
       } else {
         // No board — show wait UI and start watcher
         setFlashEnabled(false);
-        document.getElementById('bm-title').textContent = '✓ Compile Successful';
-        document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+        setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
         document.getElementById('bm-abort').style.display = 'none';
         document.getElementById('bm-close').style.display = 'inline-block';
         document.getElementById('bm-status').textContent = 'Connect your Proffieboard to flash...';
@@ -886,20 +2670,57 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       }
     } else if (aborted) {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
       finishBuildModal(false, '⊘ Compile Aborted', 'Compile was stopped.');
     } else {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
       finishBuildModal(false, '✗ Compile Failed', error);
-      if (error) appendLog(`\n⚠ ${error}`, true);
+      // [B-373] Our own summary line, so it carries the user's filename too — a log
+      // that said my_config.h beside a dialog that said LGT1Button32.h would be worse
+      // than either alone. The toolchain's streamed lines above it are untouched.
+      if (error) appendLog(`\n⚠ ${_withUserConfigName(error)}`, true);
     }
   }
   if (type === 'flash') {
     window._isFlashing = false;
+    if (ok) _clearInterruptedFlash();
+    // SETTLE THE DROPDOWN NOW, BECAUSE THE EVENT THAT WOULD HAVE DONE IT ALREADY FIRED.
+    // [B-471, 2026-10-05] refreshPorts() ignores ports-changed while _isFlashing, which is the
+    // whole point - the board leaves its port for DFU mid-flash and the dropdown must not chase
+    // it. But that re-enumeration IS the event, and it lands while the flag is still set. With
+    // no later event the dropdown would sit on the pre-flash port forever, which is the same
+    // wrong answer this guard exists to prevent, just frozen instead of flickering. So the
+    // refresh is explicit here, immediately after the flag clears: one update, after, instead
+    // of several during.
+    // [B-289] Until it settles, the port held from before the flash says nothing about now.
+    _interruptedPortsKnown = false;
+    refreshPorts().finally(() => { _interruptedPortsKnown = true; _refreshInterruptedFlashStatus(); });
     stopFlashTimer();
     resumeSerialAfterFlash();
+    // Whatever we knew about the board's ProffieOS is now about the firmware we
+    // just replaced. Drop it so the re-enumerated board is asked again.
+    forgetBoardOSVersion();
     if (!ok) {
+      // A flash can only fail this way against a port the user picked, so when that port was never
+      // identified as a Proffieboard, say so once here - AFTER the attempt, never before it. It is
+      // a note, not a verdict: an unrecognised board that simply did not answer the touch reset
+      // lands in exactly this branch, and for that user the bootloader instructions below are
+      // correct. Hence "may not be", and hence gating it strictly on the port having been
+      // unidentified, so a real board's failure keeps its own message untouched. (2026-08-14)
+      if (!isDfuMode && selectedPort && !selectedPortIsProffieboard) {
+        const note = `${selectedPort} was not identified as a Proffieboard, so it may not be the `
+                   + `right port.`;
+        appendLog(`\nNote: ${note}`, true);
+        // The Bootloader Mode modal clears bm-log when it opens, so a line written here would be
+        // wiped before it is ever seen. Hand it to the modal instead - that is the surface the user
+        // is actually looking at when this happens.
+        _dfuPortNote = note;
+      }
       // Auto-recovery: touch reset succeeded and the board IS in DFU, but the WinUSB
       // driver isn't bound on this USB instance. Switch to DFU mode and run the driver
       // install flow with autoFlash=true so the flash continues once the driver lands.
@@ -914,22 +2735,37 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       // and the user can recompile against the new source state.
       if (sourceChanged) {
         compileSuccess = false;
+        _currentBuildDir = null;
+        _currentBuildKey = null;
         setFlashEnabled(false);
-        setStatus('compile', 'warn', 'OS source changed — recompile needed');
+        setStatus('compile', 'warn', 'OS source changed, recompile needed');
         updateCompileButton();
       }
       _flashTargetPort = null;
       _flashTargetSN   = null;
-      finishBuildModal(false, '✗ Flash Failed', error, { retriable: !!retriable });
+      // [B-289] An interrupted flash waits for the board to come back.
+      const _waitBoard = !!interrupted;
+      _interruptedFlashBase = _waitBoard ? error : null;
+      _interruptedInBootloader = false;
+      finishBuildModal(false, '✗ Flash Failed', _waitBoard ? _interruptedFlashStatus() : error, { retriable: !!retriable });
+      if (_waitBoard) _applyInterruptedFlashAction();
       if (error) appendLog(`\n⚠ ${error}`, true);
       return;
     }
     if (isDfuMode) {
-      // Post-DFU flash: lastFlashedSN + setFlashedTimestamp set in watchForSerialAfterDfu once real port is known
-      document.getElementById('bm-title').textContent = '✓ Flash Complete';
-      document.getElementById('bm-title').style.color = 'var(--c-success-text)';
+      // [BUG-019] The board's serial came from dfu-util before the flash, so the config records the
+      // flashed board now. The port is added by watchForSerialAfterDfu once the board is back.
+      if (_dfuFlashSN) {
+        lastFlashedSN = _dfuFlashSN;
+        if (_flashedBuildKey && !_flashedBuildKey.sn) _flashedBuildKey.sn = _dfuFlashSN;
+        if (window.setFlashedTimestamp) window.setFlashedTimestamp(null, _dfuFlashSN);
+        _refreshFlashProvenance();
+      }
+      // Not done until the board is back [B-543]: watchForSerialAfterDfu sets the final title.
+      setBuildTitle('Waiting for the board to restart', { busy: true, color: 'var(--c-text-bright)' });
       document.getElementById('bm-abort').style.display = 'none';
-      document.getElementById('bm-close').style.display = 'inline-block';
+      // Close appears when the wait ends (board back, or not seen in time): watchForSerialAfterDfu.
+      document.getElementById('bm-close').style.display = 'none';
       // Reset close label — the DFU driver-fix flow renames it to "Cancel" because
       // there IS something cancellable mid-install. Once we've reached "✓ Flash
       // Complete" the button just dismisses the modal, and "Cancel" reads wrong.
@@ -945,14 +2781,20 @@ function onBuildDone({ type, ok, error, aborted, retriable, needsDfuDriver, sour
       // may have been cleared by mid-flash port detection. Fall back to live
       // values for paths that didn't go through doFlash (auto-flash after
       // compile, watcher-triggered flash) where the target wasn't frozen.
-      const flashedPort = _flashTargetPort || selectedPort;
+      // Never record an UNIDENTIFIED port as this config's last-flashed port. `_flashTargetPort` is
+      // the board the resolver actually settled on, so it is always trustworthy; the fallback is
+      // live state, and since flashing is no longer gated on the port being a recognised
+      // Proffieboard that fallback can now be something like COM3. Persisting it means the config
+      // reopens pointed at a port no board will ever appear on, and the next flash sits waiting for
+      // a connection that cannot happen. Better to record nothing than a wrong port. (2026-08-14)
+      const flashedPort = _flashTargetPort || (selectedPortIsProffieboard ? selectedPort : null);
       const flashedSN   = _flashTargetSN   || selectedPortSN;
       lastFlashedSN = flashedSN;
       if (window.setFlashedTimestamp) window.setFlashedTimestamp(flashedPort, flashedSN);
       _flashTargetPort = null;
       _flashTargetSN   = null;
       updatePortChangedIndicator();
-      finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true });
+      _finishFlashWithWebUsbCheck(flashedSN);
     }
   }
 }
@@ -962,18 +2804,18 @@ function showBuildModal(title) {
   stopCompileHints();
   const modal = document.getElementById('build-modal');
   modal.style.display = 'flex';
-  document.getElementById('bm-title').textContent = title;
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  _flashFollowsCompile = false;
+  setBuildTitle(title, { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-log').innerHTML = '';
   document.getElementById('bm-status').textContent = '';
   document.getElementById('bm-close').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-retry').textContent = '↺ Retry Flash';
+  document.getElementById('bm-webusb-fix').style.display = 'none';
   const _dfuSetupBtn = document.getElementById('bm-dfu-setup');
   _dfuSetupBtn.style.display = 'none';
-  _dfuSetupBtn.textContent = '⬇ Download DFU Tool';
+  _dfuSetupBtn.textContent = '▶ Install DFU Driver';
   delete _dfuSetupBtn.dataset.phase;
-  document.getElementById('bm-install-anyway').style.display = 'none';
   document.getElementById('bm-manual-row').style.display = 'none';
   document.getElementById('bm-dfu-note').style.display = 'none';
   document.getElementById('bm-board-select-wrap').style.display = 'none';
@@ -986,6 +2828,25 @@ function showBuildModal(title) {
   document.getElementById('bm-timer-flash').style.display = 'none';
   setBarMode('knightrider');
   startCompileTimer();
+}
+
+// One writer for the build-modal title, so the text and the working-state
+// animation cannot disagree. `busy` adds the busy-dots component, which supplies
+// its own animated ellipsis through ::after - so titles are passed WITHOUT
+// trailing dots, or you get six.
+//
+// The half that was missing until 2026-09-06: the class was hardcoded on the
+// element in index.html and nothing ever removed it, so the dots kept running
+// under "Flash Complete", "Compile Failed" and "DFU Device Ready". Every
+// terminal state, and every state that is waiting on the USER rather than on
+// us, passes busy:false. Same construction as _sfSetImportBar - one owner of
+// every write means the class cannot be left on. [B-322]
+function setBuildTitle(text, { busy = false, color = null } = {}) {
+  const t = document.getElementById('bm-title');
+  if (!t) return;
+  t.textContent = text;
+  t.classList.toggle('busy-dots', !!busy);
+  if (color) t.style.color = color;
 }
 
 function setBarMode(mode) {
@@ -1015,8 +2876,27 @@ let _portWatchInterval = null;
 let _portWatchContext  = null;
 let _lastRawPortKey    = null;
 
+// A board plugged in soon after a compile is the one it was for. Hours later it may be any board,
+// and a flash cannot be undone, so the wait ends and the build waits for a click on Flash instead.
+const FLASH_WAIT_MS = 2 * 60 * 1000;
+// How long a flash waits for its board to come back after the board forensics read before saying it did not.
+const BOARD_BACK_WAIT_MS = 8000;
+let _flashWaitTimer = null;
+function _endFlashWait() {
+  stopPortWatch();
+  setBuildTitle('✓ Compile Successful', { color: 'var(--c-success-text)' });
+  document.getElementById('bm-abort').style.display = 'none';
+  document.getElementById('bm-retry').style.display = 'none';
+  document.getElementById('bm-close').style.display = 'inline-block';
+  document.getElementById('bm-board-select-wrap').style.display = 'none';
+  document.getElementById('bm-status').textContent = 'Compiled, not flashed. Flash it from the toolbar whenever you are ready.';
+  setBarMode('success');
+  setFlashEnabled(isDfuMode ? !!dfuDeviceReady : !!selectedPort);
+}
+
 function startPortWatch(context) {
   _portWatchContext = context;
+  if (context === 'wait-flash' && !_flashWaitTimer) _flashWaitTimer = setTimeout(_endFlashWait, FLASH_WAIT_MS);
   if (_portWatchInterval) return; // already running, context updated above
   _lastRawPortKey = null;
 
@@ -1033,6 +2913,8 @@ function startPortWatch(context) {
 }
 
 function stopPortWatch() {
+  clearTimeout(_flashWaitTimer);
+  _flashWaitTimer = null;
   if (_portWatchInterval) {
     clearInterval(_portWatchInterval);
     _portWatchInterval = null;
@@ -1074,14 +2956,13 @@ function _selectPortAndFlash(port, result) {
   updatePortChangedIndicator();
   applyDetectedBoard(port);
   document.getElementById('bm-board-select-wrap').style.display = 'none';
-  document.getElementById('bm-status').textContent = 'Board detected — flashing...';
+  document.getElementById('bm-status').textContent = 'Board detected. Flashing...';
   setTimeout(() => doFlash(), 1200);
 }
 
 function showWaitForBoardInModal() {
   document.getElementById('build-modal').style.display = 'flex';
-  document.getElementById('bm-title').textContent = '⚡ Connect Board';
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  setBuildTitle('⚡ Connect Board', { color: 'var(--c-text-bright)' });
   document.getElementById('bm-status').textContent = 'Connect your Proffieboard to continue...';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
@@ -1108,21 +2989,184 @@ function showMultiBoardSelect(proffieports) {
   });
   if (currentVal) sel.value = currentVal; // preserve selection if already shown
 
-  document.getElementById('bm-status').textContent = 'Multiple Proffieboards detected — select one:';
+  document.getElementById('bm-status').textContent = 'Multiple Proffieboards detected. Select one:';
   document.getElementById('bm-board-select-wrap').style.display = 'flex';
 }
 
+/**
+ * Render a terminal status: first line emphasised, the rest muted beneath it.
+ *
+ * Every summary already arrives as "what happened\nwhat to do", so the split is
+ * structural and needs no knowledge of the message - it improves all of them,
+ * not just the ones we thought about.
+ *
+ * Built with textContent per node rather than innerHTML ON PURPOSE. This string
+ * carries compiler output and user file paths; a config named with a `<` would
+ * either break the markup or inject it. Formatting comes from structure, never
+ * from markup embedded in the message. (2026-08-15)
+ */
+function _setStatusTiered(elm, msg) {
+  if (!elm) return;
+  elm.textContent = '';
+  delete elm.dataset.interrupted;   // [B-289] set again only by the interrupted-flash status
+  if (!msg) return;
+  const [lead, ...rest] = String(msg).split('\n');
+  const leadEl = document.createElement('span');
+  leadEl.className = 'bm-status-lead';
+  leadEl.textContent = lead;
+  elm.appendChild(leadEl);
+  // A BLANK LINE in the message means "separate what follows". It becomes a
+  // margin on the next line rather than an empty row: the message says where the
+  // break belongs, the display decides what it costs - and a margin is tunable
+  // where a blank line is a whole line-height in a modal that is already tall.
+  // Messages with no blank line render exactly as before. (2026-08-15)
+  let gapPending = false;
+  for (const line of rest) {
+    if (!line.trim()) { gapPending = true; continue; }
+    const detailEl = document.createElement('span');
+    detailEl.className = 'bm-status-detail' + (gapPending ? ' bm-status-gap' : '');
+    detailEl.textContent = line;
+    elm.appendChild(detailEl);
+    gapPending = false;
+  }
+}
+
+// ── [B-373] SAY THE USER'S FILENAME, NOT THE STAGING COPY'S ──────────────────
+//
+// `stageConfig` writes the editor's content to a FIXED path inside the selected OS
+// version's tree — `.../ProffieOS/config/my_config.h` — and arduino-cli compiles that
+// copy. gcc reports against the file it was handed, so a failure while working on
+// LGT1Button32.h reads
+//     my_config.h:37 — cannot convert 'const char*' to 'StyleFactory*' in initialization
+// and nothing on screen connects the two. The compile log's opening line does say
+// "Config staged to: ...\my_config.h", which is correct and is not where anyone looks
+// while reading an error.
+//
+// THE LINE NUMBERS ARE RIGHT, WHICH IS WHY THIS IS A FIX AND NOT AN EXPLANATION.
+// The staged copy is byte-identical to the buffer, so line 37 IS line 37 of what they
+// are looking at. Only the filename token is wrong, so this is a substitution with
+// nothing to map and no way to point somewhere wrong.
+//
+// OURS ONLY. This rewrites the SUMMARY we render — the Compile Failed dialog and the
+// line we append. The toolchain's streamed output in Build Output is never touched:
+// that is what gets pasted into a forum thread and it has to match what the toolchain
+// actually said.
+const _STAGED_CONFIG_BASENAME = 'my_config.h';   // must match CONFIG_FILENAME in proffieos.js
+
+function _withUserConfigName(text) {
+  if (!text) return text;
+  const el = document.getElementById('input-filename');
+  const base = (el && el.value.trim()) || '';
+  // No name yet means the staging basename IS the name the user would recognise, so
+  // there is nothing to substitute — the default in the filename field is my_config.
+  if (!base) return text;
+  const own = base.toLowerCase().endsWith('.h') ? base : `${base}.h`;
+  if (own === _STAGED_CONFIG_BASENAME) return text;
+  return text.split(_STAGED_CONFIG_BASENAME).join(own);
+}
+
+// [B-289] An interrupted flash's next step depends on one thing: whether the board still has a port.
+// With one, flashing again is the step and Bootloader Mode the fallback; without one, the Flash button
+// is greyed, so Bootloader Mode is the only step offered. Redrawn as the port list changes while the
+// message is up, since a board can take a moment to come back on its port.
+let _interruptedFlashBase = null;
+// In Bootloader Mode there is no port; the bootloader check below is what says the board is back.
+function _interruptedHasPort() { return !isDfuMode && !!selectedPort; }
+// With no port, the board may also turn up in the bootloader (BOOT and RESET, or on its own); the
+// message is checked for that every two seconds while it is up, since a bootloader is not a port.
+let _interruptedInBootloader = false;
+let _interruptedWatch = null;
+let _interruptedPortsKnown = true;
+function _interruptedState() {
+  if (_interruptedPortsKnown && _interruptedHasPort()) return 'port';
+  return _interruptedInBootloader ? 'bootloader' : 'none';
+}
+function _interruptedFlashStatus() {
+  const next = {
+    port:       'The board is connected again.',
+    bootloader: 'The board is in bootloader mode.',
+    none:       'Waiting for the board. Flash Now appears when it reconnects, or when it is in bootloader '
+              + 'mode (hold BOOT, tap RESET, release both).',
+  }[_interruptedState()];
+  return _interruptedFlashBase + '\n\n' + next;
+}
+// Flash Now shows only once there is a board to flash: back on its port, or in the bootloader.
+function _applyInterruptedFlashAction() {
+  const btn = document.getElementById('bm-retry');
+  if (!btn) return;
+  const state = _interruptedState();
+  if (state === 'none') {
+    btn.style.display = 'none';
+    delete btn.dataset.interrupted;
+  } else {
+    btn.textContent = '⚡ Flash Now';
+    btn.dataset.interrupted = state === 'port' ? 'flash' : 'dfu-flash';
+    btn.style.display = 'inline-block';
+  }
+  if (state === 'port') _stopInterruptedWatch(); else _startInterruptedWatch();
+}
+function _startInterruptedWatch() {
+  if (_interruptedWatch) return;
+  let busy = false;
+  _interruptedWatch = setInterval(async () => {
+    const st = document.getElementById('bm-status');
+    const modal = document.getElementById('build-modal');
+    if (!st || st.dataset.interrupted !== '1' || !modal || modal.style.display === 'none') { _stopInterruptedWatch(); return; }
+    if (busy || _interruptedHasPort()) return;
+    busy = true;
+    // [B-522] In Bootloader Mode the port list is locked, so a board back on a port is seen only
+    // here. Leaving Bootloader Mode reopens the list, and its refresh offers Flash Now on that port.
+    if (isDfuMode) {
+      let p = null;
+      try { p = await window.electronAPI.getRecommendedPort(); } catch {}
+      if (p && p.ok && (p.proffieports || []).length) {
+        busy = false;
+        exitDfuMode();
+        return;
+      }
+    }
+    let r = null;
+    try { r = await window.electronAPI.detectDFU(); } catch {}
+    busy = false;
+    const ready = !!(r && r.found && r.accessible);
+    if (ready !== _interruptedInBootloader) {
+      _interruptedInBootloader = ready;
+      _refreshInterruptedFlashStatus();
+    }
+  }, 2000);
+}
+function _stopInterruptedWatch() {
+  if (_interruptedWatch) { clearInterval(_interruptedWatch); _interruptedWatch = null; }
+}
+// A new flash, or a successful one, ends the wait: nothing may redraw the old failure over it.
+function _clearInterruptedFlash() {
+  _stopInterruptedWatch();
+  _interruptedFlashBase = null;
+  _interruptedInBootloader = false;
+  const st = document.getElementById('bm-status');
+  if (st) delete st.dataset.interrupted;
+  const btn = document.getElementById('bm-retry');
+  if (btn) delete btn.dataset.interrupted;
+}
+function _refreshInterruptedFlashStatus() {
+  const st = document.getElementById('bm-status');
+  if (!_interruptedFlashBase || !st || st.dataset.interrupted !== '1') return;
+  _setStatusTiered(st, _withUserConfigName(_interruptedFlashStatus()));
+  st.dataset.interrupted = '1';
+  _applyInterruptedFlashAction();
+}
 function finishBuildModal(success, title, statusMsg, { retriable = false, isFlash = false } = {}) {
   stopCompileHints();
   stopPortWatch();
   stopCompileTimer();
   stopFlashTimer();
-  document.getElementById('bm-title').textContent = title;
-  document.getElementById('bm-title').style.color = success ? 'var(--c-success-text)' : 'var(--c-danger-text)';
-  document.getElementById('bm-status').textContent = statusMsg || '';
+  setBuildTitle(title, { color: success ? 'var(--c-success-text)' : 'var(--c-danger-text)' });
+  // [B-373] One substitution point, so it covers every error signature at once rather
+  // than being repeated per translation.
+  _setStatusTiered(document.getElementById('bm-status'), _withUserConfigName(statusMsg || ''));
+  if (!success && _interruptedFlashBase) document.getElementById('bm-status').dataset.interrupted = '1';
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-dfu-setup').style.display = 'none';
-  document.getElementById('bm-install-anyway').style.display = 'none';
   document.getElementById('bm-manual-row').style.display = 'none';
   document.getElementById('bm-retry').style.display = retriable ? 'inline-block' : 'none';
   const _closeBtn = document.getElementById('bm-close');
@@ -1156,10 +3200,25 @@ function appendLog(line, isError) {
   else if (line.startsWith('---') || line.startsWith('✓')) span.classList.add('log-highlight');
   panel.appendChild(span);
   panel.scrollTop = panel.scrollHeight;
+  if (el('bp-log-copy')?.style.display === 'none') _syncBuildLogActions();
 }
 
 function clearLog() {
   el('bp-log-content').innerHTML = '';
+  _syncBuildLogActions();
+}
+
+// Copy and export for Build Output: everything in the panel, compile and flash runs alike.
+function _buildLogLines() {
+  const t = el('bp-log-content')?.textContent || '';
+  return t.replace(/\n$/, '').split('\n').filter((l, i, a) => a.length > 1 || l);
+}
+function _syncBuildLogActions() {
+  const has = !!(el('bp-log-content')?.textContent || '').trim();
+  for (const id of ['bp-log-copy', 'bp-log-export']) {
+    const b = el(id);
+    if (b) b.style.display = has ? '' : 'none';
+  }
 }
 
 function _setLogChevron(open) {
@@ -1171,6 +3230,12 @@ function openLog() {
   el('bp-log-body').classList.add('open');
   _setLogChevron(true);
   _syncSerialPauseToCollapse(true);
+}
+
+function closeLog() {
+  el('bp-log-body').classList.remove('open');
+  _setLogChevron(false);
+  _syncSerialPauseToCollapse(false);
 }
 
 function toggleLog() {
@@ -1200,10 +3265,18 @@ let _suppressPopoverEl = null;
 let _serialCtxMenuEl   = null;
 const SERIAL_MAX_LINES = 1000;
 
-// TEMP: collapse-pause verification — flip to false (or grep-remove all
-// SERIAL_DEBUG references) once the behavior is verified.
-const SERIAL_DEBUG = true;
+// Collapse-pause tracing for the serial monitor. OFF.
+// This was added as a TEMP verification aid and committed as `true` on 2026-05-31 (v1.7.0),
+// so every shipped build since has logged a line to the console on every serial packet —
+// found 2026-10-05 when the noise buried the console we were debugging an import in.
+// Left in place rather than deleted because it is genuinely useful for the collapse/pause
+// behaviour it was written for; flip it to turn it back on for that, and off again after.
+const SERIAL_DEBUG = false;
 let _serialRxBytes = 0;
+// When the board last said anything, and what it has said since a reset was sent
+// (restartBoardViaMonitor). Null means nobody is listening for a reply.
+let _serialLastRxAt = 0;
+let _serialRxSinceReset = null;
 function _debugSerial(event, extra) {
   if (!SERIAL_DEBUG) return;
   const tab      = _serialActive ? 'serial' : 'build';
@@ -1255,6 +3328,7 @@ function _serialAppendLine(lineText) {
   if (_matchesAnyRule(lineText)) div.classList.add('suppressed');
   log.appendChild(div);
   while (log.children.length > SERIAL_MAX_LINES) log.removeChild(log.firstChild);
+  if (el('bp-serial-copy')?.style.display === 'none') _syncSerialLogActions();
   // Only snap-to-bottom while the user is following the live tail. When they
   // scroll up to read history, _serialAutoScroll is false and new lines stay
   // off-screen — Arduino IDE pet peeve fix. Bump the jump-pill counter so the
@@ -1554,6 +3628,8 @@ async function openSerialMonitor() {
   if (!_serialUnsubData) {
     _serialUnsubData = window.electronAPI.onSerialData(({ text }) => {
       _serialRxBytes += text.length;
+      _serialLastRxAt = Date.now();
+      if (_serialRxSinceReset !== null) _serialRxSinceReset = (_serialRxSinceReset + text).slice(-4000);
       if (_serialPaused) {
         _serialPausedBuf += text;
         if (_serialPausedBuf.length > 200000) {
@@ -1589,6 +3665,16 @@ async function closeSerialMonitor() {
   _serialOpen = false;
   _serialSetStatus('disconnected', false);
   _updateSerialPauseButton();
+  // The monitor was holding the port, which is the one blocking reason that lasts
+  // as long as the user wants it to. Releasing it is a real trigger, and without
+  // this the version stayed unknown until some unrelated port event happened to
+  // fire. NOT on the flash path: pauseSerialBeforeFlash sets _serialAutoPaused
+  // before calling us, and the flash needs the port we would be grabbing.
+  // (probeBoardOSVersion also guards on isBusy, so this is belt and braces.)
+  if (!_serialAutoPaused && !_boardOSVersion && selectedPort && selectedPortIsProffieboard) {
+    _probedSN = null;
+    probeBoardOSVersion({ path: selectedPort, isProffieboard: true, serialNumber: selectedPortSN });
+  }
 }
 
 function _switchLogTab(name) {
@@ -1705,9 +3791,89 @@ function _syncSerialPauseToCollapse(open) {
   _setSerialPaused(!open);
 }
 
+// ── Copy and export the serial log and Build Output ────
+// Shown whenever the log has history, connected or not. Both take every received line, the ones a
+// filter hides included; the app's own placeholder hints are not part of the log.
+function _serialLogLines() {
+  const log = el('bp-serial-log');
+  if (!log) return [];
+  return Array.from(log.querySelectorAll('.serial-line:not(.serial-hint)')).map(d => d.textContent);
+}
+function _syncSerialLogActions() {
+  const has = !!el('bp-serial-log')?.querySelector('.serial-line:not(.serial-hint)');
+  for (const id of ['bp-serial-copy', 'bp-serial-export']) {
+    const b = el(id);
+    if (b) b.style.display = has ? '' : 'none';
+  }
+}
+function _fieldText(id) {
+  const f = document.getElementById(id);
+  if (!f) return '';
+  if (f.tagName === 'SELECT') return (f.selectedOptions[0]?.textContent || f.value || '').trim();
+  return String(f.value || '').trim();
+}
+function _logHeader(title, lineCount, appVersion) {
+  const now = new Date();
+  const rows = [
+    ['Saved',          now.toLocaleString()],
+    ['Config',         _fieldText('input-filename') + (window._currentFilePath ? `  (${window._currentFilePath})` : '')],
+    ['Description',    _fieldText('input-desc')],
+    ['Board',          _fieldText('input-board')],
+    ['OS version',     _fieldText('input-version')],
+    ['Prop',           _fieldText('input-prop')],
+    ['USB',            _fieldText('bp-usb-select')],
+    ['Port',           selectedPort || ''],
+    ['Board serial',   selectedPortSN || ''],
+    ['Board reports',  _boardOSVersion ? `ProffieOS ${_boardOSVersion}` : ''],
+    ['JMT Studio',     appVersion || ''],
+    ['Lines',          String(lineCount)],
+  ].filter(([, v]) => v);
+  const w = Math.max(...rows.map(([k]) => k.length)) + 2;
+  return [title, ...rows.map(([k, v]) => (k + ':').padEnd(w) + v), '-'.repeat(60)].join('\n');
+}
+// kind: 'serial' (the Serial Monitor) or 'build' (Build Output).
+const _LOG_KINDS = {
+  serial: { name: 'serial log',   title: 'JMT Studio serial log',   suffix: 'serial', lines: () => _serialLogLines() },
+  build:  { name: 'build output', title: 'JMT Studio build output', suffix: 'build',  lines: () => _buildLogLines() },
+};
+async function _copyLog(kind) {
+  const k = _LOG_KINDS[kind];
+  const lines = k.lines();
+  if (!lines.length) return;
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'));
+    window.showToast?.(`${k.name[0].toUpperCase() + k.name.slice(1)} copied (${lines.length} line${lines.length === 1 ? '' : 's'}).`, { kind: 'success' });
+  } catch (e) {
+    window.showToast?.(`Could not copy the ${k.name}: ${e.message}`, { kind: 'error' });
+  }
+}
+async function _exportLog(kind) {
+  const k = _LOG_KINDS[kind];
+  const lines = k.lines();
+  if (!lines.length) return;
+  let appVersion = '';
+  try { appVersion = await window.electronAPI.getAppVersion(); } catch {}
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const config = (_fieldText('input-filename') || k.suffix).replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || k.suffix;
+  const text = _logHeader(k.title, lines.length, appVersion) + '\n' + lines.join('\n') + '\n';
+  let r = null;
+  try { r = await window.electronAPI.exportLog({ fileName: `${stamp}_${config}_${k.suffix}.txt`, text }); } catch (e) { r = { ok: false, error: e.message }; }
+  if (r && r.ok) {
+    window.showToast?.(`${k.name[0].toUpperCase() + k.name.slice(1)} saved to Downloads: ${r.fileName}`, {
+      kind: 'success',
+      action: { label: 'Show in folder', onClick: () => window.electronAPI.showItemInFolder(r.path) },
+    });
+  } else {
+    window.showToast?.(`Could not save the ${k.name}: ${(r && r.error) || 'unknown error'}`, { kind: 'error' });
+  }
+}
+
 function _clearSerialLog() {
   const log = el('bp-serial-log');
   if (log) log.innerHTML = '';
+  _syncSerialLogActions();
   _serialPausedBuf = '';
   _serialPending   = '';
   // After clearing, user is implicitly "at the bottom" of an empty log — re-engage
@@ -1761,6 +3927,10 @@ function wireSerialMonitor() {
     if (el('bp-log-body').classList.contains('open')) toggleLog();
   });
   el('bp-serial-clear')?.addEventListener('click', _clearSerialLog);
+  el('bp-serial-copy')?.addEventListener('click', () => _copyLog('serial'));
+  el('bp-serial-export')?.addEventListener('click', () => _exportLog('serial'));
+  el('bp-log-copy')?.addEventListener('click', () => _copyLog('build'));
+  el('bp-log-export')?.addEventListener('click', () => _exportLog('build'));
   el('bp-serial-filters')?.addEventListener('click', () => _toggleSuppressPopover());
   el('bp-serial-filters-clearall')?.addEventListener('click', e => { e.stopPropagation(); _clearAllSuppression(); });
   // Right-click anywhere on a line in the serial log → suppression menu
@@ -1824,38 +3994,376 @@ function wireSerialMonitor() {
 }
 
 // ── UI helpers ─────────────────────────────────────────
+
+// Single source of truth for whether Compile can run, and — the part that was
+// missing — WHY it can't. Compile has six independent preconditions and only one
+// of them (no file open) is evident from looking at the screen, so a greyed-out
+// button with no explanation leaves the user guessing. That is especially true
+// for a first-timer, whose most likely blocker is an OS version they never
+// noticed they had to choose.
+//
+// Both callers route through here deliberately. The two disabled-state
+// assignments had already drifted: setBusy() omitted the OS-version check that
+// updateCompileButton() applied, so whether Compile was enabled with no version
+// selected depended on which ran last.
+//
+// Order matters: most fundamental first, so the tooltip names the thing they
+// should deal with rather than whichever check happens to be listed first.
+function compileBlockedReason() {
+  if (isBusy)                   return 'A build or flash is already running.';
+  // A config that has never been saved is NOT "no config open" - it is an open
+  // config that has no path yet, and doCompile already knows how to ask for one
+  // (the dirty prompt offers Save As, and doSave falls through to doSaveAs when
+  // there is no path). Blocking on the path alone disabled the button BEFORE that
+  // prompt could ever run, and told the user to open a config file they already
+  // had open. So refuse only when nothing is open at all. [B-198]
+  if (!window.isConfigOpen?.() && !window._currentFilePath) {
+    return 'Open a config file to compile.';
+  }
+  if (!selectedFqbn)            return 'Select your board.';
+  const version = document.getElementById('input-version')?.value;
+  if (!version || isVersionSentinel(version)) {
+    return 'Select a ProffieOS version. If the list is empty, download or import one first.';
+  }
+  // Plugin still arriving. Compiling against a half-present core fails in
+  // ways that look like the config's fault rather than a download's.
+  if (window._coreInstallInFlight) {
+    // Same words as the Versions panel's own label. "Getting" was dropped there as a state that
+    // described nothing; leaving it alive here is the "grep the term, not the feature" miss.
+    // The flag carries a version string when one is known and plain `true` when
+    // it is not, so it can never be interpolated blind - that renders
+    // "Proffieboard Plugin true" into a tooltip. (2026-08-15)
+    const which = window._coreInstallInFlight;
+    return typeof which === 'string'
+      ? `Downloading and installing Proffieboard Plugin ${which}. Compile once it is ready.`
+      : 'Downloading and installing the Proffieboard Plugin. Compile once it is ready.';
+  }
+  // A cache check does NOT block compiling, and it used to. Every other reason above describes a
+  // real inability - busy, no file, no board, no version, a half-present plugin. This one only said
+  // "wait, we might restore this for you", and the cost was a visible disable/enable on every
+  // config open, board change, USB change and OS version change. Coalescing the overlapping checks
+  // reduced it from several flickers to one; the flicker is gone entirely only by not blocking.
+  // Clicking Compile during the lookup is legitimate - the user gets a compile, which is what they
+  // asked for. checkCacheForConfig bails if a build started while it was reading, so a late cache
+  // hit can no longer overwrite a running compile. (2026-08-14)
+  if (compileSuccess)           return 'Already compiled. Flash it, or edit the config to build again.';
+  return null;
+}
+
+// The Compile right-click menu's close, while it is open. [B-466]
+var _closeCompileMenu = null;
+
+function applyCompileButtonState() {
+  const btn = el('bp-btn-compile');
+  if (!btn) return;
+  const reason = compileBlockedReason();
+  btn.disabled = !!reason;
+  // A cache answer that lands while the menu is open greys Compile; the menu goes with it rather
+  // than offering a build the button no longer allows. [B-466]
+  if (btn.disabled && _closeCompileMenu) _closeCompileMenu();
+  // A check in flight does not disable the button (that blinks it on every config switch); the
+  // tooltip says so, and a click meanwhile is refused (doCompile). [B-470]
+  _compileTip().set(reason || (cacheCheckPending ? 'Checking for a build of this config…' : compileReadyTip()));
+}
+
+// Compile's tooltip, drawn by the app rather than the OS: a native title is read once when it appears,
+// so hovering through the cache check kept showing "Checking..." after the answer had landed. [B-470]
+// Hover is tracked by the pointer's position over the button, not the button's own events: a
+// disabled button is not guaranteed to receive them, and its reason is when the tooltip matters most.
+// Built on first use, not at load: applyCompileButtonState can run before this point in the file,
+// which is also why this is `var` (hoisted) and not `let` (unreadable until its line has run).
+var _compileTipInst = null;
+function _compileTip() { return _compileTipInst || (_compileTipInst = _makeCompileTip()); }
+function _makeCompileTip() {
+  let text = '';
+  let tip = null;
+  let inside = false;
+  let timer = null;
+  const node = () => {
+    if (!tip) { tip = document.createElement('div'); tip.className = 'bp-live-tip'; document.body.appendChild(tip); }
+    return tip;
+  };
+  const place = (btn) => {
+    const t = node();
+    const r = btn.getBoundingClientRect();
+    t.style.display = 'block';
+    const w = t.offsetWidth, h = t.offsetHeight;
+    t.style.left = Math.max(4, Math.min(r.left, window.innerWidth - w - 4)) + 'px';
+    t.style.top = (r.bottom + 6 + h > window.innerHeight ? r.top - h - 6 : r.bottom + 6) + 'px';
+  };
+  const hide = () => { clearTimeout(timer); timer = null; if (tip) tip.style.display = 'none'; };
+  document.addEventListener('mousemove', (e) => {
+    const btn = el('bp-btn-compile');
+    const r = btn && btn.getBoundingClientRect();
+    const now = !!r && r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (now === inside) return;
+    inside = now;
+    if (!now) { hide(); return; }
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (inside && text) { node().textContent = text; place(btn); } }, 500);
+  }, { passive: true });
+  document.addEventListener('mousedown', hide, true);
+  return {
+    set(t) {
+      text = t || '';
+      const btn = el('bp-btn-compile');
+      if (btn) btn.removeAttribute('title');
+      if (tip && tip.style.display === 'block') {
+        if (!text) { hide(); return; }
+        tip.textContent = text;
+        if (btn) place(btn);
+      }
+    },
+  };
+}
+
+// What a click on a live Compile will do, which depends on what is plugged in: a compile carries
+// straight on into a flash when a Proffieboard is on the port or the board is in bootloader mode,
+// and otherwise waits for one to be connected (onBuildDone). "Compile and flash" leads, so the flash is
+// part of the promise before the click; a user who expected only a compile was surprised by it.
+// Right-click is the only door to Compile only, so the tooltip names it. [B-466]
+const _COMPILE_ONLY_HINT = ' Right-click to compile without flashing.';
+function compileReadyTip() {
+  if (isDfuMode) return 'Compile and flash this config to the board in bootloader (DFU) mode.' + _COMPILE_ONLY_HINT;
+  if (selectedPortIsProffieboard && selectedPort) {
+    return `Compile and flash this config to the Proffieboard on ${selectedPort}.` + _COMPILE_ONLY_HINT;
+  }
+  return 'Compile this config into firmware for your board. Connect your Proffieboard to flash it when it finishes.'
+    + _COMPILE_ONLY_HINT;
+}
+
 function setBusy(busy) {
   isBusy = busy;
-  el('bp-btn-compile').disabled = busy || !selectedFqbn || compileSuccess || !window._currentFilePath || cacheCheckPending;
+  applyCompileButtonState();
   if (isDfuMode) {
     el('bp-btn-flash').disabled = busy || !compileSuccess;
   } else {
-    el('bp-btn-flash').disabled = busy || !compileSuccess || !selectedPort || !selectedPortIsProffieboard;
+    el('bp-btn-flash').disabled = busy || !compileSuccess || !selectedPort;
   }
+  applyFlashTitle();
   el('bp-btn-refresh-ports').disabled = busy;
   el('bp-port-select').disabled = busy;
 }
 
 function updateCompileButton() {
-  const version = document.getElementById('input-version')?.value;
-  const hasVersion = version && version !== '__add_version__';
-  if (!isBusy) el('bp-btn-compile').disabled = !selectedFqbn || !hasVersion || compileSuccess || !window._currentFilePath || cacheCheckPending;
+  applyCompileButtonState();
 }
 window.updateCompileButton = updateCompileButton;
 window.getLastFlashedSN    = () => lastFlashedSN;
 
-function setFlashEnabled(enabled) {
-  if (isDfuMode) {
-    el('bp-btn-flash').disabled = !enabled || isBusy;
-  } else {
-    el('bp-btn-flash').disabled = !enabled || !selectedPort || !selectedPortIsProffieboard || isBusy;
+// Restarts the board after its card was ejected the way a person does it: `reset` typed into this
+// Serial Monitor, echoed in the log like anything typed there. Tested by hand on the Yoga
+// 2026-11-08 with the monitor open, paused and closed: instant every time. The old route opened a
+// second connection, wrote and closed at once, and the `reset` sat on the board unrun until
+// something reconnected; the monitor's retry was what restarted it.
+// One `reset`, never two: a held one runs on the next connection, so the fallback reconnects
+// instead of sending again. Returns null when the monitor cannot be used for this port (another
+// port selected, a build running), and the caller falls back to main's own restart.
+async function restartBoardViaMonitor(portPath) {
+  const up = s => String(s || '').toUpperCase();
+  if (!portPath || up(selectedPort) !== up(portPath) || isBusy || isDfuMode || window._isFlashing) return null;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const listed = async () => {
+    try { return (await window.electronAPI.listPortsRaw()).some(p => up(p.path) === up(portPath)); }
+    catch { return null; }
+  };
+  // A monitor connection that was open and closed without being asked counts as the board dropping:
+  // a fast restart can leave and come back between two port listings.
+  const dropsWithin = async (ms) => {
+    const t0 = Date.now();
+    const wasOpen = _serialOpen;
+    while (Date.now() - t0 < ms) {
+      if (wasOpen && !_serialOpen) return true;
+      if ((await listed()) === false) return true;
+      await sleep(100);
+    }
+    return wasOpen && !_serialOpen;
+  };
+  if (!_serialOpen) { await openSerialMonitor(); if (!_serialOpen) return null; await sleep(500); }
+  // LET THE BOARD SETTLE FIRST. Right after an eject the board takes its card back and rescans
+  // the fonts; a reset sent during that sat unread and then arrived as "eset" ("Whut? :eset",
+  // 2026-11-13), while the same reset typed a minute later worked. Wait for 1.5 s of quiet on the
+  // serial line, at most 15 s.
+  const tSettle = Date.now();
+  if (!_serialLastRxAt) _serialLastRxAt = tSettle;
+  while (Date.now() - _serialLastRxAt < 1500 && Date.now() - tSettle < 15000) await sleep(100);
+  const sendReset = async () => {
+    _serialAppend('> reset\n');
+    const log = el('bp-serial-log');
+    if (log) log.scrollTop = log.scrollHeight;
+    _serialRxSinceReset = '';
+    const w = await window.electronAPI.writeSerial('reset\n');
+    return !!(w && w.ok);
+  };
+  // "Whut?" back means the reset arrived damaged and was NOT run, so sending it again right away
+  // still runs exactly one: the rule above is about a HELD reset running twice, and this never ran.
+  let resent = false;
+  const resendIfGarbled = async () => {
+    if (resent || !/Whut\?/.test(_serialRxSinceReset || '')) return false;
+    resent = true;
+    return sendReset();
+  };
+  let dropped = false;
+  try {
+    if (!(await sendReset())) return null;
+    dropped = await dropsWithin(2000);
+    if (!dropped && (await resendIfGarbled())) dropped = await dropsWithin(2500);
+    for (let i = 0; !dropped && i < 2; i++) {
+      // The retry, as clicked by hand: reconnect, nothing sent.
+      await closeSerialMonitor();
+      await openSerialMonitor();
+      dropped = await dropsWithin(2500);
+      if (!dropped && (await resendIfGarbled())) dropped = await dropsWithin(2500);
+    }
+  } finally {
+    _serialRxSinceReset = null;
   }
+  if (!dropped) return { ok: true, status: 'not-restarted', via: 'monitor' };
+  window.electronAPI.boardForgetSdShared?.(portPath);   // a restarted board boots with access off
+  // Back on USB, then the monitor reconnected so the board's welcome shows where `reset` was typed.
+  const t0 = Date.now();
+  let back = false;
+  while (!back && Date.now() - t0 < 8000) { back = (await listed()) === true; if (!back) await sleep(100); }
+  if (!back) return { ok: true, status: 'restarted', via: 'monitor', back: false, ready: false };
+  await closeSerialMonitor();
+  while (!_serialOpen && Date.now() - t0 < 30000) { await openSerialMonitor(); if (!_serialOpen) await sleep(500); }
+  return { ok: true, status: 'restarted', via: 'monitor', back: true, ready: _serialOpen };
+}
+window._bpRestartBoardViaMonitor = restartBoardViaMonitor;
+
+// Why Flash is unavailable, in plain terms. Deliberately does NOT restructure the
+// enable logic the way compileBlockedReason() does: setFlashEnabled() takes an
+// explicit `enabled` flag that ten call sites pass on purpose, and collapsing that
+// into state-derived conditions would discard information. So this only explains
+// the button; it never decides it.
+//
+// Because the reason is derived from state rather than from the caller's flag,
+// there may be paths where the button is disabled and none of these match. In
+// that case we say NOTHING rather than something vague: a tooltip that does not
+// help teaches people not to hover, and then the useful ones go unread too.
+// It also makes the gap a diagnostic — a disabled Flash button with no tooltip
+// means a blocking condition this function does not model, which is a bug to
+// fix here rather than paper over.
+// A port we did not identify as a Proffieboard is NOT a blocking reason. Detection is arduino-cli
+// matching a board name, and it is not the last word: a board can be there and unrecognised, and
+// the user may know something we do not. Refusing the attempt bought nothing either - `flash()`
+// resolves which board it is actually talking to by serial number, corrects a wrong selection when
+// exactly one board is present, and refuses only when genuinely ambiguous. That is a better
+// decision than this gate could make, made later with more information.
+//
+// Offering a port in the dropdown and then refusing it was the incoherent part: show it or do not.
+// (2026-08-14)
+function flashBlockedReason() {
+  if (isBusy)         return 'A build or flash is already running.';
+  // No OS version selected means the config asked for one we do not have. Any
+  // binary sitting in the cache was built against the version the app used to
+  // SUBSTITUTE in that case, so offering to flash it puts firmware on a board
+  // that this config never asked for - the same harm the empty selection exists
+  // to prevent, arriving through the other button. compileSuccess survives a
+  // cache restore, so it cannot be the only gate. (2026-08-19)
+  const _ver = el('input-version')?.value;
+  if (!_ver || isVersionSentinel(_ver)) {
+    return window._configOsVersionMissing
+      ? `This config was written for ${window._configOsVersionMissing}, which isn't installed. Install it, or pick a version, before flashing.`
+      : 'Select a ProffieOS version before flashing.';
+  }
+  if (!compileSuccess) return 'Compile first, then flash.';
+  if (!isDfuMode && !selectedPort) return 'Connect your Proffieboard and select its port.';
+  return null;
+}
+
+// Call AFTER the disabled state has been set, so the tooltip matches reality.
+function applyFlashTitle() {
+  const btn = el('bp-btn-flash');
+  if (!btn) return;
+  const base = btn.disabled ? (flashBlockedReason() || '') : flashReadyTip();
+  const menu = _flashMenuAvailable() ? 'Right-click for board forensics.' : '';
+  const current = compileSuccess && _sameStamp(_buildStamp, _boardInstalled) ? 'The board is already running this build.' : '';
+  btn.title = [base, current, menu].filter(Boolean).join('\n');
+  applyForensicsButton();
+  _refreshBuildStamp();
+}
+
+// The build stamp compiled into firmware (__DATE__ __TIME__), compared with the board's "installed:" [B-686].
+const _sameStamp = (a, b) => !!a && !!b && String(a).replace(/\s+/g, ' ').trim() === String(b).replace(/\s+/g, ' ').trim();
+let _buildStamp = null, _buildStampToken = 0;
+async function _refreshBuildStamp() {
+  const token = ++_buildStampToken;
+  let stamp = null;
+  if (compileSuccess) { try { stamp = await window.electronAPI.forensicsBuildStamp(_currentBuildDir); } catch {} }
+  if (token !== _buildStampToken || stamp === _buildStamp) return;
+  _buildStamp = stamp;
+  applyFlashTitle();
+}
+
+// The port row's board forensics button, shown with no config open (CSS hides it otherwise):
+// Run Board Forensics for a board with no recording, Show Board Records once it has one.
+let _forensicsBtnToken = 0;
+async function applyForensicsButton() {
+  const btn = el('bp-btn-forensics');
+  if (!btn) return;
+  const sn = _flashMenuAvailable() ? _forensicsSN() : null;
+  const token = ++_forensicsBtnToken;
+  const div = el('bp-forensics-divider');
+  if (!sn) { btn.style.display = 'none'; if (div) div.style.display = 'none'; return; }
+  let summary = null;
+  try { summary = await window.electronAPI.forensicsSummary(sn); } catch {}
+  if (token !== _forensicsBtnToken) return;
+  const recorded = !!(summary && summary.recorded);
+  btn.textContent = recorded ? 'Show Board Records' : 'Run Board Forensics';
+  btn.title = recorded ? 'Show what was recorded for this board.\nRight-click for more options.' : '';
+  btn.onclick = () => { if (isBusy) return; if (recorded) showBoardRecords(sn); else runBoardForensics(); };
+  btn.oncontextmenu = recorded ? openFlashMenu : (ev) => ev.preventDefault();
+  btn.style.display = '';
+  if (div) div.style.display = '';
+}
+
+// The right-click menu on Flash opens only when it has something to run: a Proffieboard with a
+// serial number on the selected port, and nothing else in progress.
+function _flashMenuAvailable() {
+  return !isBusy && !isDfuMode && !!selectedPort && !!_forensicsSN();
+}
+
+// What Flash will do when it is live, the same way Compile's tooltip says what Compile will do.
+function flashReadyTip() {
+  if (isDfuMode) return "Flash this config's build to the board in bootloader (DFU) mode.";
+  return `Flash this config's build to the Proffieboard on ${selectedPort}.`;
+}
+
+function setFlashEnabled(enabled) {
+  // A state-derived condition rather than a caller flag, same as !selectedPort:
+  // no version selected means there is nothing this config legitimately built
+  // against, whatever the cache is holding. Ten call sites pass `enabled` for
+  // their own reasons and none of them know about this one.
+  const _ver     = el('input-version')?.value;
+  const _noVer   = !_ver || isVersionSentinel(_ver);
+  if (isDfuMode) {
+    el('bp-btn-flash').disabled = !enabled || isBusy || _noVer;
+  } else {
+    el('bp-btn-flash').disabled = !enabled || !selectedPort || isBusy || _noVer;
+  }
+  applyFlashTitle();
 }
 
 function startCompileTimer() {
   _compileStartTime = Date.now();
   document.getElementById('bm-timer-compile').style.display = 'inline';
   document.getElementById('bm-timer-compile-val').textContent = '0:00';
+  // Persistent left-justified "last compile" for this config (its home now, so it
+  // isn't lost when the hint line shows something else).
+  const _lastDur = window.getLastCompileDuration?.();
+  const _lastEl  = document.getElementById('bm-timer-last');
+  if (_lastEl) {
+    // Keep the left slot PRESENT in compile mode even when empty: as a zero-width
+    // flex item it holds position 0, so the live Compile Time stays pinned to the
+    // RIGHT edge under space-between. (Collapsing it would leave a single child,
+    // which space-between pins LEFT.) Flash mode hides it instead, so there the
+    // two timers hug opposite edges.
+    _lastEl.textContent = _lastDur
+      ? `Last compile: ${Math.floor(_lastDur / 60)}:${(_lastDur % 60).toString().padStart(2, '0')}`
+      : '';
+    _lastEl.style.display = 'inline';
+  }
   const start = _compileStartTime;
   compileTimerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - start) / 1000);
@@ -1869,9 +4377,22 @@ function stopCompileTimer() {
   // Keep the frozen value visible — showBuildModal() hides it on next compile reset
 }
 
+// Compile Time shows during a flash only when that flash follows a compile in the same run.
+function showFlashedBuildCompileTime() {
+  if (!_flashFollowsCompile) document.getElementById('bm-timer-compile').style.display = 'none';
+  _flashFollowsCompile = false;
+}
+
 function startFlashTimer() {
+  // One clock: a flash that ended without stopping its own (the board did not come back) left it running,
+  // and two clocks then wrote Flash Time in turn. [QA10, 2026-11-20: 4:14 at 17% and jumping]
+  stopFlashTimer();
   document.getElementById('bm-timer-flash').style.display = 'inline';
   document.getElementById('bm-timer-flash-val').textContent = '0:00';
+  // Don't show last-compile during a flash (no last-flash time tracked yet).
+  // Collapse the slot entirely so Compile Time / Flash Time hug the row edges.
+  const _lastEl = document.getElementById('bm-timer-last');
+  if (_lastEl) { _lastEl.textContent = ''; _lastEl.style.display = 'none'; }
   const start = Date.now();
   flashTimerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - start) / 1000);
@@ -1943,6 +4464,17 @@ function setStatus(type, state, message) {
   dot.className = `bp-status-dot bp-status-${state}`;
   text.textContent = message;
 
+  // A TOOLTIP THAT REPEATS ITS LABEL IS NOT A TOOLTIP (2026-09-15). A label is the short
+  // version and a tooltip has more room, so a hover that matches its label should not exist at
+  // all. This line used to set title = message unconditionally, which manufactured a
+  // dead hover on every chip in the bar - hover anything, learn nothing.
+  // It did have a real job, kept here: when the label is ellipsis-truncated the hover is
+  // the ONLY way to read it. So the title is set when the text is actually clipped, and
+  // cleared when it is not. A caller with something better to say overwrites it afterwards,
+  // which is unchanged.
+  if (text.scrollWidth > text.clientWidth) text.title = message;
+  else text.removeAttribute('title');
+
   if (type === 'port') {
     if (state === 'warn' || state === 'error') {
       _portTipEnabled = true;
@@ -1958,16 +4490,58 @@ function setStatus(type, state, message) {
 
 // ── Cache check ────────────────────────────────────────
 // missStatus: message to show on miss; false = don't update status on miss
-async function checkCacheForConfig(missStatus) {
+async function checkCacheForConfig(missStatus, opts) {
+  // Only the NEWEST check may write. Opening or switching a config fires several of these in a
+  // row - board change, USB change, OS version change, and the debounced content change - each
+  // awaiting its own IPC round trip. Two problems came from letting them all write:
+  //
+  //   1. Correctness. Each run captures its own content/fqbn/usb, but they all resolve into the
+  //      same shared state. Switch configs while one is in flight and the OLDER result can land
+  //      last, so a stale HIT marks the new config "restored from cache" and enables Flash for a
+  //      binary built from a different config. Same family as flashing whichever board happened
+  //      to be in the bootloader.
+  //   2. The visible half. Each run cleared cacheCheckPending on its way out, so the button went
+  //      disabled -> enabled once per check: a flicker on every config open.
+  //
+  // A superseded run now returns WITHOUT clearing the flag, so the button stays disabled until
+  // the last check settles. One disable, one enable. (2026-08-14)
+  const seq = ++_cacheCheckSeq;
+
   // Callers (board change, USB change, OS version change, etc.) pre-set cacheCheckPending=true
   // to disable Compile immediately. If this run can't proceed (no API, no FQBN, empty editor),
   // we must clear that flag here — otherwise Compile stays disabled forever after a + New flow
   // where loadContent dispatches a board='' change while content/FQBN are still unset.
   const content = (window.electronAPI && window.getEditorContent) ? window.getEditorContent() : null;
-  const canCheck = !!(window.electronAPI && selectedFqbn && content && content.trim());
+  // The OS version is NOT a parameter of checkCache — the main process keys on
+  // whatever selectVersion last told it. When the config asked for a version we
+  // do not have, the renderer selects nothing and deliberately does NOT call
+  // selectVersion('') (that would wipe Store.lastVersion over one bad config), so
+  // main is still holding the previous version and will happily answer for it.
+  // The result was "Compile restored from cache" over a config with no selection,
+  // claiming a ready build for a version the user never chose — the same
+  // substitution wearing a status message. Do not ask while nothing is selected.
+  // (2026-08-19)
+  const _ver     = el('input-version')?.value;
+  const hasVer   = !!(_ver && !isVersionSentinel(_ver));
+  const canCheck = !!(window.electronAPI && selectedFqbn && hasVer && content && content.trim());
 
   if (!canCheck) {
-    if (cacheCheckPending) { cacheCheckPending = false; updateCompileButton(); }
+    // Blocked specifically because no version is selected, with a config open that
+    // asked for one we do not have: any compileSuccess and any "restored from
+    // cache" on screen belong to a DIFFERENT version and must not survive. Skipping
+    // the check alone would leave the old claim standing, which is how the status
+    // line kept promising a ready build over an empty selection. Narrowed to this
+    // reason on purpose — the other !canCheck paths (+ New with no content or no
+    // FQBN yet) must keep their existing behaviour.
+    if (!hasVer && window._configOsVersionMissing && seq === _cacheCheckSeq) {
+      compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
+      setFlashEnabled(false);
+      setStatus('compile', '', 'Not compiled');
+    }
+    // Still guard the clear: a newer check may already be in flight and owns the button now.
+    if (cacheCheckPending && seq === _cacheCheckSeq) { cacheCheckPending = false; updateCompileButton(); }
     return;
   }
 
@@ -1976,27 +4550,118 @@ async function checkCacheForConfig(missStatus) {
 
   let result;
   try {
-    result = await window.electronAPI.checkCache(content, selectedFqbn, selectedUsb);
+    result = await window.electronAPI.checkCache(content, selectedFqbn, selectedUsb, window.getMetaConfigId?.() || null);
   } catch {
+    if (seq !== _cacheCheckSeq) return;
     cacheCheckPending = false;
     updateCompileButton();
     return;
   }
+  if (seq !== _cacheCheckSeq) return;   // superseded while we were reading the cache
+  // A build started while we were reading. It owns compileSuccess, the flash button and the status
+  // line from here; a late cache hit landing on top would claim "restored from cache" over a
+  // compile that is actually running.
+  if (isBusy) { cacheCheckPending = false; return; }
   cacheCheckPending = false;
+
+  // [B-028] THE FLASH CHIP IS RE-READ ON BOTH PATHS, AND A MISS IS THE PATH THAT MATTERS.
+  // This call used to live inside the hit branch only. Editing a config produces a MISS -
+  // that content has never been compiled - so the re-read never ran and the chip kept
+  // saying "Flash successful" beside "Config changed - recompile needed". Together those
+  // two still claim the current file is on the board, which is the exact lie this entry
+  // exists to kill, reached through a different door. The chip could recover but never
+  // degrade: editing BACK to compiled content is a hit, so it only ever moved toward the
+  // optimistic claim.
+  // The hash is equally available here - cacheManager.checkOnly returns configHash on a
+  // miss, because hashing is how it decided it was a miss. Hoisted above the branch so
+  // there is one call site and the two paths cannot drift. Must stay ahead of the
+  // buildOutputMatches early return below, which is still a flashable state and still
+  // needs the comparison. (2026-09-15)
+  // The third argument is why the hover can trust itself: `result.hit || buildOutputMatches` is
+  // decided HERE, where the answer is known, instead of being read later off compileSuccess -
+  // which this very call runs ahead of.
+  _refreshFlashProvenance(result.configHash, result.buildPkgHash,
+                          !!(result.hit || result.buildOutputMatches));
 
   if (result.hit) {
     compileSuccess = true;
-    setFlashEnabled(isDfuMode ? compileSuccess : (selectedPortIsProffieboard && !!selectedPort));
+    // The build stays where it is. Before B-216 this check had already copied the entry over
+    // build-output by the time we got here; now it has touched nothing and the flash reads the
+    // entry directly.
+    _currentBuildDir = result.buildDir || null;
+    _currentBuildKey = { configHash: result.configHash, buildPkgHash: result.buildPkgHash,
+                         configId: result.configId || null };
+    setFlashEnabled(isDfuMode ? compileSuccess : !!selectedPort);
     updateCompileButton();
-    setStatus('compile', 'ok', 'Compile restored from cache');
-    if (window.setCompiledTimestamp) window.setCompiledTimestamp(result.metadata.compiledAt);
+    // [B-028] A HIT ON OUR OWN BUILD IS NOT A RESTORE. Clicking Close on the still-open
+    // build modal re-runs this check, which hits - that compile just populated the cache -
+    // and used to relabel this session's own build "restored from cache". The check could
+    // not tell "this hit IS the build I just made" from "restored a prior build on open",
+    // so the session records the hashes it genuinely compiled and asks.
+    if (opts && opts.afterCompile && result.configHash) _sessionBuiltHashes.add(result.configHash);
+    setStatus('compile', 'ok',
+      (result.configHash && _sessionBuiltHashes.has(result.configHash))
+        ? 'Compile successful'
+        : 'Compile restored from cache');
+    // Carry the core through on a restore too. The cached entry records which
+    // core produced it, so the config's marker stays truthful rather than
+    // inheriting whatever core happens to be selected now.
+    if (window.setCompiledTimestamp) {
+      // A hit means this entry's buildPkgHash matched, and that hash is derived
+      // from the selected version's ProffieOS source hash - so the entry WAS
+      // built from the version now selected. The name is therefore recoverable
+      // from the selection without storing it in the cache. (2026-08-15)
+      // fqbn and usb come from the ENTRY, not from the current controls: they are
+      // components of buildPkgHash, so a hit proves the entry was built with
+      // exactly these, and the metadata has recorded them since before 1.8.
+      // compiled_addons is recoverable from the selection for the same reason the
+      // version NAME is, and the chain is checkable: applying add-ons rewrites
+      // files inside the tree and calls invalidateVersionHash, buildPkgHash is
+      // derived from that source hash, so a hit proves the tree - and therefore
+      // its add-ons release - is the one that produced this entry.
+      // Asked of main rather than derived here, so the fresh-compile path and
+      // this one cannot drift apart. [B-473]
+      let _addons = null;
+      try {
+        const _r = await window.electronAPI.getAddonsVersionFor(content, null);
+        _addons = _r?.addonsVersion || null;
+      } catch {}
+      // The ENTRY's duration, not `undefined`. Passing undefined left whatever the
+      // last fresh compile wrote standing, so a restore described its own build in
+      // every field except this one - four runs on one config made it visible:
+      // a restore of a 98-second build reported 108, the time of an unrelated
+      // compile six minutes earlier. The cache has carried the real value all
+      // along (cacheManager.js:626); it was simply never read. [B-474]
+      // Milliseconds in the entry, seconds in the setter.
+      const _ms  = result.metadata.compileDurationMs;
+      const _dur = (typeof _ms === 'number') ? Math.round(_ms / 1000) : null;
+      window.setCompiledTimestamp(result.metadata.compiledAt, _dur,
+                                  result.metadata.coreVersion,
+                                  document.getElementById('input-version')?.value || null,
+                                  result.metadata.fqbn, result.metadata.usb, _addons);
+    }
   } else {
     // Cache miss → if we were claiming a valid cached compile, downgrade. The lookup
     // just ran with current inputs and didn't find a match, so the previous "success"
     // state was based on stale inputs (e.g., my_styles.h edited in another tab, OS
     // files changed via JMT apply, etc.). The miss is the authoritative truth.
+    if (result.buildOutputMatches) {
+      // NOT STORED, BUT STILL BUILT. The cache has no copy, but the build folder holds a build
+      // stamped with this exact config and these exact build settings - so it is flashable, and
+      // saying "not compiled" would be false. This is the state a failed cache save leaves behind,
+      // and it is also what clearing the cache from Settings leaves behind. (B-216)
+      compileSuccess = true;
+      _currentBuildDir = null;   // null = build-output
+      _currentBuildKey = null;
+      setFlashEnabled(isDfuMode ? true : !!selectedPort);
+      updateCompileButton();
+      setStatus('compile', 'ok', 'Compiled (not stored for reuse)');
+      return;
+    }
     if (compileSuccess) {
       compileSuccess = false;
+      _currentBuildDir = null;
+      _currentBuildKey = null;
       setFlashEnabled(false);
     }
     updateCompileButton();
@@ -2022,9 +4687,19 @@ function _setupDfuModeUI() {
   });
   el('bp-dfu-mode-indicator').style.display = 'inline-flex';
   setFlashEnabled(compileSuccess);
+  // No _refreshFlashProvenance() here on purpose: entering DFU changes nothing the flash chip
+  // reports. See the isDfuMode note in _refreshFlashProvenance.
 }
 
 function enterDfuMode() {
+  // [B-543] Into the board's event log: it left its serial connection for bootloader mode.
+  if (_loggedDetectedSN) {
+    window.electronAPI.forensicsLog?.(_loggedDetectedSN, 'disconnected', { reason: 'bootloader' })?.catch?.(() => {});
+    _loggedDetectedSN = null;
+  }
+  window.electronAPI.forensicsDfuSerials?.().then(list => {
+    for (const sn of (Array.isArray(list) ? list : [])) window.electronAPI.forensicsLog?.(sn, 'bootloader', { boards: list.length })?.catch?.(() => {});
+  }).catch(() => {});
   _setupDfuModeUI();
   setStatus('port', 'warn', 'Checking for DFU device...');
   _checkDfuOnEntry();
@@ -2063,6 +4738,11 @@ function exitDfuMode() {
   selectedPort = null;
   selectedPortIsProffieboard = false;
   setFlashEnabled(false);
+  // [B-028] Leaving DFU has to re-evaluate too, or "Board in bootloader mode" sticks after
+  // the board is running firmware again. refreshPorts() below settles the board state and
+  // re-reads the chip through applyDetectedBoard/clearDetectedBoard, but it is async and
+  // may resolve to neither - so the transition is stated here rather than assumed downstream.
+  _refreshFlashProvenance();
   refreshPorts();
 }
 
@@ -2085,10 +4765,8 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     const modal = document.getElementById('build-modal');
     modal.style.display = 'flex';
     document.getElementById('bm-log').innerHTML = '';
-    document.getElementById('bm-title').textContent = '⚡ Bootloader Mode (DFU)';
-    document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+    setBuildTitle('⚡ Bootloader Mode (DFU)', { busy: true, color: 'var(--c-text-bright)' });
     document.getElementById('bm-dfu-setup').style.display = 'none';
-    document.getElementById('bm-install-anyway').style.display = 'none';
     document.getElementById('bm-manual-row').style.display = 'none';
     document.getElementById('bm-dfu-note').style.display = 'none';
     document.getElementById('bm-retry').style.display = 'none';
@@ -2097,6 +4775,15 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     setBarMode('knightrider');
     appendModalLog('Verifying DFU connection...', false);
     document.getElementById('bm-status').textContent = 'Verifying connection...';
+  }
+  // Both branches above have finished writing (and the retry branch has cleared bm-log), so this
+  // is the first point where the note survives. It is set only when the flash that landed here was
+  // aimed at a port we never identified as a Proffieboard, so a real board's recovery is unchanged.
+  // One-shot: cleared on use, so it cannot leak into a later, unrelated DFU session.
+  if (_dfuPortNote) {
+    appendModalLog('', false);
+    appendModalLog(`Note: ${_dfuPortNote}`, false);
+    _dfuPortNote = null;
   }
   stopCompileTimer();
   document.getElementById('bm-timer-compile').style.display = 'none';
@@ -2120,10 +4807,20 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
 
     if (!isRetry && dfuResult.found) break;  // boot-wait: break on found regardless of driver
 
-    if (isRetry && dfuResult.found && !dfuResult.accessible) {
-      // Device found but driver not yet active — give Windows up to 10s to finish applying it
-      if (!notAccessibleStart) notAccessibleStart = Date.now();
-      if (Date.now() - notAccessibleStart > 10000) break;  // give up, show error
+    if (dfuResult.found && !dfuResult.accessible) {
+      // Board is in DFU but WinUSB cannot access it yet.
+      if (justInstalled) {
+        // We just force-bound the driver, which is synchronous, so this short
+        // grace only covers the brief re-enumeration window before dfu-util can
+        // open the device. (The old libwdi installer bound asynchronously and
+        // needed up to 10s here; ours does not.)
+        if (!notAccessibleStart) notAccessibleStart = Date.now();
+        if (Date.now() - notAccessibleStart > 3000) break;
+      } else {
+        // Cold entry: nothing is installing, so there is nothing to wait for.
+        // Show the driver-fix screen immediately instead of stalling 10s.
+        break;
+      }
     } else {
       notAccessibleStart = null;  // device disappeared — reset grace timer
     }
@@ -2162,31 +4859,26 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     const isWin   = navigator.platform.startsWith('Win');
     const isLinux = navigator.platform.startsWith('Linux');
     let linuxCopyCmd = '';
+    // [B-688] WinUSB already bound but the board cannot be opened: another program is using it.
+    const boardBusy = isWin && !!dfuResult.busy && !justInstalled;
 
     // ── Messages ──────────────────────────────────────────
-    if (isWin) {
+    if (boardBusy) {
+      appendModalLog('The board is in bootloader mode, but another program is using it. Close that program, then click Try Again.', false);
+    } else if (isWin) {
       if (driverStillLoading) {
-        appendModalLog('STM32 Bootloader detected but the WinUSB driver cannot access it.', false);
+        appendModalLog('The driver installed, but Windows has not finished activating it on this board.', false);
         appendModalLog('', false);
         appendModalLog('  Detected: STM32 Bootloader (0483:df11)', false);
         appendModalLog('', false);
-        if (justInstalled) {
-          appendModalLog('Unplug the board, reconnect it in Bootloader Mode, then click Try Again.', false);
-          appendModalLog('If it still fails, download and reinstall the DFU Tool below.', false);
-        } else {
-          appendModalLog('The WinUSB driver may be missing, outdated, or installed by another tool.', false);
-          appendModalLog('Download and install the DFU Tool below to fix it.', false);
-        }
+        appendModalLog('Unplug the board, reconnect it in Bootloader Mode, then click Try Again.', false);
+        appendModalLog('If it still fails, click Install DFU Driver below.', false);
       } else {
-        appendModalLog('A Windows driver is required to communicate with the STM32 Bootloader.', false);
-        appendModalLog('Windows binds this driver per USB port — you may need to re-run this when switching ports or after some Windows updates.', false);
+        appendModalLog('The board is in bootloader mode, but JMT Studio cannot reach it until its driver is set up.', false);
         appendModalLog('', false);
         appendModalLog('  Detected: STM32 Bootloader (0483:df11)', false);
         appendModalLog('', false);
-        appendModalLog('JMT Studio will download the official Proffie DFU setup tool and run', false);
-        appendModalLog('it unchanged. You will be asked by Windows before anything is installed.', false);
-        appendModalLog('', false);
-        appendModalLog('Click Download DFU Tool, or use a manual option below.', false);
+        appendModalLog('Click Install DFU Driver and accept the Windows prompts. JMT Studio installs its own signed driver, with nothing to download. This is a one-time setup that also covers any boards you connect later.', false);
       }
     } else if (isLinux) {
       appendModalLog('DFU device detected but cannot be accessed.', true);
@@ -2210,22 +4902,28 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
     // Windows really does have a driver problem (WinUSB rebinding per port).
     // Linux/Mac don't — it's a permissions issue (udev rules), and calling it
     // a "driver" misleads users into searching for software that doesn't exist.
-    document.getElementById('bm-title').textContent =
-      isWin ? 'Fix DFU Driver' : 'Fix DFU Access';
-    document.getElementById('bm-title').style.color = 'var(--c-warn-text)';
+    setBuildTitle(boardBusy ? 'Board Busy' : isWin ? 'Fix DFU Driver' : 'Fix DFU Access', { color: 'var(--c-warn-text)' });
     document.getElementById('bm-abort').style.display = 'none';
     document.getElementById('bm-close').style.display = 'inline-block';
     document.getElementById('bm-close').textContent = 'Cancel';
     document.getElementById('bm-dfu-note').style.display = 'block';
 
     const dfuSetupBtn = document.getElementById('bm-dfu-setup');
-    dfuSetupBtn.textContent = '⬇ Download DFU Tool';
+    dfuSetupBtn.textContent = '▶ Install DFU Driver';
     delete dfuSetupBtn.dataset.phase;
 
     const retryBtn = document.getElementById('bm-retry');
 
     // ── Per-OS button and status logic ────────────────────
-    if (isWin) {
+    if (boardBusy) {
+      retryBtn.textContent = '↺ Try Again';
+      retryBtn.style.display = 'inline-block';
+      _dfuRetryRecheck   = true;
+      _dfuRetryAutoFlash = autoFlash;
+      dfuSetupBtn.style.display = 'none';
+      document.getElementById('bm-manual-row').style.display = 'none';
+      document.getElementById('bm-status').textContent = 'Board busy';
+    } else if (isWin) {
       if (driverStillLoading) {
         if (justInstalled) {
           retryBtn.textContent = '↺ Try Again';
@@ -2241,7 +4939,9 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
         document.getElementById('bm-status').textContent = 'Windows driver required';
       }
       dfuSetupBtn.style.display = 'inline-block';
-      document.getElementById('bm-manual-row').style.display = 'flex';
+      // The manual tools (Setup Tool, Zadig) are no longer offered: their WinUSB is outranked by ST's signed
+      // driver, the per-board re-binding Studio's own signed driver fixed. The row stays hidden.
+      document.getElementById('bm-manual-row').style.display = 'none';
     } else if (isLinux) {
       retryBtn.style.display = 'none';
       document.getElementById('bm-status').textContent = 'Reboot required';
@@ -2270,12 +4970,11 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
   document.getElementById('bm-log').innerHTML = '';
   appendModalLog('✓ Proffieboard detected in Bootloader Mode (DFU)', false);
   document.getElementById('bm-abort').style.display = 'none';
-  document.getElementById('bm-title').textContent = '⚡ DFU Device Ready';
-  document.getElementById('bm-title').style.color = 'var(--c-title-accent)';
+  setBuildTitle('⚡ DFU Device Ready', { color: 'var(--c-title-accent)' });
   setBarMode('success');
 
   if (autoFlash && compileSuccess) {
-    appendModalLog('Firmware ready — flashing now...', false);
+    appendModalLog('Firmware ready. Flashing now...', false);
     doFlashDFU();
   } else {
     appendModalLog('', false);
@@ -2300,9 +4999,25 @@ async function startDfuWaitModal(isRetry = false, autoFlash = true, justInstalle
 
 // Called when Flash is clicked in DFU mode, or auto-triggered from startDfuWaitModal.
 async function doFlashDFU() {
+  _clearInterruptedFlash();
   if (isBusy) return;
   if (!compileSuccess) {
     appendLog('Compile first before flashing.', true);
+    return;
+  }
+
+  // Same SD-corruption guard as the serial flash path (the compiled binary
+  // carries the USB mode regardless of which flash route uploads it).
+  const _sdFlash = window.checkMassStorageSafety
+    ? await window.checkMassStorageSafety(selectedUsb, 'flash')
+    : true;
+  if (_sdFlash === 'recompile') { _flashAfterSdFix(); return; }
+  if (!_sdFlash) {
+    // Cancelled — restore a usable, closable state instead of stranding it.
+    if (el('bm-status')) el('bm-status').textContent = 'Flash cancelled. Click Flash to try again.';
+    if (el('bm-close'))  el('bm-close').style.display = 'inline-block';
+    if (el('bm-abort'))  el('bm-abort').style.display = 'none';
+    setFlashEnabled(true);
     return;
   }
 
@@ -2322,27 +5037,204 @@ async function doFlashDFU() {
     return;
   }
 
+  // [B-543] The board's serial from dfu-util's list, so the flash is filed under it and can be recorded
+  // first. Unknown when more than one board is in bootloader mode; then it is filed once the board is back.
+  _dfuFlashSN = null;
+  try {
+    const list = await window.electronAPI.forensicsDfuSerials();
+    if (Array.isArray(list) && list.length === 1) _dfuFlashSN = list[0];
+  } catch {}
+  let _dfuRecorded = false;
+  if (_dfuFlashSN) {
+    const ans = await _forensicsAskBeforeFlash({ sn: _dfuFlashSN, bootloader: true });
+    if (ans === 'cancel') { document.getElementById('build-modal').style.display = 'none'; setFlashEnabled(true); return; }
+    if (ans === 'record') {
+      document.getElementById('bm-log').innerHTML = '';
+      document.getElementById('build-modal').style.display = 'flex';
+      setBusy(true);
+      const stageAns = await _forensicsStageInFlash({ sn: _dfuFlashSN, bootloader: true });
+      setBusy(false);
+      if (stageAns === 'cancel') { document.getElementById('build-modal').style.display = 'none'; setFlashEnabled(true); return; }
+      _dfuRecorded = true;
+    }
+  }
+
   // Device confirmed present — go straight to flash
-  document.getElementById('bm-title').textContent = '⚡ Flashing (DFU)...';
-  document.getElementById('bm-title').style.color = 'var(--c-text-bright)';
+  setBuildTitle('⚡ Flashing (DFU)', { busy: true, color: 'var(--c-text-bright)' });
   document.getElementById('bm-abort').style.display = 'none';
   document.getElementById('bm-retry').style.display = 'none';
   document.getElementById('bm-close').style.display = 'none';
-  document.getElementById('bm-status').textContent = 'Uploading firmware...';
+  document.getElementById('bm-status').textContent = 'Flashing firmware...';
   document.getElementById('build-modal').style.display = 'flex';
-  document.getElementById('bm-log').innerHTML = '';
+  if (!_dfuRecorded) document.getElementById('bm-log').innerHTML = '';
   startFlashTimer();
+  showFlashedBuildCompileTime();
   setBarMode('flash');
   window._isFlashing = true;
   await pauseSerialBeforeFlash();
   setBusy(true);
   setStatus('flash', 'pending', 'Flashing via DFU...');
+  _typeFlashHint(_sdFlash);
 
-  await window.electronAPI.flashDFU();
+  await window.electronAPI.flashDFU(_currentBuildDir, _dfuFlashSN, _flashRecordInfo());   // [B-661] the build's real folder, as the normal flash does
   setBusy(false);
   // onBuildDone handles success/failure via IPC
 }
 
+// ── WebUSB on Windows, checked before "Flash Complete" [B-660] ──
+// Windows reads the WebUSB interface's GUID once per board and caches it, and any build
+// without WebUSB wipes it while the "already read" flag stays set. So after a WebUSB build
+// goes on, browser tools (ProffieOS Workbench) can fail with only "Unable to claim
+// interface" and no reason. Proven on a real board 2026-11-10, including that it re-breaks
+// on every switch. The rule: check after the board comes back, BEFORE saying done,
+// and offer the fix inside this modal. The check needs no admin; the fix is one Windows
+// permission prompt, never run without the user's click.
+// Status text for this step: a bold lead (what happened), a plain detail line, and an optional
+// bold tail inside the detail (the one thing the user must not miss). Built as nodes, not
+// innerHTML, and not through _setStatusTiered, which bolds the whole first line.
+function _setWebUsbStatus(lead, detail = '', boldTail = '', { busy = false } = {}) {
+  const st = document.getElementById('bm-status');
+  st.textContent = '';
+  const l = document.createElement('span');
+  l.className = 'bm-status-lead' + (busy ? ' busy-dots' : '');
+  l.textContent = lead;
+  st.appendChild(l);
+  if (detail || boldTail) {
+    const d = document.createElement('span');
+    d.className = 'bm-status-detail';
+    if (detail) d.appendChild(document.createTextNode(detail + (boldTail ? ' ' : '')));
+    if (boldTail) { const b = document.createElement('strong'); b.textContent = boldTail; d.appendChild(b); }
+    st.appendChild(d);
+  }
+}
+
+// Does this flash need the check at all? Windows only, a build that includes WebUSB, and a
+// real board serial to look the setting up by.
+function _webUsbCheckApplies(sn, usbOverride = null) {
+  const usb = usbOverride || (window.getCompiledUsb && window.getCompiledUsb()) || selectedUsb || '';
+  return window.electronAPI.platform === 'win32' && /webusb/i.test(usb)
+      && /^[0-9A-Fa-f]{12}$/.test((sn || '').trim()) && !!window.electronAPI.checkWebUsb;
+}
+
+// Normal (touch-reset) flash: the check runs before "Flash Complete" is ever shown.
+// usb/done: a flash of a recorded build [B-543] passes the USB setting that build was made with and its
+// own completion; a regular flash uses the open config's.
+async function _finishFlashWithWebUsbCheck(flashedSN, { usb = null, done: doneOverride = null } = {}) {
+  const done = doneOverride || (() => finishBuildModal(true, '✓ Flash Complete', 'Firmware flashed successfully.', { isFlash: true }));
+  const sn   = (flashedSN || '').trim();
+  if (!_webUsbCheckApplies(sn, usb)) { done(); return; }
+
+  _setWebUsbStatus('Checking that WebUSB tools can reach the board', '', '', { busy: true });
+  const verdict = await _webUsbVerdictAfterFlash(sn);
+  window.electronAPI.forensicsLog?.(sn, 'webusb', { verdict })?.catch?.(() => {});
+  if (verdict !== 'missing') { done(); return; }
+
+  finishBuildModal(true, '✓ Flashed, one more step for WebUSB', '', { isFlash: true });
+  _showWebUsbOffer(sn);
+}
+
+// Bootloader (DFU) flash: watchForSerialAfterDfu has just seen the board come back, so the
+// same check runs there, and the same offer replaces "Board is back online." when needed.
+async function _webUsbCheckAfterDfu(sn) {
+  sn = (sn || '').trim();
+  if (!_webUsbCheckApplies(sn)) return;
+  const closeBtn = document.getElementById('bm-close');
+  closeBtn.style.display = 'none';   // same as the normal path: no Close mid-check
+  _setWebUsbStatus('Checking that WebUSB tools can reach the board', '', '', { busy: true });
+  const verdict = await _webUsbVerdictAfterFlash(sn);
+  window.electronAPI.forensicsLog?.(sn, 'webusb', { verdict })?.catch?.(() => {});
+  closeBtn.style.display = 'inline-block';
+  if (verdict !== 'missing') {
+    _setWebUsbStatus('Firmware flashed successfully.', 'Board is back online.');
+    return;
+  }
+  setBuildTitle('✓ Flashed, one more step for WebUSB', { color: 'var(--c-success-text)' });
+  _showWebUsbOffer(sn);
+}
+
+function _showWebUsbOffer(sn) {
+  _setWebUsbStatus('Firmware flashed successfully.',
+    'Windows has an old setting for this board that will stop browser tools like ProffieOS Workbench '
+    + 'from connecting. Fix it now?', 'Windows will ask for permission.');
+  appendModalLog('WebUSB: Windows has no setting for this board\'s WebUSB interface.', false);
+  const btn = document.getElementById('bm-webusb-fix');
+  btn.dataset.sn = sn;
+  btn.disabled = false;
+  btn.textContent = 'Fix WebUSB';
+  btn.style.display = 'inline-block';
+}
+
+// Wait for THIS board to come back (it restarts after the flash), then read the setting.
+// A brand-new board's interface is still being installed for a moment, so a "missing" has
+// to hold across a few reads before it counts. Anything unclear says nothing: an offer
+// based on a guess would be worse than none.
+async function _webUsbVerdictAfterFlash(sn) {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const backBy = Date.now() + 15000;
+  let back = false;
+  while (Date.now() < backBy) {
+    await sleep(500);
+    try {
+      const r = await window.electronAPI.getRecommendedPort();
+      if (r.ok && (r.proffieports || []).some(p => (p.serialNumber || '').toUpperCase() === sn.toUpperCase())) { back = true; break; }
+    } catch {}
+  }
+  if (!back) return 'unknown';
+  let missing = 0;
+  for (let i = 0; i < 8; i++) {
+    let res = null;
+    try { res = await window.electronAPI.checkWebUsb(sn); } catch {}
+    if (res && res.status === 'ok') return 'ok';
+    if (res && res.status === 'missing') { if (++missing >= 4) return 'missing'; }
+    else return 'unknown';
+    await sleep(750);
+  }
+  return 'unknown';
+}
+
+async function _onWebUsbFixClick() {
+  const btn = document.getElementById('bm-webusb-fix');
+  const closeBtn = document.getElementById('bm-close');
+  const sn = btn.dataset.sn;
+  btn.disabled = true;
+  btn.textContent = 'Fixing';
+  btn.classList.add('busy-dots');
+  // Nothing to close while Windows is mid-change: the fix finishes on its own either way.
+  closeBtn.style.display = 'none';
+  _setWebUsbStatus('Fixing the WebUSB setting', 'A Windows permission window will come up.', 'Click Yes to continue.');
+  let res = null;
+  try { res = await window.electronAPI.fixWebUsb(sn); } catch (e) { res = { ok: false, status: 'error', detail: String(e && e.message || e) }; }
+  if (res && res.ok) {
+    // The helper already judged by outcome; read it again from here so "fixed" is
+    // something this window saw, not something it was told.
+    _setWebUsbStatus('Checking the fix', '', '', { busy: true });
+    let again = null;
+    try { again = await window.electronAPI.checkWebUsb(sn); } catch {}
+    if (again && again.status === 'ok') {
+      btn.style.display = 'none';
+      btn.classList.remove('busy-dots');
+      closeBtn.style.display = 'inline-block';
+      setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
+      _setWebUsbStatus('Firmware flashed successfully.', 'WebUSB is fixed and ready for browser tools like ProffieOS Workbench.');
+      appendModalLog('✓ WebUSB setting repaired.', false);
+      return;
+    }
+    res = { ok: false, status: 'still-missing', detail: 'Windows did not pick up the WebUSB setting. Unplug the board and plug it back in.' };
+  }
+  btn.disabled = false;
+  btn.classList.remove('busy-dots');
+  btn.textContent = 'Fix WebUSB';
+  closeBtn.style.display = 'inline-block';
+  if (res && res.status === 'cancelled') {
+    _setWebUsbStatus('Firmware flashed successfully.',
+      'WebUSB was not fixed, so browser tools like ProffieOS Workbench will not connect until it is.');
+  } else {
+    _setWebUsbStatus('Firmware flashed successfully.', `WebUSB could not be fixed: ${(res && res.detail) || 'unknown error'}`);
+  }
+  appendModalLog(`WebUSB fix: ${(res && res.detail) || 'failed'}`, true);
+}
+
+let _dfuFlashSN = null;   // the board a bootloader-mode flash went to, from dfu-util's list [B-543]
 async function watchForSerialAfterDfu() {
   const timeout    = 10000;
   const start      = Date.now();
@@ -2352,27 +5244,331 @@ async function watchForSerialAfterDfu() {
     await new Promise(r => setTimeout(r, 500));
     const result = await window.electronAPI.getRecommendedPort();
     if (result.ok && result.proffieports && result.proffieports.length > 0) {
-      // Prefer the port that wasn't present before the DFU flash
-      const newPort = result.proffieports.find(p => !preDfuPaths.has(p.path))
+      // With the flashed board's serial known (dfu-util, before the flash), wait for that board; another
+      // board already connected is not it. Otherwise prefer the port that wasn't present before the flash.
+      const wanted = _dfuFlashSN
+        ? result.proffieports.find(p => String(p.serialNumber || '').toUpperCase() === _dfuFlashSN)
+        : null;
+      if (_dfuFlashSN && !wanted) continue;
+      const newPort = wanted || result.proffieports.find(p => !preDfuPaths.has(p.path))
                    || result.proffieports[0];
       _userChosePort      = true;
       _userChosenPortPath = newPort.path;
       _portsBeforeDfu     = [];
       lastFlashedSN       = newPort.serialNumber || null;
+      // [B-028] THIS is the moment a DFU flash learns which board it actually landed on, so
+      // it is where the flash stamp gets its serial. The stamp was left null at flash time on
+      // purpose - see the sn: field in the flash branch. Re-read the chip afterwards so the
+      // hover stops saying "unknown board" the instant the real one is known. (2026-09-15)
+      if (_flashedBuildKey && !_flashedBuildKey.sn) _flashedBuildKey.sn = lastFlashedSN;
       if (window.setFlashedTimestamp) window.setFlashedTimestamp(newPort.path, lastFlashedSN);
+      _refreshFlashProvenance();
       appendModalLog(`✓ Board restarted on ${newPort.path}.`, false);
       document.getElementById('bm-status').textContent = 'Board is back online.';
+      setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
+      document.getElementById('bm-close').style.display = 'inline-block';
+      // [B-543] A flash whose board was not known before it (several in bootloader mode) is filed now.
+      if (!_dfuFlashSN && /^[0-9A-Fa-f]{12}$/.test(String(lastFlashedSN || ''))) {
+        window.electronAPI.forensicsRecordLastFlash?.(lastFlashedSN, _flashRecordInfo())?.catch?.(() => {});
+      }
+      _dfuFlashSN = null;
       setTimeout(() => exitDfuMode(), 1500);
+      _webUsbCheckAfterDfu(lastFlashedSN);   // [B-660]
       return;
     }
   }
 
   _portsBeforeDfu = [];
   exitDfuMode();
+  setBuildTitle('✓ Flash Complete', { color: 'var(--c-success-text)' });
+  document.getElementById('bm-close').style.display = 'inline-block';
+  _dfuFlashSN = null;
   document.getElementById('bm-status').textContent =
-    'Flash complete — board not yet detected. Try power cycling.';
+    'Flash complete, but the board has not been detected yet. Try power cycling.';
   appendModalLog('Board not detected after restart. Try power cycling or reconnecting.', true);
 }
+
+// ── OS version signal ──────────────────────────────────
+// Two quiet honesty fixes, no nagging and no blocking:
+//   1. When the open config carries no @jmt:os_version marker, the app picks
+//      one on the user's behalf. Say so in the field's tooltip instead of
+//      leaving it silent. Nearly every config that isn't ours lacks the marker
+//      (vendor files, web Configurator output, a friend's config).
+//   2. When a connected board reports a DIFFERENT ProffieOS than the selected
+//      tree, mark the field and say what was detected. Information, not a
+//      command — upgrading on purpose is a normal thing to do, so compile is
+//      never blocked and manual selection always wins.
+// Everything here degrades to showing nothing: no board, no probe, no map, no
+// signal. It is additive to a flow that already works.
+
+let _osVersionMap    = null;   // folderName → "v8.10", from each tree's own .ino
+let _boardOSVersion  = null;   // what the connected board reported, or null
+// When that firmware was flashed, as the board itself reports it. A SEPARATE
+// absence from _boardOSVersion: a board can answer `version` and not print an
+// install date, and that is not a failed probe. (2026-08-19)
+let _boardInstalled  = null;
+// Why we do not have a version, when we do not have one. Until 2026-08-19 only the
+// VALUE was kept, so every failure looked identical to success-with-a-match: the
+// field went plain and the tooltip omitted the board entirely. An absent answer
+// rendered as an agreeing one. null = never asked (transient, say nothing);
+// otherwise the probe's own reason.
+let _boardOSReason   = null;
+// What the board put where a version belongs, when it answered with something we
+// cannot read (e.g. `$Id: <sha> $` from a source-built firmware). Only ever set
+// alongside reason 'unrecognised'. Kept so the message can QUOTE the board rather
+// than making the user open the Serial Monitor to find out what it said.
+let _boardOSRaw      = null;
+let _probedSN        = null;   // board we already asked; don't re-probe per poll
+
+// Whether the open config declared a version lives on window, not here: this
+// file is injected at the end of boot, so a config restored before that would
+// have had its answer dropped by a setter that did not exist yet.
+// index.html owns the value; we only read it.
+
+async function loadOSVersionMap() {
+  try {
+    const r = await window.electronAPI?.getOSVersionMap?.();
+    if (r?.ok) _osVersionMap = r.map;
+  } catch { _osVersionMap = null; }
+  applyOSVersionSignal();
+}
+
+// Asks the board what it is running. Fire-and-forget: a failure to answer is a
+// non-event, because this only ever adds information.
+async function probeBoardOSVersion(port) {
+  if (!port?.isProffieboard || !port.path) return;
+  const sn = port.serialNumber || port.path;
+  if (sn === _probedSN) return;        // same board, already asked
+  if (isBusy || isDfuMode) return;     // the port belongs to the build right now
+  _probedSN = sn;
+  try {
+    const r = await window.electronAPI?.probeBoardVersion?.(port.path);
+    _boardOSVersion = r?.ok ? r.version : null;
+    // The install date is NOT conditional on ok. An 'unrecognised' reply is a real
+    // reply and carries `installed:` like any other, so a board with a source-built
+    // firmware can still report when it was built - which is the only identifying
+    // fact available for one.
+    _boardInstalled = (r?.ok || r?.reason === 'unrecognised') ? (r?.installed || null) : null;
+    _boardOSReason  = r?.ok ? null : (r?.reason || 'error');
+    _boardOSRaw     = r?.reason === 'unrecognised' ? (r?.raw || null) : null;
+    // Into the board's event log [B-543]: every time it is seen, and what it said.
+    const _seenSN = /^[0-9A-Fa-f]{12}$/.test(String(port.serialNumber || '')) ? port.serialNumber : _forensicsSN();
+    if (_seenSN) window.electronAPI.forensicsLog?.(_seenSN, 'seen', { port: port.path, ok: !!r?.ok,
+      version: r?.version || null, installed: r?.installed || null, reason: r?.reason || null, raw: r?.raw || null })?.catch?.(() => {});
+    // "The port was busy" is not "the board won't answer." Clear the marker so
+    // the next detection tries again, once the monitor or the flash is done.
+    // A timeout or a failed open does mean the board is not talking, and that
+    // one is left alone rather than retried on every port event.
+    // EVERY transient reason clears the latch, not just these two. _probedSN is set
+    // before the await and was only cleared for monitor-open and aborted, so a
+    // 'timeout' or 'open-failed' disqualified that board for the LIFE OF THE
+    // SESSION - keyed on serial number, so re-plugging did not help either. Both
+    // are things that resolve on their own: a board mid-boot, a port still
+    // enumerating, a driver hiccup. (2026-08-19)
+    if (['monitor-open', 'aborted', 'timeout', 'open-failed', 'error'].includes(r?.reason)) {
+      _probedSN = null;
+    }
+  } catch { _boardOSVersion = null; _boardInstalled = null; _boardOSReason = 'error'; _boardOSRaw = null; _probedSN = null; }
+  applyOSVersionSignal();
+}
+
+function forgetBoardOSVersion() {
+  _boardOSVersion = null;
+  _boardInstalled = null;
+  _boardOSReason  = null;   // "not asked", not "asked and failed"
+  _boardOSRaw     = null;
+  _probedSN       = null;
+  applyOSVersionSignal();
+}
+
+// The ProffieOS version the currently selected tree actually is, read from its
+// source rather than its folder name (which is whatever the user typed).
+function selectedTreeOSVersion() {
+  const name = el('input-version')?.value;
+  if (!name || isVersionSentinel(name)) return null;
+  return _osVersionMap?.[name] || null;
+}
+
+function applyOSVersionSignal() {
+  applyFlashTitle();   // the Flash tooltip says when the board already runs this build [B-686]
+  const sel = el('input-version');
+  if (!sel) return;
+  const name    = sel.value;
+  const tree    = selectedTreeOSVersion();
+  const mismatch = !!(_boardOSVersion && tree && _boardOSVersion !== tree);
+
+  sel.classList.toggle('field-error', mismatch);
+
+  // The field is 160px and folder names truncate, so the name stays the first
+  // line of the tooltip — that was its only job before this signal existed.
+  const notes = [];
+  // The build target, as ONE line: "ProffieOS 7.15 +JMT on Plugin 3.6.0", and
+  // when it has moved, "... but last built on ProffieOS 7.15 +JMT on Plugin
+  // 4.6.0." A ProffieOS version and a plugin are one target, so they belong in
+  // one sentence; splitting them made a tooltip that read as a list of alerts.
+  // It REPLACES the bare name rather than sitting under it — the name is the
+  // first half of the sentence. Falls back to the name when no plugin is known.
+  // (2026-08-15)
+  const target = window.getVersionTargetLine?.();
+  if (target) notes.push(target);
+  else if (name && !isVersionSentinel(name)) notes.push(name);
+  // What the board is running. One sentence for both cases now: it used to add
+  // "This will build against X", which restates the target line above it - and
+  // once that line names the plugin too, the restatement is not even complete.
+  // A owns the target; this owns the board. The contrast still lands, because
+  // the two sit one line apart. (2026-08-15)
+  // A board is connected and we have no version from it. Saying nothing here is
+  // what made "could not read" render identically to "board agrees" - the whole
+  // defect this entry opens with. Only speaks when there is a REASON: a null
+  // reason means the probe has not run yet, which resolves in a moment and is not
+  // worth a line. Deliberately no colour change: nothing is known to be WRONG, the
+  // selected version may be perfectly right, and red would be a claim we cannot
+  // support. This states what is unknown, which is all we have. (2026-08-19)
+  if (!_boardOSVersion && _boardOSReason && selectedPort && selectedPortIsProffieboard) {
+    // Each line names the way out, not just the fault. Same rule as the
+    // empty-filter state in ui-conventions.md: say so, and offer the way out.
+    // Ports ARE polled - every 4.5s in main (_pollPortsNow) - but the poll builds a
+    // signature from the port PATHS and emits ports:changed only when that differs.
+    // SerialPort.list() reports COM6 whether or not another process holds it open,
+    // so the signature never moves and the poller correctly sees nothing. Releasing
+    // a port from another program is therefore invisible to us, and the user has to
+    // ask. Without naming the button a correct message dead-ends.
+    // Deliberately NOT solved by probing on a timer: the probe is not passive - it
+    // opens the port and writes to it, holding it for up to 2.5s - so a poller would
+    // periodically seize the port the user may want for the Serial Monitor.
+    // 2026-08-19, on leaving it manual: "it's a very rare case."
+    // monitor-open is the exception: closing the monitor re-probes on its own.
+    // Short sentences rather than one clause-chain: this sits under a target line
+    // that is already a mouthful, and each fact lands on its own. Also keeps dashes
+    // out of a shipped UI string, which the keep-tells-out rule covers alongside
+    // commit messages and public docs.
+    const RETRY = 'Use ↺ next to Detected to retry.';
+    const CANT  = "Could not read the board's ProffieOS.";
+    const why = {
+      'monitor-open': `${CANT} The Serial Monitor has the port. Close it and the check runs again.`,
+      'timeout':      `${CANT} The board did not answer. ${RETRY}`,
+      // The board replied; its version line just is not one we read. Say that,
+      // and quote what it sent - otherwise this reads as a fault the user should
+      // go and fix, when the firmware is simply built from source rather than
+      // from a release. Nothing here needs retrying, so no RETRY line.
+      //
+      // THE BUILD DATE BELONGS HERE MORE THAN ANYWHERE ELSE, and the first cut
+      // of this fix left it out. _boardInstalled had exactly ONE reader, inside the
+      // branch below that requires _boardOSVersion - which is null by definition in
+      // this state. So the date was captured, stored, and rendered nowhere, in the
+      // one case where it is the ONLY identifying fact the firmware offers. Same
+      // shape as every other value wired into one of the two screens that report it.
+      //
+      // SAYS WHAT IS TRUE, AND STOPS. The first draft read "That firmware was
+      // built from source rather than from a release, so there is no version to
+      // compare against" - an X-rather-than-Y inversion plus a because-clause, in a
+      // shipped string, and it asserted a CAUSE the backlog entry itself records as
+      // an inference. Nobody has asked a manufacturer how that board was built.
+      // Quoting what arrived and stating the consequence are both checkable; the
+      // story about where it came from is not, and it is not the user's problem.
+      'unrecognised': (_boardOSRaw
+        ? `The board answered with "${_boardOSRaw}" where a version number belongs. There is no version to compare against.`
+        : 'The board answered without a version number. There is no version to compare against.')
+        + (_boardInstalled ? ` Its firmware was built ${_boardInstalled}.` : ''),
+      'open-failed':  `${CANT} Another program may have the port. ${RETRY}`,
+      'write-failed': `${CANT} ${RETRY}`,
+      'no-port':      `${CANT} ${RETRY}`,
+    }[_boardOSReason] || `${CANT} ${RETRY}`;
+    notes.push(why);
+  }
+  // WHENEVER THE BOARD TOLD US SOMETHING, NOT ONLY WHEN IT DISAGREES. This was
+  // `mismatch || (_boardOSVersion && !tree)`, so a board AGREEING with the selected
+  // tree printed nothing about itself at all - the most common state was the least
+  // informative, and the build date disappeared exactly when everything was fine.
+  // The date is the half a version can never supply: several configs build against
+  // one ProffieOS, so "v8.10" identifies the firmware family and "built Sep 19 2026
+  // 10:39:12" identifies THIS flash. Agreement is information. (2026-09-19, the
+  // call: "I guess we decided not to show this valuable information when on the
+  // same flashed version??")
+  if (_boardOSVersion) {
+    // BUILT, not "installed" and not "flashed". The board prints `Installed:`, but
+    // ProffieOS defines it as `const char install_time[] = __DATE__ " " __TIME__`
+    // (common/common.h:19) — COMPILE-time macros. It is the build timestamp of the
+    // firmware, not when anyone put it on the board. the user's own numbers said so
+    // before the source did: board 10:29:12, the compile 10:29, the flash 10:30.
+    // ProffieOS uses it as a build identity itself, invalidating saved presets via
+    // `f->Expect(install_time)` (common/config_file.h:108).
+    // "installed" is also already taken in this app and means "present on the
+    // computer" — see ui-conventions.md. "built" matches what the target line
+    // already says ("last built on ProffieOS 6.9") and what @jmt:compiled records.
+    // already taken in this app and means something else: whether a ProffieOS tree
+    // is present on the COMPUTER ("INSTALLED VERSIONS", "No versions installed",
+    // "which isn't installed"). Both meanings appeared in one tooltip on
+    // 2026-08-19 and Testing caught the collision. "Flashed" is the community's word
+    // for putting firmware on a board and matches @jmt:flashed, which is the same
+    // event recorded from our side — so the eventual comparison reads straight.
+    // The install date rides on the same sentence: both are facts about the board
+    // in front of you, and it is what turns "a v6.9 board" into "THIS board, flashed
+    // at 10:29" - the thing a version alone can never tell you when several configs
+    // build against the same ProffieOS. Omitted silently when the board did not
+    // print one, rather than saying 'unknown' about something nobody asked.
+    notes.push(_boardInstalled
+      ? `JMT Studio detected ProffieOS ${_boardOSVersion} on the connected board, built ${_boardInstalled}.`
+      : `JMT Studio detected ProffieOS ${_boardOSVersion} on the connected board.`);
+    // Naming the mismatch answers "do these match?" and drops the data. What
+    // the user wants next is to switch to a tree that DOES match, and folder
+    // names do not carry the version — three installed trees can all be v8.10.
+    // _osVersionMap is the only thing that knows which is which, and it is
+    // already loaded here, which is what makes the comparison above possible.
+    // So this is a filter over a map in hand, not a new lookup. (2026-08-19)
+    // Guarded on the map EXISTING, not just on it having matches: when the load
+    // failed it is null, and "no installed version is v7.15" would then be a
+    // confident claim about something unread. No map means no sentence.
+    // THE REMEDY STAYS MISMATCH-ONLY. Everything below answers "how do I get onto
+    // the board's version", which is a question nobody is asking when the selected
+    // tree already IS that version - there, "You have v8.10 installed as: ..." would
+    // list the tree the user is looking at. Widening the gate above must not widen
+    // this: one is a fact about the board, the other is a way out of a disagreement.
+    if ((mismatch || !tree) && _osVersionMap) {
+      const matches = Object.keys(_osVersionMap)
+        .filter(folder => _osVersionMap[folder] === _boardOSVersion);
+      if (matches.length) {
+        notes.push(`You have ${_boardOSVersion} installed as: ${matches.join(', ')}.`);
+      } else {
+        // Two lines, two subjects: this one is about the BOARD's version, the
+        // config-was-written-for line below is about the CONFIG's. They usually
+        // differ and both earn their place. When they name the SAME version they
+        // collapse into one fact stated twice, and the other line says it better
+        // - it names what to do about it. So yield to it. (2026-08-19.)
+        // Compared on the version number rather than the string, because one side
+        // is a reported version ("v6.9") and the other a folder name
+        // ("ProffieOS 6.9").
+        const _num = v => (String(v || '').match(/(\d+\.\d+[\w.\-]*)/) || [])[1] || null;
+        const boardNum  = _num(_boardOSVersion);
+        const configNum = _num(window._configOsVersionMissing);
+        const saidBelow = !!(boardNum && configNum && boardNum === configNum);
+        // Silence with nothing else to say leaves a red field and a detected
+        // version with no way forward, which is the dead end this note removes.
+        if (!saidBelow) notes.push(`You have no ${_boardOSVersion} installed.`);
+      }
+    }
+  }
+  // The config named a version that is not installed, so it is building against
+  // something it did not ask for. Same rule as above: no "it will build against
+  // X instead" - the target line already said so.
+  // NOT gated on a selection any more. Since 2026-08-19 an unhonoured request
+  // leaves the dropdown EMPTY, so requiring `name` dropped this line in the exact
+  // state it exists to describe — the one where nothing is selected because the
+  // config asked for something absent.
+  if (window._configOsVersionMissing && !isVersionSentinel(name)) {
+    notes.push(`This config was written for ${window._configOsVersionMissing}, which isn't installed.`);
+  }
+  // Single newline. These are short lines about one field, not paragraphs of
+  // prose, and blank lines between them made a three-item tooltip read as a
+  // document. (2026-08-15)
+  sel.title = notes.join('\n');
+}
+// Exported so updateChangedIndicators can ask for a repaint instead of writing
+// sel.title itself, which is what made two owners of one property.
+window.applyOSVersionSignal = applyOSVersionSignal;
+
+window.refreshOSVersionSignal = applyOSVersionSignal;
+window.reloadOSVersionMap     = loadOSVersionMap;
 
 // ── ProffieOS version ──────────────────────────────────
 function onOsVersionChange() {
@@ -2380,12 +5576,15 @@ function onOsVersionChange() {
   // Here we only handle compile-state invalidation.
   if (compileSuccess) {
     compileSuccess = false;
+    _currentBuildDir = null;
+    _currentBuildKey = null;
     setFlashEnabled(false);
-    setStatus('compile', 'warn', 'OS version changed — recompile needed');
+    setStatus('compile', 'warn', 'OS version changed, recompile needed');
   }
   cacheCheckPending = true;
   updateCompileButton();
-  checkCacheForConfig('OS version changed — recompile needed');
+  applyOSVersionSignal();
+  checkCacheForConfig('OS version changed, recompile needed');
   // Drop the previously-loaded ArgumentName slot map so the next lazy load
   // (when the user opens Advanced) pulls the new version's enum. Don't refetch
   // here — the enum isn't needed unless the user actually opens Advanced or
@@ -2410,12 +5609,14 @@ window.onOsVersionChange        = onOsVersionChange;
 // claiming a valid build (nothing to re-validate).
 window.recheckOnConfigReturn = () => {
   if (!compileSuccess) return;
-  checkCacheForConfig('Source changed — recompile needed');
+  checkCacheForConfig('Source changed, recompile needed');
 };
 window.resetCompileState        = () => {
   compileSuccess = false;
+  _currentBuildDir = null;
+  _currentBuildKey = null;
   setFlashEnabled(false);
-  setStatus('compile', 'warn', 'Cache cleared — recompile needed');
+  setStatus('compile', 'warn', 'Cache cleared, recompile needed');
   updateCompileButton();
 };
 // Used by `+ New` / Open to scrub stale compile + flash status that belonged
@@ -2424,32 +5625,175 @@ window.resetCompileState        = () => {
 // config, which misrepresents what's actually been done with the new content.
 window.resetBuildStatusForFileLoad = () => {
   compileSuccess = false;
+  _currentBuildDir = null;
+  _currentBuildKey = null;
+  // [B-028] The flash stamp belongs to the file being left. Carrying it across would
+  // let _refreshFlashProvenance compare a NEW config's hash against an OLD file's flash
+  // and announce "Board has an older build" about something unrelated — the same lie
+  // this entry is about, wearing the new wording.
+  _flashedBuildKey = null;
+  // The sticky flash error belongs to the file being left too. Carrying it across would
+  // pin an error on a config that was never flashed at all.
+  _flashFailed   = false;
+  _flashErrorTip = '';
+  _lastKnownConfigHash   = null;
+  _lastKnownBuildPkgHash = null;
+  // Nothing is known about the newly-loaded content yet. The cache check that follows sets
+  // this, and calls the provenance refresh again, which is what puts the hover up.
+  _openContentIsBuilt    = false;
   setFlashEnabled(false);
   setStatus('compile', '', 'Not compiled');
+  // [B-028] Session-scoped wording, per the reset-state rule in local/ui-conventions.md:
+  // "Not flashed" asserts a negative about the BOARD that we cannot know. The hover carries
+  // whatever the newly-loaded file's own @jmt record says.
   setStatus('flash',   '', 'Not flashed');
+  _decorateFlashChip();
   updateCompileButton();
 };
 window.getToolchainReady        = () => toolchainReady;
+// [B-229] SD Export asks before putting a config on a card that has never been built.
+// A GETTER, NOT THE VALUE. `compileSuccess` is reassigned in a dozen places in this file;
+// exporting it once would freeze whatever it happened to be at load. It means "a build exists
+// for the content currently in the editor" — set by a successful compile AND by a cache hit,
+// and cleared the moment the content changes — which is exactly the question being asked.
+window.getCompileSuccess        = () => compileSuccess;
 window.resetToolchainStatus     = () => {
   toolchainReady = false;
   // Same single-dominant-signal pattern as the toolchain init flow: red dot,
   // accurate message, secondary indicators hidden (they can't be acted on
   // until a ProffieOS version is imported/downloaded, so they'd just be
   // visual noise).
-  setStatus('toolchain', 'error', 'No ProffieOS versions found. Please import or download a version first.');
+  setStatus('toolchain', 'error', 'No ProffieOS installed.');
   ['port', 'compile', 'flash'].forEach(t => {
     const item = document.getElementById(`bp-status-${t}-item`);
     if (item) item.style.display = 'none';
   });
+  const getBtn = document.getElementById('bp-btn-get-proffieos');
+  if (getBtn) getBtn.style.display = '';
   updateCompileButton();
 };
+// Save As only. The copy changes no build input, so the debounced content check
+// never fires - yet from the moment it is written it is the config sitting on the
+// current build, with Flash lit. That dependence exists for exactly one instant and
+// is unreconstructable afterwards, so it gets recorded here. No restore: nothing
+// needs copying, only the entry's owner list needs to grow. Silent by design -
+// there is no user-visible outcome, and a no-op when no entry matches is correct.
+async function claimCacheForCurrentConfig() {
+  try {
+    if (!window.electronAPI?.claimCache || !selectedFqbn) return false;
+    const configId = window.getMetaConfigId?.();
+    if (!configId) return false;
+    const content = window.getEditorContent?.() || '';
+    if (!content.trim()) return false;
+    return await window.electronAPI.claimCache(content, selectedFqbn, selectedUsb, configId);
+  } catch { return false; }
+}
+
+window.claimCacheForCurrentConfig = claimCacheForCurrentConfig;
 window.checkCacheForConfig      = checkCacheForConfig;
 window.updateUsbChangedIndicator  = updateUsbChangedIndicator;
 window.updatePortChangedIndicator = updatePortChangedIndicator;
+// [B-170] EXPOSED BECAUSE A CHECK NEEDS IT, and exposed BEFORE it is read.
+// `selectedUsb` is module-local, and the preflight context's own note records what
+// happens otherwise: a first draft of that context called a getSelectedBoardLabel()
+// that did not exist, and optional chaining would have returned '' forever while
+// looking wired. So the accessor lands first and the context reads a real value.
+window.getSelectedUsb      = () => selectedUsb;
 window.setSelectedUsb      = (usb) => {
   if (!usb) return;
   selectedUsb = usb;
   const sel = el('bp-usb-select');
+  // [B-660] A config that uses an advanced type shows it; any other goes back behind Advanced….
+  _syncAdvancedUsbOptions(usb);
   if (sel) sel.value = usb;
   updateUsbChangedIndicator();
+  window._resetMassStorageDecline?.(); // config load / mode set clears the SD decline state
+};
+
+// ── Dynamic-speed compile bench (dev/test) ─────────────
+// Console helper for the "fast when you can, slower when you need it" research.
+// Measures real compile time + flash/RAM fit for the CURRENTLY OPEN config
+// across optimization levels, cache-bypassed. From the DevTools console:
+//   await jmtBench()                       // defaults to ['os','o2']
+//   await jmtBench(['os','o1','o2','o3'])  // full sweep
+// Each run also appends a line to local/compile-metrics.jsonl. Every level is a
+// full ProffieOS compile, so a multi-level sweep takes several minutes; the
+// Abort button stops it after the current level.
+window.jmtBench = async (optList = ['os', 'o2']) => {
+  if (!selectedFqbn) { console.warn('[jmtBench] No board selected. Pick a board first.'); return; }
+  const content = window.getEditorContent();
+  console.log(`[jmtBench] Sweeping opt=[${optList.join(', ')}] on ${selectedFqbn}. ${optList.length} full compile(s), this takes a while...`);
+  const res = await window.electronAPI.benchCompile(content, selectedFqbn, { usb: selectedUsb }, optList);
+  const rows = (res.runs || []).map(r => ({
+    opt: r.opt,
+    ok: r.ok,
+    seconds: r.durationMs != null ? +(r.durationMs / 1000).toFixed(1) : null,
+    flashKB: r.flashBytes != null ? Math.round(r.flashBytes / 1024) : null,
+    flashPct: r.flashPct != null ? r.flashPct : null,
+    ramKB: r.ramBytes != null ? Math.round(r.ramBytes / 1024) : null,
+    ramPct: r.ramPct != null ? r.ramPct : null,
+    fits: r.fits,
+    error: r.error || '',
+  }));
+  console.table(rows);
+  return res;
+};
+
+// ── LTO A/B (the lever for a fit-constrained config) ───
+// When you're already tight on flash, the opt-level knob can't move (dropping
+// -Os overflows). LTO can: it's a big slice of compile wall-clock, and turning
+// it off trades binary size (which you may have to spare) for speed. This runs
+// the CURRENTLY OPEN config twice — LTO on, then off — cache-bypassed, and
+// reports how much time LTO-off saves and whether the (larger) binary still
+// fits flash. Two full compiles, so it takes a while. From the DevTools console:
+//   await jmtBenchLto()
+window.jmtBenchLto = async () => {
+  if (!selectedFqbn) { console.warn('[jmtBenchLto] No board selected. Pick a board first.'); return; }
+  const content = window.getEditorContent();
+  const runs = [];
+  for (const useLto of [true, false]) {
+    console.log(`[jmtBenchLto] compiling with LTO ${useLto ? 'ON' : 'OFF'}, full compile, hang tight...`);
+    const r = await window.electronAPI.compile(content, selectedFqbn, { usb: selectedUsb, bench: true, lto: useLto });
+    const flashMax = r.flashMax || 507904;
+    runs.push({
+      lto: useLto ? 'on' : 'off',
+      ok: !!r.ok,
+      minutes: r.durationMs != null ? +(r.durationMs / 60000).toFixed(1) : null,
+      flashKB: r.flashBytes != null ? Math.round(r.flashBytes / 1024) : null,
+      flashPct: r.flashPct != null ? r.flashPct : null,
+      flashFits: r.flashBytes != null ? r.flashBytes <= flashMax : null,
+      error: r.error || '',
+    });
+  }
+  console.table(runs);
+  const [on, off] = runs;
+  if (on.minutes && off.minutes) {
+    const saved = +(on.minutes - off.minutes).toFixed(1);
+    const pct = on.minutes ? Math.round(100 * saved / on.minutes) : 0;
+    console.log(`[jmtBenchLto] LTO off saved ${saved} min (${pct}%). Flash: on=${on.flashPct}% → off=${off.flashPct}%  ·  still fits flash? ${off.flashFits}`);
+  }
+  return runs;
+};
+
+// One-shot: a single LTO-OFF compile of the current config, cache-bypassed.
+// Faster than jmtBenchLto (one compile, not two) — compare its minutes/flash to
+// your known LTO baseline (the 17:49 run). Picks up any addon changes since it
+// recompiles against the current ProffieOS version. From the DevTools console:
+//   await jmtNoLto()
+window.jmtNoLto = async () => {
+  if (!selectedFqbn) { console.warn('[jmtNoLto] No board selected. Pick a board first.'); return; }
+  console.log('[jmtNoLto] compiling with LTO OFF, full compile, hang tight...');
+  const r = await window.electronAPI.compile(window.getEditorContent(), selectedFqbn, { usb: selectedUsb, bench: true, lto: false });
+  const flashMax = r.flashMax || 507904;
+  const out = {
+    ok: !!r.ok,
+    minutes: r.durationMs != null ? +(r.durationMs / 60000).toFixed(1) : null,
+    flashKB: r.flashBytes != null ? Math.round(r.flashBytes / 1024) : null,
+    flashPct: r.flashPct != null ? r.flashPct : null,
+    flashFits: r.flashBytes != null ? r.flashBytes <= flashMax : null,
+    error: r.error || '',
+  };
+  console.table([out]);
+  console.log(`[jmtNoLto] ${out.minutes} min · flash ${out.flashPct}% · fits flash? ${out.flashFits}  (compare vs your ~17.8 min LTO baseline)`);
+  return out;
 };

@@ -1,0 +1,5 @@
+FAILED
+<OS>\config\my_config.h:15:10: fatal error: ../props/not_a_real_prop.h: No such file or directory
+   15 | #include "../props/not_a_real_prop.h"
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.

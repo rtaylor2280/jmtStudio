@@ -1,0 +1,8 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:1731:
+<OS>\config\my_config.h:33:6: error: redefinition of 'void setup()'
+   33 | void setup() {}
+      |      ^~~~~
+<OS>\ProffieOS.ino:1602:6: note: 'void setup()' previously defined here
+ 1602 | void setup() {
+      |      ^~~~~

@@ -1,0 +1,50 @@
+{
+ "blockdevices": [
+  {
+   "name": "sdb",
+   "path": "/dev/sdb",
+   "pkname": null,
+   "type": "disk",
+   "rm": true,
+   "hotplug": true,
+   "tran": "usb",
+   "vendor": "TS-RDF5 ",
+   "model": "SD Transcend",
+   "serial": "000000000037",
+   "size": "29.7G",
+   "fstype": null,
+   "fsver": null,
+   "label": null,
+   "uuid": null,
+   "mountpoints": [],
+   "fsavail": null,
+   "fssize": null,
+   "mountpoint": null,
+   "children": [
+    {
+     "name": "sdb1",
+     "path": "/dev/sdb1",
+     "pkname": "sdb",
+     "type": "part",
+     "rm": true,
+     "hotplug": true,
+     "tran": null,
+     "vendor": null,
+     "model": null,
+     "serial": null,
+     "size": "29.7G",
+     "fstype": "vfat",
+     "fsver": "FAT32",
+     "label": "PROFFIE",
+     "uuid": "CC85-0008",
+     "mountpoints": [
+      "/run/media/ryan/PROFFIE"
+     ],
+     "fsavail": "22.7G",
+     "fssize": "29.7G",
+     "mountpoint": "/run/media/ryan/PROFFIE"
+    }
+   ]
+  }
+ ]
+}

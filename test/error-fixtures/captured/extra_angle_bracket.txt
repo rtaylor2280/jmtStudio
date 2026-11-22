@@ -1,0 +1,5 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:20:51: error: expected primary-expression before ')' token
+   20 |     StylePtr<InOutHelper<Blue, 300, 800, Black>>>(),
+      |                                                   ^

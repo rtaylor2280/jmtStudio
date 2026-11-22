@@ -1,0 +1,50 @@
+{
+ "blockdevices": [
+  {
+   "name": "sdb",
+   "path": "/dev/sdb",
+   "pkname": null,
+   "type": "disk",
+   "rm": true,
+   "hotplug": true,
+   "tran": "usb",
+   "vendor": "Tlera   ",
+   "model": "DOSFS",
+   "serial": "206F32914630",
+   "size": "14.6G",
+   "fstype": null,
+   "fsver": null,
+   "label": null,
+   "uuid": null,
+   "mountpoints": [],
+   "fsavail": null,
+   "fssize": null,
+   "mountpoint": null,
+   "children": [
+    {
+     "name": "sdb1",
+     "path": "/dev/sdb1",
+     "pkname": "sdb",
+     "type": "part",
+     "rm": true,
+     "hotplug": true,
+     "tran": null,
+     "vendor": null,
+     "model": null,
+     "serial": null,
+     "size": "14.6G",
+     "fstype": "vfat",
+     "fsver": "FAT32",
+     "label": "16kbTest",
+     "uuid": "102F-16C3",
+     "mountpoints": [
+      "/run/media/ryan/16kbTest"
+     ],
+     "fsavail": "13.4G",
+     "fssize": "14.5G",
+     "mountpoint": "/run/media/ryan/16kbTest"
+    }
+   ]
+  }
+ ]
+}

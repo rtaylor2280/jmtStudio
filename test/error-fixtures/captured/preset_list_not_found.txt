@@ -1,0 +1,28 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:611:
+<OS>\config\my_config.h:28:17: error: 'blade_1' was not declared in this scope; did you mean 'blades'?
+   28 |     CONFIGARRAY(blade_1) },
+      |                 ^~~~~~~
+<OS>\common\preset.h:7:24: note: in definition of macro 'CONFIGARRAY'
+    7 | #define CONFIGARRAY(X) X, NELEM(X)
+      |                        ^
+In file included from <OS>\common\capabilities.h:4,
+                 from <OS>\ProffieOS.ino:49:
+<OS>\config\my_config.h:28:17: error: 'blade_1' was not declared in this scope; did you mean 'blades'?
+   28 |     CONFIGARRAY(blade_1) },
+      |                 ^~~~~~~
+<OS>\common\common.h:18:26: note: in definition of macro 'NELEM'
+   18 | #define NELEM(X) (sizeof(X)/sizeof((X)[0]))
+      |                          ^
+<OS>\config\my_config.h:28:5: note: in expansion of macro 'CONFIGARRAY'
+   28 |     CONFIGARRAY(blade_1) },
+      |     ^~~~~~~~~~~
+<OS>\config\my_config.h:28:17: error: 'blade_1' was not declared in this scope; did you mean 'blades'?
+   28 |     CONFIGARRAY(blade_1) },
+      |                 ^~~~~~~
+<OS>\common\common.h:18:37: note: in definition of macro 'NELEM'
+   18 | #define NELEM(X) (sizeof(X)/sizeof((X)[0]))
+      |                                     ^
+<OS>\config\my_config.h:28:5: note: in expansion of macro 'CONFIGARRAY'
+   28 |     CONFIGARRAY(blade_1) },
+      |     ^~~~~~~~~~~

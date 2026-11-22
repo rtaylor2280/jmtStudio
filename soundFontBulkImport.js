@@ -1,0 +1,2155 @@
+// Sound Fonts — bulk import (Phase 1 of the bulk-import feature).
+//
+// Two-phase contract:
+//   1. scanForBulkImport(rootDir)      — fast disk walk, classifies what's
+//                                        there. No hashing, no copying, no
+//                                        network. Returns a plan the user
+//                                        can review before committing.
+//   2. runBulkImport(plan, userData,   — drives importSource + createEntry
+//      callbacks)                       per planned source. Marks entries
+//                                        as needsReview when required
+//                                        fields couldn't be auto-filled.
+//
+// Partitioning rule (per spec):
+//   - Zip file              -> one source. detectCandidates handles the
+//                              internal candidate shape (multi-board,
+//                              multi-font bundles, etc).
+//   - Proffie-shape folder  -> one solo source per folder. Bulk never
+//                              auto-bundles adjacent folders because
+//                              there's no structural signal to tell
+//                              "this was a single vendor delivery" from
+//                              "user loosely organized N fonts together"
+//                              (a real SD backup is N loose fonts; an
+//                              extracted vendor bundle has identical
+//                              shape). If a user truly has a folder-form
+//                              bundle they want preserved, they pick its
+//                              root via the existing "Import folder"
+//                              path, which lets detectCandidates run on
+//                              the multi-board structure.
+//   - Common folder         -> recognized but skipped in v1 (separate
+//                              import surface owns common folders).
+//
+// Depth failsafe: if we descend past 6 levels without finding ANY Proffie
+// shape OR zip, surface depthHalted=true so the caller can prompt the user
+// before continuing further.
+
+const crypto = require('crypto');
+const fs = require('fs');
+const { fontShapeOf } = require('./proffieFontShape');
+const path = require('path');
+const { cleanSuggestedName, cleanFolderName } = require('./soundFontNameClean');
+const soundFontSources = require('./soundFontSources');
+const fontCatalogue = require('./fontCatalogue');
+const soundFontCandidates = require('./soundFontCandidates');
+const soundFontEntries = require('./soundFontEntries');
+const soundFontVendors = require('./soundFontVendors');
+const soundFontCommon = require('./soundFontCommon');
+const soundFontSharedTracks = require('./soundFontSharedTracks');
+const soundFontFileHash = require('./soundFontFileHash');
+const { checkWavBuffer, deriveFontName, recoverNameFromDocx } = require('./sdCardDetect');
+// ONE definition of "looks like a program by name", shared with the content check
+// so the two tiers can never drift apart ([B-214]).
+const { looksExecutableName } = require('./sdCardDetect');
+
+const MAX_SCAN_DEPTH_BEFORE_HALT = 6;
+
+// One read pass over a font folder that yields, together, everything the import
+// would otherwise compute later ("quick import, ahead of time"):
+//   - fileHashes: the per-file hash set { relPath: sha256 } over the REAL font
+//     content (noise like ._*, .DS_Store, __MACOSX excluded — the same files the
+//     import strips when it zips). Per-file is what enables percent-match, not
+//     just exact-match.
+//   - contentHash: those records folded into one digest for cheap exact-dedup.
+//   - corruptFiles: [{ relPath, reason }] — wavs are header-checked off the SAME
+//     buffer the hash reads, so nothing is read twice.
+// Returns null when the folder can't be read.
+function hashAndCheckFont(absDir) {
+  const corruptFiles = [];
+  const notNoise = (rel) => !soundFontSources.isNoisePath(rel);
+  const records = soundFontFileHash.collectFileRecords(absDir, (relPath, buf, size) => {
+    if (!/\.wav$/i.test(relPath) || !buf) return;
+    const h = checkWavBuffer(buf, size);
+    if (h && h.corrupt) corruptFiles.push({ relPath, reason: h.reason });
+  }, notNoise);
+  if (records === null) return null;
+  const fileHashes = {};
+  for (const r of records) fileHashes[r.relPath] = r.fileHash;
+  return { contentHash: soundFontFileHash.hashRecords(records), fileHashes, corruptFiles };
+}
+
+// Noise file/dir segments we never want to descend into or count as content.
+const { isOsNoiseName: isNoiseName } = require('./osNoise');
+
+// Detect Proffie-shape on a folder by reading its direct children, by the shared rule the card
+// report uses (proffieFontShape.js), so the count a card shows and what this scan imports agree. A
+// Xeno font is not a Proffie font even when it holds one plain boot.wav. [B-461]
+function looksLikeProffieDir(absDir) {
+  let entries;
+  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
+  catch { return false; }
+  return fontShapeOf(entries.filter(e => !isNoiseName(e.name))) === 'proffie';
+}
+
+// Detect Proffie's "common" shared-wav folder convention. A common folder
+// is one named "common" (any case) whose direct content is .wav files OR
+// effect-name subdirs containing .wav files. We're permissive on shape
+// because users name common folders by intent, not pattern.
+// A common folder Studio exported carries a marker whose first line is the pack's name; it names the
+// import, so a card's "common" comes back as the pack it is. Without a marker the folder name stands.
+function _commonImportName(absPath, folderName) {
+  const m = soundFontCommon.readCommonMarkerAt(path.dirname(absPath), path.basename(absPath));
+  return (m && m.name) || folderName;
+}
+
+function looksLikeCommonDir(name) {
+  return /^common$/i.test(name);
+}
+
+// Detect Proffie's "tracks" shared-music folder convention. A tracks
+// folder is one named "tracks" (any case) — the SD-card convention for
+// menu/background music. Like common, this gets routed to its own
+// bucket so the bulk runner can wire it into the shared-tracks importer
+// rather than treating it as a font or skipping it.
+function looksLikeTracksDir(name) {
+  return /^tracks$/i.test(name);
+}
+
+// Classify direct children of a folder into four buckets used by the
+// walker. Common folders are checked by NAME before Proffie-shape so
+// "common" wins over the shape match (a common folder's shared wavs like
+// boot.wav would otherwise trip the Proffie-file detector). Proffie
+// children are further tagged with their board (e.g. proffie, cfx,
+// verso) when their name matches a board pattern; that lets the walker
+// distinguish a multi-board font from a bundle of unrelated fonts.
+function classifyChildrenAt(absDir) {
+  let entries;
+  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
+  catch { return { kind: 'unreadable', proffieChildren: [], commonChildren: [], tracksChildren: [], otherFolders: [], zips: [] }; }
+  const proffieChildren = [];
+  const commonChildren = [];
+  const tracksChildren = [];
+  const otherFolders = [];
+  const zips = [];
+  for (const e of entries) {
+    if (isNoiseName(e.name)) continue;
+    const full = path.join(absDir, e.name);
+    if (e.isDirectory()) {
+      if (looksLikeCommonDir(e.name)) {
+        commonChildren.push({ name: e.name, absPath: full });
+      } else if (looksLikeTracksDir(e.name)) {
+        tracksChildren.push({ name: e.name, absPath: full });
+      } else if (looksLikeProffieDir(full)) {
+        const board = soundFontCandidates.identifyBoard(e.name);
+        proffieChildren.push({ name: e.name, absPath: full, board });
+      } else {
+        otherFolders.push({ name: e.name, absPath: full });
+      }
+    } else if (e.isFile()) {
+      if (/\.zip$/i.test(e.name)) zips.push({ name: e.name, absPath: full });
+    }
+  }
+  return { kind: 'classified', proffieChildren, commonChildren, tracksChildren, otherFolders, zips };
+}
+
+// Recursive walk: at each directory, decide one of:
+//   - Zips at this level -> emit each as a source
+//   - This dir IS itself a Proffie shape -> emit dir as solo source (handled
+//     by caller before descending in)
+//   - Multiple Proffie-shape children -> emit this dir as bundled source
+//   - One Proffie-shape child + other content -> emit child as solo, recurse
+//     into other folders
+//   - All other folders, no Proffie -> recurse into each
+function walkForSources(absDir, relPath, depth, ctx) {
+  if (depth > MAX_SCAN_DEPTH_BEFORE_HALT && ctx.results.sources.length === 0
+      && ctx.results.commonFolders.length === 0
+      && ctx.results.tracksFolders.length === 0) {
+    ctx.results.depthHalted = true;
+    return;
+  }
+  const classification = classifyChildrenAt(absDir);
+  if (classification.kind === 'unreadable') {
+    ctx.results.skipped.push({ absPath: absDir, reason: 'unreadable' });
+    return;
+  }
+  const { proffieChildren, commonChildren, tracksChildren, otherFolders, zips } = classification;
+  // Common folders surface as their own bucket. The runner wires them
+  // into soundFontCommon.importCommonFromFolder.
+  for (const c of commonChildren) {
+    ctx.results.commonFolders.push({
+      absPath: c.absPath,
+      relPath: path.join(relPath, c.name),
+      name: _commonImportName(c.absPath, c.name),
+    });
+  }
+  // Tracks folders surface as their own bucket. The runner wires the
+  // .wav files inside into soundFontSharedTracks.addFiles. Bulk import
+  // doesn't try to merge multiple tracks folders into one bucket — the
+  // shared-tracks dest is global, so addFiles handles dedup-by-name
+  // across all sources automatically.
+  for (const t of tracksChildren) {
+    ctx.results.tracksFolders.push({
+      absPath: t.absPath,
+      relPath: path.join(relPath, t.name),
+      name: t.name,
+    });
+  }
+  // Zips at this level: each is its own source.
+  for (const z of zips) {
+    ctx.results.sources.push({
+      kind: 'zip',
+      absPath: z.absPath,
+      relPath: path.join(relPath, z.name),
+      rawName: z.name.replace(/\.zip$/i, ''),
+      cleanedName: cleanSuggestedName(z.name.replace(/\.zip$/i, '')),
+      sizeBytes: safeStatSize(z.absPath),
+    });
+  }
+  // Multi-board case: when every Proffie-shape direct child has a
+  // recognized board name (Proffie, CFX, Verso, Asteria, Xeno, etc.),
+  // those children are board variants of the PARENT font, not
+  // independent fonts. Emit the parent as a single source and skip
+  // descending so we don't double-count. Mirrors detectMultiBoardSiblings
+  // in the single-import path. Only applies when the parent is a
+  // non-root, non-board-named folder (so we don't accidentally collapse
+  // the picked root into a one-font import when the user pointed at a
+  // top-level collection).
+  const allBoardNamed = proffieChildren.length > 0
+    && proffieChildren.every(p => !!p.board);
+  const parentName = path.basename(absDir);
+  const parentIsBoardNamed = !!soundFontCandidates.identifyBoard(parentName);
+  if (allBoardNamed && !parentIsBoardNamed) {
+    const _nm = folderSourceName(absDir, parentName, false);
+    ctx.results.sources.push({
+      kind: 'folder-solo',
+      absPath: absDir,
+      relPath,
+      rawName: parentName,
+      cleanedName: _nm.name,
+      nameSource: _nm.source,
+      sizeBytes: safeDirSize(absDir),
+    });
+    return;
+  }
+  // Otherwise: every Proffie-shape direct child is its own solo source.
+  // No auto-bundling — see header comment for the rationale.
+  const _series = numberedSeriesMembers(proffieChildren.map(p => p.name));
+  for (const p of proffieChildren) {
+    const _nm = folderSourceName(p.absPath, p.name, _series.has(p.name));
+    const _walk = safeDirScan(p.absPath);
+    ctx.results.sources.push({
+      kind: 'folder-solo',
+      absPath: p.absPath,
+      relPath: path.join(relPath, p.name),
+      rawName: p.name,
+      cleanedName: _nm.name,
+      nameSource: _nm.source,
+      sizeBytes: _walk.totalBytes,
+      // Free, from the walk above. Reported before the user chooses to import.
+      execFiles: _walk.execNames,
+    });
+  }
+  // Recurse into non-Proffie, non-common subfolders. Track per-recurse
+  // whether we found anything; a folder that produced zero sources and
+  // zero common folders gets logged as skipped so the user can see what
+  // was scanned-but-empty (e.g. a placeholder dir, a half-deleted font).
+  for (const f of otherFolders) {
+    const beforeSources = ctx.results.sources.length;
+    const beforeCommons = ctx.results.commonFolders.length;
+    walkForSources(f.absPath, path.join(relPath, f.name), depth + 1, ctx);
+    const noFinds = ctx.results.sources.length === beforeSources
+      && ctx.results.commonFolders.length === beforeCommons;
+    if (noFinds && depth === 1) {
+      // Only log skips at the top-level depth so the user sees what
+      // directly-picked-folder contains, not every nested empty dir
+      // along the way.
+      ctx.results.skipped.push({
+        absPath: f.absPath,
+        relPath: path.join(relPath, f.name),
+        reason: 'no Proffie content found',
+      });
+    }
+  }
+}
+
+function safeStatSize(p) {
+  try { return fs.statSync(p).size; } catch { return 0; }
+}
+
+// Walk a candidate source once and return everything the scan needs from it.
+//
+// THE EXECUTABLE NAMES RIDE THIS WALK ON PURPOSE ([B-214], 2026-09-09). The
+// scan already opens every directory and stats every file to total the bytes, so
+// the filenames are in hand and testing them costs no I/O at all - measured at
+// -1.2 ms across a 5,900-file card, which is below run-to-run noise. That is what
+// makes it honest to warn BEFORE the user chooses to import.
+//
+// This tier is NAME ONLY, and the limit is worth stating plainly wherever it is
+// reported: a program renamed to hum.wav walks straight past it. Catching that
+// needs the leading bytes of every file, which is a read this walk does not do,
+// and it happens at import instead where the read is already being paid for
+// (_selectFolderFiles). So: names before you decide, contents before anything
+// is carried in.
+function safeDirScan(dir) {
+  let total = 0;
+  const execNames = [];
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      if (isNoiseName(e.name)) continue;
+      const full = path.join(cur, e.name);
+      if (e.isDirectory()) { stack.push(full); continue; }
+      if (!e.isFile()) continue;
+      total += safeStatSize(full);
+      if (looksExecutableName(e.name)) {
+        execNames.push(path.relative(dir, full).split(path.sep).join('/'));
+      }
+    }
+  }
+  return { totalBytes: total, execNames };
+}
+
+// Kept for the callers that only ever wanted a byte total.
+function safeDirSize(dir) { return safeDirScan(dir).totalBytes; }
+
+// Names that are just a shared prefix plus a trailing number — Bank01/Bank02,
+// Preset1/Preset2, or any prefix a given card happens to use — are slot names, not
+// always font names. Detect the series across the sibling set and return the members,
+// so a readme or name tag can name them. With neither, the folder name stands.
+function numberedSeriesMembers(names) {
+  const groups = new Map();
+  for (const n of names) {
+    const m = /^(.*?)(\d+)$/.exec(n);
+    if (!m) continue;
+    const prefix = m[1].toLowerCase().replace(/[\s_-]+$/, '');
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push(n);
+  }
+  const members = new Set();
+  for (const arr of groups.values()) {
+    if (arr.length >= 3) arr.forEach(n => members.add(n));
+  }
+  return members;
+}
+
+// Suggested name for a folder-solo source. For a generic slot folder (its own name
+// matches a known slot pattern, or `forceGeneric` from the sibling series) we let
+// deriveFontName walk the confidence ladder (readme content -> name-tag -> folder).
+// For a folder that already carries a real name we keep the import's own cleaner so
+// existing naming is unchanged. Returns { name, source } — source feeds the review
+// screen's low-confidence flag ('folder-fallback' = a generic name we couldn't better).
+function folderSourceName(absDir, folderName, forceGeneric) {
+  try {
+    const d = deriveFontName(absDir, folderName, { forceGeneric });
+    // Route discovered names through the app's default cleaner too, so a name-tag
+    // "ben solo" or readme "DarkWolf" lands in the same underscore / Title-Case /
+    // disk-safe convention as every other suggested name (deriveFontName finds the
+    // name; cleanSuggestedName formats it). Fall back to the raw name if the cleaner
+    // reduces it to nothing (a name made entirely of stripped tokens).
+    if (d && (d.source === 'readme' || d.source === 'name-tag')) {
+      return { name: cleanSuggestedName(d.name) || d.name, source: d.source };
+    }
+    if (d && d.source === 'folder-fallback') {
+      const slot = /^(bank|preset|font|slot)[\s_-]*\d+$/i.test(folderName) || /^\d+$/.test(folderName) || /^\d+[-_ ]/.test(folderName);
+      return { name: cleanFolderName(folderName), source: slot ? 'folder-fallback' : 'folder' };
+    }
+  } catch { /* fall through to the plain cleaner */ }
+  return { name: cleanFolderName(folderName), source: 'folder' };
+}
+
+// scanForBulkImport({ rootDir }) -> { ok, plan }
+//   plan: {
+//     rootDir,
+//     sources: [{ kind, absPath, relPath, rawName, cleanedName, sizeBytes,
+//                  candidateCount? }],
+//     commonFolders: [{ absPath, relPath, name }],
+//     skipped: [{ absPath, reason }],
+//     depthHalted: bool,
+//     totalSizeBytes,
+//   }
+// Pass 1: walk + classify. No hashing, no dedup. Fast enough to run on
+// the renderer's "open this folder" click and show a summary right away.
+function scanForBulkImport({ rootDir }) {
+  if (!rootDir) return { ok: false, error: 'Missing rootDir' };
+  if (!fs.existsSync(rootDir)) return { ok: false, error: `Folder not found: ${rootDir}` };
+  let stat;
+  try { stat = fs.statSync(rootDir); }
+  catch (err) { return { ok: false, error: `Cannot stat folder: ${err.message}` }; }
+  if (!stat.isDirectory()) return { ok: false, error: 'Picked path is not a folder' };
+  const ctx = {
+    results: {
+      rootDir,
+      sources: [],
+      commonFolders: [],
+      tracksFolders: [],
+      skipped: [],
+      depthHalted: false,
+      totalSizeBytes: 0,
+    },
+  };
+  // [B-290] A tracks or common folder handed to the scanner AS THE ROOT (the SD
+  // browser's multi-select does exactly this) used to classify as nothing:
+  // classifyChildrenAt only ever looks at CHILDREN, a flat folder of wavs has
+  // no directories, and the selected folder vanished from the plan without a
+  // word - "the selection bar counted 4, the review header counted 3, and no
+  // message connects them." Name conventions win over shape here in the same
+  // order the child classifier uses (common before tracks before Proffie).
+  const _rootBase = path.basename(rootDir);
+  if (looksLikeCommonDir(_rootBase)) {
+    ctx.results.commonFolders.push({ absPath: rootDir, relPath: _rootBase, name: _commonImportName(rootDir, _rootBase) });
+    ctx.results.totalSizeBytes = safeDirSize(rootDir);
+    return { ok: true, plan: ctx.results };
+  }
+  if (looksLikeTracksDir(_rootBase)) {
+    ctx.results.tracksFolders.push({ absPath: rootDir, relPath: _rootBase, name: _rootBase });
+    ctx.results.totalSizeBytes = safeDirSize(rootDir);
+    return { ok: true, plan: ctx.results };
+  }
+  // If the picked root itself IS a Proffie shape, emit as solo and skip
+  // descent. Common single-font-folder case from "Import folder" workflow.
+  if (looksLikeProffieDir(rootDir)) {
+    const _nm = folderSourceName(rootDir, path.basename(rootDir), false);
+    ctx.results.sources.push({
+      kind: 'folder-solo',
+      absPath: rootDir,
+      relPath: '',
+      rawName: path.basename(rootDir),
+      cleanedName: _nm.name,
+      nameSource: _nm.source,
+      sizeBytes: safeDirSize(rootDir),
+    });
+  } else {
+    walkForSources(rootDir, '', 1, ctx);
+  }
+  let totalSize = 0;
+  for (const s of ctx.results.sources) totalSize += s.sizeBytes || 0;
+  ctx.results.totalSizeBytes = totalSize;
+  return { ok: true, plan: ctx.results };
+}
+
+// runBulkImport({ plan, userData }, callbacks)
+//   callbacks: { onProgress(payload), shouldCancel() }
+//   Returns: { ok, summary: { imported: [...], skipped: [...], failed: [...] } }
+// Each planned source:
+//   1. Pipe through soundFontSources.importSource (handles hash + dedup +
+//      copy + meta).
+//   2. On dedup hit, record in summary.skipped and continue.
+//   3. On success, detect candidates and create entries for every
+//      candidate; mark each entry needsReview when required fields can't
+//      be populated.
+// [B-514] A common folder's share of the closing size sentence, in the same terms as a font
+// source's: the source as stored, what was made from it, and what that cost on disk. A source the
+// library already held was counted when it arrived, so only the new common folder counts then.
+async function _commonSizes(userData, result) {
+  const sv = (result && result.savings) || {};
+  const saved = ((sv.crossLinked && sv.crossLinked.savedBytes) || 0) + (sv.dedupSaved || 0) + (sv.reusedBytes || 0);
+  const out = { sourceBytes: 0, madeBytes: 0, madeOwnBytes: 0,
+    footprint: Math.max(0, (sv.contentBytes || 0) - saved), archiveBytes: sv.reusedSource ? 0 : (sv.archiveBytes || 0) };
+  if (!result || !result.sourceUuid) return out;
+  try {
+    const size = require('./soundFontLibrarySize');
+    const ids = (Array.isArray(result.commons) && result.commons.length ? result.commons : [result])
+      .map((c) => c && c.uuid).filter(Boolean);
+    const p = size.sourcePaths(userData, result.sourceUuid, sv.reusedSource ? ids : null);
+    if (!sv.reusedSource) out.sourceBytes = await size.apparentBytes(p.source);
+    const m = await size.measurePaths(p.made);
+    out.madeBytes = m.apparent;
+    out.madeOwnBytes = m.unshared + (sv.reusedSource ? 0 : await size.apparentBytes(p.records));
+  } catch {}
+  return out;
+}
+
+async function runBulkImport({ plan, userData }, callbacks = {}) {
+  const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
+  const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
+  const summary = { imported: [], skipped: [], failed: [], commonsImported: [], commonsSkipped: [], commonsFailed: [], tracksAdded: 0, tracksSkipped: 0, tracksFailed: 0, cancelled: false };
+  if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
+  const total = plan.sources.length;
+  const learned = _learnedVendors(userData);
+  for (let i = 0; i < total; i++) {
+    if (shouldCancel()) { summary.cancelled = true; break; }
+    const src = plan.sources[i];
+    onProgress({ stage: 'source-start', sourceIdx: i, total, label: src.cleanedName || src.rawName });
+    try {
+      // THE SAME FONT COMES IN BESIDE THE ONE IT MATCHED, not as a source of its own. [B-643]
+      // Null means it does not apply (not the same font, not a folder, no anchor); the row then
+      // imports as it always has, so nothing on the card is ever lost to this path.
+      const beside = await _importBesideMatch({ userData, src }, (subProgress) => {
+        onProgress({ stage: 'source-progress', sourceIdx: i, total, label: src.cleanedName || src.rawName, sub: subProgress });
+      });
+      if (beside && beside.ok) {
+        // Stamped now, so the font carries its Customized tag the moment the import ends. [BUG-027]
+        try { soundFontEntries.getEntryCustomization(userData, beside.name); } catch {}
+        // The source was already in the library: only the new font counts toward the size line,
+        // its unshared bytes being what it cost on disk. [BUG-027]
+        let madeBytes = 0, madeOwnBytes = 0;
+        try {
+          const _size = require('./soundFontLibrarySize');
+          const _m = await _size.measurePaths(_size.sourcePaths(userData, beside.sourceUuid, [beside.name]).made);
+          madeBytes = _m.apparent;
+          madeOwnBytes = _m.unshared;
+        } catch {}
+        summary.imported.push({
+          src: src.relPath || src.absPath, sourceUuid: beside.sourceUuid,
+          entries: [{ name: beside.name, ok: true }],
+          bundleName: null, multiCandidate: false, versionsSkipped: 0, variantsEmitted: 0,
+          strippedFiles: [], besideOf: beside.besideOf,
+          footprint: 0, sourceBytes: 0, madeBytes, madeOwnBytes,
+        });
+        continue;
+      }
+      const result = await importPlannedSource({
+        userData, src, fromSdCard: !!plan.fromSdCard, learned,
+        // [B-462] So the cancel lands inside the copy, not only at the next source boundary.
+        shouldStop: shouldCancel,
+      }, (subProgress) => {
+        onProgress({ stage: 'source-progress', sourceIdx: i, total, label: src.cleanedName || src.rawName, sub: subProgress });
+      });
+      if (result.dedup) {
+        summary.skipped.push({ src: src.relPath || src.absPath, reason: 'already-in-library', existingUuid: result.existingUuid });
+      } else if (result.ok) {
+        summary.imported.push({
+          src: src.relPath || src.absPath,
+          sourceUuid: result.sourceUuid,
+          entries: result.entries,
+          bundleName: result.bundleName,
+          multiCandidate: !!result.multiCandidate,
+          versionsSkipped: result.versionsSkipped || 0,
+          variantsEmitted: result.variantsEmitted || 0,
+          strippedFiles: result.strippedFiles || [],
+          blockedFiles: result.blockedFiles || [],   // [B-214] refused, reported in the summary
+          dedupSaved: result.dedupSaved || 0,
+          dedupFiles: result.dedupFiles || 0,
+          crossSaved: result.crossSaved || 0,
+          crossFiles: result.crossFiles || 0,
+          contentBytes: result.contentBytes || 0,
+          archiveBytes: result.archiveBytes || 0,
+          sourceBytes: result.sourceBytes || 0,
+          madeBytes: result.madeBytes || 0,
+          madeOwnBytes: result.madeOwnBytes || 0,
+        });
+      } else {
+        summary.failed.push({ src: src.relPath || src.absPath, reason: result.error });
+      }
+    } catch (err) {
+      // A CANCEL IS NOT A FAILED FONT. [B-462, 2026-10-05] Now that the cancel reaches inside
+      // the copy, `importSource` throws from its checkpoints — and without this the font the user
+      // stopped would be reported as damaged in the summary, and the loop would carry on through
+      // the rest of them. Duck-typed on `.cancelled`, the convention `sfExportCopy` documents.
+      if (err && err.cancelled === true) { summary.cancelled = true; break; }
+      summary.failed.push({ src: src.relPath || src.absPath, reason: String(err && err.message || err) });
+    }
+  }
+  // Common folders: now imported as part of bulk (previously catalogued
+  // but skipped per v1 scope). Each folder lands in the common bucket via
+  // the same importCommonFromFolder API the manual common-import flow
+  // uses, so dedup-by-name and wav-presence checks apply identically.
+  // Name comes from the folder basename; user can rename post-import.
+  // An explicit pick from the review's common rows wins ([B-351]): the user
+  // may have renamed or excluded some, and that decision is what lands.
+  // No picks (quick import) = every planned common under its own name.
+  const commons = (Array.isArray(plan.commonPicked) && plan.commonPicked.length)
+    ? plan.commonPicked.map(p => ({ absPath: p.absPath, relPath: p.name, name: p.name }))
+    : (Array.isArray(plan.commonFolders) ? plan.commonFolders : []);
+  for (let i = 0; i < commons.length; i++) {
+    if (shouldCancel()) { summary.cancelled = true; break; }
+    const c = commons[i];
+    onProgress({ stage: 'common-start', commonIdx: i, totalCommons: commons.length, label: c.name });
+    try {
+      // [B-340] Have-it is decided by CONTENT, not name. Every card names its
+      // folder "common", so the old name test read every later card's pack as
+      // owned and silently dropped voicepacks the user did not have. Identical
+      // content under any name skips honestly; a taken name over NEW content
+      // imports under the next numbered name instead of being thrown away.
+      const cls = soundFontCommon.classifyIncomingCommon(userData, c.absPath);
+      if (cls.ownedByContent) {
+        summary.commonsSkipped.push({ src: c.relPath || c.absPath, reason: 'already-in-library', matchName: cls.matchName });
+        continue;
+      }
+      let importName = c.name;
+      if (soundFontCommon.nameInUse(userData, importName)) {
+        importName = soundFontCommon.nextNumberedName(userData, importName);
+      }
+      // Per-byte progress rides out as common-progress ([B-352]): a fontless
+      // run used to sit at a dead 0% bar for the whole common copy.
+      const result = await soundFontCommon.importCommonFromFolder(userData, c.absPath, importName,
+        (p) => onProgress({ stage: 'common-progress', commonIdx: i, totalCommons: commons.length, label: c.name, sub: p }));
+      if (result && result.ok) {
+        summary.commonsImported.push({ src: c.relPath || c.absPath, uuid: result.uuid, name: result.name,
+          ...(await _commonSizes(userData, result)) });
+      } else if (result && /already exists/i.test(result.error || '')) {
+        // Belt only: the classify + rename above should make this unreachable.
+        summary.commonsSkipped.push({ src: c.relPath || c.absPath, reason: 'already-in-library' });
+      } else {
+        summary.commonsFailed.push({ src: c.relPath || c.absPath, reason: (result && result.error) || 'unknown error' });
+      }
+    } catch (err) {
+      summary.commonsFailed.push({ src: c.relPath || c.absPath, reason: String(err && err.message || err) });
+    }
+  }
+  // Tracks folders: each is a directory of .wav files (the SD-card
+  // shared-tracks convention). Bulk gathers every .wav across all
+  // tracks folders and pipes them through soundFontSharedTracks.addFiles
+  // in one call so dedup-by-name applies across the union. The shared-
+  // tracks bucket is a single global flat folder, so multiple "tracks"
+  // dirs across the scanned tree all merge into the same destination —
+  // identical-name files get a "(N)" suffix per the existing _uniqueName
+  // contract in soundFontSharedTracks.
+  const tracksDirs = Array.isArray(plan.tracksFolders) ? plan.tracksFolders : [];
+  if (tracksDirs.length > 0 && !shouldCancel()) {
+    onProgress({ stage: 'tracks-start', totalTracksFolders: tracksDirs.length });
+    // An explicit pick from the review screen wins over globbing the folder: the
+    // user may have excluded some and renamed others, and that decision has to be
+    // what lands. Falls back to every wav when nothing was picked (quick import).
+    let wavPaths = [];
+    if (Array.isArray(plan.tracksPicked) && plan.tracksPicked.length) {
+      wavPaths = plan.tracksPicked
+        .filter(t => t && t.absPath)
+        .map(t => (t.name ? { path: t.absPath, name: t.name } : t.absPath));
+    } else {
+      for (const t of tracksDirs) {
+        try {
+          const entries = fs.readdirSync(t.absPath, { withFileTypes: true });
+          for (const e of entries) {
+            if (e.isFile() && /\.wav$/i.test(e.name)) {
+              wavPaths.push(path.join(t.absPath, e.name));
+            }
+          }
+        } catch {}
+      }
+    }
+    if (wavPaths.length > 0) {
+      try {
+        // Per-FILE progress. `tracks-start` alone is folder-level, which is one
+        // unit of work on a tracks-only import - the bar cannot move. [B-281]
+        // [B-400] addFiles is async now - the await is not cosmetic. Without it `result` is a
+        // Promise, `result.ok` is undefined, and every track lands in tracksFailed while the
+        // files themselves copy perfectly. A silent miscount, not a crash.
+        // Measured before and after, so the tracks folder's own index counts with the tracks.
+        const _sizeMod = require('./soundFontLibrarySize');
+        const _tracksDir = soundFontSharedTracks.sharedTracksRoot(userData);
+        const _tracksBefore = await _sizeMod.apparentBytes([_tracksDir]);
+        const result = await soundFontSharedTracks.addFiles(userData, wavPaths, (p) => {
+          onProgress({ stage: 'tracks-progress', done: p.done, total: p.total, label: p.name });
+        });
+        if (result && result.ok) {
+          summary.tracksAdded = (result.added || []).length;
+          // [B-514] The closing size sentence counts tracks too: what arrived, and what was new.
+          const _grew = Math.max(0, (await _sizeMod.apparentBytes([_tracksDir])) - _tracksBefore);
+          summary.tracksBytes = _grew;
+          summary.tracksNewBytes = Math.max(0, _grew - (result.addedBytes || 0)) + (result.newBytes || 0);
+          // addFiles' skipped is per-file (Invalid filename, copy error,
+          // etc.). It does NOT skip on duplicate name — uniqueName
+          // suffix-numbers instead. So skipped here is genuine failure.
+          summary.tracksFailed = (result.skipped || []).length;
+        } else {
+          summary.tracksFailed = wavPaths.length;
+        }
+      } catch (err) {
+        summary.tracksFailed = wavPaths.length;
+      }
+    }
+  }
+  onProgress({ stage: 'done', total });
+  return { ok: true, summary };
+}
+
+// ANALYZE phase ("prepare"): stage every planned source via importSource
+// prepareOnly — zip + hash + dedup, no meta/entry yet — and fold in the
+// already-computed corruption map (by top-level folder name). Returns per-source
+// results the caller stamps back onto the plan (src._prepared / dup / corrupt)
+// plus aggregate stats for the real-stats screen. This is exactly the hashing
+// quick import does, just run BEFORE the keep/prune decision — the prepared zips
+// are reused at commit (no re-hash). Emits byte progress for the existing bar.
+// `corruptFonts` IS GONE AS AN INPUT ([B-361], 2026-09-09). It used to arrive
+// as a folder-name-keyed map produced by the card browser's recursive pre-walk —
+// so the review's corrupt flags existed only for SD-card imports, and only after
+// reading the entire card a second time. Now the verdict comes from the prepare's
+// OWN read (importSource -> _selectFolderFiles header-checks every wav on the
+// walk that selects the files), so `res.strippedFiles` is the detection result.
+// Every import door gets it, including folders and zips picked from disk, which
+// were never corruption-checked at all before this.
+async function analyzeBulkImport({ plan, userData }, callbacks = {}) {
+  const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
+  const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
+  if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
+  const sources = plan.sources;
+  const total = sources.length;
+  const learned = _learnedVendors(userData);
+  const results = [];
+  let newCount = 0, dupCount = 0, corruptCount = 0;
+  // ── [B-314] TWO IDENTICAL FONTS IN ONE BATCH USED TO BE INVISIBLE TO EACH OTHER ──
+  //
+  // `FoRed` and `RVJ`, same content hash, imported 17 seconds apart from one SD bulk
+  // import: "but it didnt de dup".
+  //
+  // CAUSE: the prepare runs findByHash, which walks listSources — and listSources only
+  // returns directories with a readable meta.json. A staged source has `.preparing` and
+  // no meta yet. So every font in a batch was dedup-checked against the library AS IT
+  // WAS BEFORE THE BATCH, and two identical fonts inside the same run never saw each
+  // other. finalizePreparedSource's own comment says the tree is "dedup-cleared" —
+  // true when it was staged, no longer true by the time it commits.
+  //
+  // SURFACED, NOT SILENTLY SKIPPED. Catching this at COMMIT would make the review
+  // lie: it would say "importing 40" and import 39. Caught here, the row can say which
+  // other row it matches and it was decides — the app's normal shape, and it matches the
+  // 2026-08-31 ruling that a row ticked despite an owned marker is a row they meant.
+  //
+  // NOT THE SAME STATEMENT AS "already in your library". One is about the library,
+  // the other is about this card. Sharing a phrase would tell someone their card is
+  // already imported when it is not.
+  const _batchHashes = new Map();
+  // [B-415] One entry per prepared source, for the containment ranking below.
+  const _batchFiles = [];
+  let batchDupCount = 0;
+  for (let i = 0; i < total; i++) {
+    if (shouldCancel()) return { ok: true, cancelled: true, results };
+    const src = sources[i];
+    const label = src.cleanedName || src.rawName;
+    onProgress({ stage: 'source-start', sourceIdx: i, total, label });
+    // Corrupt fonts are prepared the SAME way as clean ones: the damaged wavs are
+    // removed FIRST, then the salvaged content is hashed. That clean, stable hash
+    // means a corrupt font you ALREADY have dedups up front (shows as "already in
+    // library" on the stats screen) instead of the user checking it and only
+    // discovering the duplicate after it re-processes at commit. A corrupt font
+    // that's genuinely NEW gets a prepared (stripped) zip, still flagged corrupt
+    // so review keeps it unchecked-by-default — but committing it now reuses the
+    // prepared zip (no re-strip/re-hash).
+    let res;
+    // [B-398] Name the source, so the log says WHICH one held the loop and for how long.
+    // Declared ABOVE the try: a `const` inside it is out of scope in the `finally`, which is a
+    // ReferenceError at runtime that `node --check` passes happily. Same shape as the two invented
+    // helpers on 09-17 — the checker proves a file parses, not that an identifier resolves.
+    const _probe = require('./stallProbe');
+    const _probeLabel = 'importSource:' + path.basename(String(src && src.absPath || '?'));
+    try {
+      _probe.begin(_probeLabel);
+      res = await soundFontSources.importSource({
+        userData, sourcePath: src.absPath, originalName: path.basename(src.absPath),
+        metadata: {}, prepareOnly: true,
+        onProgress: (p) => onProgress({ stage: 'source-progress', sourceIdx: i, total, label, sub: p }),
+        // THE CANCEL REACHES INSIDE THE SOURCE, NOT JUST BETWEEN SOURCES. [B-462, 2026-10-05]
+        // The loop above checks once per source, and one source is a whole font being hashed off a
+        // card — tens of seconds in which Cancel set a flag nobody read. The modal closed, the work
+        // carried on, and the gate stayed held, so the NEXT import was refused with "An import is
+        // already running". Hit twice in testing: *"the import doesn't really cancel... still."*
+        // `shouldStop` is export's mechanism and `importSource` already honoured it in three
+        // places along the hash/copy path — the single-source import door passes it, which is why
+        // its cancel works. Bulk called the same function and left the argument off. The memory is
+        // what found it: *"pretty sure we had the exact scenario before... on export?"*
+        // Safe because analyze only STAGES: cancelling throws the staged work away and nothing
+        // is lost, which is the reasoning for checking often rather than politely.
+        shouldStop: shouldCancel,
+      });
+    } catch (e) {
+      // A cancel is not a failure. `importSource` throws `ExportCancelled` from its checkpoints,
+      // and reporting that as a per-source error would mark the font damaged in the results and
+      // leave the loop running through the remaining eleven.
+      // DUCK-TYPED, following the convention `sfExportCopy` states and explains: an `instanceof`
+      // fails across module instances, and a `.name` check would be a third spelling of a test
+      // this codebase already has one answer for.
+      if (e && e.cancelled === true) return { ok: true, cancelled: true, results };
+      res = { ok: false, error: String(e && e.message || e) };
+    }
+    finally { _probe.end(_probeLabel); }
+    // THE VERDICT COMES FROM THE PREPARE'S OWN READ. Shape kept identical to the
+    // map it replaces ({ count, reason }) so every consumer downstream — the
+    // review's unchecked-by-default, the row's reason, the stats bucket — needs
+    // no change.
+    const _stripped = (res && res.strippedFiles) || [];
+    const corrupt = _stripped.length
+      ? { count: _stripped.length, reason: _stripped[0].reason, files: _stripped }
+      : null;
+    // THE DEEPER FINDING ([B-214]). The card report can only test NAMES, so a
+    // program wearing a sound's name is invisible there and is first seen HERE, off
+    // the read the prepare performs. The stats screen has to be able to report more
+    // than the browser did, or the second check is done and never spoken.
+    const _blocked = (res && res.blockedFiles) || [];
+    const blocked = _blocked.length ? { count: _blocked.length, files: _blocked } : null;
+    // Kept-but-reported: archive formats that cannot be opened here. Carried on the
+    // same path as `blocked` because a finding nobody plumbs out is a finding nobody
+    // sees, which is how the content check nearly ended up decorative.
+    const _noted = (res && res.notedFiles) || [];
+    const noted = _noted.length ? { count: _noted.length, files: _noted } : null;
+    if (res && res.ok && res.isDuplicate) {
+      dupCount++;
+      // `res.staged` is the zip we just wrote before discovering it was a
+      // duplicate. importSource KEEPS it on purpose (see soundFontSources'
+      // duplicate branch — "import again as a new source" finalizes it with no
+      // re-zip), on the understanding that cancel/close discards it. Dropping
+      // the field here severed that: the renderer had no uuid to hand back, so
+      // every duplicate's zip sat on disk until the 6h orphan sweep. One
+      // re-analyze of a 12 GB card that was already imported leaked ~1.9 GB,
+      // and runs inside the same 6h window stacked. (2026-08-31.)
+      results.push({ idx: i, isDuplicate: true, existingUuid: res.uuid, staged: res.staged || null, corrupt, blocked, noted });
+    } else if (res && res.ok && res.prepared) {
+      // [B-314] Match against what THIS run has already staged, as well as the library.
+      //
+      // KEYED ON CONTENT, NOT ON SOURCE IDENTITY. [B-415] `res.hash` identifies the ARTIFACT:
+      // for a zip it is the sha256 of the archive on disk, for a folder it is the content digest.
+      // So a zip and its own extracted copy of the SAME FONT carried two different numbers, never
+      // collided here, and both imported - the find 2026-09-19, Energy / Energy_2 byte-identical.
+      // [B-314] was not wrong; its fixture was two twins of the SAME SHAPE, which do collide.
+      // Falls back to res.hash so a source that somehow yields no content digest still gets
+      // the old same-shape protection rather than none.
+      const _h = res.contentHash || res.hash || null;
+      const _twin = _h ? _batchHashes.get(_h) : null;
+      // THE ZIP WINS, WHATEVER THE WALK ORDER. Ruled 2026-09-19: "take the zip over the
+      // extracted... so extracted is skipped." The zip is what the creator shipped - it carries
+      // the extras, and every provenance and savings claim is anchored to it.
+      // WITHOUT THIS, WHICH COPY SURVIVES IS AN ACCIDENT OF FILENAME ORDER. The zips happened
+      // to be named "1.1-Energy.zip", and "1" sorts before "E", so the folders became the later
+      // twin. Rename the folder and the ZIP would have been the one skipped. Shape decides, not
+      // the alphabet.
+      // THE RULE IS THE FULLEST SOURCE WINS. The wording 2026-09-19: "it's really the full
+      // source wins. duplicate font but one has more stuff around it... that wins." The keeper is
+      // the copy carrying the most AROUND the font - the extras used to build a customized version,
+      // or the exports for another board - because that is the material that cannot be recovered
+      // from the other copy.
+      // ZIP-VS-FOLDER IS NOT THE RULE and must not be re-introduced as one. It was my first
+      // draft and it is only a PROXY: a zip straight from the creator usually carries the extras
+      // and a hand-extracted folder is often a trimmed subset. Proxy, not principle - so rank on
+      // the measurement and let shape break ties.
+      // AND FOR AN EXACT TWIN THE RANKING IS ALWAYS A TIE, by definition: contentHash covers
+      // the WHOLE staged tree, extras included, so two sources that collide here hold byte-identical
+      // material and neither is fuller. Measured on a real pair - Energy/Energy_2, 55 files and one
+      // digest on both. The comparison is written anyway because it states the intended rule at the
+      // point the decision is made, and because the SUBSET case it really targets is a different
+      // check that does not exist yet (see [B-415]: different content, so no collision, so both
+      // import silently). Do not read this branch as covering that case.
+      const _isZip = (res.format || '').toLowerCase() === 'zip';
+      const _full = { files: res.fileCount || 0, bytes: res.totalBytes || res.fileSize || 0 };
+      // [B-415] Kept for the containment pass after the loop - see bulkImportContainment.js.
+      if (Array.isArray(res.fileHashes) && res.fileHashes.length) _batchFiles.push({ idx: i, hashes: res.fileHashes });
+      if (_twin) {
+        batchDupCount++;
+        // Fuller wins; on a tie the creator's own artifact wins; failing that the earlier row,
+        // so the outcome never depends on the order the folder happened to be walked in.
+        const _fuller = (_full.files !== _twin.full.files)
+          ? _full.files > _twin.full.files
+          : (_full.bytes !== _twin.full.bytes)
+            ? _full.bytes > _twin.full.bytes
+            : (_isZip && !_twin.isZip);
+        if (_fuller) _batchHashes.set(_h, { idx: i, label, isZip: _isZip, full: _full });
+      } else if (_h) {
+        _batchHashes.set(_h, { idx: i, label, isZip: _isZip, full: _full });
+      }
+      // A twin is not new — counting it would put the review's number back above what
+      // the import will produce, which is the whole complaint.
+      if (corrupt) corruptCount++; else if (!_twin) newCount++;
+      results.push({ idx: i,
+        // [B-314] The row's own display label, carried so the back-fill pass below can
+        // name THIS row on its partner's note without re-deriving it from a different
+        // field and drifting out of step with what the screen actually shows.
+        label,
+        // The prepared object is kept INTACT for a twin, deliberately: its uuid is
+        // how "import anyway" finalizes without re-extracting. The library-duplicate
+        // branch above learned this the hard way — dropping its `staged` field leaked
+        // ~1.9 GB per re-analyze of a 12 GB card.
+        // [B-415] `isZip` is THIS row's shape; `partnerIsZip` is the other one's. The renderer
+        // needs both to prefer the zip without re-deriving anything.
+        // [B-415] `keeps: false` means THIS row lost the ranking above, so the renderer unticks
+        // it rather than unticking whichever row came second in the walk.
+        sameInBatch: _twin ? { idx: _twin.idx, label: _twin.label, keeps: _batchHashes.get(_h).idx === i } : null,
+        prepared: {
+        uuid: res.uuid, hash: res.hash, format: res.format, name: res.name,
+        fileSize: res.fileSize, sourceFileDate: res.sourceFileDate, sourceFileMtimeMs: res.sourceFileMtimeMs,
+        strippedFiles: res.strippedFiles || [],
+        blockedFiles: res.blockedFiles || [],
+        // Carried from prepare to commit — see the finalize call below. ([B-283])
+        curation: res.curation || null,
+        curationTmp: res.curationTmp || null,
+        curationPayloadDir: res.curationPayloadDir || null,
+        // THIS OBJECT IS A FILTER. Cross-linking happens at PREPARE time, and
+        // this hand-picked list is the only bridge to commit — omitting a field
+        // here silently zeroes it downstream. crossLinked was omitted, so every
+        // UI-flow bulk import recorded crossSaved 0 and the summary undersold
+        // or hid the saving; the meta lost its crossLinkStats the same way.
+        // (Found 2026-09-07 when the kit's bulk fixture showed no savings
+        // sentence at all.)
+        crossLinked: res.crossLinked || null,
+        archiveBytes: res.archiveBytes || 0,
+      }, corrupt, blocked, noted });
+    } else {
+      results.push({ idx: i, error: (res && res.error) || 'prepare failed', corrupt, blocked, noted });
+    }
+  }
+  // ── OWNERSHIP, COMPUTED HERE (2026-08-31) ─────────────────────────────────
+  // "Do I already have these sounds?" used to be asked TWICE, at two different
+  // times, with two different consequences: the review screen asked it before
+  // committing and acted on the answer, while quick import asked it AFTER
+  // committing, where the only thing left to do was stamp `needsReview` on a font
+  // it had just imported. Same test, same card, two outcomes — 56 entries from one
+  // button and 54 from the other.
+  //
+  // Asking it once, here, is what makes the two paths agree by construction rather
+  // than by luck: analyze produces one answer and both paths read it. the user's
+  // acceptance test: "when I go to review, I'm reviewing exactly what we said we
+  // were already going to do as a quick import, and they will not change after the
+  // fact."
+  //
+  // TWO TESTS, ONE QUESTION. The duplicate check in the loop above compares the
+  // staged ZIP HASH — "have I imported this exact archive before". This compares
+  // per-file hashes — "do I already have all of these sounds". Both are needed and
+  // they catch different shapes (an identical download versus a subset or a rename),
+  // but to the user they mean the same thing, so `owned` covers both and the
+  // breakdown reports one number.
+  let ownedCount = 0;
+  try {
+    const compare = require('./soundFontCompare');
+    const { index } = compare.buildLibraryIndex(userData);
+    if (index.length) {
+      // Every hash the library holds, so a match's missing files split into "elsewhere in your
+      // library" and "new". Staged copies of this card are not committed and do not count. [B-643]
+      let _owned = null;
+      try { _owned = require('./soundFontContentIndex').libraryHashes(userData); } catch {}
+      for (let i = 0; i < results.length; i++) {
+        if (shouldCancel()) break;
+        const r = results[i];
+        const src = sources[r.idx];
+        // An exact-archive duplicate is already known to be owned; it needs no
+        // second opinion and its entry name comes from the dedup hit.
+        if (r.isDuplicate) {
+          r.owned = true; ownedCount++;
+          // Name what it matched. The row can otherwise only say "already in your
+          // library" while proposing to import it under a DIFFERENT name — the card
+          // folder `Graflex8` displays as `Episode_8_Graflex_Font` from its readme,
+          // so without this the one case that needs the clause most is the one case
+          // that lacks it. Fully-owned rows have said "(as X)" all along.
+          // The name is the FONT's: the library entry whose sourceUuid is this source. A source
+          // meta has no `name` (it stores `originalName`), so reading the source gave nothing and
+          // the row could say neither "(as X)" nor which font to record the card's name on. A
+          // bundle (several fonts from one download) names none. [B-641]
+          try {
+            const fonts = soundFontEntries.listEntries(userData)
+              .filter(e => e && e.meta && e.meta.sourceUuid === r.existingUuid);
+            const nm = fonts.length === 1 ? fonts[0].name : null;
+            if (nm) r.match = { label: 'Already in your library', matchName: nm, fullyOwned: true, tip: '' };
+          } catch {}
+          continue;
+        }
+        if (!r.prepared || !src) continue;
+        onProgress({ stage: 'match-start', sourceIdx: r.idx, total, label: src.cleanedName || src.rawName });
+        let m = null;
+        try {
+          let isDir = false;
+          try { isDir = !!(src.absPath && fs.existsSync(src.absPath) && fs.statSync(src.absPath).isDirectory()); } catch {}
+          if (isDir) {
+            // 200MB cap rather than the 20MB default: the ownership claim counts
+            // tracks, and a library's track wavs sit in the 20-60MB band the tight
+            // default would leave invisible. Same figure the guided matcher used.
+            const sets = compare.buildFontSetsFromDir(src.absPath, { maxFileBytes: 200 * 1024 * 1024 });
+            if (sets && sets.core.size) m = compare.matchAgainstLibrary(sets, index);
+          } else {
+            const mf = await soundFontSources.ensureSourceManifest(userData, r.prepared.uuid);
+            if (mf && Array.isArray(mf.records)) m = compare.matchCandidateAgainstLibrary(mf.records, '', index);
+          }
+        } catch {}
+        if (!m || !m.bestMatch) continue;
+        compare.applyLibrarySplit(m, _owned, { sourceName: (u) => soundFontSources.sourceDisplayName(userData, u) });
+        const label = (m.verdict === 'variant' && m.coreContainment < compare.VARIANT_DISPLAY_MIN)
+          ? null : compare.verdictLabel(m);
+        if (!label) continue;
+        r.match = {
+          label, tip: compare.verdictTip(m), matchName: m.bestMatch,
+          verdict: m.verdict, fullyOwned: compare.isFullyOwned(m),
+          // Does the library copy carry files this one does not? That is the
+          // difference between "your copy is identical" and "your copy is more
+          // complete" on the row - a fact about the CARD, not about which of our
+          // two tests happened to catch it.
+          libHasMore: (m.libCoreCount > m.cardCoreCount) || (m.libCustCount > m.cardCustCount),
+          // The label already says where its extra files are; the row adds nothing to it. [B-643]
+          ownedElsewhere: !!(m.missingSplit && m.missingSplit.fresh === 0 && m.missingSplit.elsewhere > 0),
+        };
+        // The same font file for file: nothing added, nothing taken out. Only that is already in the library;
+        // a curated copy (a quote deleted, extras held elsewhere) is a version and comes in beside it. [BUG-030]
+        r.match.identical = r.match.fullyOwned && !r.match.ownedElsewhere && !r.match.libHasMore
+          && (m.cardCoreCount || 0) === (m.libCoreCount || 0) && (m.cardCustCount || 0) === (m.libCustCount || 0);
+        // Move it out of the bucket it was actually counted in. A corrupt font was
+        // never added to newCount (the loop above counts it as corrupt), so
+        // decrementing newCount for one would put the breakdown out by one and it
+        // would stop summing to the total.
+        if (r.match.identical) {
+          r.owned = true; ownedCount++;
+          if (r.corrupt) corruptCount--; else newCount--;
+        }
+        // THE DEFAULT FOLLOWS WHETHER ANYTHING ON THE CARD IS NEW, not the match type. fullyOwned
+        // includes a copy whose extra files are all elsewhere in the library (applyLibrarySplit),
+        // so skipping it is lossless; a copy with any file the library lacks stays ticked, so
+        // nothing on the card is lost. [B-643]
+      }
+    }
+  } catch {}
+
+  // ── ENRICH, ALSO HERE ─────────────────────────────────────────────────────
+  // Creator detection, the font/hum preview clips, the doc list and the wav count.
+  // This used to run when the user clicked Review Import, behind its own progress
+  // bar, and quick import ran the creator half AGAIN after committing each source
+  // (see the detectVendor call in runBulkImport). Two paths, same work, twice.
+  //
+  // The test for whether moving it was worth doing: "there should be nothing other
+  // than loading a screen between the two" — so ALL of it moves, not just the half
+  // quick import shares. Analyze is already opening and reading every source to zip
+  // and hash it, so the readme reads and the preview picks ride along; review
+  // becomes a pure render with no wait at all.
+  try {
+    let _libSources = null;
+    for (let i = 0; i < sources.length; i++) {
+      if (shouldCancel()) break;
+      const src = sources[i];
+      onProgress({ stage: 'enrich-start', sourceIdx: i, total, label: src.cleanedName || src.rawName });
+      let e = null;
+      try { e = await enrichSourceForGuided(src, learned); } catch {}
+      if (e) {
+        const r = results.find(x => x && x.idx === i);
+        if (r) {
+          r.enrich = e;
+          try { fontCatalogue.applyToEnrichment(e, await _identifyByCatalogue(userData, r, e.candidatePaths)); } catch {}
+          if (r.isDuplicate && !e.vendor) {
+            try {
+              if (!_libSources) _libSources = new Map(soundFontSources.listSources(userData).map(x => [x.uuid, x.meta || x]));
+              const held = _libSources.get(r.existingUuid);
+              if (held && held.vendor) { e.vendor = held.vendor; e.vendorWebsite = held.vendorWebsite || null; }
+            } catch {}
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // ── SHARED TRACKS, COUNTED THE SAME WAY ───────────────────────────────────
+  // The summary used to say "Shared tracks folder (will be imported): 1", which
+  // named a folder and described nothing. The folder is merged into the one global
+  // shared-tracks folder and only tracks you do not already have get copied — so
+  // the useful numbers are how many are new and how many you already have. Counted
+  // here by CONTENT, the same test the import itself now applies, so the summary
+  // and the outcome cannot disagree. (2026-08-31.)
+  let tracks = null;
+  try {
+    const tracksDirs = Array.isArray(plan.tracksFolders) ? plan.tracksFolders : [];
+    if (tracksDirs.length) {
+      const hashIndex = require('./soundFontSharedTracksHash');
+      const idx = hashIndex.ensureIndex(userData);
+      const wavs = [];
+      for (const t of tracksDirs) {
+        let entries = [];
+        try { entries = fs.readdirSync(t.absPath, { withFileTypes: true }); } catch {}
+        for (const e of entries) {
+          if (e.isFile() && /\.wav$/i.test(e.name)) wavs.push(path.join(t.absPath, e.name));
+        }
+      }
+      let tNew = 0, tOwned = 0, tLibOwned = 0, tBatchDup = 0, done = 0;
+      const seen = new Map();
+      // Per-track detail, not just a count. The review screen shows every track the
+      // same way it shows every font: the ones you already have are listed and
+      // unchecked, naming what they match — a card's `track3.wav` may already be in
+      // your library as `Duel_of_the_Fates.wav`, and that is worth knowing.
+      const items = [];
+      for (const w of wavs) {
+        if (shouldCancel()) break;
+        done++;
+        onProgress({ stage: 'tracks-check', done, total: wavs.length, label: path.basename(w) });
+        let h = null, size = 0;
+        try { size = fs.statSync(w).size; } catch {}
+        // Streamed, not read whole. The synchronous twin holds the main process for the entire
+        // read, so nothing queued behind it can be delivered - including the progress event this
+        // loop emits one line above about this very file. On a card full of tracks that showed up
+        // as "JMT Studio (Not Responding)" while the bar sat on one filename. Same reason
+        // soundFontSharedTracks.js uses the async form for the identical job. [B-400]
+        try { h = await hashIndex.hashFileAsync(w); } catch {}
+        let owned = false, matchName = '', ownedIn = '';
+        // THE LIBRARY IS CHECKED FIRST, ALWAYS. It used to short-circuit on `seen`,
+        // so the second copy of an audio that is ALSO in the library was filed as a
+        // card-sibling and never learned the library had it — which would leave it
+        // importable as a duplicate of a file already on disk.
+        const hits = h ? hashIndex.findByHash(idx, h) : null;
+        if (hits && hits.length) {
+          owned = true; matchName = hits[0].name || ''; ownedIn = 'library';
+        } else if (h && seen.has(h)) {
+          // The same audio twice in one batch: the match is ANOTHER FILE ON THIS
+          // CARD, not something in the library.
+          owned = true; matchName = seen.get(h); ownedIn = 'batch';
+        }
+        if (h && !seen.has(h)) seen.set(h, path.basename(w));
+        // THE COUNT SPLITS WHERE THE ROWS ALREADY DID ([B-349]). `owned`
+        // lumped library hits and same-card twins into one number the UI
+        // labelled "already in your library" — against the user's 3-track library
+        // it claimed 42. The per-row ownedIn distinction existed ([B-246]);
+        // only the counter kept telling the lie.
+        if (owned) {
+          tOwned++;
+          if (ownedIn === 'library') tLibOwned++; else tBatchDup++;
+        } else tNew++;
+        // `ownedIn` EXISTS BECAUSE `matchName` MEANS TWO DIFFERENT THINGS, and the
+        // UI had been showing both as "Already in your library as X" — which is a lie
+        // for the batch case, where X is a sibling on the same card that the library
+        // has never seen. Harmless while the row only had a checkbox; the moment
+        // Adopt tried to rename that name it failed with "source file not found",
+        // which is how it surfaced (2026-09-01, the dev test). Anything acting on
+        // matchName MUST check ownedIn first. [B-246]
+        items.push({ absPath: w, name: path.basename(w), size, owned, matchName, ownedIn, hash: h });
+      }
+      // SAME AUDIO, TWO NAMES, ON ONE CARD. Only the SECOND copy learned it had a
+      // twin (via `seen`), so the first had no idea and the pair could not be
+      // treated as one decision. Tag every member of a 2+ group with a shared key.
+      // Byte-identical files in the flat shared-tracks folder are never worth
+      // importing twice — the only real question is which NAME to keep, which is a
+      // single choice, not two independent checkboxes. (2026-09-01.)
+      const byHash = new Map();
+      for (const it of items) {
+        if (!it.hash) continue;
+        if (!byHash.has(it.hash)) byHash.set(it.hash, []);
+        byHash.get(it.hash).push(it);
+      }
+      for (const [h, group] of byHash) {
+        if (group.length < 2) continue;
+        for (const it of group) it.dupGroup = h;
+      }
+      tracks = { total: wavs.length, new: tNew, owned: tOwned, libOwned: tLibOwned, batchDup: tBatchDup, items };
+    }
+  } catch {}
+
+  // [B-314] BACK-FILL THE PARTNER, so the fact is stated on BOTH rows.
+  //
+  // THE RELATIONSHIP IS SYMMETRIC AND THE LOOP ABOVE CANNOT SEE THAT. FoRed is the
+  // same font as RVJ exactly as much as RVJ is the same font as FoRed; the only reason
+  // the second one carried the marker is that it was scanned second. Marking one side is
+  // an artifact of walk order dressed up as a statement about the font.
+  //
+  // AND IT IS WHAT MAKES THE CHECKBOXES SAFE TO LEAVE ALONE. Reported 2026-09-16: "shouldn't
+  // they trade places if you reverse the selection? should they both state this if both
+  // selected? we don't want to toggle between them if we're going to allow direct
+  // duplication... but we shouldn't be quiet about it either." Labelling both, always,
+  // answers all of it at once — nothing moves when a box is ticked, both boxes stay
+  // independent, and the note can never go quiet, because it was never conditional on a
+  // selection in the first place. The alternative is logic that has to decide when to
+  // speak, and that is where a marker learns to disappear at the wrong moment.
+  //
+  // Only the DEFAULT tick is decided here, never the claim - the yellow note is on BOTH
+  // rows either way, because both are equally true statements about the batch.
+  // [B-415] WHICH row is unticked is `keeps`, ranked by fullest-source-wins above. It used to
+  // be "the later index", i.e. whichever order the folder happened to be walked in.
+  {
+    const _byIdx = new Map();
+    for (const r of results) _byIdx.set(r.idx, r);
+    for (const r of results) {
+      if (!r.sameInBatch) continue;
+      const first = _byIdx.get(r.sameInBatch.idx);
+      // The first twin has no marker yet; give it one pointing back. A third copy of the
+      // same font points at the SAME first row, so the first keeps one partner reference
+      // rather than accumulating a list — the row it names is still on screen and still
+      // the one it is identical to.
+      if (first && !first.sameInBatch) {
+        // [B-415] The first row starts as the keeper and is demoted if any partner claims it.
+        // Three copies all point HERE, so this has to survive being visited more than once.
+        first.sameInBatch = { idx: r.idx, label: r.label != null ? r.label : (r.prepared && r.prepared.name) || '', keeps: true };
+      }
+      if (first && first.sameInBatch && r.sameInBatch.keeps) first.sameInBatch.keeps = false;
+    }
+  }
+
+  // [B-415] THE FULL SOURCE WINS - the half that equality cannot reach.
+  // Two sources can hold the SAME FONT while one carries five other board flavors around it, and
+  // their contentHashes then share nothing at all, so the twin check above never fires and both
+  // import. Reported: "those would both import and be called identical fonts."
+  // RUNS AFTER the twin back-fill, never instead of it: exact twins are [B-314]'s and are
+  // deliberately left undecided by the ranker, so the two mechanisms cannot disagree about a row.
+  {
+    const { rankByContainment } = require('./bulkImportContainment');
+    const ranked = rankByContainment(_batchFiles);
+    if (ranked.size) {
+      const _byIdx = new Map();
+      for (const r of results) _byIdx.set(r.idx, r);
+      for (const [lostIdx, info] of ranked) {
+        const row = _byIdx.get(lostIdx);
+        const keeper = _byIdx.get(info.container);
+        if (!row || !keeper) continue;
+        // ONLY SKIP A ROW THAT IS ALREADY HELD BACK. The first cut skipped any row carrying
+        // `sameInBatch` at all, and that quietly left TWO survivors when the same font appeared
+        // three times - the question, and it took about a minute to reproduce:
+        //     pkg (font + cfx + readme) | bare1 | bare2   ->   pkg AND bare1 both imported
+        // bare1 and bare2 pair off as exact twins, bare1 wins THAT contest and is marked a keeper,
+        // and the keeper mark then shielded it from the containment pass that should have put it
+        // inside pkg. WINNING ONE CONTEST IS NOT IMMUNITY FROM THE NEXT.
+        if (row.sameInBatch && row.sameInBatch.keeps === false) continue;
+        const _wasKeeper = !!row.sameInBatch;
+        const _kLabel = keeper.label != null ? keeper.label : (keeper.prepared && keeper.prepared.name) || '';
+        const _lLabel = row.label != null ? row.label : (row.prepared && row.prepared.name) || '';
+        // THE SAME CATEGORY AS AN EXACT TWIN, SO IT USES THE SAME FIELD. Ruled 2026-09-19:
+        // "isn't it the same category as whatever our wording was for duplicate on source? don't
+        // need to tell about fuller - that was what informed our choice... but we still only kept 1."
+        // Fullness decided WHICH copy survives; it is not a second thing that happened to the user.
+        // SO THERE IS NO SECOND NOTE, NO SECOND PREDICATE ARM AND NO SECOND SUMMARY LINE.
+        row.sameInBatch = { idx: info.container, label: _kLabel, keeps: false };
+        // `fuller` IS WHY THIS ONE WON, AND THE ROW IS ALLOWED TO SAY SO. Ruled 2026-09-19:
+        // "don't we know that it was more complete so message can say 'Same font as G-Grievous in
+        // this import.' and then add 'This one is more complete'".
+        // WITHOUT IT BOTH ROWS READ IDENTICALLY - the same sentence on the ticked one and the
+        // unticked one - so the screen states that a choice was made and then withholds which way.
+        // SET ONLY WHEN FULLNESS DECIDED IT. Exact twins are equal, so there is nothing truthful
+        // to say about either being more complete, and they must NOT inherit this.
+        if (!keeper.sameInBatch) keeper.sameInBatch = { idx: lostIdx, label: _lLabel, keeps: true, fuller: true };
+        else keeper.sameInBatch.fuller = true;
+        // AND ANYONE WHO WAS POINTING AT THIS ROW HAS TO BE RE-POINTED. bare2's note named
+        // bare1 as the copy being kept; bare1 has just been held back itself, so the note would
+        // name a row that is not importing either - true of nothing the user can see.
+        if (_wasKeeper) {
+          for (const other of results) {
+            if (other === row || !other.sameInBatch) continue;
+            if (other.sameInBatch.idx === lostIdx && other.sameInBatch.keeps === false) {
+              other.sameInBatch = { idx: info.container, label: _kLabel, keeps: false };
+            }
+          }
+        } else {
+          // Already counted as a duplicate when it lost the twin contest; do not count it twice.
+          batchDupCount++;
+        }
+        // AND IT COMES OUT OF `new`. The twin check decrements inline because it decides DURING
+        // the loop; this ranking can only decide after it, so the row was already counted. Leaving
+        // it counted made the summary read "8 new" on a run where 6 imported - indistinguishable,
+        // from the outside, from the feature not working at all. Hit exactly that.
+        if (newCount > 0) newCount--;
+      }
+    }
+  }
+
+  onProgress({ stage: 'done', total });
+  // `duplicate` is kept for callers that still distinguish the archive-hash hit;
+  // `owned` is the number the user is shown, because the distinction between the
+  // two tests is ours, not theirs.
+  // [B-314] `sameInBatch` is its own bucket, never folded into `duplicate` — that one
+  // means "already in your library", and these are not.
+  return { ok: true, results, stats: { total, new: newCount, owned: ownedCount, duplicate: dupCount, corrupt: corruptCount, sameInBatch: batchDupCount, tracks } };
+}
+
+// Discard prepared-but-not-committed sources (user pruned them or cancelled).
+function discardPreparedSources(userData, uuids) {
+  if (!Array.isArray(uuids)) return;
+  for (const u of uuids) { try { soundFontSources.discardPreparedSource(userData, u); } catch {} }
+}
+
+// Fold the optimize passes' phase events (catalog → reading → rebuild → compress →
+// verify → commit) onto one monotonic 0-100 percent for the bulk bar. Bands are
+// weighted by typical duration; within a band the phase's own counters drive it,
+// so the number always tracks real work. Throttled ~100ms.
+const _OPT_BANDS = {
+  catalog: [0, 35], reading: [35, 50], rebuild: [50, 58],
+  innercompress: [58, 72], compress: [72, 88], verify: [88, 98], commit: [98, 100],
+};
+function _optimizeProgressForwarder(onSubProgress) {
+  if (typeof onSubProgress !== 'function') return undefined;
+  let last = 0;
+  return (p) => {
+    if (!p) return;
+    const now = Date.now();
+    if (now - last < 100) return;
+    last = now;
+    const band = _OPT_BANDS[p.phase] || [0, 100];
+    let frac = 0;
+    if (p.totalBytes) frac = Math.max(0, Math.min(1, (p.bytesDone || 0) / p.totalBytes));
+    else if (p.totalFiles) frac = Math.max(0, Math.min(1, (p.fileCount || 0) / p.totalFiles));
+    onSubProgress({
+      stage: 'optimizing',
+      percent: band[0] + frac * (band[1] - band[0]),
+      savedBytes: p.savedBytes,
+      currentFile: p.currentFile,
+    });
+  };
+}
+
+// Import one planned source end-to-end: hash + copy via importSource,
+// detect candidates, create entries with needsReview when applicable.
+// `shouldStop` is threaded in rather than read from a module-level flag: this is the same
+// predicate the caller's loop uses, so the cancel the user clicked reaches both the gap between
+// sources AND the copy inside one. [B-462, 2026-10-05]
+// A row matched to a library font as THE SAME FONT (have_it or version) comes in as another version
+// of that font: a new library font in the matched font's source, at its place in that source, read
+// from the card's folder. The same call "Add from folder" makes (soundFontEntries.createEntry with
+// folderSource): files the library already holds are linked, only new ones are stored, and the new
+// font starts with the matched font's details. Its name is the row's, made free with _2, _3.
+// Returns null when it does not apply - not the same font, not a folder, or an anchor with no
+// source details - so the caller imports the row the ordinary way. [B-643]
+async function _importBesideMatch({ userData, src }, onSubProgress) {
+  const m = src && src._match;
+  // An identical download (the archive check) carries no verdict and is the same font by
+  // definition, so it qualifies as much as a have_it does. [B-643]
+  const _same = m && (m.verdict === 'have_it' || m.verdict === 'version' || src._duplicate);
+  if (!m || !m.matchName || !_same) return null;
+  try { if (!src.absPath || !fs.statSync(src.absPath).isDirectory()) return null; } catch { return null; }
+  const anchor = soundFontEntries.findEntryByName(userData, m.matchName);
+  const am = anchor && anchor.meta;
+  if (!am || !am.sourceUuid || am.candidatePath == null) return null;
+  const root = soundFontEntries.entriesRoot(userData);
+  const want = cleanFolderName(src.guidedName || src.cleanedName || src.rawName || m.matchName) || m.matchName;
+  let name = want;
+  for (let n = 2; fs.existsSync(path.join(root, name)); n++) name = `${want}_${n}`;
+  const tags = Array.from(new Set([...(Array.isArray(am.tags) ? am.tags : []),
+    ...(Array.isArray(src.guidedTags) ? src.guidedTags : []), ...(Array.isArray(src.guidedSharedTags) ? src.guidedSharedTags : [])]));
+  const res = await soundFontEntries.createEntry({
+    userData,
+    sourceUuid: am.sourceUuid,
+    candidate: { name, path: am.candidatePath || '', nested: !!am.nested },
+    name,
+    folderSource: { folderPath: src.absPath, stripDamagedWavs: !!src._corrupt },
+    metadata: {
+      description: am.description || '',
+      userNotes: src.guidedNotes || am.userNotes || '',
+      tags,
+      author: am.author || '',
+      acquisitionDate: src.guidedAcquisitionDate || am.acquisitionDate || '',
+      purchased: !!am.purchased,
+      demoUrl: am.demoUrl || '',
+      linkedStyleLibraryEntry: am.linkedStyleLibraryEntry || null,
+    },
+    onProgress: (p) => { try { if (typeof onSubProgress === 'function') onSubProgress(p); } catch {} },
+  });
+  if (!res || !res.ok) return null;
+  // THE CARD'S NAME BELONGS TO THIS VERSION. A config on that card names the folder the card had,
+  // and the user chose to bring that copy in, so its folder name is an alias of the version, not
+  // of the font it matched; an alias the matched font holds for that name is taken off it. [B-643]
+  const made = res.name || name;
+  const cardName = path.basename(src.absPath);
+  if (cardName && cardName.toLowerCase() !== made.toLowerCase()) {
+    try { soundFontEntries.addFormerName(userData, made, cardName); } catch {}
+    try { soundFontEntries.forgetFormerName(userData, anchor.name, cardName); } catch {}
+  }
+  return { ok: true, name: made, sourceUuid: am.sourceUuid, besideOf: anchor.name };
+}
+
+// Creators the user has already labelled. Harvested ONCE PER RUN by the
+// orchestrators below and threaded down, never per-source: it is a directory
+// walk over the whole source store, and a bulk run has hundreds of sources.
+function _learnedVendors(userData) {
+  try {
+    return soundFontVendors.learnedVendorsFrom(soundFontSources.listSources(userData));
+  } catch { return []; }
+}
+
+async function importPlannedSource({ userData, src, fromSdCard, shouldStop = null, learned = [] }, onSubProgress) {
+  const sourcePath = src.absPath;
+  const originalName = path.basename(sourcePath);
+  // importSource handles dedup-by-hash automatically. We don't pre-fill
+  // metadata.vendor — vendor detection runs AFTER the source is on disk
+  // because the existing detector wants a Source object with listAll.
+  let importRes;
+  if (src._prepared && src._prepared.uuid) {
+    // COMMIT path: this source was already staged by the analyze phase
+    // (importSource prepareOnly) — its zip is on disk, hashed and dedup-cleared.
+    // Finalize just writes meta; NO re-hash (this is what makes quick import fast).
+    importRes = await soundFontSources.finalizePreparedSource({
+      userData,
+      uuid: src._prepared.uuid,
+      format: src._prepared.format,
+      name: src._prepared.name || originalName,
+      hash: src._prepared.hash,
+      fileSize: src._prepared.fileSize,
+      sourceFileDate: src._prepared.sourceFileDate,
+      sourceFileMtimeMs: src._prepared.sourceFileMtimeMs,
+      metadata: {},
+      // Measured during the analyze phase's copy ([B-317]); it cannot be
+      // recomputed here, so it rides through to the commit that writes meta.
+      crossLinked: src._prepared.crossLinked,
+      // The analyze phase already stripped the curation sidecar out of this
+      // zip; this carries it to the commit that writes the meta it belongs on,
+      // so a bulk import restores curation the same way a single one does.
+      // ([B-283])
+      curation: src._prepared.curation,
+      curationTmp: src._prepared.curationTmp,
+      curationPayloadDir: src._prepared.curationPayloadDir,
+    });
+    if (!importRes || !importRes.ok) {
+      return { ok: false, error: (importRes && importRes.error) || 'Finalize failed' };
+    }
+  } else {
+    // Legacy one-shot path (no analyze phase ran): hash + copy + dedup + finalize.
+    // A font the user flagged corrupt but chose to import lands here (analyze
+    // skips corrupt fonts, so they never get a _prepared zip). The damaged wavs
+    // are dropped at zip time by the selection walk itself — salvage the good
+    // files, and the bad read never happens. No flag needed: the check is now
+    // unconditional, so this path detects damage even when nothing upstream
+    // knew about it ([B-361]).
+    importRes = await soundFontSources.importSource({
+      userData,
+      sourcePath,
+      originalName,
+      metadata: {},
+      // The user checked a row we had already marked as owned, so they mean it.
+      // Without this, importSource would spot the identical hash and skip — which
+      // would make the review screen the one place in the app that refuses to take
+      // a second copy, when the single-import path happily gives you one with a new
+      // number. Consistency wins. (2026-08-31, the ruling.)
+      forceNewSource: !!src._duplicate,
+      onProgress: (p) => onSubProgress && onSubProgress({ phase: 'import', ...p }),
+      // Same gap as the analyze path, same one-argument fix. [B-462, 2026-10-05] Without this
+      // the commit loop only notices a cancel BETWEEN sources, so a twelve-font run ignored the
+      // click for however long the current font took to copy.
+      shouldStop,
+    });
+    if (!importRes || !importRes.ok) {
+      return { ok: false, error: (importRes && importRes.error) || 'Import failed' };
+    }
+    if (importRes.isDuplicate) {
+      // Emit the 'skipped' tick then HOLD ~1.5s so the label is visible before
+      // the next source-start event overwrites it.
+      if (onSubProgress) {
+        try { onSubProgress({ phase: 'import', stage: 'skipped', percent: 100 }); } catch {}
+      }
+      await new Promise(r => setTimeout(r, 1500));
+      return { ok: true, dedup: true, existingUuid: importRes.uuid };
+    }
+  }
+  const sourceUuid = importRes.uuid;
+  // Vendor detection on the just-imported source. detectVendor handles
+  // nested-zip bundle drilling internally so this single call covers
+  // both Kyberphonic-style bundle-of-inner-zips and ordinary single-zip
+  // shapes.
+  // Reuse what analyze already found. Detection opens the source and reads its
+  // readmes; analyze does exactly that for every font before the summary screen,
+  // so doing it again here was the same work twice on the quick path — the same
+  // shape as the ownership match running after commit. Only fall back when analyze
+  // did not run (the legacy one-shot path). (2026-08-31.)
+  let vendorRes = null;
+  if (src._enrich && !(src._enrich.vendor || src._enrich.vendorWebsite)) {
+    // No creator from the review pass, but a credit note still rides it.
+    vendorRes = { vendorNote: src._enrich.vendorNote || null, creditNote: src._enrich.creditNote || null };
+  } else if (src._enrich && (src._enrich.vendor || src._enrich.vendorWebsite)) {
+    vendorRes = {
+      vendor: src._enrich.vendor,
+      confidence: src._enrich.vendorConfidence,
+      vendorWebsite: src._enrich.vendorWebsite,
+      purchasedDefault: src._enrich.purchasedDefault,
+      vendorNote: src._enrich.vendorNote || null,
+      creditNote: src._enrich.creditNote || null,
+    };
+  } else if (!src._enrich) {
+    try {
+      const sourceObj = soundFontSources.openSource(userData, sourceUuid);
+      if (sourceObj) vendorRes = await soundFontVendors.detectVendor(sourceObj, { learned });
+    } catch {}
+  }
+  const detectedVendor = vendorRes && vendorRes.vendor ? vendorRes.vendor : null;
+  const detectedConfidence = vendorRes && vendorRes.confidence ? vendorRes.confidence : null;
+  const detectedWebsite = vendorRes && vendorRes.vendorWebsite ? vendorRes.vendorWebsite : null;
+  // Guided-import override: a vendor the user typed/confirmed in the guided
+  // review replaces the auto-detected one everywhere (source meta, entry
+  // author, and the creator_empty review reason), and clears the
+  // auto-detected flag since it's now user-chosen. The known-vendor website
+  // is only carried over when the user's vendor still matches what we
+  // detected; a different typed vendor gets no website guess.
+  const _guidedVendor  = src.guidedVendor  && String(src.guidedVendor).trim();
+  const _guidedWebsite = src.guidedWebsite && String(src.guidedWebsite).trim();
+  // A reviewed row carries its Demo in guidedLink, so a cleared one stays cleared. Quick import has no
+  // review to carry it through.
+  const _guidedLink    = (src.guidedLink && String(src.guidedLink).trim())
+    || (!src.guidedName && src._enrich && src._enrich.catalogueDemo) || '';
+  const _guidedNotes   = src.guidedNotes   && String(src.guidedNotes).trim();
+  const _guidedDate    = src.guidedAcquisitionDate && String(src.guidedAcquisitionDate).trim();
+  const vendorFromUser = !!_guidedVendor;
+  // A source exported from JMT Studio carries the user's own answers in its curation sidecar,
+  // already written onto the source meta by the import above. Those were decided by a person, so
+  // they outrank detection; only what the user types in this review outranks them.
+  let _carried = null;
+  try {
+    const _sm = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(userData), sourceUuid));
+    _carried = (_sm && _sm.curation) || null;
+  } catch {}
+  const _carriedSource = (_carried && _carried.source) || {};
+  const _carriedVendor = !vendorFromUser && _carriedSource.vendor ? String(_carriedSource.vendor) : null;
+  let effectiveVendor = vendorFromUser ? _guidedVendor : (_carriedVendor || detectedVendor);
+  // An UNDETECTED creator stays empty on every path, SD card included, so it hits
+  // creator_empty -> Needs review. "Undetected" (we couldn't find it) and "Unknown"
+  // (a real, deliberately-anonymous creator) are different answers: we never auto-stamp
+  // "Unknown" here because we can't tell the two apart programmatically. The user asserts
+  // "Unknown" themselves (a standardized creator value) when they know a font is a genuine
+  // orphan; that resolves the flag. Leaving it undetected imports fine and just stays
+  // flagged until resolved.
+  // Website precedence: an explicit guided website wins; otherwise the known-
+  // vendor site, but only when the (auto-detected or user-confirmed) vendor
+  // still matches what we detected — a different typed vendor gets no guess.
+  const detectedVendorWebsite = (!vendorFromUser || _guidedVendor === detectedVendor) ? detectedWebsite : null;
+  const effectiveWebsite = _guidedWebsite
+    || (_carriedVendor ? (_carriedSource.vendorWebsite || null) : detectedVendorWebsite);
+  // purchased default order of precedence:
+  //   1. Vendor's purchasedDefault when the detector knows (paid-only/free-only)
+  //   2. "free" in the source filename
+  //   3. Default paid (true)
+  let purchasedDefault;
+  if (!src.guidedName && src._enrich && src._enrich.catalogueFree) purchasedDefault = false;
+  else if (vendorRes && vendorRes.purchasedDefault === false) purchasedDefault = false;
+  else if (/\bfree\b/i.test(src.rawName || '')) purchasedDefault = false;
+  else purchasedDefault = true;
+  // The guided Free-content checkbox (sent on every guided-path source)
+  // overrides the default; quick import sends none and keeps the default.
+  const purchased = (typeof src.guidedFree === 'boolean') ? !src.guidedFree
+    : (typeof _carriedSource.purchased === 'boolean') ? _carriedSource.purchased
+    : purchasedDefault;
+  // Persist vendor info onto the source meta (source of truth; projected onto
+  // entries at read time). For structural matches we still apply the value AND
+  // mark needsReview so the user can verify.
+  // A reviewed row's own Link wins, and a row cleared of the catalogue's stays clear.
+  const _userLink = typeof src.guidedLinkUrl === 'string' ? src.guidedLinkUrl.trim() : null;
+  const _storeLink = _userLink || (_userLink === null && !_carriedSource.linkUrl
+    && (src.guidedStore || (!src.guidedName && src._enrich && src._enrich.catalogueStore))) || '';
+  if (_storeLink && !effectiveVendor) {
+    try { soundFontSources.updateSourceMeta(userData, sourceUuid, { linkUrl: _storeLink }); } catch {}
+  }
+  if (effectiveVendor) {
+    try {
+      soundFontSources.updateSourceMeta(userData, sourceUuid, {
+        vendor: effectiveVendor,
+        vendorWebsite: effectiveWebsite,
+        vendorAutoDetected: !vendorFromUser && !_carriedVendor,
+        purchased,
+        ...(_storeLink ? { linkUrl: _storeLink } : {}),
+      });
+    } catch {}
+  }
+  // Credits from the readme go into the source's notes when it has none yet: a modifier line
+  // ("Modifications by ...") when the detected creator stands, and a credit that is not a creator
+  // at all (a conversion) whatever creator stands.
+  const _creditLines = [
+    (vendorRes && vendorRes.vendorNote && effectiveVendor === detectedVendor) ? vendorRes.vendorNote : null,
+    (vendorRes && vendorRes.creditNote) || null,
+  ].filter(Boolean);
+  if (_creditLines.length) {
+    try {
+      const _sm = soundFontSources.readSourceMeta(path.join(soundFontSources.sourcesRoot(userData), sourceUuid));
+      if (!(_sm && _sm.userNotes)) {
+        soundFontSources.updateSourceMeta(userData, sourceUuid, { userNotes: _creditLines.join('\n') });
+      }
+    } catch {}
+  }
+  // Source-level extras for the no-vendor case (the with-vendor write above
+  // already handles website + purchased). Website + free/paid are source-of-
+  // truth fields. The date/link/notes are ENTRY-level and go through createEntry
+  // below (acquisitionDate -> hoisted to source.purchaseDate; link -> demoUrl;
+  // notes -> userNotes).
+  const _extraMeta = {};
+  if (!effectiveVendor && effectiveWebsite) _extraMeta.vendorWebsite = effectiveWebsite;
+  if (!effectiveVendor && typeof src.guidedFree === 'boolean') _extraMeta.purchased = purchased;
+  // Acquisition date -> source.purchaseDate (the projected source-of-truth
+  // field). Written here so it overrides the file-date default the source
+  // otherwise picks up, and so the read-time projection surfaces the user's value.
+  if (_guidedDate) _extraMeta.purchaseDate = _guidedDate;
+  if (Object.keys(_extraMeta).length) {
+    try { soundFontSources.updateSourceMeta(userData, sourceUuid, _extraMeta); } catch {}
+  }
+  // Candidate detection -> create each as a library entry. Bundle name
+  // (if any) becomes the first tag on every entry from this source.
+  let candidatesRes;
+  try {
+    const sourceObj = soundFontSources.openSource(userData, sourceUuid);
+    candidatesRes = await soundFontCandidates.detectCandidates(sourceObj);
+  } catch (err) {
+    return { ok: false, error: `Candidate detection failed: ${err.message}` };
+  }
+  const allCandidates = (candidatesRes && candidatesRes.candidates) || [];
+  // Bulk auto-imports only the "preferred" pick from each version group.
+  // Alternate versions (older V1 when V2 also shipped) stay in the source
+  // and surface in the source-detail picker for manual import — the user
+  // explicitly opts in, rather than getting both versions auto-installed.
+  // An export records which of its fonts the user had (`importedPaths`): a customized font's
+  // original is left off, because the customized copy rode the export instead and the source
+  // import has already restored it. When the list is there it IS the pick, the same set the
+  // single review shows checked, so the version rule above does not apply.
+  const _carriedPaths = (_carried && Array.isArray(_carried.importedPaths)) ? new Set(_carried.importedPaths) : null;
+  const candidates = _carriedPaths
+    ? allCandidates.filter(c => _carriedPaths.has(c.path || ''))
+    : allCandidates.filter(c => !c.alternateVersion);
+  const alternatesSkipped = _carriedPaths ? 0 : allCandidates.length - candidates.length;
+  // A source whose only font was customized has nothing left to take, and it is not empty: its
+  // restored fonts hold it.
+  let _restoredHere = 0;
+  if (candidates.length === 0 && _carriedPaths) {
+    try { _restoredHere = soundFontEntries.listEntriesBySourceUuid(userData, sourceUuid).length; } catch {}
+  }
+  if (candidates.length === 0 && !_restoredHere) {
+    // Source imported but no fonts found inside. Delete the source so the
+    // orphan cleanup doesn't have to and the user can re-pick later.
+    try { soundFontSources.deleteSource(userData, sourceUuid); } catch {}
+    return { ok: false, error: 'No fonts found in source' };
+  }
+  // A guided "Source name" override wins over the auto-detected bundle name;
+  // it becomes the source's friendly name and the tag on every font from it.
+  const _guidedSourceName = src.guidedSourceName && String(src.guidedSourceName).trim();
+  const _catalogueName = !src.guidedName && src._enrich && src._enrich.catalogueName;
+  const bundleName = _guidedSourceName || _catalogueName || candidatesRes.bundleName || null;
+  // Persist bundleName + multiCandidate on source meta so the renderer
+  // can show "this source produced N fonts" without re-running detection,
+  // and the entry detail can surface the bundle link for variants.
+  // Single-source manual imports already set these on the source meta;
+  // bulk was historically dropping them. Single-candidate sources still
+  // get multiCandidate=false explicitly so the field is never absent.
+  try {
+    soundFontSources.updateSourceMeta(userData, sourceUuid, {
+      bundleName: bundleName || undefined,
+      multiCandidate: candidates.length >= 2,
+    });
+  } catch {}
+  // ── OPTIMIZE BEFORE ENTRIES, AND THE ORDER IS LOAD-BEARING ([B-334]) ──
+  // The within-source dedup rewrites duplicate source names onto one canonical
+  // inode. Entries hardlink to source names, so entries created BEFORE the
+  // rewrite are left the last holders of the old bytes - lone full copies,
+  // silently outside the pool. Measured on disk 2026-09-07: a four-board-variant
+  // vendor font orphaned its entire entry this way. Deduping first means the
+  // names entries link to are canonical and nothing rewrites underneath them.
+  // Dedup preserves every name (duplicates become links), so candidate paths
+  // detected above stay valid.
+  // Inline and synchronous for the same reasons as ever: idempotent,
+  // verify-before-commit, no-op for single-format/folder sources.
+  // THE RESULT IS KEPT, not discarded. dedupeSource reports exactly what it
+  // reclaimed and this threw it away, so a bulk run had no savings to report even
+  // though every source had measured its own. (2026-09-05.)
+  let dedupHere = null;
+  try {
+    const optForward = _optimizeProgressForwarder(onSubProgress);
+    await soundFontSources.ensureSourceManifest(userData, sourceUuid, optForward);
+    dedupHere = await soundFontSources.dedupeSource(userData, sourceUuid, optForward);
+  } catch {}
+  // LINKED AGAINST THE LIBRARY AS IT STANDS NOW, so each source shares what the sources added
+  // before it in this same run. Analyze already linked every source against the library, but
+  // before anything in the run was added: the batch's other sources were still staged and not
+  // part of the library, so two sources shipping the same files were both stored in full.
+  // Measured 2026-10-21 after a 129-source run: 1.75 GiB, 1.23 of it one pair (Dagen and Cere,
+  // 72 shared wavs). The hashes are the ones analyze took; only a file that matches is read again,
+  // to confirm its bytes before it is replaced. Before the fonts are made, so they link to the
+  // shared copy.
+  let crossHere = null;
+  try {
+    const mf = await soundFontSources.ensureSourceManifest(userData, sourceUuid);
+    if (mf && Array.isArray(mf.records)) {
+      crossHere = await soundFontSources.linkAgainstLibrary(userData,
+        path.join(soundFontSources.sourcesRoot(userData), sourceUuid, 'source'), mf.records);
+    }
+  } catch {}
+  // Per-source stat tallies aggregated into the bulk summary so the
+  // completion screen can show fonts-vs-sources granularity.
+  // versionsSkippedHere counts how many alternate-version candidates we
+  // skipped over at the filter step; variantsEmittedHere counts how
+  // many isVariant rows we WILL import.
+  const versionsSkippedHere = alternatesSkipped;
+  let variantsEmittedHere = 0;
+  for (const c of candidates) {
+    if (c.isVariant) variantsEmittedHere++;
+  }
+  const entries = [];
+  const existingEntryNames = new Set();
+  try {
+    for (const e of soundFontEntries.listEntries(userData)) existingEntryNames.add(e.name);
+  } catch {}
+  for (let cIdx = 0; cIdx < candidates.length; cIdx++) {
+    const cand = candidates[cIdx];
+    let proposedName = cand.name || `font_${cIdx + 1}`;
+    // Guided-import name override applies only to single-candidate sources
+    // (the folder-solo case the guided view is built around); a bundle that
+    // yields several fonts keeps its per-candidate auto names since one
+    // typed name can't stand in for many.
+    if (src.guidedName && candidates.length === 1) {
+      const gn = String(src.guidedName).trim();
+      if (gn) proposedName = gn;
+    }
+    // Quick import: the scan already derived a confident name (readme content or a
+    // name-tag file) and the review screen shows it — the commit path must use it
+    // too. Without this the entry silently reverts to the candidate's folder name
+    // ("Bank01" while the review showed "KRossguard"), and name_uncertain stays
+    // quiet because nameSource looks confident. Guided imports arrive with
+    // guidedName carrying the same (possibly user-edited) value, so this branch
+    // only fires for the quick path. Single-candidate only, same rationale as above.
+    else if ((src.nameSource === 'readme' || src.nameSource === 'name-tag' || src.nameSource === 'folder')
+        && src.cleanedName && candidates.length === 1) {
+      proposedName = src.cleanedName;
+    }
+    // Docx name recovery for QUICK import. The guided path already recovers a docx
+    // name in enrichSourceForGuided (it arrives here as src.guidedName), but quick
+    // import skips enrichment, so without this a docx-only-named font lands under the
+    // generic folder name. Same helper the guided path and the SD surface use — read
+    // the Word readme exactly like a .txt and pull the name the same way.
+    let nameRecoveredFromDocx = false;
+    if (src.nameSource === 'folder-fallback' && !src.guidedName && src.absPath && candidates.length === 1) {
+      try {
+        const nm = await recoverNameFromDocx(src.absPath);
+        if (nm) { proposedName = cleanSuggestedName(nm) || nm; nameRecoveredFromDocx = true; }
+      } catch { /* leave the fallback name */ }
+    }
+    // The name the user gave this font, if its export carried one. Only a name typed in this
+    // review outranks it.
+    const _carriedBlock = (_carried && _carried.entries && _carried.entries[cand.path || '']) || null;
+    const _carriedName = _carriedBlock && typeof _carriedBlock.name === 'string' ? _carriedBlock.name.trim() : '';
+    const _useCarriedName = !!_carriedName && !(src.guidedName && candidates.length === 1);
+    if (_useCarriedName) proposedName = _carriedName;
+    const reviewReasons = [];
+    // Bundle prepend for ambiguous candidate names. Two triggers:
+    //   1. Variants (cand.isVariant): the detector emitted multiple
+    //      sibling fonts from inside one wrapper (e.g. JayDalorian
+    //      Excalibur's long_ignition + short_ignition, Quantum's
+    //      style_1/2/3). These names describe a variation, not an
+    //      identity, so they MUST carry the parent name to be legible
+    //      in the library ("Excalibur_Long_Ignition" not bare
+    //      "Long_Ignition").
+    //   2. Short / version-stub names in a multi-candidate bundle
+    //      (ANH / ESB / R1 / ROTJ from Father; v1 / 2.0). The earlier
+    //      "all-caps" trigger was too aggressive — caught real names
+    //      like JURASSIC / ULTRON / STARGATE (Mountain Sabers Free
+    //      Pack). Length <= 4 catches the acronyms (longest Star
+    //      Wars film code is ROTJ at 4) without over-firing.
+    if (bundleName && candidates.length >= 2 && !_useCarriedName) {
+      const isVariant = !!cand.isVariant;
+      const isShortAcronym = proposedName.length <= 4
+        || /^[vV]?\d+(\.\d+)*$/.test(proposedName);
+      const needsContext = isVariant || isShortAcronym;
+      if (needsContext && !proposedName.toLowerCase().startsWith(bundleName.toLowerCase())) {
+        proposedName = `${bundleName}_${proposedName}`;
+      }
+    }
+    // Name collision: walk _N suffix until free. Per spec
+    // ("review is essentially needing fields we didn't have") an
+    // auto-resolved collision isn't a missing-field problem — vendor
+    // is detected, name is functional, no user action required.
+    // The user can still rename to something better via the entry
+    // detail; we just don't force a review flag for the auto _N.
+    let finalName = proposedName;
+    if (existingEntryNames.has(finalName)) {
+      let n = 2;
+      while (existingEntryNames.has(`${proposedName}_${n}`)) n++;
+      finalName = `${proposedName}_${n}`;
+    }
+    existingEntryNames.add(finalName);
+    // Creator status drives the rest of the review reasons. We supply
+    // whatever vendor info we have; createEntry just writes it. We
+    // intentionally do NOT flag structural-match auto-detections —
+    // the detection is generally reliable (the pattern was chosen to
+    // be distinctive), surfacing every one as Needs Review at scale
+    // becomes noise. The vendorAutoDetected flag on the source meta
+    // still indicates the auto-application for users who want to audit.
+    // Bundle-name tag ONLY for a real multi-font bundle (2+ fonts from one source),
+    // so importing a pack groups its fonts under one filterable tag. A SOLO import
+    // gets no auto-tag: the "bundle name" there is just the lone folder's own name
+    // (e.g. a generic slot like "Bank32"), which is noise as a tag.
+    const tags = (bundleName && candidates.length >= 2) ? [bundleName] : [];
+    // Shared tags from the guided review's static tag bar — applied to every
+    // font in this batch (deduped against the source-name tag above).
+    // A reviewed row carries its own tags, so a cleared one stays cleared. Quick import has no review.
+    const _rowTags = Array.isArray(src.guidedTags) ? src.guidedTags
+      : (!src.guidedName && src._enrich && src._enrich.catalogueTags) || [];
+    for (const t of _rowTags) if (t && !tags.includes(t)) tags.push(t);
+    if (Array.isArray(src.guidedSharedTags)) {
+      for (const t of src.guidedSharedTags) {
+        const tt = String(t || '').trim();
+        if (tt && !tags.includes(tt)) tags.push(tt);
+      }
+    }
+    // Multi-version sibling info: when the candidate detector collapsed
+    // a group of X_V1/X_V2/... siblings down to the highest version,
+    // surface the version in the description so the user can tell at a
+    // glance which one this is, and add a review reason so bulk imports
+    // get flagged for the user to acknowledge (single-import users see
+    // the same info live in the review modal). Description is built
+    // here only when the field would otherwise be empty — if the user
+    // ever provides their own description during import, we don't
+    // clobber it.
+    let initialDescription = '';
+    let versionInfo = null;
+    if (cand.takenVersion && Array.isArray(cand.skippedVersions) && cand.skippedVersions.length > 0) {
+      initialDescription = cand.takenVersion;
+      versionInfo = {
+        taken: cand.takenVersion,
+        skipped: cand.skippedVersions.map(s => s.version),
+      };
+    }
+    // This font's own block from the carried curation: the user's saved creator, link, tags and
+    // notes. Order is what we derived < what was carried < what the user typed in this review.
+    let carriedEntry = {};
+    try {
+      carriedEntry = (_carried && require('./soundFontCuration').entryCurationFor(_carried, cand.path || '')) || {};
+    } catch {}
+    const _carriedTags = Array.isArray(carriedEntry.tags) && carriedEntry.tags.length ? carriedEntry.tags : null;
+    if (_carriedTags) {
+      const shared = tags.filter(t => !_carriedTags.includes(t) && !(bundleName && t === bundleName));
+      tags.length = 0;
+      tags.push(..._carriedTags, ...shared);
+    }
+    const meta = {
+      tags,
+      author: (vendorFromUser ? _guidedVendor : (carriedEntry.author || effectiveVendor)) || '',
+      purchased: (typeof src.guidedFree !== 'boolean' && typeof carriedEntry.purchased === 'boolean')
+        ? carriedEntry.purchased : purchased,
+      description: carriedEntry.description || initialDescription,
+      // Entry-level guided Details: link is the entry's demoUrl; notes are
+      // userNotes. Acquisition date is a source-of-truth field (source.
+      // purchaseDate), written directly to the source meta above so the
+      // read-time projection can't clobber it with the folder's file date.
+      demoUrl: _guidedLink || carriedEntry.demoUrl || undefined,
+      userNotes: _guidedNotes || carriedEntry.userNotes || undefined,
+      linkedStyleLibraryEntry: carriedEntry.linkedStyleLibraryEntry || undefined,
+      // Other fields default through createEntry's existing logic
+      // (acquisitionDate falls back to sourceFileDate -> importedAt).
+    };
+    // createEntry lays its own copy of the carried block UNDER what it is given, so a key present
+    // here with nothing in it would erase a carried value. Send only what holds something.
+    for (const k of Object.keys(meta)) if (meta[k] === undefined) delete meta[k];
+    // creator_unknown_no_website was meant to flag manually-typed
+    // vendors that aren't in our known list. In bulk we never type
+    // manually — vendors are either auto-detected (in which case a
+    // null website is intentional, like Orlando Dove who distributes
+    // via YouTube only) or absent entirely. So only creator_empty
+    // matters as a review trigger here.
+    // Judged on the creator the font will actually show: its own, else its source's.
+    if (!meta.author && !effectiveVendor) reviewReasons.push('creator_empty');
+    if (versionInfo) reviewReasons.push('multiple_versions_in_source');
+    // Low-confidence name flag for QUICK import. The scan fell back to a
+    // generic folder name (BankNN, a numbered sibling series) with no readme
+    // or name-tag to do better. The guided review surfaces this live as the
+    // amber g-lowconf hint, so a guided user has already seen it and made an
+    // active choice — no persisted flag needed (src.guidedName is always set
+    // on that path). Quick import skips the review screen entirely, so without
+    // this the font lands silently under the wrong name. Flag it so it carries
+    // the same Needs Review warning the guided screen shows.
+    if (src.nameSource === 'folder-fallback' && !src.guidedName && !nameRecoveredFromDocx) reviewReasons.push('name_uncertain');
+    // Note: name-tag names (font name rode along as a .txt filename next to a generic
+    // folder) are NOT flagged — field experience is they're reliably correct, so
+    // a warning there is noise. nameSource === 'name-tag' is still tracked internally.
+    const entryRes = await soundFontEntries.createEntry({
+      userData, sourceUuid, candidate: cand, name: finalName, metadata: meta,
+      onProgress: (p) => onSubProgress && onSubProgress({ phase: 'extract', candidate: cIdx + 1, totalCandidates: candidates.length, ...p }),
+    });
+    if (!entryRes || !entryRes.ok) {
+      entries.push({ name: finalName, ok: false, error: entryRes && entryRes.error });
+      continue;
+    }
+    // Stamp needsReview + reasons + structured versionInfo via
+    // updateEntryMeta if any reason fired. versionInfo travels alongside
+    // reviewReasons so the renderer can format the dynamic message
+    // ("Source contained N versions...") without re-parsing the candidate.
+    if (reviewReasons.length > 0) {
+      try {
+        const updates = { needsReview: true, reviewReasons };
+        if (versionInfo) updates.versionInfo = versionInfo;
+        soundFontEntries.updateEntryMeta({
+          userData,
+          currentName: finalName,
+          updates,
+        });
+      } catch {}
+    }
+    entries.push({ name: finalName, ok: true, candidatePath: cand.path, reviewReasons: reviewReasons.slice(), versionInfo });
+  }
+  // (The optimize/dedup pass used to run HERE, after the entries - moved above
+  // the entry loop by [B-334] so entries link to canonical names.)
+  // Duplicate recognition for QUICK import (no review screen to label): match
+  // each created entry's candidate against the library EXCLUDING this source's
+  // own just-created entries (they must not match themselves or their
+  // siblings), and stamp an already_in_library review reason on have-it hits.
+  // Runs after the optimize so the source manifest is guaranteed present.
+  try {
+    const compare = require('./soundFontCompare');
+    const fhm = require('./soundFontFileHash');
+    const created = entries.filter(e => e.ok && e.candidatePath != null);
+    if (created.length) {
+      const mf = fhm.readFileHashManifest(
+        path.join(userData, 'soundFonts', '.filehashes', 'sources', `${sourceUuid}.json`));
+      if (mf && Array.isArray(mf.records)) {
+        const { index } = compare.buildLibraryIndex(userData);
+        const ownNames = new Set(created.map(e => e.name.toLowerCase()));
+        // Nothing from this same source either: a customized font that rode the export is
+        // restored before this runs, and it is the user's own copy of this font, not a duplicate.
+        const others = index.filter(e => !ownNames.has(e.name.toLowerCase()) && e.sourceUuid !== sourceUuid);
+        for (const ent of created) {
+          if (!others.length) break;
+          const m = compare.matchCandidateAgainstLibrary(mf.records, ent.candidatePath, others);
+          if (!m || m.lowConfidence || !m.bestMatch) continue;
+          // Two stamp tiers. 'already_in_library' keeps its strict claim: the
+          // library truly holds EVERY sound this entry has. Close matches above
+          // the same display bar the review screens use get their own reason —
+          // the review flow shows these on-row, so a quick import must surface
+          // them too, with the concrete gain for the keep-both/delete-one call.
+          const updates = {};
+          let reason = null;
+          if (compare.isFullyOwned(m)) {
+            reason = 'already_in_library';
+          // A font the catalogue knows is its own release, so sharing sounds with a sibling is no question.
+          // The same font by either way in (have_it or version), not a raw share of sounds: the old
+          // 75% containment bar flagged stock-sound fonts (a card's ObiWan4) as close matches. [B-643]
+          } else if ((m.verdict === 'have_it' || m.verdict === 'version') && !(src._enrich && src._enrich.catalogueName)) {
+            reason = 'close_match';
+            const gain = compare.missingPhrase(m);
+            if (gain) updates.closeMatchGain = gain;
+          }
+          if (!reason) continue;
+          try {
+            updates.needsReview = true;
+            updates.reviewReasons = [...(ent.reviewReasons || []), reason];
+            updates.duplicateOfName = m.bestMatch;
+            if (ent.versionInfo) updates.versionInfo = ent.versionInfo;
+            soundFontEntries.updateEntryMeta({ userData, currentName: ent.name, updates });
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+  // The import message's sizes, by the footer's own ruler (soundFontLibrarySize): the source as
+  // stored, and everything this source now holds in the library. Measured, not derived from the
+  // counters above, so the message and the footer cannot disagree.
+  // `madeOwnBytes` is what the source's footprint cannot see: what the made fonts hold beyond the
+  // source (a customized font's edits, each font's records), and the source's own records.
+  let sourceBytes = 0, madeBytes = 0, madeOwnBytes = 0;
+  try {
+    const _size = require('./soundFontLibrarySize');
+    const _p = _size.sourcePaths(userData, sourceUuid);
+    sourceBytes = await _size.apparentBytes(_p.source);
+    const _m = await _size.measurePaths(_p.made);
+    madeBytes = _m.apparent;
+    madeOwnBytes = _m.unshared + await _size.apparentBytes(_p.records);
+  } catch {}
+  return {
+    ok: true,
+    sourceUuid,
+    entries,
+    bundleName,
+    sourceBytes,
+    madeBytes,
+    madeOwnBytes,
+    multiCandidate: candidates.length >= 2,
+    versionsSkipped: versionsSkippedHere,
+    variantsEmitted: variantsEmittedHere,
+    strippedFiles: (importRes && importRes.strippedFiles)
+      || (src._prepared && src._prepared.strippedFiles) || [],
+    // Same two sources as the stripped list: a committed prepare carries its own
+    // record, and the legacy one-shot path reports from the import result ([B-214]).
+    blockedFiles: (importRes && importRes.blockedFiles)
+      || (src._prepared && src._prepared.blockedFiles) || [],
+    // TWO SEPARATE SAVINGS, kept separate here as data. The summary's copy now
+    // says one outcome (2026-09-07: "Your source files started at X, JMT Studio
+    // saved you Y"), but the components stay distinct in the record so the
+    // number remains reconcilable when anyone checks it.
+    dedupSaved: (dedupHere && dedupHere.deduped && dedupHere.savedBytes) || 0,
+    dedupFiles: (dedupHere && dedupHere.deduped)
+      ? Math.max(0, (dedupHere.originalFiles || 0) - (dedupHere.uniqueFiles || 0)) : 0,
+    // What analyze linked, plus what linking at commit found among this run's earlier sources.
+    crossSaved: ((importRes && importRes.crossLinked && importRes.crossLinked.savedBytes)
+      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.savedBytes) || 0)
+      + ((crossHere && crossHere.savedBytes) || 0),
+    crossFiles: ((importRes && importRes.crossLinked && importRes.crossLinked.linkedFiles)
+      || (src._prepared && src._prepared.crossLinked && src._prepared.crossLinked.linkedFiles) || 0)
+      + ((crossHere && crossHere.linkedFiles) || 0),
+    // The savings sentence's anchor, per source (2026-09-07). The commit path's
+    // finalizePreparedSource result carries neither figure, so both fall back to
+    // the prepare result: fileSize there is the same logical content total
+    // importSource returns as contentBytes.
+    contentBytes: (importRes && importRes.contentBytes)
+      || (src._prepared && src._prepared.fileSize) || 0,
+    archiveBytes: (importRes && importRes.archiveBytes)
+      || (src._prepared && src._prepared.archiveBytes) || 0,
+  };
+}
+
+// ── Guided-import enrichment ────────────────────────────────────────────
+// The fast scan intentionally skips vendor detection and file peeking so it
+// can run instantly on an "open this folder" click. Guided import needs
+// more per candidate: the detected vendor (shown up front, editable), the
+// first font.wav / hum.wav for preview, and any readme/text docs to glance
+// at. That heavier work runs ONLY when the user chooses to look closely, so
+// quick import stays on the fast path. Read-only, no userData, no copy.
+
+// Locate the first `${base}*.wav` (base 'font' -> font.wav, font1.wav, ...)
+// at any depth. Prefer the bare name; otherwise the lowest-numbered variant.
+function _pickFirstEffectWav(entries, base) {
+  const rx = new RegExp(`(^|/)${base}(\\d*)\\.wav$`, 'i');
+  let best = null, bestNum = Infinity;
+  for (const e of entries) {
+    if (e.isDir) continue;
+    const m = e.fileName.match(rx);
+    if (!m) continue;
+    const num = m[2] === '' ? -1 : parseInt(m[2], 10); // bare name sorts first
+    if (num < bestNum) { bestNum = num; best = e.fileName; }
+  }
+  return best;
+}
+
+// Enrich one planned source in place. Returns vendor guess + preview refs +
+// text docs. fontWav/humWav/textFiles carry an absPath for folder sources
+// (renderer plays/reads them by disk path directly); zip sources get
+// fileName only for now (preview needs extraction — a later slice).
+// Runs with an empty library too: a first import is when the catalogue helps most.
+// A staged source has no meta yet, so it has no manifest to read: its sounds are hashed from the
+// staged tree, which is what a zip has been unpacked to by now.
+async function _stagedSoundRecords(dir, prefix = '') {
+  const records = [];
+  for (const d of await fs.promises.readdir(path.join(dir, prefix), { withFileTypes: true })) {
+    const relPath = prefix ? `${prefix}/${d.name}` : d.name;
+    if (d.isDirectory()) records.push(...await _stagedSoundRecords(dir, relPath));
+    else if (/\.wav$/i.test(d.name)) {
+      const buf = await fs.promises.readFile(path.join(dir, relPath));
+      records.push({ relPath, size: buf.length, fileHash: crypto.createHash('sha256').update(buf).digest('hex') });
+    }
+  }
+  return records;
+}
+
+// Looked up by the folders the fonts were found in, so a font wrapped in a folder of its own is found.
+async function _identifyByCatalogue(userData, r, candidatePaths) {
+  if (!r.prepared) return null;
+  const records = await _stagedSoundRecords(path.join(soundFontSources.sourcesRoot(userData), r.prepared.uuid, 'source'));
+  // A path inside an inner zip, Proffie.zip!Proffie, is in the staged tree as Proffie or Proffie/Proffie.
+  const paths = (candidatePaths && candidatePaths.length ? candidatePaths : [''])
+    .flatMap(p => (/\.zip!/i.test(p) ? [p.replace(/[^/!]*\.zip!/gi, ''), p.replace(/\.zip!/gi, '/')] : [p]));
+  return fontCatalogue.current().identifySource(records, paths).best;
+}
+
+async function enrichSourceForGuided(src, learned = []) {
+  const out = {
+    vendor: null, vendorConfidence: null, vendorWebsite: null,
+    purchasedDefault: true, fontWav: null, humWav: null, textFiles: [],
+    wavCount: 0,
+    suggestedName: null, nameSource: null, // set only when late docx naming upgrades a fallback
+    // [B-296] HOW MANY FONTS ARE ACTUALLY IN HERE, answered during ANALYZE.
+    //
+    // "136 new sound fonts ready to import" → Import → FORTY-SEVEN MINUTES LATER →
+    // "135 sources imported (191 fonts), 1 failed - tr.zip - No fonts found in source."
+    // The refusal was correct: tr.zip holds 17 short effect wavs and a readme, no hum,
+    // no swing, no Proffie shape. Nothing should have imported it.
+    //
+    // THE BUG IS WHEN THE ANSWER ARRIVES. "This archive contains no sound font" was
+    // knowable here and was instead discovered at the far end of the import, so the
+    // number the user clicked Import against was not the number that imported.
+    //
+    // null means the question was not asked (detection threw, or an unreadable
+    // source); 0 means it WAS asked and the answer is none. Those must not collapse —
+    // reporting "no fonts" because our own read failed is the wolf-cry version.
+    fontCount: null,
+    error: null,
+  };
+  try {
+    const source = soundFontSources.openSourceAtPath(src.absPath);
+    if (!source) { out.error = 'unreadable'; return out; }
+    let vendorRes = null;
+    try { vendorRes = await soundFontVendors.detectVendor(source, { learned }); } catch {}
+    if (vendorRes) {
+      out.vendor = vendorRes.vendor || null;
+      out.vendorConfidence = vendorRes.confidence || null;
+      out.vendorWebsite = vendorRes.vendorWebsite || null;
+      out.vendorNote = vendorRes.vendorNote || null;
+      out.creditNote = vendorRes.creditNote || null;
+      if (vendorRes.purchasedDefault === false) out.purchasedDefault = false;
+    }
+    if (out.purchasedDefault && /\bfree\b/i.test(src.rawName || '')) out.purchasedDefault = false;
+    // [B-296] Same detection the commit will run, asked here instead. Cheap: it is a
+    // listAll plus a walk over names, and this pass already has the source open.
+    // Deliberately the SAME function the commit uses, not a second "does this look
+    // like a font" rule — two definitions of that would drift and the review would
+    // start disagreeing with the import it is previewing.
+    try {
+      const cres = await soundFontCandidates.detectCandidates(source);
+      const all = (cres && cres.candidates) || [];
+      // Alternate versions are filtered the same way the commit filters them, or a
+      // source holding only an older V1 would read as importable and then refuse.
+      out.fontCount = all.filter(c => !c.alternateVersion).length;
+      out.candidatePaths = all.filter(c => !c.alternateVersion).map(c => c.path || '');
+    } catch { out.fontCount = null; }
+    const entries = await source.listAll();
+    const isFolder = source.format === 'folder';
+    const toRef = (fileName) => fileName == null ? null : {
+      fileName,
+      absPath: isFolder ? path.join(src.absPath, fileName) : null,
+    };
+    out.fontWav = toRef(_pickFirstEffectWav(entries, 'font'));
+    out.humWav = toRef(_pickFirstEffectWav(entries, 'hum'));
+    out.wavCount = entries.reduce((n, e) => n + (!e.isDir && /\.wav$/i.test(e.fileName) ? 1 : 0), 0);
+    for (const e of entries) {
+      if (e.isDir) continue;
+      // `._readme.txt` and friends are AppleDouble sidecars, not documents. They
+      // are already excluded from hashing and from the import; the doc list was
+      // the one place they still reached the screen. (2026-08-31.)
+      if (isNoiseName(e.fileName.split('/').pop())) continue;
+      if (/\.(txt|md|nfo|rtf)$/i.test(e.fileName) || /(^|\/)read\s?me/i.test(e.fileName)) {
+        out.textFiles.push({
+          fileName: e.fileName,
+          size: e.size || 0,
+          absPath: isFolder ? path.join(src.absPath, e.fileName) : null,
+        });
+      }
+    }
+    // Lead with the real readme: readme-shaped names first, then the
+    // shallowest path (root docs before nested config .txt like leds.txt /
+    // font_config.txt), then alphabetical. Keeps the peek's default on top.
+    const _isReadme = (n) => /read\s?me/i.test(n.split('/').pop());
+    const _depth = (n) => (n.match(/\//g) || []).length;
+    out.textFiles.sort((a, b) => {
+      const ar = _isReadme(a.fileName), br = _isReadme(b.fileName);
+      if (ar !== br) return ar ? -1 : 1;
+      const ad = _depth(a.fileName), bd = _depth(b.fileName);
+      if (ad !== bd) return ad - bd;
+      return a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    // Late naming from a Word .docx readme. The sync scan can't crack a .docx (it's a
+    // zip), so a font whose name fell back to the generic folder name gets one more
+    // shot here in the async pass. Shared helper (same one quick import and the SD
+    // surface use): finds any .docx in the folder, reads it like a .txt readme, and
+    // pulls the name the same way. Read-only; on any failure the fallback name stands.
+    if (src.nameSource === 'folder-fallback' && src.absPath) {
+      try {
+        const nm = await recoverNameFromDocx(src.absPath);
+        if (nm) { out.suggestedName = cleanSuggestedName(nm) || nm; out.nameSource = 'readme'; }
+      } catch { /* leave the fallback name */ }
+    }
+  } catch (e) {
+    out.error = String(e && e.message || e);
+  }
+  return out;
+}
+
+// Enrich every source in a scan plan for the guided review. Sequential so a
+// large library doesn't open hundreds of archives at once; emits per-source
+// progress and honors cancellation. Result `enriched` aligns index-for-index
+// with plan.sources.
+async function enrichPlanForGuided({ plan, userData }, callbacks = {}) {
+  const onProgress = typeof callbacks.onProgress === 'function' ? callbacks.onProgress : () => {};
+  const shouldCancel = typeof callbacks.shouldCancel === 'function' ? callbacks.shouldCancel : () => false;
+  if (!plan || !Array.isArray(plan.sources)) return { ok: false, error: 'Invalid plan' };
+  const total = plan.sources.length;
+  const learned = _learnedVendors(userData);
+  const enriched = [];
+  for (let i = 0; i < total; i++) {
+    if (shouldCancel()) return { ok: true, cancelled: true, enriched };
+    const src = plan.sources[i];
+    const result = await enrichSourceForGuided(src, learned);
+    enriched.push(result);
+    // Emit the finished result per candidate so the renderer can fill that
+    // row in place and let the user work with it immediately, while the
+    // remaining candidates keep loading below.
+    onProgress({ idx: i, total, label: src.cleanedName || src.rawName, done: true, result });
+  }
+  return { ok: true, enriched };
+}
+
+// The font and hum sounds of each font in a source, for the single-font review. A font inside a nested
+// zip cannot be played in place, so it gets none.
+async function candidatePreviewRefs({ sourcePath, candidatePaths }) {
+  const source = soundFontSources.openSourceAtPath(sourcePath);
+  if (!source) return {};
+  const entries = await source.listAll();
+  const out = {};
+  for (const p of candidatePaths || []) {
+    if (/!/.test(p)) continue;
+    const inFont = p ? entries.filter(e => e.fileName.startsWith(`${p}/`)) : entries;
+    out[p] = { font: _pickFirstEffectWav(inFont, 'font'), hum: _pickFirstEffectWav(inFont, 'hum') };
+  }
+  return out;
+}
+
+module.exports = {
+  _importBesideMatch,   // tests [B-643]
+  scanForBulkImport,
+  candidatePreviewRefs,
+  runBulkImport,
+  analyzeBulkImport,
+  discardPreparedSources,
+  enrichSourceForGuided,
+  enrichPlanForGuided,
+  // exported for testing
+  looksLikeProffieDir,
+  looksLikeCommonDir,
+  MAX_SCAN_DEPTH_BEFORE_HALT,
+};

@@ -1,0 +1,835 @@
+// Cross-location file operations for the Sound Fonts module. Unifies copy
+// and move between any pair of locations: common-folder ↔ common-folder,
+// common ↔ entry, entry ↔ entry. Source and destination are addressed by
+// { kind, id } where:
+//   kind === 'common'  → id is the common's uuid
+//   kind === 'entry'   → id is the entry name (the on-disk dir name)
+//
+// Path resolution per kind:
+//   common — userData/soundFonts/common/<uuid>/files/<subPath>
+//   entry  — userData/soundFonts/library/<name>/<subPath>
+//
+// Both helpers validate the resolved path stays inside the location root
+// to defend against any caller passing "../" sequences.
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+// copyFileHashing: one streamed read that yields, so the add loop can report while it works.
+const fileHash = require('./soundFontFileHash');
+
+function _root(userData, kind, id) {
+  // sharedTracks is a singleton folder — no id required.
+  if (kind === 'sharedTracks') return path.join(userData, 'soundFonts', 'sharedTracks');
+  if (!id) throw new Error('Missing location id');
+  if (kind === 'common') return path.join(userData, 'soundFonts', 'common', id, 'files');
+  if (kind === 'entry')  return path.join(userData, 'soundFonts', 'library', id);
+  throw new Error(`Unknown location kind: ${kind}`);
+}
+
+function _resolve(userData, kind, id, subPath) {
+  const root = path.resolve(_root(userData, kind, id));
+  const target = path.resolve(root, String(subPath || '').replace(/\\/g, '/'));
+  if (!target.startsWith(root + path.sep) && target !== root) {
+    throw new Error('Path escapes location root');
+  }
+  return target;
+}
+
+// Flag a location's content hash as stale. Cheap — single meta.json
+// write of one boolean — so we can call it on every modifying op
+// without worrying about op-rate. The actual rehash batches at modal
+// close (or lazy on next read). sharedTracks has its own per-file hash
+// index that maintains itself, so no flag needed for that kind.
+function _markLocationDirty(userData, kind, id) {
+  try {
+    if (kind === 'entry') {
+      const entries = require('./soundFontEntries');
+      entries.markEntryContentDirty(userData, id);
+      // Effects share the same op-time→batched-recompute pattern, so
+      // every file-op that flags content-dirty also flags effects-dirty.
+      // Both resolve in one IPC call at modal close.
+      entries.markEntryEffectsDirty(userData, id);
+    } else if (kind === 'common') {
+      require('./soundFontCommon').markCommonContentDirty(userData, id);
+const { openZipOwned } = require('./zipOpen');   // owns the fd: node-stream-zip leaks it on a failed read [B-479]
+    }
+  } catch {}
+}
+
+// Proffie-style variant naming with destination-aware convention. Scans
+// the destination directory for files matching <base>\d*<ext>, finds the
+// padding pattern in use (1/2/3-digit, or none), and walks from the
+// highest existing N+1 using that padding. Preserves whatever convention
+// the user has locally so a folder of boot01.wav/boot02.wav gets boot03,
+// and a folder of boot.wav/boot2.wav gets boot3. Source's own padding
+// raises the floor when wider than what's observed locally.
+function _proffieVariantName(destDir, srcName) {
+  if (!fs.existsSync(path.join(destDir, srcName))) return srcName;
+  const ext = path.extname(srcName);
+  const stem = path.basename(srcName, ext);
+  const baseMatch = stem.match(/^(.*?)(\d*)$/);
+  const base = (baseMatch && baseMatch[1]) || stem;
+  const srcPad = (baseMatch && baseMatch[2]) ? baseMatch[2].length : 0;
+  // Collect DISTINCT padding lengths observed locally. Multiple lengths
+  // means the user's convention is mixed; fall back to plain 1, 2, 3
+  // rather than guessing wrong.
+  let maxNum = 0;
+  const padLens = new Set();
+  let entries;
+  try { entries = fs.readdirSync(destDir); } catch { entries = []; }
+  for (const file of entries) {
+    if (path.extname(file) !== ext) continue;
+    const fStem = path.basename(file, ext);
+    if (fStem === base) { if (maxNum < 1) maxNum = 1; continue; }
+    if (!fStem.startsWith(base)) continue;
+    const rest = fStem.substring(base.length);
+    if (!/^\d+$/.test(rest)) continue;
+    const num = parseInt(rest, 10);
+    if (num > maxNum) maxNum = num;
+    padLens.add(rest.length);
+  }
+  let padLen;
+  if (padLens.size === 0) padLen = srcPad;
+  else if (padLens.size === 1) padLen = [...padLens][0];
+  else padLen = 0; // Ambiguous → fall back to plain numbering.
+  let n = maxNum + 1;
+  while (true) {
+    const candidate = `${base}${String(n).padStart(padLen, '0')}${ext}`;
+    if (!fs.existsSync(path.join(destDir, candidate))) return candidate;
+    n++;
+  }
+}
+
+// Copy one or more files between locations of any kind. Collision-safe —
+// destination names get " (N)" suffixed (filesystem-safe, used for
+// transient app storage; SD-bound flows still use the Proffie-style
+// numbering helpers). Returns { ok, added, failed } shape mirroring the
+// existing copyCommonFiles contract so the renderer can treat it the same.
+//
+// src.kind === 'source' is async — files live inside an archive and have
+// to be extracted on the fly. We branch up front so the on-disk kinds
+// stay synchronous (their callers don't need to await anything extra).
+// Put library content at destPath AS A POINTER ([B-315]/[B-316], 2026-09-05).
+// "Add from library" was the last door writing real bytes into a font folder,
+// which broke the rule every other door now keeps: every file in every font
+// folder points at something with a home.
+//
+// NOTHING IS HASHED ON THIS PATH, and that is the point rather than an
+// optimisation. The content is ALREADY in the library with a home — a source, a
+// pool file, another font's name for one of those. Copying from it is not a
+// dedup question ("do we hold these bytes?"), it is simply another name for a
+// file we are looking straight at. Linking is exact and free; hashing would be
+// asking a question we already have the answer to.
+//
+// Falls back to copying, never fails. A link needs the same volume, which
+// everything under userData is — but a filesystem that refuses costs space and
+// never correctness.
+function _linkInto(srcAbs, destPath) {
+  try {
+    const tmp = destPath + '.link-tmp';
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    fs.linkSync(srcAbs, tmp);
+    fs.renameSync(tmp, destPath);
+    return true;
+  } catch {
+    try { fs.rmSync(destPath + '.link-tmp', { force: true }); } catch {}
+    try { fs.copyFileSync(srcAbs, destPath); return false; } catch { throw new Error('Copy failed'); }
+  }
+}
+
+// A source file, landed at destPath as a pointer.
+//
+// The ordinary case is a real file in the source tree, so it links. The
+// exception is a COMPOSITE path — a file inside an inner archive that
+// _expandInnerArchives could not unpack — where there is no file on disk to
+// name. Those bytes have no home yet, so they get one in the pool and the
+// destination points there, which is the same answer an all-novel attached
+// folder gets: pooling follows from what a font folder IS, not from where the
+// bytes happened to come from.
+async function _pointAtSourceFile(userData, sourceUuid, subPath, destDir, finalName) {
+  const soundFontSources = require('./soundFontSources');
+  const destPath = path.join(destDir, finalName);
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  // Composite paths carry ".zip/" in them and never exist on disk.
+  if (!/\.zip\//i.test(String(subPath || ''))) {
+    const onDisk = path.join(soundFontSources.sourcesRoot(userData), sourceUuid, 'source',
+      String(subPath).replace(/\//g, path.sep));
+    try {
+      if (fs.existsSync(onDisk) && fs.statSync(onDisk).isFile()) {
+        _linkInto(onDisk, destPath);
+        return { destPath };
+      }
+    } catch { /* fall through to the extract route */ }
+  }
+  // No file to name: materialise the bytes, give them a home, point at it.
+  const CI = require('./soundFontContentIndex');
+  const buf = await soundFontSources.readSourceFileBytes(userData, sourceUuid, subPath);
+  const staging = path.join(os.tmpdir(), `jmt-pointat-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(staging, { recursive: true });
+  const tmpFile = path.join(staging, finalName);
+  try {
+    fs.writeFileSync(tmpFile, buf);
+    const index = CI.buildIndex(userData);
+    const home = CI.storeInPool({ index, srcAbs: tmpFile, preferredName: finalName });
+    if (home.ok) _linkInto(home.absPath, destPath);
+    else fs.copyFileSync(tmpFile, destPath);
+  } finally {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch {}
+  }
+  return { destPath };
+}
+
+async function copyAcrossLocations({
+  userData,
+  src,    // { kind, id }
+  srcPaths,
+  dest,   // { kind, id, subPath }
+  destNames, // optional: parallel to srcPaths; when supplied, use these
+             // target basenames instead of the source's own. Proffie
+             // variant naming still resolves collisions at the dest.
+  onFile,    // optional: onFile(name, done, total) as each file lands. Copying
+             // and (for sharedTracks) hashing are synchronous here, so a paste
+             // of thirty large tracks is a long silence without it.
+}) {
+  // sharedTracks (src or dest) is the singleton flat folder — no id
+  // required either side. Every other kind needs one.
+  if (!src || !src.kind) return { ok: false, error: 'Missing src' };
+  if (src.kind !== 'sharedTracks' && !src.id) return { ok: false, error: 'Missing src' };
+  if (!dest || !dest.kind) return { ok: false, error: 'Missing dest' };
+  if (dest.kind !== 'sharedTracks' && !dest.id) return { ok: false, error: 'Missing dest' };
+  if (!Array.isArray(srcPaths) || srcPaths.length === 0) {
+    return { ok: false, error: 'No source paths' };
+  }
+  let destDir;
+  try { destDir = _resolve(userData, dest.kind, dest.id, dest.subPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create dest: ${err.message}` }; }
+  }
+  const destRoot = path.resolve(_root(userData, dest.kind, dest.id));
+  const added = [];
+  const failed = [];
+  // Pick a free folder name in destDir using the same " (N)" walk we
+  // use elsewhere when a paste would collide with an existing folder.
+  // Filesystem-safe (parens are fine on every target FS); avoids the
+  // Proffie-style numeric tail since that convention is reserved for
+  // saber-meaningful filenames, not directory names.
+  const _uniqueDirName = (destDir, baseName) => {
+    if (!fs.existsSync(path.join(destDir, baseName))) return baseName;
+    let n = 1;
+    while (true) {
+      const cand = `${baseName} (${n})`;
+      if (!fs.existsSync(path.join(destDir, cand))) return cand;
+      n++;
+    }
+  };
+  // Walk a source-side path: returns array of { rel, isDir } for the
+  // path itself + everything underneath. Empty when the path doesn't
+  // resolve in the archive. Composite paths (file or folder inside an
+  // inner zip, e.g. "Indara.zip/clash") get peeled — we open the inner
+  // zip on the fly and walk ITS central directory. Returned fileName
+  // values stay composite (full path from outer source root) so the
+  // caller can hand them to source.readFile, which is composite-aware
+  // and resolves them transparently. Same outer/inner walk shape as the
+  // file-read resolver in soundFontSources._resolveCompositeReadBytes,
+  // just listing instead of reading bytes.
+  const _enumerateSourceTree = async (sourceId, subPath) => {
+    const soundFontSources = require('./soundFontSources');
+    const compositeMatch = subPath.match(/^(.+?\.zip)\/(.+)$/i);
+    if (compositeMatch) {
+      const innerZipPath = compositeMatch[1];
+      const insidePath = compositeMatch[2];
+      const source = soundFontSources.openSource(userData, sourceId);
+      if (!source) throw new Error(`Source not found: ${sourceId}`);
+      const innerBytes = await source.readFile(innerZipPath);
+      const StreamZip = require('node-stream-zip');
+      const os = require('os');
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jmt-sf-enum-'));
+      const tmpZip = path.join(tmpDir, 'inner.zip');
+      try {
+        fs.writeFileSync(tmpZip, innerBytes);
+        const zip = openZipOwned(tmpZip, { skipEntryNameValidation: true });
+        try {
+          const entryMap = await zip.entries();
+          const insidePrefix = insidePath.endsWith('/') ? insidePath : insidePath + '/';
+          let exact = null;
+          const inside = [];
+          for (const k of Object.keys(entryMap)) {
+            const e = entryMap[k];
+            if (!e.name || e.name === '/') continue;
+            const flatName = e.name.replace(/\/+$/, '');
+            const isDir = !!e.isDirectory || e.name.endsWith('/');
+            const compositePath = `${innerZipPath}/${flatName}`;
+            if (flatName === insidePath) {
+              exact = { fileName: compositePath, size: e.size || 0, isDir };
+            }
+            if (flatName.startsWith(insidePrefix)) {
+              inside.push({ fileName: compositePath, size: e.size || 0, isDir });
+            }
+          }
+          if (!exact && !inside.length) return null;
+          return { exact, inside };
+        } finally {
+          await zip.close();
+        }
+      } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      }
+    }
+    const source = soundFontSources.openSource(userData, sourceId);
+    if (!source) throw new Error(`Source not found: ${sourceId}`);
+    const all = await source.listAll();
+    const prefix = subPath.endsWith('/') ? subPath : subPath + '/';
+    const exact = all.find(e => e.fileName === subPath);
+    const inside = all.filter(e => e.fileName.startsWith(prefix));
+    if (!exact && !inside.length) return null;
+    return { exact, inside };
+  };
+  if (src.kind === 'source') {
+    const soundFontSources = require('./soundFontSources');
+    for (let i = 0; i < srcPaths.length; i++) {
+      const srcSubPath = srcPaths[i];
+      try {
+        const baseName = String(srcSubPath).split('/').pop();
+        if (!baseName) { failed.push({ source: srcSubPath, error: 'Invalid source path' }); continue; }
+        const desiredName = (destNames && destNames[i]) || baseName;
+        // Distinguish file vs directory by probing the source listing.
+        // _enumerateSourceTree handles composite paths (files / folders
+        // inside inner zips) by opening the inner zip and walking its
+        // central directory, returning entries with composite fileName
+        // values so the file branch's source.readFile call resolves them
+        // through the composite-aware reader.
+        const tree = await _enumerateSourceTree(src.id, srcSubPath);
+        if (!tree) { failed.push({ source: srcSubPath, error: 'Not found in source' }); continue; }
+        const isDir = (tree.exact && tree.exact.isDir) || (!tree.exact && tree.inside.length > 0);
+        if (!isDir) {
+          // File path — current behavior, single extract with Proffie
+          // variant naming on collision.
+          const finalName = _proffieVariantName(destDir, desiredName);
+          await _pointAtSourceFile(userData, src.id, srcSubPath, destDir, finalName);
+          const rel = path.relative(destRoot, path.join(destDir, finalName)).replace(/\\/g, '/');
+          added.push(rel);
+          // (2026-10-08: this call was duplicated, so the file branch reported every add twice
+          // while the directory branch below reported once.)
+          if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
+        } else {
+          // Directory — extract the whole subtree under a folder-named
+          // safe name. Each interior file lands at <destDir>/<finalDir>
+          // /<originalRelPath>.
+          const finalDir = _uniqueDirName(destDir, baseName);
+          const outRoot = path.join(destDir, finalDir);
+          fs.mkdirSync(outRoot, { recursive: true });
+          const prefix = srcSubPath.endsWith('/') ? srcSubPath : srcSubPath + '/';
+          const source = soundFontSources.openSource(userData, src.id);
+          for (const entry of tree.inside) {
+            if (entry.isDir) continue; // dir markers handled implicitly
+            const innerRel = entry.fileName.slice(prefix.length);
+            if (!innerRel) continue;
+            const outPath = path.join(outRoot, innerRel.replace(/\//g, path.sep));
+            fs.mkdirSync(path.dirname(outPath), { recursive: true });
+            // Pointers here too — a folder pulled out of a source is just many
+            // files, and each one gets the same treatment as a single pick.
+            await _pointAtSourceFile(userData, src.id, entry.fileName,
+              path.dirname(outPath), path.basename(outPath));
+          }
+          const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
+          added.push(rel);
+          if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
+        }
+      } catch (err) {
+        failed.push({ source: srcSubPath, error: String(err && err.message || err) });
+      }
+    }
+    return _finishCopy(userData, dest, added, failed);
+  }
+  for (let i = 0; i < srcPaths.length; i++) {
+    const srcSubPath = srcPaths[i];
+    try {
+      let srcAbs;
+      try { srcAbs = _resolve(userData, src.kind, src.id, srcSubPath); }
+      catch (err) { failed.push({ source: srcSubPath, error: err.message }); continue; }
+      if (!fs.existsSync(srcAbs)) {
+        failed.push({ source: srcSubPath, error: 'Source not found' });
+        continue;
+      }
+      const stat = fs.statSync(srcAbs);
+      const desiredName = (destNames && destNames[i]) || path.basename(srcAbs);
+      if (stat.isDirectory()) {
+        // Recursive on-disk copy. Destination folder gets a " (N)"
+        // suffix on collision so an existing folder isn't merged into
+        // silently. Inner files copy verbatim (no variant renaming
+        // inside — preserves relative structure).
+        const baseName = path.basename(srcAbs);
+        const finalDir = _uniqueDirName(destDir, baseName);
+        const outRoot = path.join(destDir, finalDir);
+        const walkCopy = (sd, dd) => {
+          fs.mkdirSync(dd, { recursive: true });
+          for (const ent of fs.readdirSync(sd, { withFileTypes: true })) {
+            const s = path.join(sd, ent.name);
+            const d = path.join(dd, ent.name);
+            if (ent.isDirectory()) walkCopy(s, d);
+            // Already library content with a home of its own, so this is another
+            // NAME for it rather than a second copy.
+            else if (ent.isFile()) _linkInto(s, d);
+          }
+        };
+        walkCopy(srcAbs, outRoot);
+        const rel = path.relative(destRoot, outRoot).replace(/\\/g, '/');
+        added.push(rel);
+        if (onFile) { try { onFile(rel, added.length, srcPaths.length); } catch {} }
+        continue;
+      }
+      if (!stat.isFile()) {
+        failed.push({ source: srcSubPath, error: 'Source file not found' });
+        continue;
+      }
+      const finalName = _proffieVariantName(destDir, desiredName);
+      const destPath = path.join(destDir, finalName);
+      _linkInto(srcAbs, destPath);
+      const rel = path.relative(destRoot, destPath).replace(/\\/g, '/');
+      added.push(rel);
+    } catch (err) {
+      failed.push({ source: srcSubPath, error: String(err && err.message || err) });
+    }
+  }
+  return _finishCopy(userData, dest, added, failed);
+}
+
+// THE ONE EXIT FOR `copyAcrossLocations`, AND IT EXISTS BECAUSE HAVING TWO COST A REAL BUG.
+// [2026-10-08] This function has two bodies — an async branch for `src.kind === 'source'` and the
+// on-disk branch below it — and each used to end with its own tail. `_maybeIndexSharedTracksAdds`
+// was correctly called from both (its own comment says so, deliberately). The content-dirty flag
+// arrived later and landed in ONE of them.
+//
+// WHAT THAT COST, reported by pressing it: "adding from library isn't marking as customized...
+// if I add from browse it gets customized". The library picker DEFAULTS its target to the entry's
+// own source, so the ordinary Add-from-library is precisely the branch that never flagged the
+// entry — no rehash, so the Customized marker never appeared. Browse goes through `addFilesAt`,
+// which marks, which is why the two doors disagreed.
+//
+// So the repair is not "add the missing line to the other branch" — that leaves two tails to
+// keep in agreement forever, which is the arrangement that just failed. Both branches now return
+// through here, and a third branch added later inherits both steps instead of being the one that
+// forgot.
+function _finishCopy(userData, dest, added, failed) {
+  // sharedTracks dest gets per-file hash records — every file that landed
+  // needs an index entry so backup merge/replace can use content-identity
+  // instead of bare filename matching.
+  _maybeIndexSharedTracksAdds(userData, dest, added);
+  // Source is unmodified by a copy; only the destination location's
+  // content changes. sharedTracks already maintains its own per-file
+  // hash index — only entry/common destinations need the dirty flag.
+  if (added.length > 0 && dest && (dest.kind === 'entry' || dest.kind === 'common')) {
+    _markLocationDirty(userData, dest.kind, dest.id);
+  }
+  return { ok: true, added, failed };
+}
+
+// Hook the sharedTracks hash index after copyAcrossLocations writes
+// files into the shared folder. Called from both the source-archive
+// branch and the on-disk branch so every landing path is covered.
+// No-op for non-sharedTracks destinations.
+function _maybeIndexSharedTracksAdds(userData, dest, added) {
+  if (!dest || dest.kind !== 'sharedTracks') return;
+  if (!Array.isArray(added) || added.length === 0) return;
+  let hashIndex;
+  try { hashIndex = require('./soundFontSharedTracksHash'); }
+  catch { return; }
+  for (const rel of added) {
+    // rel is relative to the destination root; sharedTracks is flat
+    // so rel === filename.
+    if (!rel || rel.includes('/')) continue;
+    try { hashIndex.recordAdd(userData, rel); } catch {}
+  }
+}
+
+// Move files within a single location (any kind). Same-dir source/dest is
+// a silent no-op per item; cross-dir moves rename via fs.renameSync and
+// collision-rename with " (N)" if needed.
+function moveWithinLocation({
+  userData,
+  kind,
+  id,
+  sourcePaths,
+  destSubPath,
+}) {
+  if (!kind || !id) return { ok: false, error: 'Missing location' };
+  if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
+    return { ok: false, error: 'No source paths' };
+  }
+  let destDir;
+  try { destDir = _resolve(userData, kind, id, destSubPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create dest: ${err.message}` }; }
+  }
+  const filesRoot = path.resolve(_root(userData, kind, id));
+  const cleanDest = (destSubPath || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+  const moved = [];
+  const failed = [];
+  for (const srcSubPath of sourcePaths) {
+    try {
+      let srcAbs;
+      try { srcAbs = _resolve(userData, kind, id, srcSubPath); }
+      catch (err) { failed.push({ source: srcSubPath, error: err.message }); continue; }
+      if (!fs.existsSync(srcAbs)) {
+        failed.push({ source: srcSubPath, error: 'Source file not found' });
+        continue;
+      }
+      // A folder moves whole [B-313], never into itself or its own subfolder, and never over a
+      // folder of the same name.
+      const isDir = fs.statSync(srcAbs).isDirectory();
+      const srcClean = srcSubPath.replace(/\\/g, '/').replace(/\/+$/g, '');
+      if (isDir && (cleanDest === srcClean || cleanDest.startsWith(srcClean + '/'))) {
+        failed.push({ source: srcSubPath, error: 'A folder cannot go inside itself' });
+        continue;
+      }
+      const srcParts = srcSubPath.split('/'); srcParts.pop();
+      const srcParent = srcParts.join('/');
+      if (srcParent === cleanDest) {
+        moved.push(srcSubPath);
+        continue;
+      }
+      if (isDir && fs.existsSync(path.join(destDir, path.basename(srcAbs)))) {
+        failed.push({ source: srcSubPath, error: 'A folder with that name is already there' });
+        continue;
+      }
+      const finalName = isDir ? path.basename(srcAbs) : _proffieVariantName(destDir, path.basename(srcAbs));
+      const destPath = path.join(destDir, finalName);
+      fs.renameSync(srcAbs, destPath);
+      const rel = path.relative(filesRoot, destPath).replace(/\\/g, '/');
+      moved.push(rel);
+    } catch (err) {
+      failed.push({ source: srcSubPath, error: String(err && err.message || err) });
+    }
+  }
+  if (moved.length > 0) _markLocationDirty(userData, kind, id);
+  return { ok: true, moved, failed };
+}
+
+// Delete one or more files OR directories from a location. Directories
+// are removed recursively; the UI is expected to confirm with the user
+// before calling this (which it does — promptConfirm in both the entry
+// and common folder right-click paths). Iterates and aggregates errors
+// so a single broken path doesn't abort the whole batch.
+function deleteFilesAt({ userData, kind, id, subPaths }) {
+  if (!kind || !id) return { ok: false, error: 'Missing location' };
+  if (!Array.isArray(subPaths) || subPaths.length === 0) {
+    return { ok: false, error: 'No paths' };
+  }
+  const deleted = [];
+  const failed = [];
+  for (const sub of subPaths) {
+    try {
+      const target = _resolve(userData, kind, id, sub);
+      if (!fs.existsSync(target)) { failed.push({ source: sub, error: 'Not found' }); continue; }
+      const stat = fs.statSync(target);
+      if (stat.isDirectory()) {
+        fs.rmSync(target, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(target);
+      }
+      deleted.push(sub);
+    } catch (err) {
+      failed.push({ source: sub, error: String(err && err.message || err) });
+    }
+  }
+  if (deleted.length > 0) {
+    _markLocationDirty(userData, kind, id);
+    // Deleting the last font using a pooled sound leaves the pool holding the
+    // only name for it, which is zero users ([B-316]). Same ordering as
+    // deleteEntry: the link count only falls once the name above is gone.
+    // Deleting ONE file is as much a last-user event as deleting a whole font,
+    // so this door needs the sweep too.
+    try { require('./soundFontContentIndex').releasePoolOrphans(userData); } catch {}
+  }
+  return { ok: true, deleted, failed };
+}
+
+// Rename a file OR folder in place at any location. New name is validated
+// against path separators + filesystem-illegal chars; collisions return
+// an error rather than auto-disambiguating so the user sees their typed
+// name landed (or didn't). fs.renameSync handles both files and dirs
+// identically.
+function renameFileAt({ userData, kind, id, subPath, newName }) {
+  if (!kind || !id) return { ok: false, error: 'Missing location' };
+  if (!subPath) return { ok: false, error: 'Missing path' };
+  const clean = String(newName || '').trim();
+  if (!clean) return { ok: false, error: 'Name is required' };
+  if (/[\\/]/.test(clean)) return { ok: false, error: 'Name cannot contain path separators' };
+  if (/[<>:"|?*\x00-\x1f]/.test(clean)) return { ok: false, error: 'Name contains invalid characters' };
+  let srcAbs;
+  try { srcAbs = _resolve(userData, kind, id, subPath); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(srcAbs)) return { ok: false, error: 'Source not found' };
+  const isDir = fs.statSync(srcAbs).isDirectory();
+  const destAbs = path.join(path.dirname(srcAbs), clean);
+  if (fs.existsSync(destAbs)) {
+    return { ok: false, error: `A ${isDir ? 'folder' : 'file'} named "${clean}" already exists here` };
+  }
+  try { fs.renameSync(srcAbs, destAbs); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  const root = path.resolve(_root(userData, kind, id));
+  const rel = path.relative(root, destAbs).replace(/\\/g, '/');
+  _markLocationDirty(userData, kind, id);
+  return { ok: true, path: rel, isDir };
+}
+
+// Create an empty subfolder inside a location at the given parent path.
+// Mirrors soundFontCommon.createCommonSubfolder for entries (and now for
+// commons too via the unified IPC). Name validated for path separators
+// and uniqueness within the parent.
+function createSubfolderAt({ userData, kind, id, parentSubPath, name }) {
+  if (!kind || !id) return { ok: false, error: 'Missing location' };
+  const clean = String(name || '').trim();
+  if (!clean) return { ok: false, error: 'Name is required' };
+  if (/[\\/]/.test(clean)) return { ok: false, error: 'Name cannot contain path separators' };
+  if (/[<>:"|?*\x00-\x1f]/.test(clean)) return { ok: false, error: 'Name contains invalid characters' };
+  let parentDir;
+  try { parentDir = _resolve(userData, kind, id, parentSubPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(parentDir)) {
+    try { fs.mkdirSync(parentDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create parent: ${err.message}` }; }
+  }
+  const newDir = path.join(parentDir, clean);
+  if (fs.existsSync(newDir)) return { ok: false, error: `A folder named "${clean}" already exists here` };
+  try { fs.mkdirSync(newDir); }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+  const rel = path.join(parentSubPath || '', clean).replace(/\\/g, '/');
+  // An empty subfolder counts as a content change because the canonical
+  // hash captures empty-dir markers, so getEntryContentHash needs to
+  // see this as a reason to recompute.
+  _markLocationDirty(userData, kind, id);
+  return { ok: true, path: rel };
+}
+
+// Add one or more files from external absolute paths into a location at
+// the given subPath. Used by the "+ Add" affordance in both common
+// folders and entries — picks files from disk, copies them in with
+// Proffie-style variant naming on collision.
+// [B-400] Async, with a byte-weighted progress budget.
+//
+// DELIBERATELY PER-FILE, NOT PER-CHUNK, AND THAT IS NOT LAZINESS — IT IS THE SHAPE OF THE
+// DATA. Shared tracks are a handful of ENORMOUS files, so its bar has to move WITHIN a file or it
+// sits at zero for thirty seconds; that is why addFiles streams its hash. A font's files are the
+// opposite: a couple of hundred small effect sounds. Crediting each one as it lands, WEIGHTED BY
+// ITS SIZE, gives a smooth honest bar without touching soundFontContentIndex — whose hashing and
+// pooling are shared with createEntry and three other callers. Streaming here would ripple through
+// all of them to fix a case (one huge file added to a font) that barely occurs.
+// THE HONEST LIMIT, WRITTEN DOWN SO IT IS NOT A SURPRISE: adding a single very large file to a
+// font still blocks for its hash. If that ever becomes a real complaint the fix is an async
+// storeInPool, not a patch here.
+//
+// THE `await` PER ITERATION IS LOAD-BEARING. Pooling resolves to a hardlink and never touches
+// fsp, so without an explicit yield the loop would run to completion synchronously and every tick
+// would flush after the work finished — the exact defect this entry exists for.
+// `shouldStop` IS NOT OPTIONAL POLISH ON THIS DOOR. [B-424, 2026-10-08] This is the font
+// detail's "+ Add → Browse…", and it was found by pressing: the eject checkbox was there and the
+// eject toast was there and there was no Cancel at all. The exit from a long add was force-quitting
+// the app, and force-quitting mid-write to a card is the corruption the whole SD line of work
+// exists to prevent - so an add that cannot be stopped pushes people toward the dangerous exit.
+// The gap ran all three layers deep (no param here, no gate in the handler, no `onCancel` at the
+// door), which is why the fix is not a button. The shape is copied from
+// `soundFontSharedTracks.addFiles` rather than re-derived - that door already solved this.
+async function addFilesAt({ userData, kind, id, subPath, sourceFilePaths, destNames, onBytes, shouldStop }) {
+  if (!kind || !id) return { ok: false, error: 'Missing location' };
+  if (!Array.isArray(sourceFilePaths) || sourceFilePaths.length === 0) {
+    return { ok: false, error: 'No source paths' };
+  }
+  let destDir;
+  try { destDir = _resolve(userData, kind, id, subPath || ''); }
+  catch (err) { return { ok: false, error: err.message }; }
+  if (!fs.existsSync(destDir)) {
+    try { fs.mkdirSync(destDir, { recursive: true }); }
+    catch (err) { return { ok: false, error: `Cannot create dest: ${err.message}` }; }
+  }
+  const destRoot = path.resolve(_root(userData, kind, id));
+  const added = [];
+  const failed = [];
+  // THE SAME POLICY AS EVERY OTHER WAY IN ([B-370], the catch 2026-09-11: "I just
+  // added a .exe into my library"). This module had NO checker of any kind, and this
+  // is the font detail's "+ Add" - so Studio itself would put a program in a font, and
+  // the export dialog would then tell the user something else on their computer did.
+  // The rule: these files are never allowed to come in or out.
+  // NOT A REMOVAL. Nothing is destroyed here - the file simply does not arrive, and
+  // the user's own copy stays where they picked it from. So this reports `refused` and
+  // the caller says what was not added; Delete and Quarantine belong to the export
+  // side, where we ARE destroying something.
+  const { checkCarryableFile } = require('./sdCardDetect');
+  const refused = [];
+  // A FILE YOU ADD IS ONLY STORED IF IT IS NOVEL ([B-315] + [B-316], 2026-09-05).
+  // Every file here goes through the library-wide content index. Content we
+  // already hold anywhere — a vendor source, another font, the pool — becomes a
+  // second NAME for it. Content we have never seen is written to the pool and
+  // this location gets a pointer, so an added sound is a thing in the library
+  // rather than a property of whichever font first received it: there is one
+  // place to look for it, and it outlives the font that first used it.
+  const CI = require('./soundFontContentIndex');
+  const index = CI.buildIndex(userData);
+  let linkedFiles = 0, pooled = 0;
+  // Byte budget, stat'd up front so the bar is determinate from its first frame.
+  const _sizes = new Map();
+  let _bytesTotal = 0;
+  for (const sp of sourceFilePaths) {
+    let sz = 0;
+    try { sz = fs.statSync(sp).size; } catch {}
+    _sizes.set(sp, sz);
+    _bytesTotal += sz;
+  }
+  let _bytesDone = 0;
+  const _emit = (name) => {
+    if (typeof onBytes !== 'function') return;
+    try { onBytes({ done: _bytesDone, total: _bytesTotal, name: name || '' }); } catch {}
+  };
+  _emit('');
+  // CHECKED AT THE TOP OF THE LOOP, SO A STOP LANDS BETWEEN FILES AND NEVER INSIDE ONE.
+  // Stopping here leaves every file already added in place and complete; files not yet reached are
+  // simply not added. Nothing is half-written and nothing needs cleaning up, which is why this
+  // needs no rollback the way the `creating` phase of the font import door does.
+  let _stopped = false;
+  for (let i = 0; i < sourceFilePaths.length; i++) {
+    if (shouldStop && shouldStop()) { _stopped = true; break; }
+    const src = sourceFilePaths[i];
+    // What the streamed copy below has already credited for THIS file. The settle at the bottom
+    // of the loop adds only the remainder, so a file that streamed fully is not counted twice and
+    // one that never got that far (not a file, refused, threw) is still settled in full.
+    let _fileStreamed = 0;
+    // Name first, so the label names what is being worked on rather than what just finished.
+    _emit(path.basename(String(src || '')));
+    // Yield BEFORE the work, so the tick above reaches the renderer while this file is in
+    // flight rather than after it.
+    await new Promise(r => setImmediate(r));
+    try {
+      if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
+        failed.push({ source: src, error: 'Not a file' });
+        continue;
+      }
+      {
+        const _n = path.basename(src);
+        const _v = checkCarryableFile(src, _n);
+        if (_v.blocked) {
+          refused.push({ name: _n, kind: _v.kind, reason: _v.reason, disguised: !!_v.disguised });
+          continue;
+        }
+      }
+      const desiredName = (destNames && destNames[i]) || path.basename(src);
+      const finalName = _proffieVariantName(destDir, desiredName);
+      const destPath = path.join(destDir, finalName);
+      // Read the source ONCE, streamed, and work off the local temp from here on. [B-424]
+      // This used to hand `src` straight to storeInPool, which hashes with the SYNCHRONOUS
+      // hashFile and copies with copyFileSync — both on the main process. On a card mounted
+      // through a Proffieboard that froze the window: reported at 0 B of 62.4 MB after 17
+      // seconds with the title bar reading "Not Responding", because nothing could emit while
+      // the main thread was inside those two calls.
+      // The await is the fix, not the read count. A bar cannot report on a loop that never
+      // yields, which is the same thing soundFontSharedTracks' header records.
+      const _tmp = destPath + '.jmt-add-tmp';
+      const _r = await fileHash.copyFileHashing(src, _tmp,
+        { onBytes: (n) => { _fileStreamed += n; _bytesDone += n;
+                      _emit(path.basename(String(src || ''))); },
+          shouldStop });
+      if (_r && _r.stopped) { _stopped = true; break; }
+      if (!_r || !_r.hash) { failed.push({ source: src, error: 'Could not read the file' }); continue; }
+      // Give the content a home. storeInPool returns what we already hold when we hold it, so
+      // nothing is written twice — then the name here is a link to that home.
+      // Pointed at the TEMP and given the digest we already have, so its sync hash and copy
+      // work on the local disk instead of the card. Passing `src` here puts the freeze back.
+      let done = false;
+      const home = CI.storeInPool({ index, srcAbs: _tmp, preferredName: desiredName,
+                                    knownHash: _r.hash });
+      if (home.ok) {
+        if (home.stored) pooled++;
+        const r = CI.ingestFile({ index, srcAbs: home.absPath, destAbs: destPath });
+        if (r.ok) { done = true; if (r.linked) linkedFiles++; }
+      }
+      // Either the pool placed the file and the temp is redundant, or nothing did and the temp
+      // IS the file. Renaming beats re-copying from the source.
+      if (done) { try { fs.rmSync(_tmp, { force: true }); } catch {} }
+      else { fs.renameSync(_tmp, destPath); }
+      const rel = path.relative(destRoot, destPath).replace(/\\/g, '/');
+      added.push(rel);
+    } catch (err) {
+      failed.push({ source: src, error: String(err && err.message || err) });
+    }
+    _bytesDone += Math.max(0, (_sizes.get(src) || 0) - _fileStreamed);
+    _emit(path.basename(String(src || '')));
+  }
+  // Land on 100% whatever route the files took. Files leave this loop four ways — added,
+  // not-a-file, refused, or a thrown copy — and crediting at each exit is a guard the fifth exit
+  // will forget. [B-389]: a bar always reaches 100% before it moves on.
+  _bytesDone = _bytesTotal;
+  _emit('');
+  if (added.length > 0) _markLocationDirty(userData, kind, id);
+  // `canceled` travels with the result rather than being an error: a stop the user asked for is
+  // an OUTCOME, and reporting it as a failure is what [B-005] item 4 had to undo across the export
+  // doors. Everything already added is reported in `added`, because it was.
+  // `ok: true` THEREFORE DOES NOT MEAN "IT WROTE EVERYTHING" - callers must test `canceled`
+  // BEFORE `!ok`, or a cancel reads as a clean full run. That is the exact trap three export doors
+  // fell into.
+  return { ok: true, cancelled: _stopped, added, failed, refused, linkedFiles, pooled };
+}
+
+// Images that landed at the TOP of a location become PNG [B-530]; deeper ones are content and are
+// left alone, as is anything not named in relPaths. `decode(absPath)` returns PNG bytes. The PNG
+// takes the original's name with .png, numbered _2, _3 when that is taken, and the original goes.
+// Returns every top-level image path that landed, as it now is; a failed conversion keeps its file.
+const LANDED_IMAGE_RX = /\.(png|jpe?g|gif|webp|bmp)$/i;
+async function landedImagesToPng({ userData, kind, id, relPaths, decode }) {
+  const out = [];
+  let changed = false;
+  for (const rel of relPaths || []) {
+    const clean = String(rel || '').replace(/\\/g, '/');
+    if (!clean || clean.includes('/') || !LANDED_IMAGE_RX.test(clean)) continue;
+    if (/\.png$/i.test(clean)) { out.push(clean); continue; }
+    try {
+      const abs = _resolve(userData, kind, id, clean);
+      const png = await decode(abs);
+      if (!png || !png.length) { out.push(clean); continue; }
+      const dir = path.dirname(abs);
+      const stem = path.parse(clean).name;
+      let name = `${stem}.png`;
+      for (let n = 2; fs.existsSync(path.join(dir, name)); n++) name = `${stem}_${n}.png`;
+      fs.writeFileSync(path.join(dir, name), png);
+      fs.unlinkSync(abs);
+      changed = true;
+      out.push(name);
+    } catch { out.push(clean); }
+  }
+  if (changed) _markLocationDirty(userData, kind, id);
+  return out;
+}
+
+// Where a file in a font or common folder is on disk, checked to stay inside it.
+function locationFilePath(userData, kind, id, subPath) { return _resolve(userData, kind, id, subPath); }
+
+// Whether location `b` already holds the file at location `a` ({ kind, id, subPath } each):
+// 'same' when it is the same file (one hard link, or equal bytes), 'different' when another file
+// sits at that path, 'absent' when nothing does. Lets a caller reuse a file rather than add a second
+// copy under a variant name.
+function sameFileAt(userData, a, b) {
+  const pa = _resolve(userData, a.kind, a.id, a.subPath);
+  const pb = _resolve(userData, b.kind, b.id, b.subPath);
+  let sb;
+  try { sb = fs.statSync(pb); } catch { return 'absent'; }
+  if (!sb.isFile()) return 'different';
+  const sa = fs.statSync(pa);
+  if (sa.ino && sa.ino === sb.ino && sa.dev === sb.dev) return 'same';
+  if (sa.size !== sb.size) return 'different';
+  return fs.readFileSync(pa).equals(fs.readFileSync(pb)) ? 'same' : 'different';
+}
+
+module.exports = {
+  locationFilePath,
+  sameFileAt,
+  landedImagesToPng,
+  copyAcrossLocations,
+  moveWithinLocation,
+  deleteFilesAt,
+  renameFileAt,
+  createSubfolderAt,
+  addFilesAt,
+};

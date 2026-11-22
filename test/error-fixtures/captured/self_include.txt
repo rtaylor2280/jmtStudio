@@ -1,0 +1,7 @@
+FAILED
+<OS>\config\my_config.h:15:23: error: #include nested depth 200 exceeds maximum of 200 (use -fmax-include-depth=DEPTH to increase the maximum)
+   15 | #include "my_config.h"
+      |                       ^
+<OS>\config\my_config.h:15:23: error: #include nested depth 200 exceeds maximum of 200 (use -fmax-include-depth=DEPTH to increase the maximum)
+   15 | #include "my_config.h"
+      |                       ^

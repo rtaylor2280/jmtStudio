@@ -1,0 +1,25 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:20:26: error: 'Bluue' was not declared in this scope; did you mean 'Blue'?
+   20 |     StylePtr<InOutHelper<Bluue, 300, 800, Black>>(),
+      |                          ^~~~~
+      |                          Blue
+<OS>\config\my_config.h:20:43: error: template argument 1 is invalid
+   20 |     StylePtr<InOutHelper<Bluue, 300, 800, Black>>(),
+      |                                           ^~~~~
+<OS>\config\my_config.h:20:50: error: no matching function for call to 'StylePtr<<expression error> >()'
+   20 |     StylePtr<InOutHelper<Bluue, 300, 800, Black>>(),
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+In file included from <OS>\styles\fire.h:4,
+                 from <OS>\ProffieOS.ino:484:
+<OS>\styles\style_ptr.h:135:16: note: candidate: 'template<class STYLE> StyleFactory* StylePtr()'
+  135 | StyleAllocator StylePtr() {
+      |                ^~~~~~~~
+<OS>\styles\style_ptr.h:135:16: note:   template argument deduction/substitution failed:
+<OS>\config\my_config.h:20:50: error: template argument 1 is invalid
+   20 |     StylePtr<InOutHelper<Bluue, 300, 800, Black>>(),
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+<OS>\styles\style_ptr.h:159:16: note: candidate: 'template<class STYLE> StyleFactory* StylePtr(const char*)'
+  159 | StyleAllocator StylePtr(const char* default_arguments) {
+      |                ^~~~~~~~
+<OS>\styles\style_ptr.h:159:16: note:   candidate expects 1 argument, 0 provided

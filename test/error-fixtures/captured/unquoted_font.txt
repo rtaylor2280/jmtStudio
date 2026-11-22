@@ -1,0 +1,5 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:19:5: error: 'Font1' was not declared in this scope
+   19 |   { Font1, "tracks/track1.wav",
+      |     ^~~~~

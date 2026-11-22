@@ -22,13 +22,22 @@ const CERTIFICATE_PROFILE        = 'jmt-studio-signing';
 exports.default = async function sign(configuration) {
   const file = configuration.path;
 
-  // Skip bundled third-party tools — Proffieboard core dfu-util/dfu-suffix/
-  // dfu-prefix, arduino-cli, etc. Those aren't ours and don't need our
-  // signature; signing them would also break any signatures they ship with.
-  // Only sign our own binaries: the main app .exe and the NSIS installer/
-  // uninstaller.
-  if (/[\\\/]resources[\\\/]/i.test(file)) {
-    console.log(`[sign] Skipping third-party binary: ${file}`);
+  // [B-681] EVERY WINDOWS PROGRAM FILE STUDIO SHIPS IS SIGNED, the bundled tools (arduino-cli,
+  // dfu-util, dfu-suffix and its library) and native modules (koffi, serialport) included.
+  // Behaviour-based antivirus convicted the unsigned arduino-cli and Studio with it (QA BUG-012);
+  // a signed file has a publisher it can check. None of these carries a signature of its own
+  // (verified 2026-11-15), so signing breaks nothing. A file that already has a valid signature
+  // keeps it and is not signed again.
+  //
+  // package.json win.signExts sends .node and .dll files here as well as .exe. Only Windows PE
+  // files can be signed, so anything else that matches by name (koffi ships .node builds for
+  // every platform) is passed over.
+  if (!_isPortableExecutable(file)) {
+    console.log(`[sign] Not a Windows program file, not signed: ${file}`);
+    return;
+  }
+  if (_hasValidSignature(file)) {
+    console.log(`[sign] Already signed, kept: ${file}`);
     return;
   }
 
@@ -58,3 +67,22 @@ exports.default = async function sign(configuration) {
     throw new Error(`sign exited with code ${result.status} for ${file}`);
   }
 };
+
+// A Windows PE file starts with "MZ".
+function _isPortableExecutable(file) {
+  const fs = require('fs');
+  try {
+    const fd = fs.openSync(file, 'r');
+    const b = Buffer.alloc(2);
+    fs.readSync(fd, b, 0, 2, 0);
+    fs.closeSync(fd);
+    return b[0] === 0x4d && b[1] === 0x5a;
+  } catch { return false; }
+}
+
+// True when Windows already finds a valid Authenticode signature on the file.
+function _hasValidSignature(file) {
+  const ps = `(Get-AuthenticodeSignature -LiteralPath '${String(file).replace(/'/g, "''")}').Status`;
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
+  return r.status === 0 && /^Valid\s*$/m.test(r.stdout || '');
+}

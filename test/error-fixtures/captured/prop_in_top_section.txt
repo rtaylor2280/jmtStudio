@@ -1,0 +1,77 @@
+FAILED
+In file included from <OS>\sound\sound_library.h:6,
+                 from <OS>\props\saber_fett263_buttons.h:1033,
+                 from <OS>\config\my_config.h:12,
+                 from <OS>\ProffieOS.ino:46:
+<OS>\sound\sound_queue.h:8:21: error: 'BufferedWavPlayer' has not been declared
+    8 |   virtual bool Play(BufferedWavPlayer* player) = 0;
+      |                     ^~~~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h:14:48: error: 'Effect' has not been declared
+   14 |   SoundToPlayInSameDirAs(const char* filename, Effect* e) : filename_(filename), effect_(e) {}
+      |                                                ^~~~~~
+<OS>\sound\sound_queue.h:15:13: error: 'BufferedWavPlayer' has not been declared
+   15 |   bool Play(BufferedWavPlayer* player) override {
+      |             ^~~~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h:22:3: error: 'Effect' does not name a type
+   22 |   Effect* effect_;
+      |   ^~~~~~
+<OS>\sound\sound_queue.h: In constructor 'SoundToPlayInSameDirAs::SoundToPlayInSameDirAs(const char*, int*)':
+<OS>\sound\sound_queue.h:14:82: error: class 'SoundToPlayInSameDirAs' does not have any field named 'effect_'
+   14 |   SoundToPlayInSameDirAs(const char* filename, Effect* e) : filename_(filename), effect_(e) {}
+      |                                                                                  ^~~~~~~
+<OS>\sound\sound_queue.h: In member function 'virtual bool SoundToPlayInSameDirAs::Play(int*)':
+<OS>\sound\sound_queue.h:16:13: error: request for member 'PlayInSameDirAs' in '* player', which is of non-class type 'int'
+   16 |     player->PlayInSameDirAs(filename_, effect_);
+      |             ^~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h:16:40: error: 'effect_' was not declared in this scope
+   16 |     player->PlayInSameDirAs(filename_, effect_);
+      |                                        ^~~~~~~
+<OS>\sound\sound_queue.h: At global scope:
+<OS>\sound\sound_queue.h:28:13: error: 'BufferedWavPlayer' has not been declared
+   28 |   bool Play(BufferedWavPlayer* player) override {
+      |             ^~~~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h: In member function 'virtual bool SoundToPlayInCurrentDir::Play(int*)':
+<OS>\sound\sound_queue.h:29:20: error: request for member 'PlayInCurrentDir' in '* player', which is of non-class type 'int'
+   29 |     return player->PlayInCurrentDir(filename_);
+      |                    ^~~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h: At global scope:
+<OS>\sound\sound_queue.h:38:21: error: 'Effect' has not been declared
+   38 |   SoundToPlayFileID(Effect::FileID id) : file_id_(id) {}
+      |                     ^~~~~~
+<OS>\sound\sound_queue.h:38:35: error: expected ')' before 'id'
+   38 |   SoundToPlayFileID(Effect::FileID id) : file_id_(id) {}
+      |                    ~              ^~~
+      |                                   )
+<OS>\sound\sound_queue.h:39:13: error: 'BufferedWavPlayer' has not been declared
+   39 |   bool Play(BufferedWavPlayer* player) override {
+      |             ^~~~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h:45:3: error: 'Effect' does not name a type
+   45 |   Effect::FileID file_id_;
+      |   ^~~~~~
+<OS>\sound\sound_queue.h: In member function 'virtual bool SoundToPlayFileID::Play(int*)':
+<OS>\sound\sound_queue.h:40:13: error: request for member 'PlayOnce' in '* player', which is of non-class type 'int'
+   40 |     player->PlayOnce(file_id_);
+      |             ^~~~~~~~
+<OS>\sound\sound_queue.h:40:22: error: 'file_id_' was not declared in this scope
+   40 |     player->PlayOnce(file_id_);
+      |                      ^~~~~~~~
+<OS>\sound\sound_queue.h: At global scope:
+<OS>\sound\sound_queue.h:54:13: error: 'BufferedWavPlayer' has not been declared
+   54 |   bool Play(BufferedWavPlayer* player) override {
+      |             ^~~~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h: In member function 'virtual bool SoundToPlayColor::Play(int*)':
+<OS>\sound\sound_queue.h:57:5: error: 'strcpy' was not declared in this scope
+   57 |     strcpy(filename, "colors/");
+      |     ^~~~~~
+<OS>\sound\sound_queue.h:1:1: note: 'strcpy' is defined in header '<cstring>'; this is probably fixable by adding '#include <cstring>'
+  +++ |+#include <cstring>
+    1 | #ifndef SOUND_SOUND_QUEUE_H
+<OS>\sound\sound_queue.h:58:28: error: 'strlen' was not declared in this scope
+   58 |     char* tmp = filename + strlen(filename);
+      |                            ^~~~~~
+<OS>\sound\sound_queue.h:58:28: note: 'strlen' is defined in header '<cstring>'; this is probably fixable by adding '#include <cstring>'
+<OS>\sound\sound_queue.h:66:20: error: request for member 'PlayInCurrentDir' in '* player', which is of non-class type 'int'
+   66 |     return player->PlayInCurrentDir(filename);
+      |                    ^~~~~~~~~~~~~~~~
+<OS>\sound\sound_queue.h: At global scope:
+<OS>\sound\sound_queue.h:76:22: error: 'size_t' has not been declared

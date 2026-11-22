@@ -1,0 +1,7 @@
+FAILED
+In file included from <OS>\ProffieOS.ino:674:
+<OS>\config\my_config.h:28:76: error: cannot convert 'BladeBase*' to 'Preset*' in initialization
+   28 |     WS281XBladePtr<144, blade2Pin, Color8::GRB, PowerPINS<bladePowerPin4> >(),
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+      |                                                                            |
+      |                                                                            BladeBase*

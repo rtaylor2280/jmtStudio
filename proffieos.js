@@ -13,6 +13,10 @@ const { app } = require('electron');
 const path   = require('path');
 const fs     = require('fs');
 const crypto = require('crypto');
+// Shared because a directory something still holds open cannot be removed on
+// Windows, and this app had grown three separate answers to that. Used here to
+// clear a half-copied version tree after a cancel.
+const fsRemove = require('./fsRemove');
 
 // ── Constants ──────────────────────────────────────────
 const CONFIG_FILENAME  = 'my_config.h';
@@ -20,7 +24,8 @@ const STYLES_FILENAME  = 'my_styles.h';
 
 // ── Version state ──────────────────────────────────────
 let _selectedVersion = null;
-const _hashCache = new Map(); // versionName → hash string
+const _hashCache = new Map(); // versionName → { sig, hash }
+const _osVersionCache = new Map(); // versionName → "v8.10" | null
 
 // ── Path helpers ───────────────────────────────────────
 
@@ -80,6 +85,36 @@ function getVersionSourcePath(versionName) {
   return resolved ? path.join(resolved.folderPath, 'ProffieOS') : path.join(getUserVersionsPath(), versionName, 'ProffieOS');
 }
 
+// ── Reported OS version ────────────────────────────────
+
+/**
+ * The ProffieOS version a tree actually IS, read from its own source rather
+ * than inferred from the folder name. Folder names are whatever the user typed
+ * ("Test ProffieOS 8.10 (copy)"); this is the string the firmware reports over
+ * serial, so it is the only value that can be compared against a live board.
+ *
+ * Returns "v8.10" style, or null if the line is missing (a hand-edited or
+ * partial tree). Cached — an installed tree's version never changes.
+ */
+function getVersionOSVersion(versionName) {
+  if (_osVersionCache.has(versionName)) return _osVersionCache.get(versionName);
+  let found = null;
+  try {
+    const ino = path.join(getVersionSourcePath(versionName), 'ProffieOS.ino');
+    const m = fs.readFileSync(ino, 'utf8').match(/^const\s+char\s+version\s*\[\s*\]\s*=\s*"([^"]+)"/m);
+    if (m) found = m[1].trim();
+  } catch { /* unreadable tree → null, caller degrades */ }
+  _osVersionCache.set(versionName, found);
+  return found;
+}
+
+// { versionName → "v8.10" | null } for every installed tree.
+function getOSVersionMap() {
+  const map = {};
+  for (const name of listVersions()) map[name] = getVersionOSVersion(name);
+  return map;
+}
+
 // ── Version selection ──────────────────────────────────
 
 function setSelectedVersion(name) {
@@ -97,12 +132,16 @@ function getSelectedVersion() {
 /**
  * Recursively hashes all files in a directory, sorted by relative path
  * for stability. Returns a 16-char hex string.
- * Result is cached in memory by versionName — computed at most once per session.
+ * Kept in memory with the tree's signature (paths, sizes, modified times) and recomputed when that
+ * changes, so an edit no code path announced (Explorer, a forgotten invalidate) cannot leave the
+ * compile cache restoring a binary built from the old files. [B-591]
  */
 function hashVersion(versionName) {
-  if (_hashCache.has(versionName)) return _hashCache.get(versionName);
-
   const dirPath = getVersionSourcePath(versionName);
+  const sig = _treeSignature(dirPath);
+  const have = _hashCache.get(versionName);
+  if (have && have.sig === sig) return have.hash;
+
   const hash    = crypto.createHash('sha256');
 
   function walk(dir) {
@@ -135,7 +174,7 @@ function hashVersion(versionName) {
 
   walk(dirPath);
   const result = hash.digest('hex').slice(0, 16);
-  _hashCache.set(versionName, result);
+  _hashCache.set(versionName, { sig, hash: result });
   return result;
 }
 
@@ -146,6 +185,9 @@ function hashVersion(versionName) {
 function invalidateVersionHash(versionName) {
   if (versionName) _hashCache.delete(versionName);
   else _hashCache.clear();
+  // The name index [B-584] is derived from the same files, so it goes stale at the same moment.
+  if (versionName) _nameIndexCache.delete(versionName);
+  else _nameIndexCache.clear();
 }
 
 // ── ArgumentName enum ──────────────────────────────────
@@ -254,25 +296,123 @@ function copyDirSync(src, dest) {
   }
 }
 
+// The same copy, but the event loop stays alive and a cancel can land. [B-488]
+//
+// WHY THIS EXISTS BESIDE copyDirSync RATHER THAN REPLACING IT. This hit the
+// version import with the window reading "JMT Studio (Not Responding)" and the
+// dialog's Cancel unavailable. `copyDirSync` is a synchronous recursive walk, and
+// Electron routes frame presentation AND input dispatch through the main process,
+// so for the whole copy the app cannot repaint and cannot receive the cancel IPC
+// — the button is not ignoring the click, nothing is listening. Exactly the shape
+// written up in [B-462] for the bulk scan.
+//
+// MEASURED on a real source (346 files, 2.6 MB, read from a Drive-backed
+// folder): 2,092 ms cold, 1,638 ms warm, 893 ms local-to-local. Short, and that
+// is the point — the blocking time scales with whatever the user points at, and
+// nothing bounds what that is.
+//
+// THE OTHER TWO copyDirSync CALLERS ARE LEFT ALONE ON PURPOSE (`initWorkspace`
+// and the prop copy). They are different doors with their own sizes and their own
+// walk entries; converting them is not this fix.
+//
+// YIELDS ON A TIME BUDGET, NOT A FILE COUNT, AND THAT CORRECTION CAME FROM
+// TESTING IT. The first cut yielded every 24 files and it was reported "still
+// went briefly unresponsive because I tried to click again and it wasn't showing
+// canceling". A COUNT CANNOT BOUND THE BLOCK: a ProffieOS tree holds both 2 KB
+// headers and much larger assets, so 24 files is a few milliseconds in one folder
+// and a visible stall in another. Budgeting by elapsed time bounds it regardless
+// of what the files turn out to be.
+//
+// One frame at 60 Hz is ~16 ms, so that is the ceiling on how long a click can sit
+// unpainted. The cost is more setImmediate calls on fast trees, which is cheap
+// next to a window that does not answer.
+const YIELD_AFTER_MS = 16;
+
+async function copyDirCancellable(src, dest, opts = {}) {
+  const shouldStop = typeof opts.shouldStop === 'function' ? opts.shouldStop : () => false;
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+  let copied = 0;
+  let lastYield = Date.now();
+
+  async function walk(s, d) {
+    if (shouldStop()) return false;
+    fs.mkdirSync(d, { recursive: true });
+    for (const entry of fs.readdirSync(s, { withFileTypes: true })) {
+      if (shouldStop()) return false;
+      const sp = path.join(s, entry.name);
+      const dp = path.join(d, entry.name);
+      if (entry.isDirectory()) {
+        if (!await walk(sp, dp)) return false;
+      } else {
+        fs.copyFileSync(sp, dp);
+        copied++;
+        if (Date.now() - lastYield >= YIELD_AFTER_MS) {
+          lastYield = Date.now();
+          onProgress({ copied });
+          // Hand the loop back so a repaint and the cancel IPC can happen. The
+          // check above means this costs at most one frame of latency on the
+          // click, whatever the files weigh.
+          await new Promise((r) => setImmediate(r));
+        }
+      }
+    }
+    return true;
+  }
+
+  const finished = await walk(src, dest);
+  onProgress({ copied });
+  return { completed: finished, copied };
+}
+
+// What a version's files are right now: every path, size and modified time, hashed. Read fresh
+// on every call, never cached, so no door that changes a tree (prop import, add-on update, an
+// edit in Explorer) can leave the workspace behind by forgetting to say so. Stats only, no
+// reads: ~400 files, a few milliseconds.
+function _treeSignature(dir) {
+  const h = crypto.createHash('sha1');
+  (function walk(d, rel) {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) { walk(full, r); continue; }
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      h.update(`${r}\0${st.size}\0${Math.floor(st.mtimeMs)}\n`);
+    }
+  })(dir, '');
+  return h.digest('hex').slice(0, 16);
+}
+
 /**
- * Ensures the selected version is in the writable workspace.
- * No-op in dev (source is already writable).
- * Re-copies if the workspace holds a different version.
+ * Ensures the workspace holds the selected version exactly as it is on disk now.
+ * Re-copies when the workspace holds a different version OR the version's files changed
+ * since the copy. [B-591]
+ *
+ * ONE PATH FOR BOTH BUILDS, so dev runs what release runs. Re-copying on a version NAME change
+ * alone left a prop imported or an add-on updated in the selected version out of the compile,
+ * and an in-place dev compile could not show that. The workspace exists so a
+ * compile never writes into the user's tree (my_config.h, my_styles.h, the CONFIG_FILE line
+ * in ProffieOS.ino), and dev now tests exactly what release runs. Called on every compile.
  */
 function initWorkspace(onLog) {
-  if (!app.isPackaged) return { ok: true };
-
   const version = getSelectedVersion();
   if (!version) return { ok: false, error: 'No ProffieOS version available.' };
 
-  const workspace        = getWorkspacePath();
-  const workspaceVersion = getWorkspaceVersion();
+  const workspace = getWorkspacePath();
+  const source    = getVersionSourcePath(version);
+  const sig       = _treeSignature(source);
+  const sigPath   = path.join(workspace, '_signature.txt');
+  let haveSig = null;
+  try { haveSig = fs.readFileSync(sigPath, 'utf8').trim(); } catch { haveSig = null; }
 
-  if (workspaceVersion === version && fs.existsSync(path.join(workspace, 'ProffieOS.ino'))) {
+  if (getWorkspaceVersion() === version && haveSig === sig
+      && fs.existsSync(path.join(workspace, 'ProffieOS.ino'))) {
     return { ok: true };
   }
 
-  const source = getVersionSourcePath(version);
   if (onLog) onLog(`Setting up ProffieOS workspace for ${version}...`, false);
 
   try {
@@ -280,7 +420,13 @@ function initWorkspace(onLog) {
       fs.rmSync(workspace, { recursive: true, force: true });
     }
     copyDirSync(source, workspace);
+    // A tree compiled in place by an older dev build carries that compile's staged copies;
+    // the workspace starts without them, as a release user's tree always has.
+    for (const f of [CONFIG_FILENAME, STYLES_FILENAME]) {
+      fs.rmSync(path.join(workspace, 'config', f), { force: true });
+    }
     fs.writeFileSync(getWorkspaceVersionFilePath(), version, 'utf8');
+    fs.writeFileSync(sigPath, sig, 'utf8');
     if (onLog) onLog('Workspace ready.', false);
     return { ok: true };
   } catch (e) {
@@ -290,11 +436,9 @@ function initWorkspace(onLog) {
 
 // ── Compile paths ──────────────────────────────────────
 
-// The root used for compilation and config staging.
+// The root used for compilation and config staging: always the workspace copy. [B-591]
 function getProffieOSRoot() {
-  if (app.isPackaged) return getWorkspacePath();
-  const version = getSelectedVersion();
-  return version ? getVersionSourcePath(version) : null;
+  return getWorkspacePath();
 }
 
 function getConfigStagingPath() {
@@ -433,6 +577,27 @@ function stageConfig(configContent) {
 }
 
 /**
+ * Puts the Style Library beside the staged config, on every compile, so a config's
+ * #include "my_styles.h" finds it. Unconditional: no question of whether this config uses it or
+ * whether it changed, so nothing can drift. With no library, a copy left from an earlier compile
+ * is removed, so an include of it fails as missing instead of building old styles.
+ * Returns { ok, stagedPath } or { ok: false, error }.
+ */
+function stageStylesForCompile() {
+  const dest = path.join(path.dirname(getConfigStagingPath()), STYLES_FILENAME);
+  try {
+    if (hasUserStyles()) {
+      fs.copyFileSync(getUserStylesPath(), dest);
+      return { ok: true, stagedPath: dest };
+    }
+    fs.rmSync(dest, { force: true });
+    return { ok: true, stagedPath: null };
+  } catch (e) {
+    return { ok: false, error: `Failed to stage the Style Library:\n${e.message}` };
+  }
+}
+
+/**
  * Reads the currently staged config back (for verification or display).
  */
 function readStagedConfig() {
@@ -465,7 +630,12 @@ function readStagedStyles() {
  * under a user-supplied name. sourcePath must be a folder named "ProffieOS"
  * containing ProffieOS.ino.
  */
-function importVersion(sourcePath, versionName, proffieVersion) {
+// coreVersion is stamped at import time so every tree carries the core that was
+// current when it arrived. Passed in rather than resolved here: resolving means
+// a network call, this function is synchronous, and proffieos cannot require
+// toolchain without a cycle. Omitting it leaves the version following latest,
+// which is the correct degradation rather than a failure.
+async function importVersion(sourcePath, versionName, proffieVersion, coreVersion, opts = {}) {
   if (path.basename(sourcePath) !== 'ProffieOS') {
     return { ok: false, error: 'Selected folder must be named "ProffieOS".' };
   }
@@ -484,13 +654,28 @@ function importVersion(sourcePath, versionName, proffieVersion) {
     return { ok: false, error: `A version named "${name}" already exists.` };
   }
   try {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    copyDirSync(sourcePath, dest);
-    const ver = (proffieVersion || '').trim();
-    if (ver) {
+    // A CANCEL MUST NOT LEAVE A HALF-COPIED VERSION ON THE LIST. The version
+    // directory is created here, so if we created it and the copy did not finish,
+    // it is ours to remove — and `versionDir` is the whole of what we made, which
+    // is why the removal targets it rather than `dest`. The existsSync guard
+    // above already refused a name that was in use, so this can only ever remove
+    // a tree this call brought into being. [B-488]
+    const versionDir = path.dirname(dest);
+    fs.mkdirSync(versionDir, { recursive: true });
+    const copy = await copyDirCancellable(sourcePath, dest, opts);
+    if (!copy.completed) {
+      try { await fsRemove.rmWithRetry(versionDir); } catch { /* best effort */ }
+      return { ok: false, cancelled: true, error: 'Import cancelled.' };
+    }
+    const ver  = (proffieVersion || '').trim();
+    const core = (coreVersion || '').trim();
+    if (ver || core) {
+      const meta = { source: 'import' };
+      if (ver)  meta.proffieVersion = ver;
+      if (core) meta.coreVersion    = core;
       fs.writeFileSync(
         path.join(path.dirname(dest), '.jmt_meta.json'),
-        JSON.stringify({ proffieVersion: ver, source: 'import' }, null, 2),
+        JSON.stringify(meta, null, 2),
         'utf8'
       );
     }
@@ -498,6 +683,194 @@ function importVersion(sourcePath, versionName, proffieVersion) {
   } catch (e) {
     return { ok: false, error: `Import failed: ${e.message}` };
   }
+}
+
+// Copy a single prop header into ONE version's props/ folder. [B-446]
+//
+// Per version by design, settled 2026-09-29: the file lands in the version that was
+// selected and nowhere else. Duplicating a version copies its whole tree, so an
+// imported prop follows a duplicate for free without this having to fan out.
+//
+// THIS IS A DOOR THAT WRITES A CHOSEN FILE INTO THE TREE WE THEN COMPILE, so it
+// refuses two things and neither check is invented here:
+//   · A program. `checkExecutableFile` is the programs-only predicate, by content AND
+//     by name, with the trailing-dot/space strip that stops `evil.exe.` sneaking past.
+//     soundFontAttachments guards with the same one for the same reason.
+//     NOT `checkCarryableFile` - its refusal wording is card-scoped ("no use on a
+//     saber card", "left out") and reads as nonsense in a props folder.
+//   · Anything that is not `.h`. The include the Prop dropdown writes is
+//     `../props/<file>`, so a non-header cannot be compiled by the only path that
+//     would reference it.
+//
+// `overwrite` is opt-in rather than automatic: props/ holds ProffieOS's own shipped
+// props, and writing over saber_fett263_buttons.h is both a real possibility and a
+// legitimate act (re-importing your own prop after editing it is the obvious second
+// use). So the caller confirms; this refuses until it does.
+function importProp(versionName, sourcePath, opts) {
+  const o = opts || {};
+  const name = (versionName || '').trim();
+  if (!name) return { ok: false, error: 'No ProffieOS version selected.' };
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return { ok: false, error: 'That file could not be found.' };
+  }
+
+  const file = path.basename(sourcePath);
+  if (!/\.h$/i.test(file)) {
+    return { ok: false, error: 'A prop must be a .h header file.' };
+  }
+  // Defence in depth against a chosen path carrying separators in its basename.
+  if (file !== path.basename(file) || /[\\/]/.test(file)) {
+    return { ok: false, error: 'That file name cannot be used.' };
+  }
+
+  try {
+    const verdict = require('./sdCardDetect').checkExecutableFile(sourcePath, file);
+    if (verdict && verdict.blocked) {
+      return { ok: false, error: verdict.disguised
+        ? `${file} is a program, despite its name. It was not imported.`
+        : `${file} is a program file, which cannot be a prop. It was not imported.` };
+    }
+  } catch { /* predicate unavailable: fall through to the extension check alone */ }
+
+  const propsDir = path.join(getUserVersionsPath(), name, 'ProffieOS', 'props');
+  if (!fs.existsSync(propsDir)) {
+    return { ok: false, error: `${name} has no props folder — is this a complete ProffieOS tree?` };
+  }
+
+  const dest = path.join(propsDir, file);
+  const existed = fs.existsSync(dest);
+  if (existed && !o.overwrite) {
+    return { ok: false, exists: true, file,
+             error: `${name} already has a prop called ${file}.` };
+  }
+  try {
+    fs.copyFileSync(sourcePath, dest);
+    _recordAddedProp(name, file);
+    // The version's content hash is what decides whether a cached build can be
+    // reused. Adding a file to the tree changes what would compile, so a stale
+    // hash here would hand back a build made without this prop.
+    try { invalidateVersionHash(name); } catch {}
+    return { ok: true, file, versionName: name, replaced: existed };
+  } catch (e) {
+    return { ok: false, error: `Import failed: ${e.message}` };
+  }
+}
+
+// ── Provenance: which props did the USER put here? ─────
+//
+// Import is the only moment this is CERTAIN. Everything after it is inference, so
+// the answer is recorded at the one point we know it rather than reconstructed
+// later from a folder listing that cannot tell a stock prop from a brought one.
+//
+// THE LIMIT IS PART OF THE DESIGN, not a shortfall: versions installed before
+// this existed have no record, so nothing in them is removable until it is
+// imported through the app. That is correct. We genuinely do not know what was in
+// those folders when they arrived, and an app that offers to delete a file it
+// cannot vouch for is the one overstepping. [B-446]
+function _recordAddedProp(versionName, file) {
+  try {
+    const meta  = readVersionMeta(versionName);
+    const added = Array.isArray(meta.addedProps) ? meta.addedProps.slice() : [];
+    if (!added.includes(file)) added.push(file);
+    writeVersionMeta(versionName, { addedProps: added });
+  } catch { /* provenance is a convenience; never fail the import over it */ }
+}
+
+function _forgetAddedProp(versionName, file) {
+  try {
+    const meta = readVersionMeta(versionName);
+    if (!Array.isArray(meta.addedProps)) return;
+    writeVersionMeta(versionName, { addedProps: meta.addedProps.filter(f => f !== file) });
+  } catch { /* as above */ }
+}
+
+// The props in this version that the user added, as a plain array.
+function addedProps(versionName) {
+  const meta = readVersionMeta(versionName);
+  return Array.isArray(meta.addedProps) ? meta.addedProps : [];
+}
+
+// Remove a prop this app put there. [B-446] requirement 3.
+//
+// REFUSES ANYTHING NOT IN addedProps, and that refusal is the feature. A prop
+// that shipped with ProffieOS is not ours to delete, and one we have no record of
+// is one we cannot vouch for - which reads the same way from here.
+function removeProp(versionName, file) {
+  const name = (versionName || '').trim();
+  if (!name) return { ok: false, error: 'No ProffieOS version selected.' };
+  if (!file || file !== path.basename(file) || /[\\/]/.test(file)) {
+    return { ok: false, error: 'That file name cannot be used.' };
+  }
+  if (!addedProps(name).includes(file)) {
+    return { ok: false, error: `${file} was not added through JMT Studio, so it is not ours to delete.` };
+  }
+  const target = path.join(getUserVersionsPath(), name, 'ProffieOS', 'props', file);
+  try {
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+    _forgetAddedProp(name, file);
+    // Removing a file changes what would compile, same as adding one.
+    try { invalidateVersionHash(name); } catch {}
+    return { ok: true, file, versionName: name };
+  } catch (e) {
+    return { ok: false, error: `Could not remove ${file}: ${e.message}` };
+  }
+}
+
+// What would copying this prop into each destination do? [B-446] requirement 4.
+//
+// Answered BEFORE anything is written, because the menu rows carry the consequence
+// and picking a row is the consent - there is no confirm dialog downstream to catch
+// a surprise. `replaces` is why a row reads "(replaces)"; `majorDiffers` is why one
+// reads "(different major)", and that is per DESTINATION rather than per operation:
+// across several destinations a blanket warning either cries wolf over the safe ones
+// or buries the one that matters.
+function planPropCopy(fromVersion, file, toVersions) {
+  const src = path.join(getUserVersionsPath(), fromVersion, 'ProffieOS', 'props', file);
+  const srcMajor = String(getVersionOSVersion(fromVersion) || '').split('.')[0];
+  return (toVersions || []).map(to => {
+    const dest = path.join(getUserVersionsPath(), to, 'ProffieOS', 'props', file);
+    const toMajor = String(getVersionOSVersion(to) || '').split('.')[0];
+    return {
+      version:      to,
+      replaces:     fs.existsSync(dest),
+      majorDiffers: !!(srcMajor && toMajor && srcMajor !== toMajor),
+      ok:           fs.existsSync(src),
+    };
+  });
+}
+
+// Copy one prop into one or more other versions. [B-446] requirement 4.
+function copyPropToVersions(fromVersion, file, toVersions) {
+  const src = path.join(getUserVersionsPath(), fromVersion, 'ProffieOS', 'props', file);
+  if (!fs.existsSync(src)) return { ok: false, error: `${file} is not in ${fromVersion}.` };
+  // SAME RESTRICTION AS removeProp, AND FOR A HARDER REASON THAN SYMMETRY.
+  // A prop that shipped with ProffieOS already exists in every version that ships
+  // it, so copying one across does not ADD anything - it overwrites the
+  // destination's own correct copy with a file written against a different OS
+  // release. That is not a useful operation; it is a way to quietly break a working
+  // tree. Only a prop the user brought here is ours to move. [B-446]
+  if (!addedProps(fromVersion).includes(file)) {
+    return { ok: false, error: `${file} was not added through JMT Studio, so it is not ours to copy.` };
+  }
+
+  const done = [], failed = [];
+  for (const to of (toVersions || [])) {
+    if (to === fromVersion) continue;          // never a destination for itself
+    const propsDir = path.join(getUserVersionsPath(), to, 'ProffieOS', 'props');
+    if (!fs.existsSync(propsDir)) { failed.push({ version: to, error: 'no props folder' }); continue; }
+    try {
+      const replaced = fs.existsSync(path.join(propsDir, file));
+      fs.copyFileSync(src, path.join(propsDir, file));
+      // A copied prop is user-added in its DESTINATION too, or it would land
+      // there unremovable - the exact hole requirement 3 exists to close.
+      _recordAddedProp(to, file);
+      try { invalidateVersionHash(to); } catch {}
+      done.push({ version: to, replaced });
+    } catch (e) {
+      failed.push({ version: to, error: e.message });
+    }
+  }
+  return { ok: failed.length === 0, file, done, failed };
 }
 
 // ── Info ───────────────────────────────────────────────
@@ -553,6 +926,62 @@ function writeVersionMeta(versionName, updates) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
+// ── Per-version core selection ─────────────────────────
+//
+// Which Proffieboard core this ProffieOS version builds against. Stored on the
+// version rather than app-wide because the two move together: a config that
+// fits on core 3.6 and overflows on 4.6 is a property of this tree and this
+// board, not of the user.
+//
+// Null means "not chosen", and the caller resolves that to whatever is newest.
+// An absent value is deliberately NOT written as the current latest at read
+// time - that would silently freeze a version onto today's core the first time
+// anything glanced at it.
+function getVersionCore(versionName) {
+  const meta = readVersionMeta(versionName);
+  return meta.coreVersion || null;
+}
+
+// Passing null clears the choice and returns the version to following latest.
+function setVersionCore(versionName, coreVersion) {
+  return writeVersionMeta(versionName, { coreVersion: coreVersion || null });
+}
+
+/**
+ * One-time upgrade backfill: pin every existing version to the core it has
+ * actually been building with.
+ *
+ * Before 1.8 the core was hardcoded, so every tree on the machine was built
+ * against that one version whether anyone chose it or not. Leaving those trees
+ * on "follow latest" would look harmless right up until a newer core is
+ * published, and then, with no user action at all, they would each get a
+ * different compiler: the whole build cache misses, a several-hundred-megabyte
+ * core downloads, and a config that only just fitted may stop linking. Newer
+ * cores produce larger binaries, which is the entire reason this feature exists.
+ *
+ * So an upgrade must be something the user chooses, not something that happens
+ * to them. Pinning here makes follow-latest an opt-in.
+ *
+ * The value is passed in rather than read from disk on purpose. Every pre-1.8
+ * build used the hardcoded version regardless of what else is installed, and
+ * inspecting a machine that has several cores on it invites the wrong answer.
+ *
+ * Callers must guard this to run once. It only ever fills a MISSING field, so a
+ * second run is harmless, but a user who deliberately cleared a version back to
+ * follow-latest must not have it silently re-pinned.
+ */
+function backfillVersionCores(coreVersion) {
+  if (!coreVersion) return { ok: false, error: 'A core version is required.', stamped: [] };
+  const stamped = [];
+  for (const name of listVersions()) {
+    const meta = readVersionMeta(name);
+    if (meta.coreVersion) continue;
+    const res = writeVersionMeta(name, { coreVersion });
+    if (res.ok) stamped.push(name);
+  }
+  return { ok: true, stamped, coreVersion };
+}
+
 function readNotes(versionName) {
   const p = getNotesPath(versionName);
   if (!p || !fs.existsSync(p)) return null;
@@ -585,8 +1014,47 @@ function listVersionsDetails() {
       notesPreview:   notes ? notes.split('\n').find(l => l.trim()) || null : null,
       proffieVersion: meta.proffieVersion || null,
       jmtVersion:     meta.jmtVersion     || null,
+      coreVersion:    meta.coreVersion    || null,
     };
   }).filter(Boolean);
+}
+
+// Which JMT Add-ons release a build of `configContent` against `versionName`
+// actually compiled in, or null. [B-473]
+//
+// ONE DEFINITION BECAUSE THERE ARE TWO CALLERS: a fresh compile asks via
+// toolchain, and a cache restore asks over IPC. They have to agree, and the
+// second copy is where they would stop agreeing.
+//
+// Null has two distinct causes and the caller cannot tell them apart, which is
+// fine - both mean "no add-ons are in this binary": the tree has none
+// installed, or it has them and this config includes none of their headers.
+//
+// The file list is the one the apply step recorded in `.jmt_meta.json`, so this
+// follows the add-ons as they gain and lose files instead of freezing today's
+// filenames - and it covers the headers with no `jmt_` prefix (charge_state.h,
+// charge_full_prop.h) without naming them.
+// Split from the disk read on purpose: THIS half is the decision and it is where
+// the bugs would be, so it has to be reachable by a test without a version folder
+// on disk. A test that has to fabricate a tree ends up asserting over source text
+// instead of running the code.
+function _addonsVersionFromMeta(meta, configContent) {
+  const m = meta || {};
+  if (!m.jmtVersion) return null;
+  const files = Array.isArray(m.jmtInstalledFiles) ? m.jmtInstalledFiles : [];
+  if (!files.length) return null;
+  // `^[ \t]*#include` rather than a loose search: a commented-out `//#include`
+  // is not in the build, so it must not produce a stamp claiming it was.
+  const included = new Set(
+    [...String(configContent || '').matchAll(/^[ \t]*#include[ \t]+"([^"]+)"/gm)]
+      .map(m2 => m2[1].split(/[\\/]/).pop())
+  );
+  const used = files.some(p => included.has(String(p).split(/[\\/]/).pop()));
+  return used ? m.jmtVersion : null;
+}
+
+function getCompiledAddonsVersion(versionName, configContent) {
+  return _addonsVersionFromMeta(readVersionMeta(versionName), configContent);
 }
 
 // ── Version operations ─────────────────────────────────
@@ -622,7 +1090,13 @@ function renameVersion(oldName, newName) {
   }
 }
 
-function duplicateVersion(versionName, newName) {
+// CANCELLABLE FOR THE SAME REASON AS importVersion, AND IT IS NOT OPTIONAL
+// SCOPE: Duplicate shares the import modal AND its single Cancel button. [B-488]
+// Leaving this one synchronous would ship a button that works on the Import path
+// and is drawn-but-dead on the Duplicate path — which is the precise defect
+// [B-462] was filed for ("it shows a cancrl button but it doesnt work. thats
+// wrong too"). One button, one promise.
+async function duplicateVersion(versionName, newName, opts = {}) {
   const resolved = _resolveVersionFolder(versionName);
   if (!resolved) return { ok: false, error: 'Version not found.' };
   const err = _validateVersionName(newName);
@@ -631,7 +1105,13 @@ function duplicateVersion(versionName, newName) {
   if (_resolveVersionFolder(trimmed)) return { ok: false, error: `A version named "${trimmed}" already exists.` };
   const destPath = path.join(getUserVersionsPath(), trimmed);
   try {
-    copyDirSync(resolved.folderPath, destPath);
+    const copy = await copyDirCancellable(resolved.folderPath, destPath, opts);
+    if (!copy.completed) {
+      // The name was refused above if it already existed, so destPath is only
+      // ever a tree this call created.
+      try { await fsRemove.rmWithRetry(destPath); } catch { /* best effort */ }
+      return { ok: false, cancelled: true, error: 'Duplicate cancelled.' };
+    }
     return { ok: true, newName: trimmed };
   } catch (e) { return { ok: false, error: e.message }; }
 }
@@ -737,6 +1217,107 @@ function searchVersionFiles(versionName, query) {
   return { ok: true, results };
 }
 
+// ── Name index [B-584] ─────────────────────────────────
+// Every identifier in a version's ProffieOS tree and the files it appears in, built
+// in one walk and kept. Two readers: the editor's #define autocomplete, and the
+// "Defines nothing reads" preflight check. They share it so autocomplete can never
+// offer a name the check then flags.
+//
+// Same files the content search reads (same extensions, same size cap), so a name
+// the File Browser finds is a name the index has. Whole words, case-sensitive: the
+// compiler is, and a substring hit (FETT263_SWING inside FETT263_SWING_ON_SPEED) is
+// not a read.
+//
+// `c` marks a name the tree tests in a preprocessor condition (#if/#ifdef/#ifndef/
+// #elif), which is what a config option usually looks like; autocomplete ranks
+// those first. Value options like VOLUME are read as plain names and still count.
+//
+// `stamp` lets the renderer keep its copy and ask "still this one?" without the whole
+// index crossing IPC every time. Dropped by invalidateVersionHash, which every path
+// that changes a version's files already calls.
+const _nameIndexCache = new Map(); // versionName → { stamp, files, names }
+let _nameIndexStamp = 0;
+
+// A word in a comment or a string is not a name the code reads, and offering one puts names in
+// the autocomplete list that nothing could read. Comments, string and char literals are blanked to
+// spaces, newlines kept, so line-based reading (and #if detection) sees the code alone.
+function _blankCommentsAndStrings(text) {
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i], d = text[i + 1];
+    if (c === '/' && d === '/') {
+      while (i < n && text[i] !== '\n') { out += ' '; i++; }
+    } else if (c === '/' && d === '*') {
+      out += '  '; i += 2;
+      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) { out += text[i] === '\n' ? '\n' : ' '; i++; }
+      if (i < n) { out += '  '; i += 2; }
+    } else if (c === '"' || c === "'") {
+      out += ' '; i++;
+      while (i < n && text[i] !== c && text[i] !== '\n') {
+        if (text[i] === '\\' && i + 1 < n && text[i + 1] !== '\n') { out += ' '; i++; }
+        out += ' '; i++;
+      }
+      if (i < n && text[i] === c) { out += ' '; i++; }
+    } else {
+      out += c; i++;
+    }
+  }
+  return out;
+}
+
+function getVersionNameIndex(versionName, knownStamp) {
+  if (!versionName) return { ok: false, error: 'No version.' };
+  const resolved = _resolveVersionFolder(versionName);
+  if (!resolved) return { ok: false, error: 'Version not found.' };
+  const searchRoot = path.join(resolved.folderPath, 'ProffieOS');
+  if (!fs.existsSync(searchRoot)) return { ok: false, error: 'ProffieOS directory not found.' };
+  // Kept while the tree's signature holds, so an edit nothing announced still rebuilds it. [B-591]
+  const sig = _treeSignature(searchRoot);
+  const cached = _nameIndexCache.get(versionName);
+  if (cached && cached.sig === sig) {
+    if (knownStamp != null && knownStamp === cached.stamp) return { ok: true, unchanged: true, stamp: cached.stamp };
+    return { ok: true, stamp: cached.stamp, files: cached.files, names: cached.names };
+  }
+
+  const files = [];
+  const names = Object.create(null);
+  const condRe = /^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b/;
+  (function walk(dir, relPath) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const rel = relPath ? `${relPath}/${e.name}` : e.name;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(full, rel); continue; }
+      const ext = (e.name.toLowerCase().split('.').pop() || '');
+      if (!_SEARCH_TEXT_EXTS.has(ext)) continue;
+      let text;
+      try {
+        if (fs.statSync(full).size > _SEARCH_MAX_FILE_BYTES) continue;
+        text = fs.readFileSync(full, 'utf8');
+      } catch { continue; }
+      const fi = files.push(`ProffieOS/${rel}`) - 1;
+      for (const line of _blankCommentsAndStrings(text).split('\n')) {
+        const ids = line.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+        if (!ids) continue;
+        const cond = condRe.test(line);
+        for (const id of ids) {
+          let n = names[id];
+          if (!n) n = names[id] = { f: [], c: 0 };
+          if (n.f[n.f.length - 1] !== fi) n.f.push(fi);
+          if (cond) n.c = 1;
+        }
+      }
+    }
+  })(searchRoot, '');
+
+  const entry = { stamp: ++_nameIndexStamp, files, names };
+  _nameIndexCache.set(versionName, { ...entry, sig });
+  return { ok: true, ...entry };
+}
+
 // Returns the top-level resources directory (arduino-cli, tools, etc.)
 function getResourcesPath() {
   return app.isPackaged
@@ -746,6 +1327,8 @@ function getResourcesPath() {
 
 module.exports = {
   listVersions,
+  getVersionOSVersion,
+  getOSVersionMap,
   getSelectedVersion,
   setSelectedVersion,
   hashVersion,
@@ -760,6 +1343,7 @@ module.exports = {
   initWorkspace,
   ensureConfigFileRef,
   stageConfig,
+  stageStylesForCompile,
   readStagedConfig,
   stageStyles,
   readStagedStyles,
@@ -769,6 +1353,11 @@ module.exports = {
   getUserStylesPath,
   STYLES_FILENAME,
   importVersion,
+  importProp,
+  addedProps,
+  removeProp,
+  planPropCopy,
+  copyPropToVersions,
   getInfo,
   CONFIG_FILENAME,
   listVersionsDetails,
@@ -776,11 +1365,17 @@ module.exports = {
   writeNotes,
   readVersionMeta,
   writeVersionMeta,
+  getCompiledAddonsVersion,
+  _addonsVersionFromMeta,   // exported for test only
+  getVersionCore,
+  setVersionCore,
+  backfillVersionCores,
   renameVersion,
   duplicateVersion,
   deleteVersion,
   listVersionDir,
   readVersionFile,
   searchVersionFiles,
+  getVersionNameIndex,
   getUserVersionsPath,
 };
