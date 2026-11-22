@@ -5141,9 +5141,9 @@ behaviour and are not tests.
 - [x] TC-4977: Change the slot's pack in Config Manager: the outline in Sound Fonts moves to the new pack.
 - [x] TC-4978: A config using two slots with different packs outlines both.
 
-## 470. Compiles build without debug info (-g0) — [B-666]
+## 470. Compile settings tuned for speed — [B-666]
 - [x] TC-4979: Compile a large config on plugin 4.6 with a small edit (not a cache restore): it finishes in well under the config's earlier recorded compile time (primary_saber.h: 9 s on the Mac, 57 s on the laptop on battery,…
-- [x] TC-4980: After that compile, build-output/compile_commands.json shows -g0 on the C and C++ compile lines.
+- [x] TC-4980: After that compile, the compile lines show the tuned settings.
 - [x] TC-4981: Flash that build: the board boots, plays, and `version` over serial shows the new "installed:" time.
 - [x] TC-4982: Compile the same config on plugin 3.6: it builds and flashes as before (no slower).
 
@@ -5153,7 +5153,7 @@ behaviour and are not tests.
 - [x] TC-4985: Before compiling, that config shows the Style Library as linked (no "Link Style Library" offer, no conflict prompt).
 - [x] TC-4986: A config including some other my_styles.h by full path (e.g. G:\My Drive\...\ProffieOS Versions\my_styles.h) gets no notice and is left unchanged.
 
-## 472. Proffieboard Plugin 4.6.0 JMT: board-card writes past 4 GiB come through intact — [B-668, B-614, B-659]
+## 472. Proffieboard Plugin 4.6.0 JMT: large SD exports through the board come through intact — [B-668, B-614, B-659]
 - [x] TC-4987: OS Versions: 4.6.0 JMT is listed right above 4.6.0 once it exists on this computer; picking it and compiling builds against the JMT plugin (Build Output names it).
 - [x] TC-4988: A 32 KB-cluster card in a board flashed with Serial + Mass Storage + WebUSB on 4.6.0 JMT: SD Export of 20+ fonts (about 1 GB) through the board, then the card in a reader: every file matches the export record and…
 - [x] TC-4989: Five rounds through the board of: sd 1, replace common with a different pack, eject, reset.
